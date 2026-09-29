@@ -28,6 +28,7 @@ from jevex.layout import (
     PageLocation,
 )
 from jevex.pipeline import Context, Pipeline, Stage
+from jevex.resolve import EntityStage, SingleEntity
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 
@@ -46,6 +47,7 @@ __all__ = [
     "DocumentText",
     "DomLocation",
     "EntityScope",
+    "EntityStage",
     "ExtractionResult",
     "Extractor",
     "FetchError",
@@ -66,6 +68,7 @@ __all__ = [
     "SchemaConfig",
     "SchemaSpec",
     "SimpleFetcher",
+    "SingleEntity",
     "Span",
     "Stage",
     "Statement",
