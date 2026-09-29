@@ -14,6 +14,10 @@
 #
 # Options: --continuous | --every <N>[s|m|h]  --model <name> (default: opus)  --dry-run
 # Env:     JEVEX_AGENT_DIR (default: ~/.jevex-agent)
+#          JEVEX_JEV_MAX_COST_USD (default: 0.50), a hard Jev spend cap per process
+#
+# API keys for live-api issues go in $JEVEX_AGENT_DIR/.env (never in a clone). Runs get
+# only its *path* as JEVEX_SECRETS_FILE; .claude/loop.md says when they may load it.
 set -euo pipefail
 
 REPO_URL="git@github.com:davidpurkiss/jevex.git"
@@ -27,7 +31,7 @@ CONTINUOUS=""
 DRY=""
 LAST=""  # outcome of the last run: worked | idle | failed
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 seconds() {
   case "$1" in
@@ -94,7 +98,13 @@ run_once() {
 
   echo "[$stamp] run started (model: $MODEL${DRY:+, dry run}); log: $log"
   # Unset ANTHROPIC_API_KEY so the session uses your logged-in subscription, not API credits.
-  if (cd "$CLONE" && env -u ANTHROPIC_API_KEY claude -p "$prompt" \
+  # Secrets stay in a file outside the clone; the session only learns where it is.
+  local secrets=""
+  [ -f "$AGENT_DIR/.env" ] && secrets="$AGENT_DIR/.env"
+  if (cd "$CLONE" && env -u ANTHROPIC_API_KEY \
+        JEVEX_SECRETS_FILE="$secrets" \
+        JEVEX_JEV_MAX_COST_USD="${JEVEX_JEV_MAX_COST_USD:-0.50}" \
+        claude -p "$prompt" \
         --model "$MODEL" \
         --permission-mode auto \
         --output-format stream-json --verbose) >"$log" 2>&1; then

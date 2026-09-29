@@ -7,6 +7,15 @@ import os
 import pytest
 
 
+@pytest.fixture
+def typesafe_api_key() -> str:
+    """The real Jev key for ``live`` tests; skips the test when it isn't set."""
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if not key:
+        pytest.skip("TYPESAFE_API_KEY not set")
+    return key
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--live", action="store_true", help="run tests that call real APIs")
 
