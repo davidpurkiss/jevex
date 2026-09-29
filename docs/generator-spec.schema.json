@@ -1,0 +1,366 @@
+{
+  "$defs": {
+    "MatchSpec": {
+      "additionalProperties": false,
+      "description": "An RE2 pattern; ``group`` is the capture group holding the value (0: the match).",
+      "properties": {
+        "regex": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Regex",
+          "type": "string"
+        },
+        "group": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "regex"
+      ],
+      "title": "MatchSpec",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Where a spec came from: the verified examples and what wrote it.",
+      "properties": {
+        "learned_from": {
+          "description": "Ids of the verified examples it was learned from.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Learned From",
+          "type": "array"
+        },
+        "synthesised_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What wrote it: 'generator_llm', 'human', a pack name...",
+          "title": "Synthesised By"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    },
+    "SpecScope": {
+      "additionalProperties": false,
+      "description": "Where a learned generator runs, beyond its own field. Empty means everywhere.",
+      "properties": {
+        "locale": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locale"
+        },
+        "sources": {
+          "description": "Document sources (e.g. site hosts).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "title": "SpecScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A declarative candidate generator for one field.",
+  "properties": {
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "field": {
+      "description": "Schema.field, e.g. VehicleSpec.price",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$",
+      "title": "Field",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/SpecScope"
+    },
+    "match": {
+      "$ref": "#/$defs/MatchSpec"
+    },
+    "normalise": {
+      "description": "Built-in normalisers, applied in order.",
+      "items": {
+        "anyOf": [
+          {
+            "enum": [
+              "parse_date",
+              "parse_money",
+              "parse_number",
+              "parse_range",
+              "strip",
+              "unit"
+            ],
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "parse_date": {
+                "additionalProperties": false,
+                "properties": {
+                  "order": {
+                    "enum": [
+                      "ymd",
+                      "dmy",
+                      "mdy"
+                    ],
+                    "type": "string"
+                  },
+                  "precision": {
+                    "enum": [
+                      "day",
+                      "month",
+                      "year"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "parse_date"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "parse_money": {
+                "additionalProperties": false,
+                "properties": {
+                  "currency": {
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "parse_money"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "unit": {
+                "additionalProperties": false,
+                "properties": {
+                  "from": {
+                    "enum": [
+                      "L",
+                      "Nm",
+                      "PS",
+                      "bhp",
+                      "cc",
+                      "cm",
+                      "cm3",
+                      "cm³",
+                      "ft lb",
+                      "ft-lb",
+                      "g/km",
+                      "hp",
+                      "kW",
+                      "kWh",
+                      "kg",
+                      "kgs",
+                      "kilograms",
+                      "kilometers",
+                      "kilometres",
+                      "km",
+                      "km per hour",
+                      "km/h",
+                      "kmh",
+                      "kph",
+                      "kw",
+                      "kwh",
+                      "l",
+                      "l/100 km",
+                      "l/100km",
+                      "lb ft",
+                      "lb-ft",
+                      "lb.ft",
+                      "lbft",
+                      "liter",
+                      "liters",
+                      "liters/100km",
+                      "litre",
+                      "litres",
+                      "litres/100km",
+                      "ltr",
+                      "m",
+                      "meters",
+                      "metres",
+                      "mi",
+                      "mile",
+                      "miles",
+                      "miles per hour",
+                      "millimeters",
+                      "millimetres",
+                      "mm",
+                      "mpg",
+                      "mph",
+                      "newton meters",
+                      "newton metres",
+                      "nm",
+                      "s",
+                      "sec",
+                      "second",
+                      "seconds",
+                      "secs"
+                    ],
+                    "type": "string"
+                  },
+                  "to": {
+                    "enum": [
+                      "L",
+                      "Nm",
+                      "PS",
+                      "bhp",
+                      "cc",
+                      "cm",
+                      "cm3",
+                      "cm³",
+                      "ft lb",
+                      "ft-lb",
+                      "g/km",
+                      "hp",
+                      "kW",
+                      "kWh",
+                      "kg",
+                      "kgs",
+                      "kilograms",
+                      "kilometers",
+                      "kilometres",
+                      "km",
+                      "km per hour",
+                      "km/h",
+                      "kmh",
+                      "kph",
+                      "kw",
+                      "kwh",
+                      "l",
+                      "l/100 km",
+                      "l/100km",
+                      "lb ft",
+                      "lb-ft",
+                      "lb.ft",
+                      "lbft",
+                      "liter",
+                      "liters",
+                      "liters/100km",
+                      "litre",
+                      "litres",
+                      "litres/100km",
+                      "ltr",
+                      "m",
+                      "meters",
+                      "metres",
+                      "mi",
+                      "mile",
+                      "miles",
+                      "miles per hour",
+                      "millimeters",
+                      "millimetres",
+                      "mm",
+                      "mpg",
+                      "mph",
+                      "newton meters",
+                      "newton metres",
+                      "nm",
+                      "s",
+                      "sec",
+                      "second",
+                      "seconds",
+                      "secs"
+                    ],
+                    "type": "string"
+                  },
+                  "gallon": {
+                    "enum": [
+                      "uk",
+                      "us"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "unit"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "maxItems": 8,
+      "title": "Normalise",
+      "type": "array"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    }
+  },
+  "required": [
+    "id",
+    "field",
+    "match"
+  ],
+  "title": "GeneratorSpec",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -33,11 +33,32 @@ class _Pattern(Protocol):
     def finditer(self, text: str) -> Iterator[_Match]: ...
 
 
+def _has_byte_escape(pattern: str) -> bool:
+    """Whether ``pattern`` uses RE2's ``\\C`` (any single byte), outside an escaped backslash."""
+    i = 0
+    while i < len(pattern):
+        if pattern[i] == "\\":
+            if pattern[i + 1 : i + 2] == "C":
+                return True
+            i += 2
+        else:
+            i += 1
+    return False
+
+
 def compile_re2(pattern: str) -> _Pattern:
-    """Compile under RE2, raising :class:`InvalidGeneratorError` on anything RE2 rejects."""
+    """Compile under RE2, raising :class:`InvalidGeneratorError` on anything RE2 rejects.
+
+    ``\\C`` is refused too: it matches one byte of UTF-8, so on non-ASCII text its match
+    offsets fall inside a character and the wrapper's byte-to-character mapping breaks.
+    """
     if len(pattern) > MAX_PATTERN_LENGTH:
         raise InvalidGeneratorError(
             f"pattern is {len(pattern)} characters; the limit is {MAX_PATTERN_LENGTH}"
+        )
+    if _has_byte_escape(pattern):
+        raise InvalidGeneratorError(
+            r"pattern uses \C (match one byte), which breaks on non-ASCII text"
         )
     # google-re2 ships without type stubs; the Protocols above describe what we use.
     import re2  # pyright: ignore[reportMissingTypeStubs]
