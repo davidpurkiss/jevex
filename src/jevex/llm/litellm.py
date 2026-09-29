@@ -35,13 +35,18 @@ class LiteLLM:
         prices: dict[str, ModelPrice] | None = None,
         **completion_kwargs: Any,
     ) -> None:
+        # Import here, not in the async call: importing litellm takes about a second and
+        # would block the event loop on the first request.
+        import litellm
+
+        litellm.suppress_debug_info = True
         self.model = model
         self.prices = prices
         self.completion_kwargs = completion_kwargs
         """Extra ``litellm.acompletion`` arguments, e.g. ``api_base`` for Ollama."""
 
     async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
-        import litellm
+        import litellm  # already imported by __init__; this is a cheap lookup
 
         check_budget()
         try:

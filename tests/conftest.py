@@ -6,6 +6,10 @@ import os
 
 import pytest
 
+# LiteLLM fetches its price map from GitHub at import time unless told to use the bundled
+# copy; set it before any test module imports litellm.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 
 @pytest.fixture
 def typesafe_api_key() -> str:

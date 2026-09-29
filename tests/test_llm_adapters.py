@@ -18,6 +18,7 @@ import openai  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from jevex.llm import (  # noqa: E402
+    LLMBudgetExceededError,
     LLMError,
     LLMRefusalError,
     ModelPrice,
@@ -113,6 +114,59 @@ async def test_anthropic_cost_uses_the_model_that_served() -> None:
     assert response.usage.cost == pytest.approx((12 * 2 + 7 * 10) / 1_000_000)
 
 
+async def test_anthropic_cost_sums_fallback_attempts_at_their_own_prices() -> None:
+    body = message('{"title": "Dune"}', model="claude-sonnet-5-5")
+    body["usage"]["iterations"] = [
+        {"type": "message", "model": "claude-opus-5-5", "input_tokens": 100, "output_tokens": 5},
+        {
+            "type": "fallback_message",
+            "model": "claude-sonnet-5-5",
+            "input_tokens": 12,
+            "output_tokens": 7,
+        },
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=body)
+
+    response = await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
+    assert response.usage.input_tokens == 112
+    assert response.usage.output_tokens == 12
+    assert response.usage.cost == pytest.approx((100 * 4 + 5 * 20 + 12 * 2 + 7 * 10) / 1_000_000)
+
+
+async def test_anthropic_refusal_still_records_usage() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=message(None, stop="refusal"))
+
+    with pytest.raises(LLMRefusalError, match="declined"):
+        await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
+    assert process_llm_cost() > 0
+
+
+async def test_anthropic_truncated_output_is_an_llm_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=message('{"title": "Du', stop="max_tokens"))
+
+    with pytest.raises(LLMError, match="max_tokens"):
+        await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
+
+
+async def test_spent_cap_makes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(str(request.url))
+        return httpx2.Response(200, json=message('{"title": "Dune"}'))
+
+    llm = AnthropicLLM(client=anthropic_client(handler))
+    await llm.structured("x", Book)
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "0.0000001")
+    with pytest.raises(LLMBudgetExceededError):
+        await llm.structured("x", Book)
+    assert len(calls) == 1
+
+
 async def test_anthropic_refusal() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=message(None, stop="refusal"))
@@ -127,6 +181,7 @@ async def test_anthropic_output_that_fails_the_schema_is_an_llm_error() -> None:
 
     with pytest.raises(LLMError):
         await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
+    assert process_llm_cost() > 0  # the failed call still counts
 
 
 async def test_anthropic_api_errors_are_llm_errors() -> None:
@@ -142,7 +197,12 @@ async def test_anthropic_api_errors_are_llm_errors() -> None:
 # --- OpenAI ----------------------------------------------------------------------------
 
 
-def openai_response(text: str) -> dict[str, Any]:
+def openai_response(text: str, *, refusal: bool = False) -> dict[str, Any]:
+    content: dict[str, Any] = (
+        {"type": "refusal", "refusal": "I can't help with that."}
+        if refusal
+        else {"type": "output_text", "text": text, "annotations": []}
+    )
     return {
         "id": "resp_1",
         "object": "response",
@@ -155,7 +215,7 @@ def openai_response(text: str) -> dict[str, Any]:
                 "id": "msg_1",
                 "status": "completed",
                 "role": "assistant",
-                "content": [{"type": "output_text", "text": text, "annotations": []}],
+                "content": [content],
             }
         ],
         "usage": {
@@ -204,6 +264,26 @@ async def test_openai_unknown_price_is_none() -> None:
     assert response.usage.cost is None
 
 
+async def test_openai_invalid_output_is_an_llm_error_and_still_costs() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=openai_response('{"name": "wrong"}'))
+
+    llm = OpenAILLM(
+        "gpt-test", client=openai_client(handler), prices={"gpt-test": ModelPrice(1, 2)}
+    )
+    with pytest.raises(LLMError, match="doesn't match Book"):
+        await llm.structured("x", Book)
+    assert process_llm_cost() == pytest.approx((10 * 1 + 4 * 2) / 1_000_000)
+
+
+async def test_openai_refusal() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=openai_response("", refusal=True))
+
+    with pytest.raises(LLMRefusalError, match="can't help"):
+        await OpenAILLM("gpt-test", client=openai_client(handler)).structured("x", Book)
+
+
 async def test_openai_errors_are_llm_errors() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
@@ -215,32 +295,29 @@ async def test_openai_errors_are_llm_errors() -> None:
 
 
 # --- LiteLLM ---------------------------------------------------------------------------
+# Not ``ollama/`` ids: LiteLLM asks a local Ollama server for their model info. The price
+# map is the bundled copy (conftest sets LITELLM_LOCAL_MODEL_COST_MAP).
 
 
-@pytest.fixture
-def local_litellm_prices(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Use LiteLLM's bundled price map; never fetch it (the network is blocked in tests).
-    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
-
-@pytest.mark.usefixtures("local_litellm_prices")
 async def test_litellm_structured_output_with_mock_response() -> None:
-    llm = LiteLLM("ollama/llama3.1", mock_response='{"title": "Dune"}')
+    llm = LiteLLM("openai/gpt-test", mock_response='{"title": "Dune"}')
     response = await llm.structured("Title: Dune", Book)
     assert response.output == Book(title="Dune")
-    assert response.model == "ollama/llama3.1"
+    assert response.model == "openai/gpt-test"
+    assert response.usage.cost is None  # not in LiteLLM's price map, no prices given
 
 
-@pytest.mark.usefixtures("local_litellm_prices")
 async def test_litellm_explicit_prices() -> None:
     llm = LiteLLM(
-        "ollama/mine", mock_response='{"title": "Dune"}', prices={"ollama/mine": ModelPrice(1, 1)}
+        "openai/mine",
+        mock_response='{"title": "Dune"}',
+        prices={"openai/mine": ModelPrice(1, 1)},
     )
     response = await llm.structured("Title: Dune", Book)
-    assert response.usage.cost is not None
+    # LiteLLM's mock reports 10 prompt and 20 completion tokens.
+    assert response.usage.cost == pytest.approx((10 * 1 + 20 * 1) / 1_000_000)
 
 
-@pytest.mark.usefixtures("local_litellm_prices")
 async def test_litellm_invalid_output_is_an_llm_error() -> None:
     with pytest.raises(LLMError):
-        await LiteLLM("ollama/llama3.1", mock_response="not json").structured("x", Book)
+        await LiteLLM("openai/gpt-test", mock_response="not json").structured("x", Book)

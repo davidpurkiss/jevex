@@ -10,8 +10,11 @@ in extras: ``jevex.llm.anthropic`` (``jevex[anthropic]``), ``jevex.llm.openai``
 (``jevex[openai]``) and ``jevex.llm.litellm`` (``jevex[litellm]``, which covers any
 provider LiteLLM supports, including local Ollama).
 
-Spend is capped process-wide by ``JEVEX_LLM_MAX_COST_USD`` (like Jev's
-``JEVEX_JEV_MAX_COST_USD``): once this process has spent the cap, no further call is made.
+Spend is capped process-wide by ``JEVEX_LLM_MAX_COST_USD``: once this process has spent
+the cap, no further call is made. Unlike Jev's cap it can't pre-estimate a call (output
+size isn't known), so one call can overshoot, concurrent calls can all pass the check, and
+calls with unknown prices count as $0. It's a backstop; per-document and per-run budgets
+are #34.
 """
 
 from __future__ import annotations

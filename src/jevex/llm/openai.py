@@ -8,10 +8,11 @@ unless a client is passed in.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from jevex.llm import (
     LLMError,
+    LLMRefusalError,
     LLMResponse,
     LLMUsage,
     ModelPrice,
@@ -46,10 +47,11 @@ class OpenAILLM:
 
     async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
         import openai
+        from pydantic import ValidationError
 
         check_budget()
         try:
-            response = await self._client.responses.parse(
+            raw: Any = await self._client.responses.with_raw_response.parse(
                 model=self.model,
                 input=prompt,
                 text_format=schema,
@@ -57,14 +59,31 @@ class OpenAILLM:
             )
         except openai.OpenAIError as exc:
             raise LLMError(f"OpenAI API error: {exc}") from exc
-        in_tokens = response.usage.input_tokens if response.usage else 0
-        out_tokens = response.usage.output_tokens if response.usage else 0
+        # Record usage from the raw body first, so invalid output still counts.
+        body = cast("dict[str, Any]", raw.http_response.json())
+        tokens = cast("dict[str, Any]", body.get("usage") or {})
+        in_tokens, out_tokens = (
+            int(tokens.get("input_tokens", 0)),
+            int(tokens.get("output_tokens", 0)),
+        )
         usage = LLMUsage(
             in_tokens, out_tokens, cost(self.model, in_tokens, out_tokens, self.prices)
         )
         record(usage)
+        refusals = [
+            str(part.get("refusal", ""))
+            for item in cast("list[dict[str, Any]]", body.get("output") or [])
+            for part in cast("list[dict[str, Any]]", item.get("content") or [])
+            if part.get("type") == "refusal"
+        ]
+        if refusals:
+            raise LLMRefusalError(f"{self.model} declined the request: {' '.join(refusals)}")
+        try:
+            response = raw.parse()
+        except (ValidationError, ValueError) as exc:
+            raise LLMError(f"{self.model}'s output doesn't match {schema.__name__}: {exc}") from exc
         if response.output_parsed is None:
-            raise LLMError(f"{self.model} returned no structured output (it may have refused)")
+            raise LLMError(f"{self.model} returned no structured output")
         return LLMResponse(
             output=validate_output(schema, response.output_parsed), usage=usage, model=self.model
         )
