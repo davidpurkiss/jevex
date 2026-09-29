@@ -40,7 +40,7 @@ from jevex.pipeline import Context, Pipeline, Stage
 from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
-from jevex.select import CandidateStage, SelectStage
+from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 
 __version__ = "0.0.1"
@@ -73,6 +73,7 @@ __all__ = [
     "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
+    "JevCandidateSelector",
     "Location",
     "NormaliseError",
     "NormaliseStage",
