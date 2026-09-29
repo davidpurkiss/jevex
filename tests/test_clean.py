@@ -240,6 +240,11 @@ def test_drops_landmark_roles(role: str) -> None:
         'class="osano-cm-window"',
         'id="truste-consent-track"',
         'aria-label="Cookie consent"',
+        'id="cookie-consent-settings"',
+        'id="BorlabsCookieBox"',
+        'id="moove_gdpr_cookie_info_bar"',
+        'class="klaro"',
+        'class="cky-consent-container"',
     ],
 )
 def test_drops_cookie_and_consent_banners(attrs: str) -> None:

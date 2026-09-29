@@ -46,11 +46,11 @@ DROP_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 CONSENT_PATTERN = re.compile(
     r"cookie[-_ ]?(?:banner|bar|notice|notification|popup|modal|law|message|warning"
     r"|disclaimer|dialog|overlay|wall|settings|preferences)"
-    r"|(?:cookie|gdpr)[-_ ]?consent(?![-_]?(?:active|given|set|accepted|granted|ed\b))"
+    r"|(?:cookie|gdpr)[-_ ]?consent(?![-_]?(?:active|given|set|accepted|granted|ed)(?![a-z]))"
     r"|consent[-_](?:banner|bar|modal|dialog|popup|overlay|manager|notice|box)"
     r"|gdpr[-_](?:banner|bar|popup|notice|modal|dialog|overlay)"
     r"|onetrust|cookiebot|didomi|usercentrics|trustarc|truste[-_]|qc-cmp|cmpbox|osano-cm"
-    r"|iubenda|sp_message|cc-(?:window|banner)",
+    r"|iubenda|sp_message|cc-(?:window|banner)|borlabscookie|moove_gdpr|klaro|cky-consent",
     re.IGNORECASE,
 )
 """Matched against ``id``, ``class`` and ``aria-label`` to find cookie and consent banners.
