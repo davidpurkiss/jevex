@@ -145,11 +145,14 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
         optional = copy(info)
         optional.default = None
         optional.default_factory = None
+        optional.validate_default = False  # a None default must never be validated
         fields[name] = (Optional[info.annotation], optional)  # noqa: UP045 - built at runtime
-    config = ConfigDict(
-        populate_by_name=True,
-        arbitrary_types_allowed=model.model_config.get("arbitrary_types_allowed", False),
-    )
+    # Keep the model's value-shaping config (strict, str_strip_whitespace, use_enum_values,
+    # ...) so records hold what the real model would; drop extra="forbid", which is about
+    # the whole model, and allow population by field name (stages use field names).
+    config = cast("ConfigDict", {k: v for k, v in model.model_config.items() if k != "extra"})
+    config["populate_by_name"] = True
+    # create_model's overloads don't accept a dynamic **fields mapping alongside __config__.
     partial = create_model(  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
         f"Partial{model.__name__}",
         __config__=config,
@@ -165,8 +168,10 @@ class Extracted[T: BaseModel]:
     """One extracted record: the values plus their metadata.
 
     ``record`` is an instance of the partial variant of ``T`` (see :func:`partial_model`):
-    the same fields, all optional. Values below the extractor's thresholds, or that don't
-    fit the field, are ``None`` there but still in ``meta``.
+    the same fields, all optional, and **only** the fields. The model's methods, properties
+    and computed fields aren't on it; call :meth:`strict` for a real ``T``. Values below
+    the extractor's thresholds, or that don't fit the field, are ``None`` there but still
+    in ``meta``.
     """
 
     schema_name: str
@@ -177,7 +182,7 @@ class Extracted[T: BaseModel]:
 
     @property
     def complete(self) -> bool:
-        """Whether the found values validate against the real model."""
+        """Whether every found value (including any the type rejected) validates as ``T``."""
         try:
             self.strict()
         except _VALIDATOR_ERRORS:
@@ -187,12 +192,13 @@ class Extracted[T: BaseModel]:
     def strict(self) -> T:
         """The record as the real model, with all its validators.
 
-        Validates the original found values (not the partial's already-coerced ones, so
-        field validators run once). Fields that weren't found fall back to the model's
-        own defaults. Raises ``ValidationError`` if anything required is missing, or
-        whatever the model's own validators raise.
+        Validates the original found values once (not the partial's already-coerced ones,
+        so field validators don't run twice), including values the partial rejected, so a
+        bad value fails here rather than silently falling back. Filtered and unfound fields
+        use the model's own defaults. Raises ``ValidationError`` if anything required is
+        missing or invalid, or whatever the model's own validators raise.
         """
-        values = {name: self.meta[name].value for name in self.record.model_fields_set}
+        values = {name: m.value for name, m in self.meta.items() if m.found and not m.filtered}
         return self.model.model_validate(values, by_name=True)
 
     def to_dict(self) -> dict[str, Any]:
@@ -243,6 +249,9 @@ def build_extracted(
             errors = _field_errors(exc, data)
             if not errors:  # nothing attributable to a field: keep what's valid on its own
                 errors = _isolate_errors(partial, data)
+            if not errors:  # can't blame anything (shouldn't happen): keep no values
+                record = partial.model_construct()
+                break
             for name, message in errors.items():
                 by_name[name] = by_name[name].model_copy(update={"error": message})
                 del data[name]
@@ -277,7 +286,9 @@ def _isolate_errors(partial: type[BaseModel], data: Mapping[str, Any]) -> dict[s
             partial.model_validate({name: value})
         except _VALIDATOR_ERRORS as exc:
             errors[name] = str(exc).splitlines()[0]
-    return errors or {name: "record failed validation" for name in data}
+    if errors or not data:
+        return errors
+    return dict.fromkeys(data, "record failed validation")
 
 
 @overload

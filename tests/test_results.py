@@ -6,6 +6,7 @@ import pytest
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     ValidationError,
     computed_field,
@@ -161,6 +162,49 @@ def test_serializers_and_forbid_dont_break_strict_or_to_dict() -> None:
     assert item.to_dict()["record"]["registered"] == "2024-03-12"
     empty = tricky({})
     assert empty.to_dict()["record"]["lo"] is None  # no computed field to crash
+
+
+class ValidatesDefault(BaseModel):
+    name: Annotated[str, BeforeValidator(lambda v: v.strip())] = Field(
+        default="", validate_default=True, description="Name"
+    )
+    other: int = Field(default=0, description="Other")
+
+
+def test_validate_default_fields_dont_break_partial_records() -> None:
+    item = build_extracted(SchemaSpec.from_model(ValidatesDefault), "doc", {"other": meta(3)})
+    assert item.meta["other"].error is None
+    assert item.to_dict()["record"] == {"name": None, "other": 3}
+
+
+class Configured(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, strict=True)
+
+    s: str = Field(default="", description="S")
+    n: int = Field(default=0, description="N")
+
+
+def test_model_config_shapes_partial_values() -> None:
+    item = build_extracted(
+        SchemaSpec.from_model(Configured), "doc", {"s": meta("  x "), "n": meta("7")}
+    )
+    assert item.to_dict()["record"]["s"] == "x"
+    assert item.meta["n"].error is not None  # strict: "7" is not an int
+
+
+def test_a_rejected_found_value_makes_the_record_incomplete() -> None:
+    item = build(
+        "doc",
+        {
+            "model": meta("Golf"),
+            "fuel_type": meta("ev"),
+            "zero_to_62_s": meta(7.9),
+            "seats": meta("lots"),
+        },
+    )
+    assert item.record.seats is None
+    assert item.meta.seats.error is not None
+    assert not item.complete  # the model default of 5 doesn't silently stand in
 
 
 class Engine(BaseModel):

@@ -516,7 +516,7 @@ The project is `jevex`: Apache 2.0, Python 3.12+, Pydantic v2, fully typed (`py.
 | Evaluation | Harness with learning curves and a CI gate; synthetic test site |
 | Budgets | Per document and per run |
 | Name and license | jevex, Apache 2.0 |
-| Required fields (decided in #20) | Records are instances of a generated partial model: the same fields, all optional, keeping each field's constraints, `Annotated` validators and alias, but not model-level validators, computed fields or serializers, so a missing value never raises. It's a separate class, so `isinstance` against the user's model is false. `complete`/`strict()` validate the found values against the real model. |
+| Required fields (decided in #20) | Records are instances of a generated partial model: the same fields, all optional, keeping each field's constraints, `Annotated` validators and alias, but not model-level validators, computed fields or serializers, so a missing value never raises. It's a separate class with only the fields: `isinstance` against the user's model is false and the model's methods and properties aren't on it. `strict()` returns the real model, validating every found value, including any the type rejected. |
 
 ## Open questions
 
