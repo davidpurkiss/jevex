@@ -90,7 +90,10 @@ A change is done when all of these hold:
 
 ## Rules for agents working unattended
 
-The loop's run procedure is `.claude/loop.md`. The run log is issue #84.
+The loop's run procedure is `.claude/loop.md`. The run log is issue #84. It normally
+runs locally via `scripts/agent-loop.sh`: fresh headless sessions on the owner's
+subscription, in a dedicated clone under `~/.jevex-agent`. A cloud routine can use the
+same prompt ("Follow .claude/loop.md...").
 
 - **One issue per branch per PR.** Branch `agent/<issue>-<slug>`; the PR body starts
   with `Closes #<issue>`.

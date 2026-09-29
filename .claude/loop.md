@@ -8,15 +8,17 @@ Read `CLAUDE.md` first and follow it, especially **Rules for agents working unat
 and **Definition of done**. If anything here conflicts with CLAUDE.md, CLAUDE.md wins.
 
 `REPO=davidpurkiss/jevex`. `NOW` is `date -u +%Y-%m-%dT%H:%MZ`.
-If the prompt that started you contains `DRY RUN`, do steps 0–4, report which issue you
-would pick and why, and stop without changing anything.
+If the prompt that started you contains `DRY RUN`, go through steps 0–4 **read-only**.
+Report what steps 1–2 would post or release, which issue step 4 would pick and why, then
+stop. In a dry run, don't comment, label, branch, push or edit files.
 
 ## 0. Preflight
 - Run `gh auth status`, `git status`, `uv --version`, then `uv sync`. If `gh` can't reach
   the repo, or `uv sync` fails, stop and report it in your final message (you can't log
   to #84 without `gh`).
-- `git fetch origin && git checkout main && git reset --hard origin/main` (a fresh
-  checkout, so this is safe).
+- You should be on `main` at `origin/main` with a clean tree (the runner makes sure of
+  this). If `git status --porcelain` shows changes, **stop and report**; never discard
+  changes you didn't make. Otherwise `git fetch origin && git checkout main && git pull --ff-only`.
 
 ## 1. Weekly summary
 If no comment on #84 starting with `**Week of**` was posted since the most recent Monday
