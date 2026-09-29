@@ -17,7 +17,7 @@ import types
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -45,6 +45,7 @@ class FunctionNormaliser:
     fn: Callable[..., Any]
 
     def apply(self, value: Any, **args: Any) -> Any:
+        """Run the normaliser. ``args`` include the step's arguments and ``field``."""
         return self.fn(value, **args)
 
 
@@ -69,6 +70,7 @@ def parse_number(value: Any) -> int | float:
 
 
 def strip(value: Any) -> Any:
+    """Trim whitespace and trailing punctuation from strings; other values pass through."""
     if isinstance(value, str):
         return value.strip().strip(" \t\r\n.;,")
     return value
@@ -100,6 +102,7 @@ _UNIT_FACTORS: dict[str, tuple[str, float]] = {
 }
 _ECONOMY = {"mpg", "l/100km"}
 _LITRES_PER_100KM_TIMES_MPG = {"uk": 282.480936, "us": 235.214583}
+_PRECISION = 6  # decimal places kept after a conversion, dropping float noise
 _UNIT_LOOKUP = {s.lower(): canonical for s, canonical, _ in spellings()} | {
     canonical.lower(): canonical for _, canonical, _ in spellings()
 }
@@ -122,15 +125,17 @@ def convert(value: float, from_unit: str, to_unit: str, *, gallon: str = "uk") -
     if src == dst:
         return value
     if {src, dst} == _ECONOMY:
+        if gallon not in _LITRES_PER_100KM_TIMES_MPG:
+            raise NormaliseError(f"gallon must be 'uk' or 'us', not {gallon!r}")
         if value == 0:
             raise NormaliseError("can't convert zero fuel economy")
-        return _LITRES_PER_100KM_TIMES_MPG[gallon] / value
+        return round(_LITRES_PER_100KM_TIMES_MPG[gallon] / value, _PRECISION)
     if src not in _UNIT_FACTORS or dst not in _UNIT_FACTORS:
         raise NormaliseError(f"can't convert {from_unit} to {to_unit}")
     (src_dim, src_factor), (dst_dim, dst_factor) = _UNIT_FACTORS[src], _UNIT_FACTORS[dst]
     if src_dim != dst_dim:
         raise NormaliseError(f"can't convert {from_unit} ({src_dim}) to {to_unit} ({dst_dim})")
-    return value * src_factor / dst_factor
+    return round(value * src_factor / dst_factor, _PRECISION)
 
 
 def unit(value: Any, *, field: FieldSpec | None = None, gallon: str = "uk", **args: Any) -> Any:
@@ -143,7 +148,8 @@ def unit(value: Any, *, field: FieldSpec | None = None, gallon: str = "uk", **ar
     if source is None or target is None:
         return value
     if isinstance(value, list):
-        return [convert(float(v), source, target, gallon=gallon) for v in value]  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+        # Sorted: inverse conversions (mpg ↔ l/100km) would otherwise flip a range.
+        return sorted(convert(float(v), source, target, gallon=gallon) for v in value)  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
     return convert(float(parse_number(value)), source, target, gallon=gallon)
 
 
@@ -160,7 +166,7 @@ _MULTIPLIERS = {
 }
 _MONEY = re.compile(
     r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?"
-    r"(?P<mult>bn|billion|million|thousand|mn|[kKmM](?![a-zA-Z]))?"
+    r"(?P<mult>(?i:bn|billion|million|thousand|mn)|[kKmM](?![a-zA-Z]))?"
 )
 _CURRENCY_UNITS = {"GBP", "USD", "EUR", "JPY", "CHF", "AUD", "CAD"}
 
@@ -251,6 +257,10 @@ def parse_date(
         if len(numbers) >= 3:
             a, b, c = numbers[:3]
             resolved = order or ("ymd" if a >= 1000 else "dmy")
+            if resolved == "ymd" and a < 100:
+                a = _four_digit_year(a)
+            elif resolved in ("dmy", "mdy") and c < 100:
+                c = _four_digit_year(c)
             if resolved == "ymd":
                 return date(a, b, c)
             if resolved == "mdy":
@@ -264,6 +274,11 @@ def parse_date(
     except (StopIteration, ValueError) as exc:
         raise NormaliseError(f"not a date: {value!r}") from exc
     raise NormaliseError(f"not a date: {value!r}")
+
+
+def _four_digit_year(yy: int) -> int:
+    """Two-digit years pivot at 70: 00–69 → 2000s, 70–99 → 1900s."""
+    return 2000 + yy if yy < 70 else 1900 + yy
 
 
 def parse_range(value: Any) -> list[int | float]:
@@ -291,15 +306,18 @@ class NormaliserRegistry:
 
     @property
     def names(self) -> list[str]:
+        """Registered normaliser names."""
         return list(self._by_name)
 
     def get(self, name: str) -> FunctionNormaliser:
+        """The normaliser called ``name``; ``NormaliseError`` if there's none."""
         try:
             return self._by_name[name]
         except KeyError:
             raise NormaliseError(f"unknown normaliser {name!r}") from None
 
     def with_normaliser(self, normaliser: FunctionNormaliser) -> NormaliserRegistry:
+        """A new registry with ``normaliser`` added (replacing one of the same name)."""
         return NormaliserRegistry([*self._by_name.values(), normaliser])
 
 
@@ -351,13 +369,19 @@ def normalise(
     *,
     registry: NormaliserRegistry = BUILTIN_NORMALISERS,
 ) -> Any:
-    """Run the chain, then validate against the field's type (one item for list fields).
+    """Run the chain, then validate against the field, including its own constraints.
 
+    For ``list[T]`` fields one value is a ``T``; a chain that yields a list (a range) is
+    validated as ``list[T]``. Numbers bound for an ``int`` field are rounded to the
+    nearest integer when a unit conversion made them fractional (1.4 l → 1400 cc).
     If the field has a unit but the chain never says what unit the text was in (a bare
     number), the number is taken as already being in the field's unit.
     """
-    value = run_chain(raw, steps, field, registry=registry)
-    target = _item_type(field)
+    chain = list(steps)
+    value = run_chain(raw, chain, field, registry=registry)
+    target = _target_type(field, value)
+    converted = any(step.name == "unit" for step in chain)
+    value = _round_for_int(value, target, converted=converted)
     try:
         return TypeAdapter(target).validate_python(value)
     except ValidationError as exc:
@@ -365,15 +389,39 @@ def normalise(
         raise NormaliseError(f"{value!r} doesn't fit {field.name}: {message}") from exc
 
 
-def _item_type(field: FieldSpec) -> Any:
-    """The type one value must have: the list's item type for ``list[T]`` fields."""
-    annotation = field.annotation
+def _target_type(field: FieldSpec, value: Any) -> Any:
+    """The type ``value`` must have: the field (with its constraints) or one list item."""
     if not field.many:
-        return annotation
+        return (
+            Annotated[field.annotation, *field.constraints]
+            if field.constraints
+            else field.annotation
+        )
+    annotation = field.annotation
     if get_origin(annotation) in (Union, types.UnionType):
         annotation = next(a for a in get_args(annotation) if a is not type(None))
     (item,) = get_args(annotation) or (Any,)
-    return item
+    return list[item] if isinstance(value, list) else item
+
+
+def _is_int_type(target: Any) -> bool:
+    while get_origin(target) is Annotated:
+        target = get_args(target)[0]
+    if get_origin(target) in (Union, types.UnionType):
+        return any(_is_int_type(a) for a in get_args(target) if a is not type(None))
+    if get_origin(target) is list:
+        return _is_int_type(get_args(target)[0])
+    return target is int
+
+
+def _round_for_int(value: Any, target: Any, *, converted: bool) -> Any:
+    if not _is_int_type(target):
+        return value
+    if isinstance(value, list):
+        return [_round_for_int(v, target, converted=converted) for v in value]  # pyright: ignore[reportUnknownVariableType]
+    if isinstance(value, float) and (converted or value.is_integer()):
+        return round(value)
+    return value
 
 
 # --- stage -----------------------------------------------------------------------------
@@ -440,7 +488,12 @@ class NormaliseStage:
         best_id, best, best_value = accepted[0]
         if field.many:
             in_order = sorted(accepted, key=lambda a: _position(ctx, a[0], a[1]))
-            best_value = list(dict.fromkeys(_hashable(v) for _, _, v in in_order))
+            items: list[Any] = []
+            for _, _, v in in_order:
+                for item in v if isinstance(v, list) else [v]:  # pyright: ignore[reportUnknownVariableType]
+                    if item not in items:
+                        items.append(item)
+            best_value = items
         return FieldMeta(
             value=best_value,
             confidence=best.confidence,
@@ -464,29 +517,26 @@ def _source(ctx: Context, statement_id: str, selection: Selection) -> Source:
 
 
 def _alternatives(ranked: list[tuple[str, Selection]], exclude: list[str]) -> list[Alternative]:
-    """Other picks, then the options each deciding question weighed, most likely first."""
-    out: list[Alternative] = []
+    """Other picks and the options each question weighed, one per raw span, most likely
+    first. The chosen span itself is never listed."""
+    chosen = {s.candidate.raw for sid, s in ranked if sid in exclude and s.candidate is not None}
+    best: dict[str, float] = {}
     for statement_id, selection in ranked:
         if selection.candidate and statement_id not in exclude:
-            out.append(
-                Alternative(
-                    value=selection.candidate.raw,
-                    raw=selection.candidate.raw,
-                    p=selection.confidence,
-                )
-            )
-        chosen = selection.candidate.raw if selection.candidate else None
+            raw = selection.candidate.raw
+            best[raw] = max(best.get(raw, 0.0), selection.confidence)
+        picked = selection.candidate.raw if selection.candidate else None
         for raw, p in selection.alternatives.items():
-            if raw != chosen:
-                out.append(Alternative(value=raw, raw=raw, p=p))
-    return sorted(out, key=lambda a: -a.p)
+            if raw != picked:
+                best[raw] = max(best.get(raw, 0.0), p)
+    return [
+        Alternative(value=raw, raw=raw, p=p)
+        for raw, p in sorted(best.items(), key=lambda kv: -kv[1])
+        if raw not in chosen
+    ]
 
 
 def _position(ctx: Context, statement_id: str, selection: Selection) -> tuple[int, int]:
     order = list(ctx.parsed.statements) if ctx.parsed else []
     index = order.index(statement_id) if statement_id in order else len(order)
     return index, selection.candidate.span.start if selection.candidate else 0
-
-
-def _hashable(value: Any) -> Any:
-    return tuple(value) if isinstance(value, list) else value  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]

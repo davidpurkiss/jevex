@@ -27,6 +27,15 @@ from jevex.layout import (
     Location,
     PageLocation,
 )
+from jevex.normalise import (
+    BUILTIN_NORMALISERS,
+    FunctionNormaliser,
+    NormaliseError,
+    NormaliserRegistry,
+    NormaliseStage,
+    normalise,
+    run_chain,
+)
 from jevex.pipeline import Context, Pipeline, Stage
 from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
@@ -36,6 +45,7 @@ from jevex.statements import Candidate, NormaliserStep, Span, Statement, Stateme
 __version__ = "0.0.1"
 
 __all__ = [
+    "BUILTIN_NORMALISERS",
     "BBox",
     "BoilerplateCleaner",
     "Candidate",
@@ -56,11 +66,15 @@ __all__ = [
     "Field",
     "FieldMeta",
     "FieldSpec",
+    "FunctionNormaliser",
     "GeneratorRegistry",
     "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
     "Location",
+    "NormaliseError",
+    "NormaliseStage",
+    "NormaliserRegistry",
     "NormaliserStep",
     "NoulDocumentGate",
     "PageLocation",
@@ -80,4 +94,6 @@ __all__ = [
     "TextReader",
     "__version__",
     "default_registry",
+    "normalise",
+    "run_chain",
 ]

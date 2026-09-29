@@ -342,3 +342,118 @@ async def test_stage_is_in_the_default_pipeline() -> None:
     from jevex.extractor import default_pipeline
 
     assert "normalise" in default_pipeline()
+
+
+# --- review fixes ----------------------------------------------------------------------
+
+
+class Extra(BaseModel):
+    engine_cc: int = Field(description="Engine", unit="cc")
+    power_ps: int = Field(description="Power", unit="PS")
+    seats: int = Field(ge=1, le=9, description="Seats")
+    seat_options: list[int] = Field(default_factory=list, description="Seat options")
+    boot: list[float] = Field(default_factory=list, description="Boot", unit="l")
+
+
+EXTRA = SchemaSpec.from_model(Extra)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("£1.5 Million", Decimal(1_500_000)),
+        ("£2Bn", Decimal(2_000_000_000)),
+        ("£3 Thousand", Decimal(3000)),
+        ("€2 MN", Decimal(2_000_000)),
+    ],
+)
+def test_money_multipliers_ignore_case(raw: str, value: Decimal) -> None:
+    assert parse_money(raw) == value
+
+
+def test_int_fields_with_units_round_after_conversion() -> None:
+    assert (
+        normalise(
+            "1.4 litre", steps("parse_number", {"unit": {"from": "l"}}), EXTRA.field("engine_cc")
+        )
+        == 1400
+    )
+    assert (
+        normalise(
+            "110 kW", steps("parse_number", {"unit": {"from": "kW"}}), EXTRA.field("power_ps")
+        )
+        == 150
+    )
+    assert convert(1.4, "l", "cc") == 1400.0  # no float noise
+
+
+def test_field_constraints_are_enforced() -> None:
+    with pytest.raises(NormaliseError, match="less than or equal to 9"):
+        normalise("12", steps("parse_number"), EXTRA.field("seats"))
+
+
+def test_ranges_validate_on_list_fields() -> None:
+    assert normalise("5–7", steps("parse_range"), EXTRA.field("seat_options")) == [5, 7]
+    assert normalise(
+        "380 to 1,237 litres", steps("parse_range", {"unit": {"from": "l"}}), EXTRA.field("boot")
+    ) == [380.0, 1237.0]
+    with pytest.raises(NormaliseError):
+        normalise("5–7", steps("parse_range"), EXTRA.field("seats"))  # a range isn't one int
+
+
+def test_inverse_range_conversions_stay_ordered() -> None:
+    assert run_chain(
+        "40-50 mpg", steps("parse_range", {"unit": {"from": "mpg", "to": "l/100km"}})
+    ) == [
+        pytest.approx(5.6496, rel=1e-3),
+        pytest.approx(7.0620, rel=1e-3),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw", "order", "value"),
+    [
+        ("12/03/24", "dmy", date(2024, 3, 12)),
+        ("12/03/98", "dmy", date(1998, 3, 12)),
+        ("24-03-12", "ymd", date(2024, 3, 12)),
+    ],
+)
+def test_two_digit_years_pivot(raw: str, order: str, value: date) -> None:
+    assert parse_date(raw, order=order) == value
+
+
+def test_unknown_gallon_is_a_normalise_error() -> None:
+    with pytest.raises(NormaliseError, match="gallon"):
+        run_chain(
+            "40 mpg",
+            steps("parse_number", {"unit": {"from": "mpg", "to": "l/100km", "gallon": "imperial"}}),
+        )
+
+
+async def test_stage_extends_list_fields_with_ranges() -> None:
+    a = statement("s1", "Seats 5–7")
+    ctx = Context.create(Document.from_bytes(b"<p/>"), [EXTRA], FakeJev().client())
+    ctx.parsed = ParsedDocument(
+        document=ctx.document,
+        root=Component(id="root", type="section", location=LOC),
+        statements={"s1": a},
+    )
+    run = ctx.schemas["Extra"]
+    run.selections[("doc", "seat_options", "s1")] = pick(a, "5–7", 0.9, "parse_range")
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["seat_options"].value == [5, 7]
+
+
+async def test_alternatives_never_repeat_the_chosen_span() -> None:
+    a, b = statement("s1", "0-62 in 9.1 s"), statement("s2", "0-62: 9.1 s")
+    ctx = context(a, b)
+    run = ctx.schemas["Car"]
+    run.selections[("doc", "zero_to_62_s", "s1")] = pick(
+        a, "9.1 s", 0.9, "parse_number", **{"62": 0.1}
+    )
+    run.selections[("doc", "zero_to_62_s", "s2")] = pick(
+        b, "9.1 s", 0.8, "parse_number", **{"62": 0.2}
+    )
+    await NormaliseStage().run(ctx)
+    alts = run.fields["doc"]["zero_to_62_s"].alternatives
+    assert [(x.raw, x.p) for x in alts] == [("62", 0.2)]
