@@ -599,6 +599,34 @@ def test_unclosed_nesting_is_capped_without_losing_text() -> None:
     assert Component.model_validate_json(root.model_dump_json()) == root
 
 
+@pytest.mark.parametrize("opener", ["<font>", "<div>"])
+@pytest.mark.parametrize("depth", [250, 254, 400])
+def test_tables_and_templates_survive_the_depth_cap(opener: str, depth: int) -> None:
+    root = parse_html(
+        opener * depth + "<table><tr><td>a</td></tr><p>x</p><tr><td>b</td></tr></table>"
+        "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>"
+        "<template><p>secret</p></template>"
+    )
+    first, grid = only(root, "table")
+    assert first.text == "a\nb"
+    assert grid.text == "1 | 2\n3 | 4"
+    assert [(c.row, c.col) for c in grid.cells] == [(0, 0), (0, 1), (1, 0), (1, 1)]
+    texts = [c.text for c in root.walk() if c.text]
+    assert texts.index("x") < texts.index("a\nb")  # still moved in front of its table
+    assert "secret" not in "".join(texts)
+
+
+def test_endlessly_nested_tables_stop_growing_but_keep_their_text() -> None:
+    root = parse_html(
+        "<table><tr><td>cell" * 500 + "<script>var x</script><template><p>tpl</p></template>"
+    )
+    assert "var x" not in root.model_dump_json()
+    assert "tpl" not in root.model_dump_json()
+    # Nested tables are layout tables, so every cell's text is a paragraph; none is lost.
+    assert sum(c.text.count("cell") for c in root.walk()) == 500
+    assert Component.model_validate_json(root.model_dump_json()) == root
+
+
 def test_deep_component_trees_are_flattened_at_the_depth_limit() -> None:
     root = parse_html("<ul><li>x" * 100 + "<table><tr><td>t</td></tr></table>")
     depth, node = 0, root

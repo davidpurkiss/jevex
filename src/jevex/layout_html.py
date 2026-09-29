@@ -48,7 +48,12 @@ if TYPE_CHECKING:
 MAX_DEPTH = 256
 """Deepest element nesting kept. Old pages with thousands of unclosed ``<font>`` tags would
 otherwise nest that deep. Past this depth a new element closes the innermost one and takes
-its place as a sibling (as Blink does), so blocks still break the text."""
+its place as a sibling (as Blink does), so blocks still break the text. Table structure,
+templates and skipped elements are never closed this way (see ``MAX_DEPTH_HARD``)."""
+
+MAX_DEPTH_HARD = MAX_DEPTH + 64
+"""Where the stack stops growing at all, for tables nested in cells without end: new elements
+are added but not opened, so their content joins the innermost element."""
 
 MAX_COMPONENT_DEPTH = 64
 """Deepest component nesting below the root. Deeper components are flattened into their
@@ -163,6 +168,8 @@ _TABLE_SECTIONS = frozenset({"thead", "tbody", "tfoot"})
 _CELLS = frozenset({"td", "th"})
 _TABLE_PARTS = _TABLE_SECTIONS | _CELLS | {"tr", "caption", "colgroup", "col"}
 _TABLE_CONTEXT = _TABLE_SECTIONS | {"table", "tr"}
+_CAP_KEEP = _TABLE_PARTS | {"table", "template"}
+"""Elements the depth cap never closes: closing them would change what is shown."""
 """Where only table parts belong: other content found here is moved in front of the table."""
 _IN_TABLE = _TABLE_PARTS | {"script", "style", "template", "input"}
 
@@ -323,6 +330,16 @@ class _TreeBuilder(HTMLParser):
         if self.body is None and tag not in _HEAD_TAGS:
             self.ensure_body()
         self._imply_end_tags(tag)
+        # Void elements are never opened, so only other tags need room on the stack.
+        if tag not in _VOID_TAGS and len(self.stack) >= MAX_DEPTH and not self._make_room():
+            # Nothing left to close: add it without opening it, so its content joins the
+            # innermost element. A skipped element still opens (once), so its content
+            # stays hidden.
+            top = self.stack[-1]
+            node = top.append(tag, attrs)
+            if node.skip and not top.skip:
+                self.stack.append(node)
+            return
         parent = self.stack[-1]
         table = self._open_table()
         if parent.tag in _TABLE_CONTEXT and tag not in _IN_TABLE and table is not None:
@@ -334,9 +351,6 @@ class _TreeBuilder(HTMLParser):
             parent, before = table.parent, table
         else:
             before = None
-        while len(self.stack) > MAX_DEPTH - 3:  # room for an implied tbody and tr
-            self.stack.pop()
-            parent = self.stack[-1]
         if tag == "tr" and parent.tag == "table":
             parent = self._push(parent.append("tbody", {}))
         elif tag in _CELLS and parent.tag in _TABLE_SECTIONS | {"table"}:
@@ -346,6 +360,22 @@ class _TreeBuilder(HTMLParser):
         node = parent.append(tag, attrs, before=before)
         if not closed and tag not in _VOID_TAGS:
             self.stack.append(node)
+
+    def _make_room(self) -> bool:
+        """At the depth cap, close inline elements so the next one opens as a sibling.
+
+        Table structure, templates and skipped subtrees stay open, so the stack can pass
+        the cap by those (tables nested in cells, for instance). Past ``MAX_DEPTH_HARD``
+        this gives up and returns False.
+        """
+        while len(self.stack) >= MAX_DEPTH:
+            node = self.stack[-1]
+            parent = node.parent
+            keep = node.tag in _CAP_KEEP or (node.skip and parent is not None and not parent.skip)
+            if keep:
+                break
+            self.stack.pop()
+        return len(self.stack) < MAX_DEPTH_HARD
 
     def _push(self, node: _Node) -> _Node:
         self.stack.append(node)
