@@ -9,6 +9,8 @@ authors = [{ name = "David Purkiss" }]
 requires-python = ">=3.12"
 dependencies = [
     "google-re2>=1.1.20251105",
+    "httpx2>=2.13",
+    "protego>=0.7.0",
     "pydantic>=2.11",
     "typesafe-sdk>=0.7.2",
 ]

@@ -38,7 +38,8 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `schema.py` | `jevex.Field`, `Questions`, `SchemaConfig`, `SchemaSpec`/`FieldSpec` and every generated question |
 | `interfaces.py` | Protocols for the 15 pluggable parts + shared types (`ParsedDocument`, `GateDecision`, `Selection`...). Its docstring maps each protocol to the issue that ships its default |
 | `pipeline.py` | `Stage` protocol, `Context`/`SchemaRun` (per-document state), `Pipeline` composition, `for_each_scope`/`for_each_schema` |
-| `extractor.py` | `Extractor`, `default_pipeline()`/`DEFAULT_STAGES`, `ExtractionResult`, `DocumentMeta` |
+| `extractor.py` | `Extractor`, `STAGE_ORDER`/`DEFAULT_STAGES`/`default_pipeline()`, `ExtractionResult`, `DocumentMeta` |
+| `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |
 | `testing.py` | `FakeJev` (scripted answers), `Cassette` record/replay |
 
 How the parts fit together:
@@ -48,6 +49,11 @@ How the parts fit together:
   it, and the default adapter gets added to `DEFAULT_STAGES` in spec order.
 - Within a stage, fan out with `for_each_scope`/`for_each_schema`, and put every question
   about one state into a single `ctx.jev.ask(...)` call.
+- A default stage's `name` must be one of `extractor.STAGE_ORDER` (the spec's order). Add
+  it to `DEFAULT_STAGES` in any position; `default_pipeline()` sorts it into place.
+- Stages record what they find with `run.set_field(scope, field, FieldMeta(...))`
+  (`jevex.results`). Records, thresholds and `result.one()` are built from that; a record
+  is a partial model holding only the fields (`strict()` gives the real model).
 
 Put new modules where the spec's structure suggests. For example: `jevex/clean.py`,
 `jevex/layout_html.py`, `jevex/generators/`, `jevex/normalise.py`, `jevex/store/`,

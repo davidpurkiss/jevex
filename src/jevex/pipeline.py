@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from jevex.entities import EntityScope
     from jevex.interfaces import GateDecision, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
+    from jevex.results import FieldMeta
     from jevex.schema import SchemaSpec
     from jevex.statements import Candidate, Statement
 
@@ -53,8 +54,16 @@ class SchemaRun:
         default_factory=dict[tuple[str, str, str], "Selection"]
     )
     """Keyed by (scope label, field name, statement id)."""
+    fields: dict[str, dict[str, FieldMeta]] = field(
+        default_factory=dict[str, dict[str, "FieldMeta"]]
+    )
+    """What was found, keyed by scope label, then field name. Records are built from this."""
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
-    """Normalised values keyed by scope label, then field name."""
+    """Bare values by scope label, then field name, for stages with no metadata to give.
+    Used only when ``fields`` has no entry for that field."""
+
+    def set_field(self, scope: str, name: str, meta: FieldMeta) -> None:
+        self.fields.setdefault(scope, {})[name] = meta
 
     @property
     def name(self) -> str:

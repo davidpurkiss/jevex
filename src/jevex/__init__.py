@@ -4,6 +4,7 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
     DocumentGateStage,
     DocumentText,
@@ -30,13 +31,25 @@ from jevex.layout import (
     UnsupportedDocumentError,
 )
 from jevex.layout_html import HtmlLayoutParser
+from jevex.normalise import (
+    BUILTIN_NORMALISERS,
+    FunctionNormaliser,
+    NormaliseError,
+    NormaliserRegistry,
+    NormaliseStage,
+    normalise,
+    run_chain,
+)
 from jevex.pipeline import Context, Pipeline, Stage
+from jevex.resolve import EntityStage, SingleEntity
+from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 
 __version__ = "0.0.1"
 
 __all__ = [
+    "BUILTIN_NORMALISERS",
     "BBox",
     "BoilerplateCleaner",
     "Candidate",
@@ -49,10 +62,15 @@ __all__ = [
     "DocumentText",
     "DomLocation",
     "EntityScope",
+    "EntityStage",
+    "Extracted",
     "ExtractionResult",
     "Extractor",
+    "FetchError",
     "Field",
+    "FieldMeta",
     "FieldSpec",
+    "FunctionNormaliser",
     "GeneratorRegistry",
     "HtmlLayoutParser",
     "HtmlTextReader",
@@ -60,14 +78,21 @@ __all__ = [
     "InvalidGeneratorError",
     "LayoutStage",
     "Location",
+    "NormaliseError",
+    "NormaliseStage",
+    "NormaliserRegistry",
     "NormaliserStep",
     "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
     "Questions",
     "RegexGenerator",
+    "RobotsDisallowedError",
     "SchemaConfig",
     "SchemaSpec",
+    "SimpleFetcher",
+    "SingleEntity",
+    "Source",
     "Span",
     "Stage",
     "Statement",
@@ -77,4 +102,6 @@ __all__ = [
     "UnsupportedDocumentError",
     "__version__",
     "default_registry",
+    "normalise",
+    "run_chain",
 ]

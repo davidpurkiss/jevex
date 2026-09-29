@@ -18,6 +18,7 @@ from jevex.jev import (
     ScoreAnswer,
 )
 from jevex.pipeline import SchemaRun, Stage, for_each_scope
+from jevex.results import FieldMeta
 
 
 class Car(BaseModel):
@@ -194,7 +195,9 @@ class AskAndStore:
             answers = await ctx.jev.ask("state", {"q": Noul(instructions="?")})
             answer = answers["q"]
             assert isinstance(answer, NoulAnswer)
-            run.values["only"] = {"p": answer.p}
+            run.set_field(
+                "only", run.spec.fields[0].name, FieldMeta(value="Golf", confidence=answer.p)
+            )
 
         await asyncio.gather(*(one(run) for run in ctx.active))
 
@@ -205,7 +208,7 @@ def extractor(*stages_: Stage) -> Extractor:
 
 async def test_extract_returns_values_and_meta() -> None:
     result = await extractor(GateAll(keep={"Car"}), AskAndStore()).extract(doc())
-    assert result.values == {"Car": {"only": {"p": 1.0}}}
+    assert result.values == {"Car": {"only": {"model": "Golf"}}}
     meta = result.meta
     assert meta.url == "https://example.com"
     assert meta.content_type == "text/html"
@@ -228,7 +231,7 @@ async def test_each_document_gets_its_own_usage() -> None:
 def test_extract_sync_reuses_one_loop() -> None:
     ex = extractor(AskAndStore())
     try:
-        assert ex.extract_sync(doc()).values["Car"]["only"] == {"p": 1.0}
+        assert ex.extract_sync(doc()).values["Car"]["only"] == {"model": "Golf"}
         assert ex.extract_sync(doc()).meta.jev.requests == 2
     finally:
         ex.close()
