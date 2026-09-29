@@ -29,6 +29,7 @@ from jevex.layout import (
 )
 from jevex.pipeline import Context, Pipeline, Stage
 from jevex.resolve import EntityStage, SingleEntity
+from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 
@@ -48,10 +49,12 @@ __all__ = [
     "DomLocation",
     "EntityScope",
     "EntityStage",
+    "Extracted",
     "ExtractionResult",
     "Extractor",
     "FetchError",
     "Field",
+    "FieldMeta",
     "FieldSpec",
     "GeneratorRegistry",
     "HtmlTextReader",
@@ -69,6 +72,7 @@ __all__ = [
     "SchemaSpec",
     "SimpleFetcher",
     "SingleEntity",
+    "Source",
     "Span",
     "Stage",
     "Statement",
