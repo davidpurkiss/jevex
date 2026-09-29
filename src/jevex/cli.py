@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from jevex import __version__
 from jevex.document import Document
+from jevex.eval import EvalReport, evaluate, load_corpus
 from jevex.extractor import Extractor
 from jevex.fetch import FetchError, SimpleFetcher
 from jevex.jev import JevError
@@ -39,7 +40,6 @@ EXIT_USAGE = 2
 PLANNED = {
     "learn": ("Synthesise and test generators from logged examples", 39),
     "pack": ("Export, import and diff generator packs", 41),
-    "eval": ("Evaluate extraction against a labelled corpus", 46),
     "testsite": ("Build and serve the synthetic test site", 45),
     "serve": ("Run the extraction microservice", 53),
 }
@@ -142,6 +142,51 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
     }
 
 
+async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
+    schemas = [load_schema(s) for s in args.schema]
+    try:
+        corpus = load_corpus(args.corpus)
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+    if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
+        raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
+    try:
+        extractor = Extractor(schemas, jev=jev)
+    except (ValueError, UnsupportedFieldError) as exc:
+        raise CliError(str(exc)) from exc
+    async with extractor:
+        try:
+            return await evaluate(extractor, corpus, concurrency=max(1, args.concurrency))
+        except ValueError as exc:
+            raise CliError(str(exc)) from exc
+
+
+def format_report(report: EvalReport) -> str:
+    """A plain-text summary: run metrics, then precision/recall per field."""
+
+    def pct(x: float | None) -> str:
+        return "   –  " if x is None else f"{x * 100:5.1f}%"
+
+    s = report.summary()
+    lines = [
+        f"documents: {s['documents']}  errors: {s['errors']}",
+        f"precision: {pct(s['precision'])}  recall: {pct(s['recall'])}",
+        f"per document: ${s['cost_per_document']:.5f}  {s['seconds_per_document']:.2f}s  "
+        f"{s['jev_requests_per_document']:.1f} Jev requests  "
+        f"{s['llm_calls_per_document']:.1f} LLM calls",
+        f"resolution mix: {s['resolution_mix'] or 'none'}",
+        "",
+        f"{'field':40} {'precision':>9} {'recall':>7} "
+        f"{'ok':>5} {'wrong':>5} {'miss':>5} {'extra':>5}",
+    ]
+    for name, f in report.field_scores().items():
+        lines.append(
+            f"{name:40} {pct(f.precision):>9} {pct(f.recall):>7} "
+            f"{f.correct:>5} {f.wrong:>5} {f.missing:>5} {f.spurious:>5}"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _probability(text: str) -> float:
     value = float(text)
     if not 0.0 <= value <= 1.0:
@@ -181,6 +226,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract.add_argument("--indent", type=int, default=2, help="JSON indent (0 for one line)")
 
+    evaluate = commands.add_parser(
+        "eval",
+        help="Evaluate extraction against a labelled corpus",
+        description="Score extraction against a corpus directory with a truth.json. "
+        "Needs TYPESAFE_API_KEY.",
+    )
+    evaluate.add_argument("corpus", help="Directory containing truth.json and the documents")
+    evaluate.add_argument(
+        "--schema",
+        action="append",
+        required=True,
+        metavar="MODULE:CLASS",
+        help="Every schema the corpus uses (repeatable), e.g. jevex.testsite:VehicleSpec",
+    )
+    evaluate.add_argument("--concurrency", type=int, default=4, help="Documents at a time")
+    evaluate.add_argument("--json", action="store_true", help="Print the full report as JSON")
+
     for name, (summary, issue) in PLANNED.items():
         commands.add_parser(name, help=f"{summary} (not implemented yet, #{issue})")
     return parser
@@ -211,6 +273,14 @@ def main(
         print(f"jevex {args.command}: not implemented yet ({summary}; see #{issue})", file=stderr)
         return EXIT_USAGE
     try:
+        if args.command == "eval":
+            report = asyncio.run(_eval(args, jev))
+            if args.json:
+                json.dump(report.to_dict(), stdout, indent=2, ensure_ascii=False)
+                stdout.write("\n")
+            else:
+                stdout.write(format_report(report))
+            return EXIT_OK
         payload = asyncio.run(_extract(args, jev))
     except CliError as exc:
         print(f"jevex: error: {exc}", file=stderr)

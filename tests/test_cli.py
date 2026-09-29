@@ -102,7 +102,7 @@ def test_schema_by_module_path_and_by_file() -> None:
     assert load_schema(SCHEMA).__name__ == "Book"
 
 
-@pytest.mark.parametrize("command", ["learn", "pack", "eval", "testsite", "serve"])
+@pytest.mark.parametrize("command", ["learn", "pack", "testsite", "serve"])
 def test_planned_commands_say_so(command: str) -> None:
     code, _, err = run_cli(command)
     assert code == 2
