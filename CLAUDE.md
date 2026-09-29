@@ -48,6 +48,8 @@ How the parts fit together:
   it, and the default adapter gets added to `DEFAULT_STAGES` in spec order.
 - Within a stage, fan out with `for_each_scope`/`for_each_schema`, and put every question
   about one state into a single `ctx.jev.ask(...)` call.
+- A default stage's `name` must be one of `extractor.STAGE_ORDER` (the spec's order). Add
+  it to `DEFAULT_STAGES` in any position; `default_pipeline()` sorts it into place.
 
 Put new modules where the spec's structure suggests. For example: `jevex/clean.py`,
 `jevex/layout_html.py`, `jevex/generators/`, `jevex/normalise.py`, `jevex/store/`,

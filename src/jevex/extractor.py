@@ -12,6 +12,7 @@ from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient
 from jevex.pipeline import Context, Pipeline
+from jevex.resolve import EntityStage
 from jevex.schema import SchemaSpec
 
 if TYPE_CHECKING:
@@ -21,13 +22,41 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.pipeline import Stage
 
-# Default stages in spec order; each lands with its issue (see jevex.interfaces).
-DEFAULT_STAGES: tuple[Stage, ...] = (CleanStage(), DocumentGateStage())
+# The spec's stage order (see jevex.interfaces). Default stages must use these names; they
+# are sorted into this order, so issues can add their stage without coordinating position.
+STAGE_ORDER: tuple[str, ...] = (
+    "fetch",
+    "clean",
+    "document_gate",
+    "structured",
+    "layout",
+    "images",
+    "component_gate",
+    "entities",
+    "statements",
+    "categorise",
+    "candidates",
+    "select",
+    "normalise",
+    "fallback",
+    "learn",
+)
+
+# Default stages, one per line to keep merges clean. Order here doesn't matter: see
+# STAGE_ORDER.
+DEFAULT_STAGES: tuple[Stage, ...] = (
+    CleanStage(),
+    DocumentGateStage(),
+    EntityStage(),
+)
 
 
 def default_pipeline() -> Pipeline:
-    """The pipeline ``Extractor`` builds when none is given."""
-    return Pipeline(DEFAULT_STAGES)
+    """The pipeline ``Extractor`` builds when none is given, in :data:`STAGE_ORDER`."""
+    unknown = [s.name for s in DEFAULT_STAGES if s.name not in STAGE_ORDER]
+    if unknown:
+        raise ValueError(f"default stages {unknown} are not in STAGE_ORDER {STAGE_ORDER}")
+    return Pipeline(sorted(DEFAULT_STAGES, key=lambda s: STAGE_ORDER.index(s.name)))
 
 
 class JevUsageSummary(BaseModel):
