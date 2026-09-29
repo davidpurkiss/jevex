@@ -1,3 +1,4 @@
+import codecs
 import re
 from pathlib import Path
 
@@ -48,7 +49,8 @@ PAGES = {
             "Our test car",
             "Posted in Reviews",
             "Newsletter",
-            '<script type="application/ld+json">' and "<title>",
+            '<script type="application/ld+json">',
+            "<title>Our week with the Golf SE L",
         ],
         [
             "Primary menu",
@@ -250,7 +252,11 @@ def test_drops_cookie_and_consent_banners(attrs: str) -> None:
     "body",
     [
         '<div class="cookie-recipe"><p>Choc chip cookies</p></div>',
-        '<main class="gdpr-guide"><p>What GDPR means</p></main>',
+        '<div class="gdpr-guide"><p>What GDPR means</p></div>',
+        '<section class="informed-consent"><p>Patient consent</p></section>',
+        '<div class="page cookie-consent-active"><p>Whole page</p></div>',
+        '<div class="cookieconsent-given"><p>Whole page</p></div>',
+        '<a class="cookie-policy-link" href="/cookies">Cookie policy</a>',
         '<article id="cookie-policy"><p>Our policy</p></article>',
         '<div class="trusted-seller">Trusted</div>',
         '<div class="cmp-text"><p>AEM content component</p></div>',
@@ -258,6 +264,15 @@ def test_drops_cookie_and_consent_banners(attrs: str) -> None:
 )
 def test_keeps_content_that_only_looks_like_boilerplate(body: str) -> None:
     assert clean(body) == body
+
+
+def test_keeps_declarative_shadow_dom_templates() -> None:
+    body = (
+        '<product-card><template shadowrootmode="open"><h2>Golf</h2></template></product-card>'
+        '<x-a><template shadowroot="open"><p>legacy</p></template></x-a>'
+        "<template><p>inert</p></template>"
+    )
+    assert clean(body) == body.replace("<template><p>inert</p></template>", "")
 
 
 def test_body_with_consent_flag_class_is_kept() -> None:
@@ -329,11 +344,12 @@ def test_keeps_the_declared_charset(encoding: str, declaration: str) -> None:
     assert cleaned.content == source.replace("<nav>x</nav>", "").encode(encoding)
 
 
-def test_keeps_a_utf16_document_utf16() -> None:
-    source = "<html><body><nav>x</nav>café</body></html>"
-    document = Document.from_bytes(source.encode("utf-16"), content_type="text/html")
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_keeps_a_utf16_document_in_its_byte_order(encoding: str) -> None:
+    source = "\ufeff<html><body><nav>x</nav>café</body></html>"
+    document = Document.from_bytes(source.encode(encoding), content_type="text/html")
     cleaned = BoilerplateCleaner().clean(document)
-    assert cleaned.content.decode("utf-16") == "<html><body>café</body></html>"
+    assert cleaned.content == "\ufeff<html><body>café</body></html>".encode(encoding)
 
 
 def test_keeps_a_utf8_bom() -> None:
@@ -350,11 +366,33 @@ def test_undecodable_bytes_survive_untouched() -> None:
     assert cleaned.content == b"<html><body>\xff\xfe caf\xe9</body></html>"
 
 
-def test_unknown_or_utf16_meta_charset_falls_back_to_utf8() -> None:
-    for label in ("x-made-up", "utf-16"):
-        source = f'<html><head><meta charset="{label}"></head><body><nav>x</nav>café</body></html>'
-        cleaned = BoilerplateCleaner().clean(Document.from_bytes(source.encode()))
-        assert cleaned.content == source.replace("<nav>x</nav>", "").encode()
+@pytest.mark.parametrize("label", ["x-made-up", "utf-16", "utf-32", "utf-7", "hz", "cp037"])
+def test_unusable_meta_charsets_fall_back_to_utf8(label: str) -> None:
+    head = f'<head><meta charset="{label}"></head>'
+    source = f"<html>{head}<body><nav>x</nav>c+b-afé~{{</body></html>"
+    cleaned = BoilerplateCleaner().clean(Document.from_bytes(source.encode()))
+    assert cleaned.content == source.replace("<nav>x</nav>", "").encode()
+
+
+def test_bytes_invalid_in_the_declared_charset_fall_back_to_utf8() -> None:
+    # A truncated ISO-2022-JP escape sequence can't be decoded, so the page is read as
+    # UTF-8 with the stray bytes kept as they are.
+    content = b'<html><head><meta charset="iso-2022-jp"></head><body>\x1b$B<nav>x</nav></body>'
+    cleaned = BoilerplateCleaner().clean(Document.from_bytes(content))
+    assert cleaned.content == content.replace(b"<nav>x</nav>", b"")
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "<html><body><nav>x</nav></body></html>".encode("utf-16") + b"\x00",
+        codecs.BOM_UTF16_LE + b"\x00\xd8<\x00p\x00>\x00",
+    ],
+    ids=["odd-trailing-byte", "lone-surrogate"],
+)
+def test_malformed_utf16_passes_through_without_raising(content: bytes) -> None:
+    document = Document.from_bytes(content, content_type="text/html")
+    assert BoilerplateCleaner().clean(document).content == content
 
 
 def test_configuration_widens_or_narrows_what_is_dropped() -> None:

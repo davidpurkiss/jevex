@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 DROP_TAGS = frozenset(
     {"script", "style", "noscript", "template", "iframe", "object", "embed", "nav"}
 )
-"""Elements removed wherever they appear."""
+"""Elements removed wherever they appear. A ``template`` holding declarative shadow DOM
+(``shadowrootmode``) is rendered by browsers, so it stays."""
 
 PAGE_TAGS = frozenset({"header", "footer"})
 """Elements removed only at page level. Inside an article or section they often carry the
@@ -43,14 +44,19 @@ DROP_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA landmark roles removed like their equivalent tags."""
 
 CONSENT_PATTERN = re.compile(
-    r"cookie[-_ ]?(?:banner|bar|consent|notice|notification|policy|popup|modal|law|message"
-    r"|warning|disclaimer|dialog|overlay|wall|settings|preferences)"
-    r"|cookieconsent|consent|gdpr|onetrust|cookiebot|didomi|usercentrics|trustarc|truste[-_]"
-    r"|qc-cmp|cmpbox|osano-cm|iubenda|sp_message|cc-(?:window|banner)",
+    r"cookie[-_ ]?(?:banner|bar|notice|notification|popup|modal|law|message|warning"
+    r"|disclaimer|dialog|overlay|wall|settings|preferences)"
+    r"|(?:cookie|gdpr)[-_ ]?consent(?![-_]?(?:active|given|set|accepted|granted|ed\b))"
+    r"|consent[-_](?:banner|bar|modal|dialog|popup|overlay|manager|notice|box)"
+    r"|gdpr[-_](?:banner|bar|popup|notice|modal|dialog|overlay)"
+    r"|onetrust|cookiebot|didomi|usercentrics|trustarc|truste[-_]|qc-cmp|cmpbox|osano-cm"
+    r"|iubenda|sp_message|cc-(?:window|banner)",
     re.IGNORECASE,
 )
 """Matched against ``id``, ``class`` and ``aria-label`` to find cookie and consent banners.
-Common consent-platform names are included; a bare "cookie" is not, so recipe pages survive."""
+Only banner-shaped names and consent-platform names count: a bare "cookie", "consent" or
+"gdpr" doesn't, so recipe pages, consent forms and GDPR guides survive, and neither do
+wrapper flags such as ``cookie-consent-active``."""
 
 STATE_PATTERN = re.compile(
     r"__(?:NEXT_DATA|NUXT|NUXT_DATA|INITIAL_STATE|PRELOADED_STATE|APOLLO_STATE)__"
@@ -85,11 +91,13 @@ _JSON_TYPE = re.compile(r"application/(?:[-\w.]+\+)?json", re.IGNORECASE)
 _JS_TYPES = frozenset({"", "module", "text/javascript", "application/javascript"})
 
 _META_CHARSET = re.compile(rb"<meta[^>]+charset\s*=\s*[\"']?\s*([-\w.:]+)", re.IGNORECASE)
+# The UTF-16 BOM is decoded as U+FEFF and written back, so the byte order is kept.
 _BOMS = (
     (codecs.BOM_UTF8, "utf-8-sig"),
-    (codecs.BOM_UTF16_LE, "utf-16"),
-    (codecs.BOM_UTF16_BE, "utf-16"),
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
 )
+_ASCII = bytes(range(0x20, 0x7F))
 
 
 class BoilerplateCleaner:
@@ -119,8 +127,7 @@ class BoilerplateCleaner:
     def clean(self, document: Document) -> Document:
         if not document.is_html:
             return document
-        encoding = _encoding(document.content)
-        text = document.content.decode(encoding, "surrogateescape")
+        text, encoding = _decode(document.content)
         stripper = _Stripper(self)
         stripper.feed(text)
         stripper.close()
@@ -131,6 +138,8 @@ class BoilerplateCleaner:
 
     def drops(self, tag: str, attrs: list[tuple[str, str | None]], open_tags: list[str]) -> bool:
         """Whether an element starting here is boilerplate, given its open ancestors."""
+        if tag == "template" and any(n in ("shadowrootmode", "shadowroot") for n, _ in attrs):
+            return False
         if tag in self.drop_tags:
             return True
         if tag in self.page_tags and SECTIONING_TAGS.isdisjoint(open_tags):
@@ -267,17 +276,36 @@ class CleanStage:
         ctx.document = self.cleaner.clean(ctx.document)
 
 
+def _decode(content: bytes) -> tuple[str, str]:
+    """Decode with the page's charset if that round-trips exactly, else as UTF-8.
+
+    ``surrogateescape`` keeps undecodable bytes, so UTF-8 always round-trips. Falling back
+    means a page with a broken or exotic charset is still cleaned (or passed through)
+    rather than failing the extraction.
+    """
+    encoding = _encoding(content)
+    try:
+        text = content.decode(encoding, "surrogateescape")
+        if text.encode(encoding, "surrogateescape") == content:
+            return text, encoding
+    except UnicodeError:
+        pass
+    return content.decode("utf-8", "surrogateescape"), "utf-8"
+
+
 def _encoding(content: bytes) -> str:
-    """The charset to decode and re-encode with: BOM, then ``<meta charset>``, then UTF-8."""
+    """The charset to use: BOM, then an ASCII-compatible ``<meta charset>``, then UTF-8."""
     for bom, encoding in _BOMS:
         if content.startswith(bom):
             return encoding
     match = _META_CHARSET.search(content[:4096])
-    if match:
-        try:
-            name = codecs.lookup(match.group(1).decode("ascii")).name
-        except LookupError:
-            return "utf-8"
-        # A meta tag readable as ASCII means the bytes aren't UTF-16 (WHATWG rule).
-        return "utf-8" if name.startswith("utf-16") else name
-    return "utf-8"
+    if not match:
+        return "utf-8"
+    try:
+        name = codecs.lookup(match.group(1).decode("ascii")).name
+        # A meta tag readable as ASCII means the bytes are in an ASCII-compatible charset
+        # (the WHATWG rule), which rules out UTF-16/32, UTF-7 and EBCDIC.
+        compatible = _ASCII.decode("ascii").encode(name) == _ASCII
+    except (LookupError, UnicodeError):
+        return "utf-8"
+    return name if compatible else "utf-8"
