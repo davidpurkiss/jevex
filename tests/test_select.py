@@ -110,6 +110,30 @@ def test_state_includes_the_heading_trail() -> None:
 # --- candidates ------------------------------------------------------------------------
 
 
+def test_a_statement_also_goes_to_fields_with_enough_category_probability() -> None:
+    a = st("s1", "Automatic, 0-62 mph in 9.1 s")
+    ctx = context(FakeJev(), [a], {})
+    run = ctx.schemas["Car"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="zero_to_62_s",
+        confidence=0.5,
+        probabilities={"zero_to_62_s": 0.5, "automatic": 0.35, "model": 0.1, "none": 0.05},
+    )
+    pairs = field_statements(ctx, run, run.scopes[0])
+    assert [f.name for _, f in pairs] == ["zero_to_62_s", "automatic"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="model",
+        confidence=0.75,
+        probabilities={"model": 0.75, "automatic": 0.25},
+    )
+    assert [f.name for _, f in field_statements(ctx, run, run.scopes[0])] == ["model"]
+    # A "none" answer routes nowhere, however close a field came.
+    run.categories["s1"] = ChoiceAnswer(
+        choice="none", confidence=0.6, probabilities={"none": 0.6, "automatic": 0.4}
+    )
+    assert field_statements(ctx, run, run.scopes[0]) == []
+
+
 async def test_candidates_are_generated_for_fields_that_need_them() -> None:
     a, b = st("s1", "0-62 mph in 9.1 s"), st("s2", "Runs on diesel")
     ctx = context(FakeJev(), [a, b], {"s1": "zero_to_62_s", "s2": "fuel_type"})
