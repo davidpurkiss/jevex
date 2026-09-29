@@ -305,7 +305,9 @@ async def test_bool_via_noul_both_ways() -> None:
     ctx = context(fake, [st("s1", "Six-speed manual gearbox")], {"s1": "automatic"})
     await run_both(ctx)
     assert only_call_questions(fake) == {
-        "Car.automatic/bool": Noul(instructions="Does the statement say has an automatic gearbox?")
+        "Car.automatic/bool": Noul(
+            instructions="Does the statement say it has an automatic gearbox?"
+        )
     }
     meta = ctx.schemas["Car"].fields["doc"]["automatic"]
     assert (meta.value, meta.confidence) == (False, 0.8)

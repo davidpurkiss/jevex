@@ -398,8 +398,12 @@ def test_whole_statement_proposes_short_statements_whole() -> None:
     assert raws(gen, "Sapiens: A Brief History of Humankind") == [
         "Sapiens: A Brief History of Humankind"
     ]
+    assert raws(gen, " ".join(["word"] * 16)) == [" ".join(["word"] * 16)]
     assert raws(gen, " ".join(["word"] * 17)) == []
+    assert raws(WholeStatement(max_words=3), "one two three four") == []
     assert raws(gen, "...") == []
+    assert raws(gen, "Who Moved My Cheese?") == ["Who Moved My Cheese?"]
+    assert raws(gen, "Stop! ") == ["Stop!"]
     pair = Statement(
         id="s1",
         text="Colour: Red",
@@ -408,6 +412,26 @@ def test_whole_statement_proposes_short_statements_whole() -> None:
         location=DomLocation(dom_path="/"),
     )
     assert gen.generate(pair) == []
+
+
+def test_whole_statement_skips_list_fields() -> None:
+    class Car(BaseModel):
+        trims: list[str] = Field(default_factory=list, description="Trim names")
+        model: str = Field(description="Model name")
+
+    spec = SchemaSpec.from_model(Car)
+    statement = st("Available in SE, SE L and R-Line trims")
+    assert WholeStatement().generate_for(statement, spec.field("trims")) == []
+    [cand] = WholeStatement().generate_for(statement, spec.field("model"))
+    assert cand.raw == "Available in SE, SE L and R-Line trims"
+
+
+def test_whole_statement_is_linear_on_long_statements() -> None:
+    import time
+
+    start = time.perf_counter()
+    assert raws(WholeStatement(), ". " * 40_000) == []
+    assert time.perf_counter() - start < 0.5
 
 
 def test_registry_generate_dedupes_spans_and_sorts() -> None:

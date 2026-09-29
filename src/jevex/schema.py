@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import enum
 import inspect
+import re
 import types
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -76,6 +77,12 @@ def Field(
     """``pydantic.Field`` plus jevex extras, stored under ``json_schema_extra["jevex"]``.
 
     The model stays plain Pydantic: the extras only add to its JSON schema.
+
+    ``description`` is read mid-sentence in jevex's questions ("Which of these is the
+    {description}?"), so write it as a noun phrase: "Price", "Engine displacement". For a
+    ``bool``, write the claim that makes it True, as a clause: "The book is in stock", or
+    "has an automatic gearbox" (read as "it has..."). A bare noun ("Sunroof") works too
+    but is asked as "Does the statement mention sunroof?", which a "no sunroof" can pass.
     """
     extra: dict[str, Any] = {}
     if unit is not None:
@@ -166,7 +173,11 @@ class FieldSpec:
     def bool_question(self) -> Noul:
         if self.kind != "bool":
             raise ValueError(f"{self.name} is not a bool field")
-        return Noul(instructions=self.questions.select or f"Does the statement say {self.phrase}?")
+        if self.questions.select:
+            return Noul(instructions=self.questions.select)
+        shape, claim = _claim(self)
+        verb = "say" if shape == "clause" else "mention"
+        return Noul(instructions=f"Does the statement {verb} {claim}?")
 
     def member_question(self, value: str) -> Noul:
         """For ``list[...]`` fields: does the statement give ``value`` as one of them?"""
@@ -184,6 +195,14 @@ class FieldSpec:
     def verify_question(self, value: object) -> Noul:
         """Checks an LLM or vision answer against the statement."""
         template = self.questions.verify
+        if template is None and self.kind == "bool":
+            # "the book is in stock is True" doesn't read; say the claim itself.
+            shape, claim = _claim(self)
+            if shape == "clause":
+                text = claim if value else f"it is not the case that {claim}"
+                return Noul(instructions=f"The statement says {text}.")
+            text = f"mentions {claim}" if value else f"says there is no {claim}"
+            return Noul(instructions=f"The statement {text}.")
         if template is None:
             template, description = (
                 "The statement states that the {description} is {value}.",
@@ -337,23 +356,91 @@ def _first_sentence(text: str) -> str:
     return text.split("\n\n", 1)[0].strip().rstrip(".")
 
 
+_FIRST_TOKEN = re.compile(r"[A-Za-z0-9]+")
+
+
 def _lower_first(text: str) -> str:
-    """Lowercase the first letter, unless the first word is an acronym ("EV", "SUV")."""
-    if len(text) > 1 and text[1].isupper():
+    """Lowercase the first letter, unless the first word is an acronym or a letter name.
+
+    Kept: any capital after the first character of the first word ("EV range", "iPhone",
+    "VIN"), and a lone capital that isn't the article "A" ("X", "A-pillar colour").
+    Proper nouns ("Google rating") can't be told apart and are lowercased; override the
+    question with ``Questions(...)`` if that matters.
+    """
+    m = _FIRST_TOKEN.match(text)
+    if m is None:
+        return text
+    token = m.group()
+    rest = text[m.end() :]
+    if any(ch.isupper() for ch in token[1:]):
+        return text
+    if len(token) == 1 and token.isupper() and not (token == "A" and rest[:1] == " "):
         return text
     return text[:1].lower() + text[1:]
 
 
+# Words that make a bool description a clause ("the book is in stock") rather than a noun
+# ("sunroof"). One of them first means the subject is missing ("has an automatic gearbox").
+_VERBS = frozenset(
+    [
+        "is",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "had",
+        "can",
+        "could",
+        "will",
+        "would",
+        "does",
+        "do",
+        "did",
+        "comes",
+        "come",
+        "includes",
+        "include",
+        "offers",
+        "offer",
+        "supports",
+        "support",
+        "needs",
+        "need",
+        "uses",
+        "use",
+        "runs",
+        "run",
+    ]
+)
+
+
+def _claim(field: FieldSpec) -> tuple[Literal["clause", "noun"], str]:
+    """How a bool's description reads: as a claim ("the book is in stock", "it has an
+    automatic gearbox") or as a thing ("sunroof")."""
+    phrase = field.phrase
+    words = [w.lower() for w in phrase.split()]
+    if words and words[0] in _VERBS:
+        return "clause", f"it {phrase}"
+    if any(w in _VERBS for w in words[1:]):
+        return "clause", phrase
+    return "noun", phrase
+
+
 def _gate_instructions(members: Sequence[FieldSpec]) -> str:
-    """ "Does this section contain the price (GBP)?"; bools read as a claim: "Does this
-    section say whether the book is in stock?"."""
+    """ "Does this section contain the price (GBP)?"; bools ask for their claim: "Does this
+    section say whether the book is in stock?", or "...mention a sunroof?" for nouns."""
     things = [f.phrase for f in members if f.kind != "bool"]
-    claims = [f.phrase for f in members if f.kind == "bool"]
+    claims = [_claim(f) for f in members if f.kind == "bool"]
+    clauses = [f"whether {text}" for shape, text in claims if shape == "clause"]
+    nouns = [text for shape, text in claims if shape == "noun"]
     parts: list[str] = []
     if things:
         parts.append(f"contain the {_join_or(things)}")
-    if claims:
-        parts.append(f"say whether {_join_or(claims)}")
+    if clauses:
+        parts.append(f"say {_join_or(clauses)}")
+    if nouns:
+        parts.append(f"mention {_join_or(nouns)}")
     return f"Does this section {' or '.join(parts)}?"
 
 

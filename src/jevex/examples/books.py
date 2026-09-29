@@ -21,6 +21,7 @@ from jevex.schema import Field
 
 if TYPE_CHECKING:
     from jevex.document import Document
+    from jevex.interfaces import Cleaner
     from jevex.pipeline import Pipeline
 
 
@@ -36,8 +37,11 @@ class Book(BaseModel):
     )
 
 
+# ``[^<>]`` (not ``[^>]``) keeps a scan from running across tags, which made unclosed
+# ``<a class="`` runs quadratic. ``(?<![\w-])`` stops ``no-star-rating`` matching.
 _STAR_RATING = re.compile(
-    r"""(<[a-z]+\b[^>]*\bclass=["'][^"']*\bstar-rating\s+(One|Two|Three|Four|Five)\b[^>]*>)""",
+    r"""(<[a-z]+\b[^<>]*\bclass=["'][^"'<>]*(?<![\w-])star-rating\s+"""
+    r"""(One|Two|Three|Four|Five)\b[^<>]*>)""",
     re.I,
 )
 
@@ -46,15 +50,18 @@ _STAR_RATING = re.compile(
 class StarRatingCleaner:
     """Writes ``star-rating N`` classes out as text, then runs ``inner``."""
 
-    inner: BoilerplateCleaner = field(default_factory=BoilerplateCleaner)
+    inner: Cleaner = field(default_factory=BoilerplateCleaner)
 
     def clean(self, document: Document) -> Document:
         if not document.is_html:
             return self.inner.clean(document)
-        html, _ = decode_html(document.content)
+        # Re-encode in the page's own encoding (bytes it couldn't decode come back as they
+        # were), so its charset declaration stays true.
+        html, encoding = decode_html(document.content)
         rewritten = _STAR_RATING.sub(r"\1Rating: \2 out of five stars", html)
         if rewritten != html:
-            document = document.model_copy(update={"content": rewritten.encode("utf-8")})
+            content = rewritten.encode(encoding, "surrogateescape")
+            document = document.model_copy(update={"content": content})
         return self.inner.clean(document)
 
 
