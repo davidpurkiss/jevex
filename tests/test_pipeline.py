@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from jevex import Context, Document, EntityScope, Extractor, Field, Pipeline, SchemaSpec
 from jevex.interfaces import GateDecision
 from jevex.jev import (
+    Choice,
     ChoiceAnswer,
     JevClient,
     JevResponse,
@@ -19,6 +20,7 @@ from jevex.jev import (
 )
 from jevex.pipeline import SchemaRun, Stage, for_each_scope
 from jevex.results import FieldMeta
+from jevex.schema import NONE_OPTION
 
 
 class Car(BaseModel):
@@ -37,13 +39,14 @@ class YesBackend:
     async def system_one(
         self, state: JSONContent, questions: Mapping[str, Question]
     ) -> JevResponse:
-        # Yes to every Noul; "none" to every Choice (it's always an option).
-        answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {
-            k: ChoiceAnswer(choice="none", confidence=1.0, probabilities={"none": 1.0})
-            if q.type == "choice"
-            else NoulAnswer(p=1.0)
-            for k, q in questions.items()
-        }
+        # Yes to every Noul; "none" to a Choice that offers it, else its first option.
+        answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
+        for k, q in questions.items():
+            if isinstance(q, Choice):
+                pick = NONE_OPTION if NONE_OPTION in q.options else next(iter(q.options))
+                answers[k] = ChoiceAnswer(choice=pick, confidence=1.0, probabilities={pick: 1.0})
+            else:
+                answers[k] = NoulAnswer(p=1.0)
         return JevResponse(answers=answers, input_tokens=10, model="fake")
 
 

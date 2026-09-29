@@ -48,18 +48,37 @@ ACCEPT_AT = 0.5
 """Noul probability at or above which a bool is True or a list member is accepted."""
 
 
+ALSO_CATEGORY_P = 0.3
+"""A statement whose top category is a field also goes to any other field with at least
+this probability: "In stock (22 available)" states both ``in_stock`` and
+``stock_count``. Tuned in #49."""
+
+
 def field_statements(
     ctx: Context, run: SchemaRun, scope: EntityScope
 ) -> list[tuple[Statement, FieldSpec]]:
-    """(statement, field) pairs in scope that the classifier assigned to a field."""
+    """(statement, field) pairs in scope that the classifier assigned to a field.
+
+    A statement pairs with its top category and, when that is a field, with every other
+    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first.
+    """
     if ctx.parsed is None:
         return []
     out: list[tuple[Statement, FieldSpec]] = []
     names = {f.name for f in run.spec.fields}
     for statement in ctx.parsed.statements_in(scope.component_ids):
         answer = run.categories.get(statement.id)
-        if answer is not None and answer.choice in names:
-            out.append((statement, run.spec.field(answer.choice)))
+        if answer is None or answer.choice not in names:
+            # A "none" answer routes nowhere, even if a field came close: a bool field
+            # would record False from a statement that isn't about it.
+            continue
+        also = sorted(
+            (p, name)
+            for name, p in answer.probabilities.items()
+            if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
+        )
+        chosen = [answer.choice, *(name for _, name in reversed(also))]
+        out.extend((statement, run.spec.field(name)) for name in chosen)
     return out
 
 

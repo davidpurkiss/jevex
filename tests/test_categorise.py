@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+import pytest
 from pydantic import BaseModel
 
 from jevex import (
@@ -18,7 +19,14 @@ from jevex import (
 from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ParsedDocument, StatementClassifier
-from jevex.jev import Choice, ChoiceAnswer
+from jevex.jev import (
+    Choice,
+    ChoiceAnswer,
+    JevClient,
+    JevResponse,
+    NoulAnswer,
+    UnexpectedAnswerError,
+)
 from jevex.testing import FakeJev
 
 LOC = DomLocation(dom_path="/p")
@@ -67,21 +75,6 @@ def test_jev_statement_classifier_is_a_statement_classifier() -> None:
     assert isinstance(JevStatementClassifier(), StatementClassifier)
 
 
-def test_categorise_question_can_be_limited_to_some_fields() -> None:
-    spec = SchemaSpec.from_model(Car)
-    assert list(spec.categorise_question().options) == [
-        "price",
-        "power_kw",
-        "zero_to_62_s",
-        "none",
-    ]
-    limited = spec.categorise_question(["zero_to_62_s"])
-    assert limited.options == {
-        "zero_to_62_s": "How long it takes to reach 62 mph",
-        "none": "None of these details",
-    }
-
-
 async def test_each_statement_is_one_choice_with_its_distribution_kept() -> None:
     fake = FakeJev().choice("Which detail", "price", confidence=0.8, state="24,995")
     ctx = context(fake, [st("s1", "From £24,995."), st("s2", "A lovely car.")], ["c1"])
@@ -93,6 +86,76 @@ async def test_each_statement_is_one_choice_with_its_distribution_kept() -> None
     assert cats["s2"].choice == "none"  # "none" answers are kept too
     assert len(fake.calls) == 2
     assert fake.calls[0].state == {"statement": "From £24,995."}
+
+
+class Engine(BaseModel):
+    size_cc: int = Field(description="Engine size", unit="cc")
+
+
+class CarWithEngine(BaseModel):
+    """A car."""
+
+    price: Decimal = Field(description="Price", unit="GBP")
+    engine: Engine = Field(description="The engine")
+
+
+class Book(BaseModel):
+    """A book."""
+
+    title: str = Field(description="Title")
+
+
+async def test_every_schemas_choice_about_a_statement_goes_in_one_request() -> None:
+    fake = FakeJev().choice(
+        "Which detail", lambda q: "price" if "price" in q.options else "none", state="24,995"
+    )
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"),
+        [SchemaSpec.from_model(Car), SchemaSpec.from_model(Book)],
+        fake.client(),
+    )
+    ctx.parsed = ParsedDocument(
+        document=ctx.document,
+        root=Component(id="root", type="section", location=LOC),
+        statements={"s1": st("s1", "From £24,995")},
+    )
+    for run in ctx.schemas.values():
+        run.scopes = [EntityScope(label="doc", component_ids=["c1"])]
+    await CategoriseStage().run(ctx)
+    [call] = fake.calls
+    assert set(call.questions) == {"Car", "Book"}
+    assert ctx.schemas["Car"].categories["s1"].choice == "price"
+    assert ctx.schemas["Book"].categories["s1"].choice == "none"
+
+
+async def test_statements_with_only_nested_model_fields_arent_asked() -> None:
+    fake = FakeJev()
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarWithEngine)], fake.client()
+    )
+    ctx.parsed = ParsedDocument(
+        document=ctx.document,
+        root=Component(id="root", type="section", location=LOC),
+        statements={"s1": st("s1", "1,498 cc", "c2"), "s2": st("s2", "£24,995", "c3")},
+    )
+    run = ctx.schemas["CarWithEngine"]
+    run.scopes = [EntityScope(label="doc", component_ids=["c2", "c3"])]
+    run.component_ids = {"engine": ["c2"], "price": ["c3"]}
+    await CategoriseStage().run(ctx)
+    assert [c.state for c in fake.calls] == [{"statement": "£24,995"}]
+
+
+async def test_a_non_choice_answer_is_an_error() -> None:
+    class NoulForEverything:
+        async def system_one(self, state: object, questions: dict[str, object]) -> JevResponse:
+            return JevResponse(
+                answers={k: NoulAnswer(p=0.9) for k in questions}, input_tokens=1, model="fake"
+            )
+
+    ctx = context(FakeJev(), [st("s1", "From £24,995")], ["c1"])
+    ctx.jev = JevClient(NoulForEverything())  # type: ignore[arg-type]
+    with pytest.raises(UnexpectedAnswerError, match="Choice"):
+        await CategoriseStage().run(ctx)
 
 
 async def test_gated_components_limit_the_options_and_skip_irrelevant_statements() -> None:
@@ -191,10 +254,20 @@ async def test_html_to_values_through_the_default_pipeline() -> None:
         "zero_to_62_s": 9.1,
     }
     categorised = [
-        c.state
+        (c.state["statement"], list(q.options))
         for c in fake.calls
-        if any(isinstance(q, Choice) and "detail" in q.instructions for q in c.questions.values())
+        if isinstance(c.state, dict)
+        for q in c.questions.values()
+        if isinstance(q, Choice) and "detail" in q.instructions
     ]
-    # The newsletter aside and the intro failed the component gate, so they were never
-    # categorised.
-    assert all("Newsletter" not in str(s) and "weekly deals" not in str(s) for s in categorised)
+    perf = ["power_kw", "zero_to_62_s", "none"]
+    # Only statements in sections that passed the component gate are categorised, over
+    # only the fields that section passed for. The intro and newsletter never are.
+    assert categorised == [
+        ("Performance", perf),
+        ("Power: 150 PS", perf),
+        ("0-62 mph: 9.1 s", perf),
+        ("Price", ["price", "none"]),
+        ("On the road from £24,995.", ["price", "none"]),
+    ]
+    assert result.meta.jev.requests == len(fake.calls)
