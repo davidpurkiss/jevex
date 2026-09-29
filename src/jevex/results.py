@@ -1,9 +1,12 @@
 """What consumers get back: plain records with per-field metadata alongside.
 
 Each extracted record is an instance of a *partial* variant of the consumer's model: a
-generated subclass in which every field is optional. A missing or rejected value
-therefore never raises, and ``isinstance(item.record, VehicleSpec)`` still holds.
-``item.complete`` / ``item.strict()`` check the record against the real model.
+generated model with the same fields, every one optional. It keeps each field's own
+constraints, ``Annotated`` validators and alias, but **not** the model's model-level or
+field validators, computed fields or serializers, which usually assume every field is
+present. A missing value therefore never raises. Because it's a separate class,
+``isinstance(item.record, VehicleSpec)`` is false. ``item.complete`` and ``item.strict()``
+check the found values against the real model, validators and all.
 
 Stages record what they found as :class:`FieldMeta` on ``SchemaRun.fields``; the
 extractor turns those into :class:`Extracted` records, applying confidence thresholds.
@@ -12,6 +15,7 @@ extractor turns those into :class:`Extracted` records, applying confidence thres
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from copy import copy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast, overload
 
@@ -120,35 +124,49 @@ class FieldMetas(Mapping[str, FieldMeta]):
 
 _PARTIALS: dict[type[BaseModel], type[BaseModel]] = {}
 
+# What a user validator on the real model may raise besides ValidationError when it meets
+# an incomplete record (e.g. comparing a field with None).
+_VALIDATOR_ERRORS = (ValidationError, ValueError, TypeError, AssertionError, AttributeError)
+
 
 def partial_model[M: BaseModel](model: type[M]) -> type[M]:
-    """A subclass of ``model`` in which every field is optional and defaults to ``None``.
+    """A model with ``model``'s fields, every one optional and defaulting to ``None``.
 
-    Built once per model and cached (a dict, not ``functools.cache``, which would erase
-    the generic return type).
+    Each field keeps its constraints, ``Annotated`` validators, alias and description;
+    only the default and optionality change. Model-level behaviour (model and field
+    validators, computed fields, serializers, ``extra="forbid"``) is left behind so a
+    partial record can always be built. It's typed as ``type[M]`` for convenient
+    attribute access, but it isn't a subclass. Cached per model.
     """
     if model in _PARTIALS:
         return cast("type[M]", _PARTIALS[model])
-    overrides: dict[str, Any] = {
-        name: (Optional[info.annotation], Field(default=None, description=info.description))  # noqa: UP045 - annotation is a runtime object, not syntax
-        for name, info in model.model_fields.items()
-    }
-    partial = create_model(
+    fields: dict[str, Any] = {}
+    for name, info in model.model_fields.items():
+        optional = copy(info)
+        optional.default = None
+        optional.default_factory = None
+        fields[name] = (Optional[info.annotation], optional)  # noqa: UP045 - built at runtime
+    config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=model.model_config.get("arbitrary_types_allowed", False),
+    )
+    partial = create_model(  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
         f"Partial{model.__name__}",
-        __base__=model,
+        __config__=config,
         __module__=model.__module__,
-        **overrides,
+        **fields,
     )
     _PARTIALS[model] = partial
-    return partial
+    return cast("type[M]", partial)
 
 
 @dataclass(frozen=True)
 class Extracted[T: BaseModel]:
     """One extracted record: the values plus their metadata.
 
-    ``record`` is an instance of the partial variant of ``T`` (see :func:`partial_model`).
-    Values below the extractor's thresholds are ``None`` there but still in ``meta``.
+    ``record`` is an instance of the partial variant of ``T`` (see :func:`partial_model`):
+    the same fields, all optional. Values below the extractor's thresholds, or that don't
+    fit the field, are ``None`` there but still in ``meta``.
     """
 
     schema_name: str
@@ -159,19 +177,23 @@ class Extracted[T: BaseModel]:
 
     @property
     def complete(self) -> bool:
-        """Whether the record validates against the real (strict) model."""
+        """Whether the found values validate against the real model."""
         try:
             self.strict()
-        except ValidationError:
+        except _VALIDATOR_ERRORS:
             return False
         return True
 
     def strict(self) -> T:
-        """The record as the real model. Raises ``ValidationError`` if anything's missing.
+        """The record as the real model, with all its validators.
 
-        Fields that weren't found fall back to the model's own defaults.
+        Validates the original found values (not the partial's already-coerced ones, so
+        field validators run once). Fields that weren't found fall back to the model's
+        own defaults. Raises ``ValidationError`` if anything required is missing, or
+        whatever the model's own validators raise.
         """
-        return self.model.model_validate(self.record.model_dump(exclude_unset=True))
+        values = {name: self.meta[name].value for name in self.record.model_fields_set}
+        return self.model.model_validate(values, by_name=True)
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-ready: the record's values plus every field's metadata."""
@@ -213,17 +235,16 @@ def build_extracted(
         by_name[f.name] = meta
 
     partial = partial_model(spec.model)
-    while True:
+    record: BaseModel | None = None
+    while record is None:
         try:
             record = partial.model_validate(data)
-            break
-        except ValidationError as exc:
-            bad = {str(e["loc"][0]) for e in exc.errors() if e["loc"] and e["loc"][0] in data}
-            if not bad:
-                raise
-            for name in bad:
-                messages = [e["msg"] for e in exc.errors() if e["loc"] and e["loc"][0] == name]
-                by_name[name] = by_name[name].model_copy(update={"error": "; ".join(messages)})
+        except _VALIDATOR_ERRORS as exc:
+            errors = _field_errors(exc, data)
+            if not errors:  # nothing attributable to a field: keep what's valid on its own
+                errors = _isolate_errors(partial, data)
+            for name, message in errors.items():
+                by_name[name] = by_name[name].model_copy(update={"error": message})
                 del data[name]
 
     return Extracted(
@@ -233,6 +254,30 @@ def build_extracted(
         meta=FieldMetas(by_name),
         model=spec.model,
     )
+
+
+def _field_errors(exc: Exception, data: Mapping[str, Any]) -> dict[str, str]:
+    """Error messages per top-level field, keeping any nested path ("cyl: Field required")."""
+    if not isinstance(exc, ValidationError):
+        return {}
+    out: dict[str, list[str]] = {}
+    for e in exc.errors():
+        loc = e["loc"]
+        if loc and loc[0] in data:
+            rest = ".".join(str(part) for part in loc[1:])
+            out.setdefault(str(loc[0]), []).append(f"{rest}: {e['msg']}" if rest else e["msg"])
+    return {name: "; ".join(messages) for name, messages in out.items()}
+
+
+def _isolate_errors(partial: type[BaseModel], data: Mapping[str, Any]) -> dict[str, str]:
+    """Validate each field alone to find which ones fail (or blame them all)."""
+    errors: dict[str, str] = {}
+    for name, value in data.items():
+        try:
+            partial.model_validate({name: value})
+        except _VALIDATOR_ERRORS as exc:
+            errors[name] = str(exc).splitlines()[0]
+    return errors or {name: "record failed validation" for name in data}
 
 
 @overload

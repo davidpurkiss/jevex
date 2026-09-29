@@ -1,8 +1,18 @@
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from datetime import date
+from typing import Annotated, Any, Literal, cast
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    computed_field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from jevex import Context, Document, EntityScope, Extractor, Field, Pipeline
 from jevex.results import (
@@ -27,11 +37,6 @@ class VehicleSpec(BaseModel):
     seats: int = Field(default=5, description="Seats")
     features: list[str] = Field(default_factory=list, description="Features")
 
-    @property
-    def is_fast(self) -> bool:
-        # Truthiness, not "is not None": partial records can hold None here.
-        return bool(self.zero_to_62_s) and self.zero_to_62_s < 7
-
 
 class Book(BaseModel):
     title: str = Field(description="Title")
@@ -45,17 +50,17 @@ def build(entity: str, metas: dict[str, FieldMeta], **kw: Any) -> Extracted[Vehi
     return cast("Extracted[VehicleSpec]", build_extracted(SPEC, entity, metas, **kw))
 
 
-def meta(value: object, confidence: float | None = 0.9, **kw: object) -> FieldMeta:
-    return FieldMeta(value=value, confidence=confidence, method="jev", **kw)  # pyright: ignore[reportArgumentType]
+def meta(value: object, confidence: float | None = 0.9, **kw: Any) -> FieldMeta:
+    return FieldMeta(value=value, confidence=confidence, method="jev", **kw)
 
 
 # --- partial model ---------------------------------------------------------------------
 
 
-def test_partial_model_is_a_subclass_with_every_field_optional() -> None:
+def test_partial_model_has_every_field_optional() -> None:
     partial = partial_model(VehicleSpec)
     empty = partial()
-    assert isinstance(empty, VehicleSpec)
+    assert not isinstance(empty, VehicleSpec)  # a separate model, same fields
     assert empty.model is None
     assert empty.seats is None
     assert partial is partial_model(VehicleSpec)  # cached
@@ -63,9 +68,124 @@ def test_partial_model_is_a_subclass_with_every_field_optional() -> None:
     assert partial.model_fields["zero_to_62_s"].description == "0-62 mph time"
 
 
-def test_partial_record_keeps_model_behaviour() -> None:
-    record = partial_model(VehicleSpec)(zero_to_62_s=6.2)
-    assert record.is_fast
+# --- user models with validators, constraints, aliases, computed fields ----------------
+
+
+def upper(v: str) -> str:
+    return v.upper()
+
+
+class Tricky(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lo: int = Field(description="Low")
+    hi: int = Field(description="High")
+    seats: int = Field(default=5, ge=1, le=9, description="Seats")
+    name: Annotated[str, AfterValidator(upper)] = Field(default="", description="Name")
+    zero_to_62: float = Field(default=0.0, alias="zeroTo62", description="0-62")
+    registered: date | None = Field(default=None, description="Registered")
+
+    @model_validator(mode="after")
+    def ordered(self) -> "Tricky":
+        if self.lo > self.hi:
+            raise ValueError("lo must not exceed hi")
+        return self
+
+    @field_validator("hi")
+    @classmethod
+    def hi_after_lo(cls, v: int, info: Any) -> int:
+        if v < info.data["lo"]:  # reads another field: fails when lo is missing
+            raise ValueError("hi < lo")
+        return v
+
+    @computed_field
+    @property
+    def span(self) -> int:
+        return self.hi - self.lo
+
+    @field_serializer("registered")
+    def fmt(self, v: date | None) -> str | None:
+        return v.strftime("%d/%m/%Y") if v else None
+
+
+TRICKY = SchemaSpec.from_model(Tricky)
+
+
+def tricky(metas: dict[str, FieldMeta]) -> Extracted[Tricky]:
+    return cast("Extracted[Tricky]", build_extracted(TRICKY, "doc", metas))
+
+
+def test_user_validators_never_break_partial_records() -> None:
+    item = tricky({"lo": meta(3)})  # hi missing: the model validator would compare with None
+    assert item.record.lo == 3
+    assert not item.complete  # hi is required
+    item = tricky({"hi": meta(2)})  # the field validator would read a missing lo
+    assert item.record.hi == 2
+
+
+def test_model_level_validation_failures_surface_in_strict_not_extraction() -> None:
+    item = tricky({"lo": meta(5), "hi": meta(9)})
+    assert item.complete
+    bad = tricky({"lo": meta(9), "hi": meta(5)})
+    assert bad.record.lo == 9  # the partial record is still built
+    assert not bad.complete
+    with pytest.raises(ValidationError, match=r"lo must not exceed hi|hi < lo"):
+        bad.strict()
+
+
+def test_field_constraints_and_annotated_validators_are_kept() -> None:
+    item = tricky({"seats": meta(-3), "name": meta("golf")})
+    assert item.record.seats is None
+    assert item.meta.seats.error is not None
+    assert "greater than or equal to 1" in item.meta.seats.error
+    assert item.record.name == "GOLF"
+
+
+def test_aliased_fields_work_by_name() -> None:
+    item = tricky({"lo": meta(1), "hi": meta(2), "zero_to_62": meta(9.1)})
+    assert item.record.zero_to_62 == 9.1
+    strict = item.strict()
+    assert strict.zero_to_62 == 9.1
+    assert strict.span == 1  # computed fields work on the strict model
+
+
+def test_strict_validates_original_values_once() -> None:
+    item = tricky({"lo": meta(1), "hi": meta(2), "name": meta("golf")})
+    assert item.strict().name == "GOLF"
+
+
+def test_serializers_and_forbid_dont_break_strict_or_to_dict() -> None:
+    item = tricky({"lo": meta(1), "hi": meta(2), "registered": meta("2024-03-12")})
+    assert item.complete
+    assert item.strict().registered == date(2024, 3, 12)
+    assert item.to_dict()["record"]["registered"] == "2024-03-12"
+    empty = tricky({})
+    assert empty.to_dict()["record"]["lo"] is None  # no computed field to crash
+
+
+class Engine(BaseModel):
+    cyl: int
+    power: int
+
+
+class WithNested(BaseModel):
+    engine: Engine | None = Field(default=None, description="Engine")
+    tags: list[int] = Field(default_factory=list, description="Tags")
+
+
+def test_nested_errors_keep_their_path() -> None:
+    item = cast(
+        "Extracted[WithNested]",
+        build_extracted(
+            SchemaSpec.from_model(WithNested),
+            "doc",
+            {"engine": meta({"power": 100}), "tags": meta([1, "x", 3])},
+        ),
+    )
+    assert item.record.engine is None
+    assert item.meta.engine.error == "cyl: Field required"
+    assert item.meta.tags.error is not None
+    assert item.meta.tags.error.startswith("1: ")
 
 
 # --- building records ------------------------------------------------------------------
@@ -211,12 +331,9 @@ class Record:
         ctx.schemas["Book"].set_field("doc", "title", meta("Dune"))
 
 
-def extractor(**kwargs: object) -> Extractor:
+def extractor(**kwargs: Any) -> Extractor:
     return Extractor(
-        [VehicleSpec, Book],
-        jev=FakeJev().client(),
-        pipeline=Pipeline([Record()]),
-        **kwargs,  # pyright: ignore[reportArgumentType]
+        [VehicleSpec, Book], jev=FakeJev().client(), pipeline=Pipeline([Record()]), **kwargs
     )
 
 
@@ -255,6 +372,27 @@ async def test_extractor_thresholds_apply_to_records() -> None:
     assert sel.record.model is None
     assert sel.meta.model.filtered
     assert result.values["VehicleSpec"] == {"SE": {"model": "Golf", "seats": 5}}
+
+
+async def test_values_view_matches_the_records() -> None:
+    @dataclass
+    class Messy:
+        name: str = "record"
+
+        async def run(self, ctx: Context) -> None:
+            car = ctx.schemas["VehicleSpec"]
+            car.set_field("doc", "seats", meta("7"))  # coerced to 7 in the record
+            car.set_field("doc", "fuel_type", meta("hydrogen"))  # rejected by the type
+
+    ex = Extractor([VehicleSpec], jev=FakeJev().client(), pipeline=Pipeline([Messy()]))
+    result = await ex.extract(doc())
+    assert result.values == {"VehicleSpec": {"doc": {"seats": 7}}}
+
+
+def test_unknown_threshold_keys_are_rejected() -> None:
+    with pytest.raises(ValueError, match="feul"):
+        extractor(thresholds={"feul": 0.9})
+    extractor(thresholds={"VehicleSpec.model": 0.9, "title": 0.5})
 
 
 async def test_result_to_dict() -> None:

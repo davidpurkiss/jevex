@@ -129,10 +129,13 @@ class ExtractionResult:
 
     @property
     def values(self) -> dict[str, dict[str, dict[str, Any]]]:
-        """Found values only, by schema, entity and field: a quick look without meta."""
+        """The records' values (as coerced into them), by schema, entity and field.
+
+        Only fields that made it into a record: not filtered, not rejected by the type.
+        """
         out: dict[str, dict[str, dict[str, Any]]] = {}
         for r in self.records:
-            found = {name: m.value for name, m in r.meta.items() if m.found and not m.filtered}
+            found = {name: getattr(r.record, name) for name in r.record.model_fields_set}
             if found:
                 out.setdefault(r.schema_name, {})[r.entity] = found
         return out
@@ -228,6 +231,12 @@ class Extractor:
         self.pipeline = pipeline if pipeline is not None else default_pipeline()
         self.threshold = threshold
         self.thresholds = dict(thresholds or {})
+        known = {f.name for s in self.schemas for f in s.fields} | {
+            f"{s.name}.{f.name}" for s in self.schemas for f in s.fields
+        }
+        unknown = sorted(set(self.thresholds) - known)
+        if unknown:
+            raise ValueError(f"thresholds for unknown fields: {unknown}")
         self._jev = jev
         self._sync_loop: asyncio.AbstractEventLoop | None = None
 
