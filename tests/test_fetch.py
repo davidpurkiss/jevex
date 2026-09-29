@@ -182,6 +182,26 @@ async def test_robots_fetched_once_per_origin_ignoring_case_and_default_port() -
     assert seen.count("other.example/robots.txt") == 1
 
 
+@pytest.mark.parametrize(
+    ("url", "origin"),
+    [
+        ("https://EXAMPLE.com/a", "https://example.com"),
+        ("https://example.com:443/b", "https://example.com"),
+        ("http://user:pw@Example.com:8080/x", "http://example.com:8080"),
+        ("http://[::1]:8080/x", "http://[::1]:8080"),
+    ],
+)
+def test_origin_normalisation(url: str, origin: str) -> None:
+    from jevex.fetch import _origin  # pyright: ignore[reportPrivateUsage] - unit under test
+
+    assert _origin(url) == origin
+
+
+async def test_ipv6_literal_hosts_are_fetchable() -> None:
+    doc = await fetcher(site()).fetch("http://[::1]:8080/page")
+    assert doc.url == "http://[::1]:8080/page"
+
+
 # --- redirects -------------------------------------------------------------------------
 
 

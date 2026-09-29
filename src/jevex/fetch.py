@@ -210,7 +210,10 @@ def _origin(url: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.host:
         raise FetchError(f"not an http(s) URL: {url!r}")
     port = f":{parsed.port}" if parsed.port is not None else ""
-    return f"{parsed.scheme}://{parsed.host.lower()}{port}"
+    host = parsed.host.lower()
+    if ":" in host:  # IPv6 literal: keep the brackets so the origin is still a valid URL
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}{port}"
 
 
 def _join(base: str, location: str) -> str:
