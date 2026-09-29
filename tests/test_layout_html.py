@@ -103,6 +103,31 @@ def test_unrendered_and_hidden_content_is_skipped() -> None:
     assert [c.text for c in root.walk() if c.text] == ["Shown", "aria", "End"]
 
 
+async def test_declarative_shadow_roots_survive_cleaning_and_are_read() -> None:
+    doc = html(
+        "<div><template shadowrootmode='open'><h2>Shadow title</h2><p>shadow text</p>"
+        "</template></div><x-a><template shadowroot='open'><p>legacy</p></template></x-a>"
+        "<p>after</p>"
+    )
+    root = await HtmlLayoutParser().parse(BoilerplateCleaner().clean(doc))
+    assert outline(root) == [
+        (0, "heading", "Shadow title"),
+        (0, "paragraph", "shadow text"),
+        (0, "paragraph", "legacy"),
+        (0, "paragraph", "after"),
+    ]
+    assert path(root.children[1]) == "/html/body/div/template/p"
+
+
+def test_end_tag_br_and_stray_end_tag_p_break_the_text() -> None:
+    # Browsers read "</br>" as "<br>", and a "</p>" with no open <p> as an empty <p>.
+    assert [c.text for c in parse_html("<p>Line one</br>Line two</p>").walk() if c.text] == [
+        "Line one\nLine two"
+    ]
+    root = parse_html("<div>Engine</p>1.5 TSI</div>")
+    assert [c.text for c in root.walk() if c.text] == ["Engine", "1.5 TSI"]
+
+
 def test_empty_markup_gives_an_empty_root() -> None:
     root = parse_html("")
     assert root.id == "c0"
@@ -455,6 +480,27 @@ def test_headings_in_header_cells_keep_a_data_table() -> None:
     assert outline(root) == [(0, "table", "Power | 150 PS")]
 
 
+def test_tfoot_rows_come_last_wherever_they_are_written() -> None:
+    root = parse_html(
+        "<table><thead><tr><th>h</th></tr></thead><tfoot><tr><td>foot</td></tr></tfoot>"
+        "<tbody><tr><td>b</td></tr></tbody></table>"
+    )
+    (table,) = only(root, "table")
+    assert table.text == "h\nb\nfoot"
+    assert [(c.row, c.text) for c in table.cells] == [(0, "h"), (1, "b"), (2, "foot")]
+
+
+def test_image_alt_text_is_the_text_of_cells_and_headings() -> None:
+    root = parse_html(
+        "<h1><img alt='Brand' src=logo.png></h1>"
+        "<table><tr><th>ABS</th><td><img src=tick.png alt='Yes'></td>"
+        "<td><img src=cross.png alt='No'> (extra)</td></tr></table>"
+    )
+    assert only(root, "heading")[0].text == "Brand"
+    assert [c.text for c in only(root, "table")[0].cells] == ["ABS", "Yes", "No (extra)"]
+    assert only(root, "image") == []  # the alt text is already in the text
+
+
 def test_a_table_without_text_is_dropped_but_keeps_its_caption() -> None:
     root = parse_html("<table><caption>Empty</caption><tr><td> </td></tr></table><table></table>")
     assert outline(root) == [(0, "caption", "Empty")]
@@ -545,9 +591,12 @@ def test_ids_follow_reading_order() -> None:
 
 
 def test_unclosed_nesting_is_capped_without_losing_text() -> None:
-    # Elements past MAX_DEPTH are dropped, so the <div> no longer breaks the line.
-    root = parse_html("<p>before</p>" + "<font>" * 5000 + "deep" + "<div>block</div>")
-    assert [c.text for c in root.walk() if c.text] == ["before", "deepblock"]
+    # Past MAX_DEPTH new elements become siblings, so later blocks still break the text.
+    root = parse_html(
+        "<p>before</p>" + "<font>" * 5000 + "deep" + "<div>block</div>text<p>after</p>"
+    )
+    assert [c.text for c in root.walk() if c.text] == ["before", "deep", "block", "text", "after"]
+    assert Component.model_validate_json(root.model_dump_json()) == root
 
 
 def test_deep_component_trees_are_flattened_at_the_depth_limit() -> None:
@@ -579,6 +628,15 @@ async def test_parser_rejects_other_documents() -> None:
     assert not parser.supports(pdf)
     with pytest.raises(UnsupportedDocumentError, match="application/pdf"):
         await parser.parse(pdf)
+
+
+async def test_undecodable_bytes_are_read_as_windows_1252() -> None:
+    # No charset and not UTF-8: decode_html keeps the bytes as lone surrogates, which
+    # JSON can't hold.
+    doc = Document.from_bytes(b"<p>caf\xe9 \xa320 \x81</p>", content_type="text/html")
+    root = await HtmlLayoutParser().parse(doc)
+    assert root.children[0].text == "café £20 \ufffd"
+    assert Component.model_validate_json(root.model_dump_json()) == root
 
 
 async def test_parser_decodes_the_page_charset() -> None:

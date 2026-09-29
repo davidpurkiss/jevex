@@ -21,7 +21,9 @@ it was given. It then walks the DOM and maps it to components:
 - ``img`` becomes an image component whose text is its alt text.
 
 Hidden content (``hidden``, inline ``display:none``) and
-non-rendered elements (scripts, styles, forms' option lists, SVG...) are skipped. The
+non-rendered elements (scripts, styles, forms' option lists, SVG...) are skipped. A
+``template`` is skipped too, except a declarative shadow root (``shadowrootmode``), which
+browsers render in place. The
 parser never produces ``column`` components: HTML columns come from CSS, which it doesn't
 read.
 
@@ -45,7 +47,8 @@ if TYPE_CHECKING:
 
 MAX_DEPTH = 256
 """Deepest element nesting kept. Old pages with thousands of unclosed ``<font>`` tags would
-otherwise nest that deep; elements opened past this depth are dropped (their text is kept)."""
+otherwise nest that deep. Past this depth a new element closes the innermost one and takes
+its place as a sibling (as Blink does), so blocks still break the text."""
 
 MAX_COMPONENT_DEPTH = 64
 """Deepest component nesting below the root. Deeper components are flattened into their
@@ -196,6 +199,12 @@ class HtmlLayoutParser:
         return parse_html(decode_html(document.content)[0])
 
 
+_UNDECODED = {0xDC00 + b: bytes([b]).decode("cp1252", "replace") for b in range(0x80, 0x100)}
+"""``decode_html`` keeps bytes it couldn't decode as lone surrogates (U+DC80-U+DCFF), which
+JSON can't encode. They are read as windows-1252, the WHATWG fallback for a page without
+a working charset (its five undefined bytes become U+FFFD)."""
+
+
 def parse_html(markup: str) -> Component:
     """Segment HTML markup into a component tree rooted at a ``section`` for ``<body>``.
 
@@ -203,7 +212,7 @@ def parse_html(markup: str) -> Component:
     markup.
     """
     builder = _TreeBuilder()
-    builder.feed(markup)
+    builder.feed(markup.translate(_UNDECODED))
     builder.close()
     segmenter = _Segmenter()
     body = builder.ensure_body()
@@ -236,7 +245,7 @@ class _Node:
         Only the element being built is ever inserted in front of, so a new element is
         still the last of its tag and its ``index`` is the running count.
         """
-        skip = self.skip or tag in SKIP_TAGS or _hidden(attrs)
+        skip = self.skip or (tag in SKIP_TAGS and not _shadow_root(tag, attrs)) or _hidden(attrs)
         node = _Node(tag, attrs, parent=self, skip=skip)
         node.index = self.counts[tag] = self.counts.get(tag, 0) + 1
         if before is None:
@@ -249,6 +258,11 @@ class _Node:
                 ancestor.has_block = True
                 ancestor = ancestor.parent
         return node
+
+
+def _shadow_root(tag: str, attrs: dict[str, str]) -> bool:
+    """A declarative shadow DOM ``template``: browsers render its content in place."""
+    return tag == "template" and ("shadowrootmode" in attrs or "shadowroot" in attrs)
 
 
 def _hidden(attrs: dict[str, str]) -> bool:
@@ -320,14 +334,15 @@ class _TreeBuilder(HTMLParser):
             parent, before = table.parent, table
         else:
             before = None
+        while len(self.stack) > MAX_DEPTH - 3:  # room for an implied tbody and tr
+            self.stack.pop()
+            parent = self.stack[-1]
         if tag == "tr" and parent.tag == "table":
             parent = self._push(parent.append("tbody", {}))
         elif tag in _CELLS and parent.tag in _TABLE_SECTIONS | {"table"}:
             if parent.tag == "table":
                 parent = self._push(parent.append("tbody", {}))
             parent = self._push(parent.append("tr", {}))
-        if len(self.stack) >= MAX_DEPTH:
-            return
         node = parent.append(tag, attrs, before=before)
         if not closed and tag not in _VOID_TAGS:
             self.stack.append(node)
@@ -393,6 +408,15 @@ class _TreeBuilder(HTMLParser):
         if tag in _HEADINGS:
             self._close(*_HEADINGS, stop=_SCOPE)  # "<h2>...</h3>" still ends the heading
             return
+        if tag == "br":
+            self._start("br", {})  # browsers read "</br>" as "<br>"
+            return
+        if tag == "p":
+            # A "</p>" with no open <p> makes an empty one, which still breaks the text.
+            if not self._close("p", stop=_SCOPE) and self.body is not None:
+                self._start("p", {})
+                self._close("p", stop=_SCOPE)
+            return
         stop = _SCOPE
         if tag == "template":
             stop = frozenset[str]()  # closes back to the template, whatever is left open
@@ -443,6 +467,9 @@ class _Inline:
 
     pieces: list[str] = field(default_factory=list[str])
     images: list[_Block] = field(default_factory=list[_Block])
+    alt_text: bool = False
+    """Put images' alt text in the text instead of collecting them: headings, cells and
+    definitions are one line of text, and a tick icon in a cell is its answer."""
 
 
 class _Segmenter:
@@ -519,7 +546,7 @@ class _Segmenter:
 
     def flat_text(self, node: _Node) -> str:
         """All of the node's text on one line: for headings, cells and definitions."""
-        inline = _Inline()
+        inline = _Inline(alt_text=True)
         self._inline(node, inline, pre=node.tag == "pre")
         return " ".join(_finish(inline.pieces, pre=False).split("\n"))
 
@@ -529,7 +556,11 @@ class _Segmenter:
             return
         if node.tag == "img":
             image = self._image(node)
-            if image is not None:
+            if image is None:
+                pass
+            elif inline.alt_text:
+                inline.pieces.append(f" {image.text} ")
+            else:
                 inline.images.append(image)
             return
         pre = pre or node.tag == "pre"
@@ -610,13 +641,18 @@ class _Segmenter:
     def _table(self, node: _Node) -> list[_Block]:
         captions: list[_Block] = []
         rows: list[tuple[_Node, bool]] = []
+        foot: list[tuple[_Node, bool]] = []  # rendered last, wherever it is in the markup
         for child in node.elements():
             if child.tag == "caption":
                 captions.extend(self.block(child))
             elif child.tag in _TABLE_SECTIONS:
-                rows.extend((tr, child.tag == "thead") for tr in child.elements() if tr.tag == "tr")
+                group = foot if child.tag == "tfoot" else rows
+                group.extend(
+                    (tr, child.tag == "thead") for tr in child.elements() if tr.tag == "tr"
+                )
             elif child.tag == "tr":
                 rows.append((child, False))
+        rows += foot
         cells: list[TableCell] = []
         busy: dict[int, int] = {}  # column -> first row where it is free again
         for r, (tr, in_head) in enumerate(rows):
