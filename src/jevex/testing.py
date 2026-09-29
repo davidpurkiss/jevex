@@ -120,8 +120,14 @@ class FakeJev:
         *,
         confidence: float = 1.0,
         state: Matcher = None,
+        probabilities: Mapping[str, float] | None = None,
     ) -> FakeJev:
-        """Pick ``choice`` (or ``choice(question)``) for matching Choices."""
+        """Pick ``choice`` (or ``choice(question)``) for matching Choices.
+
+        The rest of the probability is spread evenly over the other options, unless
+        ``probabilities`` gives some of them (options it names that aren't offered are
+        ignored).
+        """
 
         def answer(q: Question) -> Answer:
             assert isinstance(q, Choice)
@@ -130,7 +136,7 @@ class FakeJev:
                 raise UnscriptedQuestionError(
                     f"scripted choice {picked!r} is not an option: {list(q.options)}"
                 )
-            return _choice_answer(q, picked, confidence)
+            return _choice_answer(q, picked, confidence, probabilities)
 
         self._rules.append(_Rule("choice", instructions, state, answer))
         return self
@@ -196,9 +202,16 @@ class FakeJev:
                 return ScoreAnswer(score=0.0, confidence=1.0, probabilities=probabilities)
 
 
-def _choice_answer(question: Choice, picked: str, confidence: float) -> ChoiceAnswer:
-    rest = (1.0 - confidence) / max(len(question.options) - 1, 1)
-    probabilities = {o: (confidence if o == picked else rest) for o in question.options}
+def _choice_answer(
+    question: Choice,
+    picked: str,
+    confidence: float,
+    given: Mapping[str, float] | None = None,
+) -> ChoiceAnswer:
+    fixed = {o: p for o, p in (given or {}).items() if o in question.options and o != picked}
+    others = [o for o in question.options if o != picked and o not in fixed]
+    rest = max(1.0 - confidence - sum(fixed.values()), 0.0) / max(len(others), 1)
+    probabilities = {o: confidence if o == picked else fixed.get(o, rest) for o in question.options}
     return ChoiceAnswer(choice=picked, confidence=confidence, probabilities=probabilities)
 
 

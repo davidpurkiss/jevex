@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from jevex import Field, Questions, SchemaConfig, SchemaSpec
 from jevex.jev import Choice, Noul
-from jevex.schema import UnsupportedFieldError
+from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
 
 
 class VehicleSpec(BaseModel):
@@ -273,3 +273,39 @@ def test_member_question_default_and_override() -> None:
         instructions='Does the statement give "red" as one of the Tags?'
     )
     assert spec.field("colours").member_question("red") == Noul(instructions="Is red a Colours?")
+
+
+class GatedCar(BaseModel):
+    """A car's specification."""
+
+    price: Decimal = Field(description="Price", unit="GBP")
+    power_kw: float = Field(description="Engine power", unit="kW", group="performance")
+    zero_to_62_s: float = Field(
+        description="0-62 mph time",
+        unit="s",
+        group="performance",
+        questions=Questions(categorise="How long it takes to reach 62 mph"),
+    )
+
+
+def test_categorise_question_can_be_limited_to_some_fields() -> None:
+    spec = SchemaSpec.from_model(GatedCar)
+    assert list(spec.categorise_question().options) == [
+        "price",
+        "power_kw",
+        "zero_to_62_s",
+        "none",
+    ]
+    limited = spec.categorise_question(["zero_to_62_s"])
+    assert limited.options == {
+        "zero_to_62_s": "How long it takes to reach 62 mph",
+        "none": "None of these details",
+    }
+
+
+def test_a_field_named_none_is_reserved() -> None:
+    class Odd(BaseModel):
+        none: str = Field(description="Nothing")
+
+    with pytest.raises(ReservedFieldNameError, match="reserved"):
+        SchemaSpec.from_model(Odd)

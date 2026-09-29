@@ -48,18 +48,37 @@ ACCEPT_AT = 0.5
 """Noul probability at or above which a bool is True or a list member is accepted."""
 
 
+ALSO_CATEGORY_P = 0.3
+"""A statement whose top category is a field also goes to any other field with at least
+this probability: "In stock (22 available)" states both ``in_stock`` and
+``stock_count``. Such a second route can make a bool True, never False. Tuned in #49."""
+
+
 def field_statements(
     ctx: Context, run: SchemaRun, scope: EntityScope
 ) -> list[tuple[Statement, FieldSpec]]:
-    """(statement, field) pairs in scope that the classifier assigned to a field."""
+    """(statement, field) pairs in scope that the classifier assigned to a field.
+
+    A statement pairs with its top category and, when that is a field, with every other
+    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first.
+    """
     if ctx.parsed is None:
         return []
     out: list[tuple[Statement, FieldSpec]] = []
     names = {f.name for f in run.spec.fields}
     for statement in ctx.parsed.statements_in(scope.component_ids):
         answer = run.categories.get(statement.id)
-        if answer is not None and answer.choice in names:
-            out.append((statement, run.spec.field(answer.choice)))
+        if answer is None or answer.choice not in names:
+            # A "none" answer routes nowhere, even if a field came close: a bool field
+            # would record False from a statement that isn't about it.
+            continue
+        also = sorted(
+            (p, name)
+            for name, p in answer.probabilities.items()
+            if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
+        )
+        chosen = [answer.choice, *(name for _, name in reversed(also))]
+        out.extend((statement, run.spec.field(name)) for name in chosen)
     return out
 
 
@@ -270,7 +289,9 @@ class SelectStage:
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection
             return
-        outcome = _direct(spec, statement, answers, order)
+        category = run.categories.get(statement.id)
+        secondary = category is not None and category.choice != spec.name
+        outcome = _direct(spec, statement, answers, order, secondary=secondary)
         if outcome is not None:
             for scope in ask.scopes:
                 outcomes.setdefault((run.name, scope, spec.name), []).append(outcome)
@@ -282,13 +303,26 @@ def _merged(asks: Mapping[tuple[str, str], _Ask]) -> dict[str, Question]:
 
 
 def _direct(
-    spec: FieldSpec, statement: Statement, answers: dict[str, Answer], order: int
+    spec: FieldSpec,
+    statement: Statement,
+    answers: dict[str, Answer],
+    order: int,
+    *,
+    secondary: bool = False,
 ) -> _Outcome | None:
-    """Read one statement's enum or bool answer. ``None`` when it states nothing."""
+    """Read one statement's enum or bool answer. ``None`` when it states nothing.
+
+    ``secondary``: the field isn't the statement's top category (see
+    :data:`ALSO_CATEGORY_P`). Such a statement can say a bool is True but never that it
+    is False: a low p there means "not about this", which would otherwise outvote the
+    statement that is about it.
+    """
     if spec.kind == "bool":
         answer = answers["bool"]
         assert isinstance(answer, NoulAnswer)
         value = answer.p >= ACCEPT_AT
+        if secondary and not value:
+            return None
         # Confidence in the stated value: p for True, 1 - p for False.
         return _Outcome(order, statement, [value], answer.p if value else 1 - answer.p, {})
     if spec.many:

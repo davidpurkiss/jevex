@@ -23,6 +23,8 @@ from pydantic_core import PydanticUndefined
 from jevex.jev import Choice, JSONContent, Noul
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic.fields import FieldInfo
 
 EXTRA_KEY = "jevex"
@@ -91,6 +93,10 @@ def Field(
         json_schema_extra=json_schema_extra or None,
         **kwargs,
     )
+
+
+class ReservedFieldNameError(ValueError):
+    """A schema field uses a name jevex reserves for its own question options."""
 
 
 class UnsupportedFieldError(TypeError):
@@ -185,6 +191,12 @@ class SchemaSpec:
             raise TypeError(f"{model.__name__}.__jevex__ must be a SchemaConfig")
         docstring = model.__dict__.get("__doc__")
         description = inspect.cleandoc(docstring) if docstring else _humanise(model.__name__)
+        if NONE_OPTION in model.model_fields:
+            raise ReservedFieldNameError(
+                f"{model.__name__}.{NONE_OPTION}: {NONE_OPTION!r} is reserved (it is the "
+                '"none of these" option in jevex\'s questions); rename the field and set '
+                f"alias={NONE_OPTION!r} if the data needs that name"
+            )
         fields = tuple(_field_spec(name, info) for name, info in model.model_fields.items())
         return cls(model, model.__name__, description, config, fields)
 
@@ -221,10 +233,16 @@ class SchemaSpec:
             )
         return questions
 
-    def categorise_question(self) -> Choice:
-        """One Choice per statement: which field does it state, or none of them."""
+    def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
+        """One Choice per statement: which field does it state, or none of them.
+
+        ``fields`` limits the options to those field names (in schema order).
+        """
+        allowed = None if fields is None else set(fields)
         options: dict[str, JSONContent | None] = {
-            f.name: f.questions.categorise or f.label for f in self.fields if f.kind != "model"
+            f.name: f.questions.categorise or f.label
+            for f in self.fields
+            if f.kind != "model" and (allowed is None or f.name in allowed)
         }
         options[NONE_OPTION] = "None of these details"
         return Choice(
