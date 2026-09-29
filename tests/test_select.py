@@ -195,6 +195,9 @@ async def test_list_candidate_fields_accept_several_spans_per_statement() -> Non
     await run_both(ctx)
     questions = only_call_questions(fake)
     assert all(isinstance(q, Noul) for q in questions.values())
+    assert Noul(instructions='Does the statement give "SE" as one of the Trim names?') in (
+        questions.values()
+    )
     sel = ctx.schemas["Car"].selections[("doc", "trims", "s1")]
     assert [c.raw for c in sel.accepted] == ["SE", "GT"]
     assert sel.candidate is not None
@@ -345,3 +348,12 @@ def test_stages_are_in_the_default_pipeline_in_order() -> None:
 
     names = default_pipeline().names
     assert names.index("candidates") < names.index("select") < names.index("normalise")
+
+
+async def test_list_enum_options_follow_the_text_order_within_a_statement() -> None:
+    fake = FakeJev(default_p=0.05)
+    fake.noul('"red"', p=0.9)
+    fake.noul('"grey"', p=0.9)
+    ctx = context(fake, [st("s1", "Grey or red")], {"s1": "colours"})
+    await run_both(ctx)
+    assert ctx.schemas["Car"].fields["doc"]["colours"].value == ["grey", "red"]

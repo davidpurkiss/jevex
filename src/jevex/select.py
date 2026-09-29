@@ -210,7 +210,7 @@ class SelectStage:
                 for statement, asks in plans.values()
             )
         )
-        order = list(ctx.parsed.statements) if ctx.parsed else []
+        order = {sid: i for i, sid in enumerate(ctx.parsed.statements)} if ctx.parsed else {}
         outcomes: dict[tuple[str, str, str], list[_Outcome]] = {}
         for (sid, (statement, asks)), answers in zip(plans.items(), replies, strict=True):
             for ask in asks.values():
@@ -219,7 +219,7 @@ class SelectStage:
                     for key, answer in answers.items()
                     if key.startswith(ask.prefix)
                 }
-                self._read(ask, statement, mine, order.index(sid), outcomes)
+                self._read(ask, statement, mine, order.get(sid, len(order)), outcomes)
         for (schema, scope, field_name), found in outcomes.items():
             run = ctx.schemas[schema]
             _record_direct(ctx, run, scope, run.spec.field(field_name), found)
@@ -300,6 +300,9 @@ def _direct(
         accepted = [o for o in spec.options if probs.get(o, 0.0) >= ACCEPT_AT]
         if not accepted:
             return None
+        # In the order the statement mentions them; options it doesn't spell out go last.
+        text = statement.text.lower()
+        accepted.sort(key=lambda o: i if (i := text.find(o.lower())) >= 0 else len(text))
         weighed = {o: p for o, p in probs.items() if o not in accepted}
         return _Outcome(order, statement, accepted, max(probs[o] for o in accepted), weighed)
     choice = answers["enum"]

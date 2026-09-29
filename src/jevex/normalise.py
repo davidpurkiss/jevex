@@ -521,7 +521,11 @@ class NormaliseStage:
             method="generator",
             generator_id=best.candidate.generator_id if best.candidate else None,
             source=_source(ctx, best_id, best),
-            alternatives=_alternatives(ranked, [] if field.many else [best_id]),
+            alternatives=_alternatives(
+                ranked,
+                [] if field.many else [best_id],
+                accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
+            ),
         )
 
 
@@ -537,10 +541,16 @@ def _source(ctx: Context, statement_id: str, selection: Selection) -> Source:
     )
 
 
-def _alternatives(ranked: list[tuple[str, Selection]], exclude: list[str]) -> list[Alternative]:
+def _alternatives(
+    ranked: list[tuple[str, Selection]],
+    exclude: list[str],
+    *,
+    accepted_raws: set[str] | None = None,
+) -> list[Alternative]:
     """Other picks and the options each question weighed, one per raw span, most likely
-    first. The chosen span itself is never listed."""
+    first. Chosen spans (and, for list fields, every accepted span) are never listed."""
     chosen = {s.candidate.raw for sid, s in ranked if sid in exclude and s.candidate is not None}
+    chosen |= accepted_raws or set()
     best: dict[str, float] = {}
     for statement_id, selection in ranked:
         if selection.candidate and statement_id not in exclude:
