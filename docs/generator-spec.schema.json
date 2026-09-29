@@ -1,0 +1,234 @@
+{
+  "$defs": {
+    "MatchSpec": {
+      "additionalProperties": false,
+      "description": "An RE2 pattern; ``group`` is the capture group holding the value (0: the match).",
+      "properties": {
+        "regex": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Regex",
+          "type": "string"
+        },
+        "group": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "regex"
+      ],
+      "title": "MatchSpec",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Where a spec came from: the verified examples and what wrote it.",
+      "properties": {
+        "learned_from": {
+          "description": "Ids of the verified examples it was learned from.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Learned From",
+          "type": "array"
+        },
+        "synthesised_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What wrote it: 'generator_llm', 'human', a pack name...",
+          "title": "Synthesised By"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    },
+    "SpecScope": {
+      "additionalProperties": false,
+      "description": "Where a learned generator runs, beyond its own field. Empty means everywhere.",
+      "properties": {
+        "locale": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locale"
+        },
+        "sources": {
+          "description": "Document sources (e.g. site hosts).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "title": "SpecScope",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A declarative candidate generator for one field.",
+  "properties": {
+    "id": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "field": {
+      "description": "Schema.field, e.g. VehicleSpec.price",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$",
+      "title": "Field",
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/$defs/SpecScope"
+    },
+    "match": {
+      "$ref": "#/$defs/MatchSpec"
+    },
+    "normalise": {
+      "items": {
+        "anyOf": [
+          {
+            "const": "parse_date"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "parse_date": {
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "type": "string"
+                  },
+                  "precision": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "parse_date"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "const": "parse_money"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "parse_money": {
+                "type": "object",
+                "properties": {
+                  "currency": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "parse_money"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "const": "parse_number"
+          },
+          {
+            "const": "parse_range"
+          },
+          {
+            "const": "strip"
+          },
+          {
+            "const": "unit"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "unit": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "gallon": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "unit"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "maxItems": 8,
+      "title": "Normalise",
+      "type": "array",
+      "description": "Built-in normalisers, applied in order."
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    }
+  },
+  "required": [
+    "id",
+    "field",
+    "match"
+  ],
+  "title": "GeneratorSpec",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
