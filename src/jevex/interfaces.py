@@ -200,6 +200,18 @@ class CandidateGenerator(Protocol):
 
 
 @runtime_checkable
+class FieldAwareGenerator(CandidateGenerator, Protocol):
+    """A generator whose normaliser chain depends on the field it's generating for.
+
+    ``GeneratorRegistry.generate`` calls ``generate_for`` instead of ``generate`` when a
+    generator has it. ``key_value`` needs this: the same span "12 March 2024" wants
+    ``parse_date`` for a date field but only ``strip`` for a string field.
+    """
+
+    def generate_for(self, statement: Statement, field: FieldSpec) -> list[Candidate]: ...
+
+
+@runtime_checkable
 class CandidateSelector(Protocol):
     async def select(
         self, statement: Statement, field: FieldSpec, candidates: list[Candidate], jev: JevClient

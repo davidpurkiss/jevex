@@ -20,10 +20,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from jevex.generators.units import spellings
 from jevex.interfaces import Scope
 from jevex.statements import Candidate, NormaliserStep, Span, Statement
+
+if TYPE_CHECKING:
+    from jevex.schema import FieldSpec
 
 _NUM = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
 _NUMBER = re.compile(rf"(?<![\w.,])(?:{_NUM})(?![\w]|[.,]\d)")
@@ -222,25 +226,98 @@ class Range:
 
 _KEY_VALUE = re.compile(r":\s+(?=\S)")
 _TRAILING = " \t\r\n.;,"
+_DIGIT = re.compile(r"\d")
+
+
+def _number_chain(value: str) -> list[NormaliserStep] | None:
+    """The chain for the first quantity in ``value``: a range, money, a number with a unit or
+    a bare number, in that order when two start at the same place."""
+    found: list[tuple[int, int, list[NormaliserStep] | None]] = []
+    if m := _RANGE.search(value):
+        steps = [_step("parse_range")]
+        if m.group("unit"):
+            steps.append(_step("unit", **{"from": _canonical_unit(m.group("unit"))}))
+        found.append((m.start(), 0, steps))
+    if m := _MONEY.search(value):
+        currency = (
+            _CURRENCY_SYMBOLS[m.group("sym")] if m.group("sym") else m.group("c2") or m.group("c3")
+        )
+        found.append((m.start(), 1, [_step("parse_money", currency=currency)]))
+    if m := _NUMBER_WITH_UNIT.search(value):
+        steps = [_step("parse_number"), _step("unit", **{"from": _canonical_unit(m.group("unit"))})]
+        found.append((m.start(), 2, steps))
+    if m := _NUMBER.search(value):
+        # A bare number with more after it ("1.5 TSI 150PS") could be any of them: skip it.
+        bare = None if _DIGIT.search(value, m.end()) else [_step("parse_number")]
+        found.append((m.start(), 3, bare))
+    return _first(value, found)
+
+
+def _date_chain(value: str) -> list[NormaliserStep] | None:
+    """The chain for the first date in ``value``, longest form first; a bare year last."""
+    found: list[tuple[int, int, list[NormaliserStep] | None]] = []
+    for rank, (pattern, args) in enumerate(_DATE_PATTERNS):
+        if m := pattern.search(value):
+            found.append((m.start(), rank, [_step("parse_date", **args)]))
+    if m := _YEAR.search(value):
+        found.append((m.start(), len(_DATE_PATTERNS), [_step("parse_date", precision="year")]))
+    return _first(value, found)
+
+
+def _first(
+    value: str, found: list[tuple[int, int, list[NormaliserStep] | None]]
+) -> list[NormaliserStep] | None:
+    """The earliest match's chain. None if nothing matched, or if a digit comes before it:
+    the parsers read the first number in the raw text, which would then be the wrong one."""
+    if not found:
+        return None
+    start, _, steps = min(found, key=lambda f: (f[0], f[1]))
+    return None if _DIGIT.search(value, 0, start) else steps
 
 
 @dataclass(frozen=True)
 class KeyValue:
-    """The value side of ``label: value`` statements, including rendered table cells."""
+    """The value side of ``label: value`` statements, including rendered table cells.
+
+    The chain fits the field (via ``generate_for``): numbers get ``parse_number`` plus the
+    unit found, ``parse_money`` or ``parse_range``; dates get ``parse_date``; strings get
+    ``strip``. A number or date field gets no candidate when the value holds nothing that
+    could parse. Without a field, ``generate`` gives the ``strip`` chain.
+    """
 
     id: str = "key_value"
     scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"number", "date", "str"})))
 
     def generate(self, statement: Statement) -> list[Candidate]:
-        text = statement.text
-        separators = list(_KEY_VALUE.finditer(text))
-        if not separators:
+        span = _value_span(statement.text)
+        if span is None:
             return []
-        start = separators[-1].end()
-        end = len(text.rstrip(_TRAILING))
-        if end <= start:
+        return [_candidate(statement, *span, self.id, _step("strip"))]
+
+    def generate_for(self, statement: Statement, field: FieldSpec) -> list[Candidate]:
+        span = _value_span(statement.text)
+        if span is None:
             return []
-        return [_candidate(statement, start, end, self.id, _step("strip"))]
+        value = statement.text[span[0] : span[1]]
+        if field.kind == "number":
+            steps = _number_chain(value)
+        elif field.kind == "date":
+            steps = _date_chain(value)
+        else:
+            steps = [_step("strip")]
+        if steps is None:
+            return []
+        return [_candidate(statement, *span, self.id, *steps)]
+
+
+def _value_span(text: str) -> tuple[int, int] | None:
+    """Offsets of the text after the last ``: `` separator, minus trailing punctuation."""
+    separators = list(_KEY_VALUE.finditer(text))
+    if not separators:
+        return None
+    start = separators[-1].end()
+    end = len(text.rstrip(_TRAILING))
+    return (start, end) if end > start else None
 
 
 _WORD = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|[\w][\w'’&/+-]*(?:\.\d+)?")
