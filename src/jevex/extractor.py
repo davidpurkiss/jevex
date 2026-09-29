@@ -343,8 +343,9 @@ class Extractor:
                     budget.record_hit("document", "max_jev_requests", str(exc))
                     ctx.stop("budget", str(exc))
         finally:
-            # Every branch has settled (fan-outs cancel on failure), so this is the
-            # document's whole Jev spend, recorded even when a stage failed.
+            # Every branch has settled (fan-outs cancel on failure, and a request cancelled
+            # mid-flight is counted at its estimate), so this is the document's whole Jev
+            # spend, recorded even when a stage failed.
             await budget.finish_document(ctx.jev.usage.cost)
         return ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds

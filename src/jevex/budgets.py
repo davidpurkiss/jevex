@@ -242,6 +242,8 @@ class DocumentBudget:
     rpm_skips: int = 0
     llm_stopped: bool = False
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
+    _pending: int = field(default=0, repr=False)
+    """Reserved slots still waiting on the run ledger's checks."""
 
     def record_hit(self, scope: Scope, limit: str, message: str) -> None:
         """Report a budget hit in ``meta.budget_events`` (once per scope and limit; a
@@ -254,8 +256,13 @@ class DocumentBudget:
         self.record_hit(scope, limit, message)
 
     def _document_refusal(self) -> bool:
+        """Whether a document limit refuses a call now. Only a limit that is really used up
+        stops LLM use: a call slot held by a call still waiting on the run ledger may yet be
+        given back, so while any are pending a full call count refuses without stopping."""
         doc = self.budgets.per_document
         if doc.max_llm_calls is not None and self.llm_calls >= doc.max_llm_calls:
+            if self.llm_calls - self._pending < doc.max_llm_calls:
+                return True
             self._stop_llm("document", "max_llm_calls", f"{self.llm_calls} LLM calls (the limit)")
         elif doc.max_spend is not None and self.llm_spend >= doc.max_spend:
             self._stop_llm(
@@ -273,7 +280,11 @@ class DocumentBudget:
         if self.llm_stopped or self._document_refusal():
             return False
         self.llm_calls += 1
-        refusal = await self.ledger.refuse_llm()
+        self._pending += 1
+        try:
+            refusal = await self.ledger.refuse_llm()
+        finally:
+            self._pending -= 1
         if refusal is None:
             return True
         self.llm_calls -= 1  # give the slot back
@@ -320,7 +331,8 @@ class DocumentBudget:
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))
             return None
         except BaseException:
-            await self._settle(None)
+            # Counted as a call (the provider may bill it), but its cost is unknown for a
+            # different reason than a missing price, so it isn't reported as unpriced.
             raise
         await self._settle(response.usage.cost)
         return response

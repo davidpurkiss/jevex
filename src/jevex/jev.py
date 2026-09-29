@@ -430,7 +430,17 @@ class JevClient:
             )
         async with self._limiter.semaphore():
             start = time.perf_counter()
-            response = await self.backend.system_one(state, batch)
+            try:
+                response = await self.backend.system_one(state, batch)
+            except asyncio.CancelledError:
+                # Cancelled mid-request (a sibling failed): the request may still be
+                # billed, so count it at its estimated size before letting go.
+                _process_cost += _token_cost(estimated)
+                self.usage.requests += 1
+                self.usage.questions += len(batch)
+                self.usage.input_tokens += estimated
+                self.usage.seconds += time.perf_counter() - start
+                raise
             elapsed = time.perf_counter() - start
         tokens = response.input_tokens if response.input_tokens is not None else estimated
         _process_cost += _token_cost(tokens)

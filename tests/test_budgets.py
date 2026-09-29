@@ -21,7 +21,7 @@ from jevex import (
 from jevex.budgets import period_start
 from jevex.jev import JevBackendError, Noul
 from jevex.llm import LLMResponse, LLMUsage, reset_process_llm_cost
-from jevex.pipeline import Context, for_each_schema
+from jevex.pipeline import Context, SchemaRun, for_each_schema
 from jevex.store import SpendEntry, SQLiteStore
 from jevex.testing import FakeJev, FakeLLM
 
@@ -94,6 +94,35 @@ async def test_concurrent_calls_cant_pass_the_call_cap_together() -> None:
     assert sum(r is not None for r in results) == 2
     assert slow.calls == 2
     assert budget.llm_calls == 2
+
+
+async def test_calls_waiting_on_the_ledger_dont_falsely_stop_llm_use(
+    store: SQLiteStore,
+) -> None:
+    now = datetime.now(UTC)
+    for _ in range(2):  # the rate limit is already full
+        await store.record_spend(SpendEntry(amount_usd=0, kind="llm_call", at=now))
+    budget = DocumentBudget(
+        Budgets(per_document=DocBudget(max_llm_calls=2)), ledger(store, llm_rpm=2)
+    )
+    fake = ScriptedLLM()
+    results = await asyncio.gather(*(budget.call_llm(fake, "x", Title) for _ in range(3)))
+    assert results == [None, None, None]
+    assert fake.calls == 0
+    assert not budget.llm_stopped
+    assert [e.limit for e in budget.events] == ["llm_rpm"]
+
+
+async def test_a_failed_call_under_a_spend_cap_isnt_reported_as_unpriced() -> None:
+    def boom(_p: str, _s: type[BaseModel]) -> object:
+        raise RuntimeError("provider down")
+
+    budget = doc_budget(max_spend=1.0)
+    with pytest.raises(RuntimeError):
+        await budget.call_llm(FakeLLM(boom), "x", Title)
+    assert budget.llm_calls == 1
+    assert budget.unpriced_calls == 0
+    assert budget.events == []
 
 
 async def test_max_spend_counts_actual_cost() -> None:
@@ -298,8 +327,8 @@ class TwoBranches:
     late: list[str] | None = None
 
     async def run(self, ctx: Context) -> None:
-        async def branch(run: object) -> None:
-            name = getattr(run, "name", "")
+        async def branch(run: SchemaRun) -> None:
+            name = run.name
             if name == "Car":
                 await ctx.jev.ask("a", {"q": Noul(instructions="a?")})
                 await ctx.jev.ask("b", {"q": Noul(instructions="b?")})
@@ -309,7 +338,7 @@ class TwoBranches:
                     self.late.append(name)
                 ctx.schemas["Boat"].values["document"] = {"name": "late write"}
 
-        await for_each_schema(ctx, branch)  # pyright: ignore[reportArgumentType]
+        await for_each_schema(ctx, branch)
 
 
 async def test_a_capped_branch_cancels_its_siblings_before_the_result() -> None:

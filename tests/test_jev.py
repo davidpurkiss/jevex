@@ -315,3 +315,21 @@ async def test_max_requests_caps_a_client_and_counts_requests_as_they_start() ->
     metered = JevClient(RecordingBackend()).metered(max_requests=0)
     with pytest.raises(JevRequestCapError, match="0 Jev requests"):
         await metered.ask("s", {"q": Noul(instructions="a?")})
+
+
+async def test_a_request_cancelled_mid_flight_is_still_counted() -> None:
+    class Hangs:
+        async def system_one(
+            self, state: JSONContent, questions: Mapping[str, Question]
+        ) -> JevResponse:
+            await asyncio.sleep(10)
+            raise AssertionError("unreachable")
+
+    client = JevClient(Hangs())
+    task = asyncio.create_task(client.ask("some state", {"q": Noul(instructions="a?")}))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.usage.requests == 1
+    assert client.usage.input_tokens > 0
