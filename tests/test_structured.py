@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -537,6 +538,22 @@ def test_other_json_scripts_are_app_state_named_by_id() -> None:
     ]
     assert [(s.name, s.reason) for s in data.skipped] == [
         ("bad", "invalid JSON: expected a property name at offset 1")
+    ]
+
+
+def test_payloads_that_expand_too_far_are_skipped() -> None:
+    """Shared references decode cheaply, but written out as a tree they double per level."""
+    flat = json.dumps([[i + 1, i + 1] for i in range(40)] + ["leaf"])
+    nested = "(function(a){return [a,a]})(" * 25 + "1" + ")" * 25
+    data = read(
+        f'<script type="application/json" id="__NUXT_DATA__">{flat}</script>'
+        f"<script>window.__INITIAL_STATE__ = {nested}</script>"
+        "<script>window.__APOLLO_STATE__ = {ok: 1}</script>"
+    )
+    assert [(b.name, b.data) for b in data.blobs] == [("window.__APOLLO_STATE__", {"ok": 1})]
+    assert [(s.name, s.reason) for s in data.skipped] == [
+        ("__NUXT_DATA__", "expands to more than 1,000,000 values"),
+        ("window.__INITIAL_STATE__", "expands to more than 1,000,000 values"),
     ]
 
 

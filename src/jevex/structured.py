@@ -75,6 +75,11 @@ _WRAPPER_START = re.compile(r"^\s*(?:<!--|(?://|/\*)?\s*<!\[CDATA\[(?:\s*\*/)?)"
 _WRAPPER_END = re.compile(r"(?:(?://|/\*)?\s*\]\]>(?:\s*\*/)?|(?://\s*)?-->)\s*$")
 _SPACE = re.compile(r"\s+")
 
+MAX_BLOB_NODES = 1_000_000
+"""The most values a blob may hold once shared references are written out in full. Nuxt
+payloads and function-style state share values by reference, so a few hundred bytes can
+stand for a tree too large to serialise or flatten; such blobs are skipped."""
+
 # Elements with no end tag; they never go on the open-element stack.
 _VOID_TAGS = frozenset(
     {
@@ -380,6 +385,9 @@ class _Collector:
         types: list[str] | None = None,
         name: str | None = None,
     ) -> None:
+        if not _fits(data, MAX_BLOB_NODES):
+            self.skip(source, node, f"expands to more than {MAX_BLOB_NODES:,} values", name=name)
+            return
         self.blobs.append(
             StructuredBlob(
                 source=source, data=data, types=types or [], name=name, location=node.location
@@ -577,6 +585,22 @@ class _Collector:
                 data[key] = _attribute_value(value)
             if data:
                 self.add("data_attributes", node, data)
+
+
+def _fits(data: Any, limit: int) -> bool:
+    """Whether ``data``, walked as a tree, holds at most ``limit`` values. Stops early."""
+    count = 0
+    stack: list[Any] = [data]
+    while stack:
+        value = stack.pop()
+        count += 1
+        if count > limit:
+            return False
+        if isinstance(value, dict):
+            stack.extend(cast("dict[str, Any]", value).values())
+        elif isinstance(value, list):
+            stack.extend(cast("list[Any]", value))
+    return True
 
 
 def _script_type(script: _Node) -> str:
