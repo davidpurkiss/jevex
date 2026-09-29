@@ -110,21 +110,159 @@ def test_planned_commands_say_so(command: str) -> None:
     assert "#" in err
 
 
-def test_no_command_prints_help() -> None:
-    code, out, _ = run_cli()
+def test_no_command_prints_help_to_stderr() -> None:
+    code, out, err = run_cli()
     assert code == 2
-    assert "extract" in out
+    assert out == ""
+    assert "extract" in err
 
 
 def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as info:
         main(["--version"])
     assert info.value.code == 0
-    assert "jevex 0.0.1" in capsys.readouterr().out
+    import jevex
+
+    assert f"jevex {jevex.__version__}" in capsys.readouterr().out
 
 
 def test_console_script_is_declared() -> None:
     import tomllib
 
-    scripts = tomllib.loads(Path("pyproject.toml").read_text())["project"]["scripts"]
+    pyproject = Path(__file__).parents[1] / "pyproject.toml"
+    scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
     assert scripts == {"jevex": "jevex.cli:entrypoint"}
+
+
+# --- review round 1 --------------------------------------------------------------------
+
+
+def test_missing_api_key_is_a_clean_error(page: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["extract", str(page), "--schema", SCHEMA], out=out, err=err)  # no jev injected
+    assert code == 1
+    assert "TYPESAFE_API_KEY is not set" in err.getvalue()
+    assert "Traceback" not in err.getvalue()
+
+
+def test_unsupported_schema_is_a_clean_error(page: Path, tmp_path: Path) -> None:
+    schema = tmp_path / "bad_schema.py"
+    schema.write_text("from pydantic import BaseModel\nclass Bad(BaseModel):\n    tags: set[int]\n")
+    code, _, err = run_cli("extract", str(page), "--schema", f"{schema}:Bad")
+    assert code == 1
+    assert "unsupported type" in err
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_jev_errors_are_clean_errors(page: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import dataclass
+
+    import jevex.extractor as extractor
+    from jevex.jev import StateTooLargeError
+
+    @dataclass
+    class Boom:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            raise StateTooLargeError("state is too big")
+
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", (Boom(),))
+    code, _, err = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert code == 1
+    assert "jevex: error: Jev: state is too big" in err
+
+
+def test_schema_files_never_shadow_real_modules(tmp_path: Path) -> None:
+    import json as real_json
+    import sys
+
+    fake = tmp_path / "json.py"
+    fake.write_text("from pydantic import BaseModel\nclass Book(BaseModel):\n    title: str\n")
+    assert load_schema(f"{fake}:Book").__name__ == "Book"
+    assert sys.modules["json"] is real_json
+
+
+def test_modules_in_the_current_directory_are_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "here_schemas.py").write_text(
+        "from pydantic import BaseModel\nclass Here(BaseModel):\n    x: int = 0\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.path", [p for p in __import__("sys").path if p != str(tmp_path)])
+    assert load_schema("here_schemas:Here").__name__ == "Here"
+
+
+def test_missing_and_dotted_attributes() -> None:
+    with pytest.raises(CliError, match="has no attribute 'Nope'"):
+        load_schema("jevex.results:Nope")
+    assert load_schema("jevex.results:FieldMeta").__name__ == "FieldMeta"
+
+
+@pytest.mark.parametrize("value", ["5", "-0.1"])
+def test_threshold_must_be_a_probability(page: Path, value: str) -> None:
+    with pytest.raises(SystemExit) as info:
+        main(["extract", str(page), "--schema", SCHEMA, "--threshold", value], err=io.StringIO())
+    assert info.value.code == 2
+
+
+def test_url_fetch_errors_are_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    import jevex.cli as cli
+    from jevex.fetch import FetchError
+
+    class NoFetch:
+        async def __aenter__(self) -> "NoFetch":
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def fetch(self, url: str) -> object:
+            raise FetchError(f"GET {url} returned HTTP 503")
+
+    monkeypatch.setattr(cli, "SimpleFetcher", NoFetch)
+    code, _, err = run_cli("extract", "https://example.com/book", "--schema", SCHEMA)
+    assert code == 1
+    assert "HTTP 503" in err
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_non_ascii_is_printed_as_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import jevex.extractor as extractor
+
+    @dataclass
+    class Accents:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            for run in ctx.active:
+                run.set_field("document", "title", FieldMeta(value="Café — 東京", confidence=1.0))
+
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", (Accents(),))
+    page = tmp_path / "p.html"
+    page.write_text("<p>x</p>")
+    code, out, _ = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert code == 0
+    assert "Café — 東京" in out
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_the_jev_client_is_closed(page: Path) -> None:
+    from jevex.jev import JevClient
+
+    closed: list[bool] = []
+
+    class Closing(FakeJev):
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    code = main(
+        ["extract", str(page), "--schema", SCHEMA],
+        jev=JevClient(Closing()),
+        out=io.StringIO(),
+        err=io.StringIO(),
+    )
+    assert code == 0
+    assert closed == [True]
