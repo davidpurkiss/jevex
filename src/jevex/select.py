@@ -51,7 +51,7 @@ ACCEPT_AT = 0.5
 ALSO_CATEGORY_P = 0.3
 """A statement whose top category is a field also goes to any other field with at least
 this probability: "In stock (22 available)" states both ``in_stock`` and
-``stock_count``. Tuned in #49."""
+``stock_count``. Such a second route can make a bool True, never False. Tuned in #49."""
 
 
 def field_statements(
@@ -289,7 +289,9 @@ class SelectStage:
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection
             return
-        outcome = _direct(spec, statement, answers, order)
+        category = run.categories.get(statement.id)
+        secondary = category is not None and category.choice != spec.name
+        outcome = _direct(spec, statement, answers, order, secondary=secondary)
         if outcome is not None:
             for scope in ask.scopes:
                 outcomes.setdefault((run.name, scope, spec.name), []).append(outcome)
@@ -301,13 +303,26 @@ def _merged(asks: Mapping[tuple[str, str], _Ask]) -> dict[str, Question]:
 
 
 def _direct(
-    spec: FieldSpec, statement: Statement, answers: dict[str, Answer], order: int
+    spec: FieldSpec,
+    statement: Statement,
+    answers: dict[str, Answer],
+    order: int,
+    *,
+    secondary: bool = False,
 ) -> _Outcome | None:
-    """Read one statement's enum or bool answer. ``None`` when it states nothing."""
+    """Read one statement's enum or bool answer. ``None`` when it states nothing.
+
+    ``secondary``: the field isn't the statement's top category (see
+    :data:`ALSO_CATEGORY_P`). Such a statement can say a bool is True but never that it
+    is False: a low p there means "not about this", which would otherwise outvote the
+    statement that is about it.
+    """
     if spec.kind == "bool":
         answer = answers["bool"]
         assert isinstance(answer, NoulAnswer)
         value = answer.p >= ACCEPT_AT
+        if secondary and not value:
+            return None
         # Confidence in the stated value: p for True, 1 - p for False.
         return _Outcome(order, statement, [value], answer.p if value else 1 - answer.p, {})
     if spec.many:

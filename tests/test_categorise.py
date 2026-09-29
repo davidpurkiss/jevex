@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from decimal import Decimal
 
 import pytest
@@ -24,7 +25,9 @@ from jevex.jev import (
     ChoiceAnswer,
     JevClient,
     JevResponse,
+    JSONContent,
     NoulAnswer,
+    Question,
     UnexpectedAnswerError,
 )
 from jevex.testing import FakeJev
@@ -147,13 +150,15 @@ async def test_statements_with_only_nested_model_fields_arent_asked() -> None:
 
 async def test_a_non_choice_answer_is_an_error() -> None:
     class NoulForEverything:
-        async def system_one(self, state: object, questions: dict[str, object]) -> JevResponse:
+        async def system_one(
+            self, state: JSONContent, questions: Mapping[str, Question]
+        ) -> JevResponse:
             return JevResponse(
                 answers={k: NoulAnswer(p=0.9) for k in questions}, input_tokens=1, model="fake"
             )
 
     ctx = context(FakeJev(), [st("s1", "From £24,995")], ["c1"])
-    ctx.jev = JevClient(NoulForEverything())  # type: ignore[arg-type]
+    ctx.jev = JevClient(NoulForEverything())
     with pytest.raises(UnexpectedAnswerError, match="Choice"):
         await CategoriseStage().run(ctx)
 
@@ -270,4 +275,4 @@ async def test_html_to_values_through_the_default_pipeline() -> None:
         ("Price", ["price", "none"]),
         ("On the road from £24,995.", ["price", "none"]),
     ]
-    assert result.meta.jev.requests == len(fake.calls)
+    assert result.meta.jev.requests == len(fake.calls) == 13

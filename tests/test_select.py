@@ -134,6 +134,25 @@ def test_a_statement_also_goes_to_fields_with_enough_category_probability() -> N
     assert field_statements(ctx, run, run.scopes[0]) == []
 
 
+async def test_a_second_field_route_never_makes_a_bool_false() -> None:
+    about = st("s1", "Automatic gearbox as standard")
+    other = st("s2", "Diesel engine, manual option")
+    fake = (
+        FakeJev()
+        .noul("automatic gearbox", p=0.85, state="as standard")
+        .noul("automatic gearbox", p=0.05, state="manual option")
+    )
+    ctx = context(fake, [about, other], {"s1": "automatic"})
+    run = ctx.schemas["Car"]
+    run.categories["s2"] = ChoiceAnswer(
+        choice="fuel_type", confidence=0.6, probabilities={"fuel_type": 0.6, "automatic": 0.3}
+    )
+    await run_both(ctx)
+    meta = run.fields["doc"]["automatic"]
+    assert meta.value is True
+    assert meta.confidence == 0.85
+
+
 async def test_candidates_are_generated_for_fields_that_need_them() -> None:
     a, b = st("s1", "0-62 mph in 9.1 s"), st("s2", "Runs on diesel")
     ctx = context(FakeJev(), [a, b], {"s1": "zero_to_62_s", "s2": "fuel_type"})
