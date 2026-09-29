@@ -30,6 +30,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 
 | Module | What lives there |
 | --- | --- |
+| `categorise.py` | Statement categorisation (stage 10): `JevStatementClassifier` (one Choice per statement, options limited to the fields the component gate passed), `CategoriseStage` (answers with full distributions on `SchemaRun.categories`) |
 | `document.py` | `Document` (bytes + content type; base64 in JSON), content sniffing |
 | `layout.py` | `Component` tree, `Location` union (`DomLocation`, `PageLocation`, `ImageLocation`), `BBox` |
 | `statements.py` | `Statement`, `Span`, `Candidate`, `NormaliserStep` (compact YAML form) |

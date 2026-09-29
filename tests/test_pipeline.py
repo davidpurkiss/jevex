@@ -37,8 +37,12 @@ class YesBackend:
     async def system_one(
         self, state: JSONContent, questions: Mapping[str, Question]
     ) -> JevResponse:
+        # Yes to every Noul; "none" to every Choice (it's always an option).
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {
-            k: NoulAnswer(p=1.0) for k in questions
+            k: ChoiceAnswer(choice="none", confidence=1.0, probabilities={"none": 1.0})
+            if q.type == "choice"
+            else NoulAnswer(p=1.0)
+            for k, q in questions.items()
         }
         return JevResponse(answers=answers, input_tokens=10, model="fake")
 

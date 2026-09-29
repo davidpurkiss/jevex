@@ -39,7 +39,7 @@ from jevex.layout import Component
 from jevex.statements import Candidate, Statement
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from jevex.entities import EntityScope
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
@@ -193,10 +193,20 @@ class StatementSplitter(Protocol):
 
 @runtime_checkable
 class StatementClassifier(Protocol):
-    """Categorises each statement as one of the schema's fields, or "none"."""
+    """Categorises each statement as one of the schema's fields, or "none".
+
+    ``fields`` (from the component gate) maps statement ids to the field names each may
+    be; ids not in it may be any field. Returns answers by statement id; a statement may
+    be left out (e.g. no field was allowed).
+    """
 
     async def classify(
-        self, statements: list[Statement], schema: SchemaSpec, jev: JevClient
+        self,
+        statements: list[Statement],
+        schema: SchemaSpec,
+        jev: JevClient,
+        *,
+        fields: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, ChoiceAnswer]: ...
 
 

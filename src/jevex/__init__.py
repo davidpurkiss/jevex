@@ -1,5 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
+from jevex.categorise import CategoriseStage, JevStatementClassifier
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
@@ -65,6 +66,7 @@ __all__ = [
     "BoilerplateCleaner",
     "Candidate",
     "CandidateStage",
+    "CategoriseStage",
     "CleanStage",
     "Component",
     "ComponentGateStage",
@@ -95,6 +97,7 @@ __all__ = [
     "ImageLocation",
     "InvalidGeneratorError",
     "JevCandidateSelector",
+    "JevStatementClassifier",
     "LayoutStage",
     "Location",
     "NormaliseError",

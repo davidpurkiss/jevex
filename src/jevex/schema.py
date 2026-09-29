@@ -23,6 +23,8 @@ from pydantic_core import PydanticUndefined
 from jevex.jev import Choice, JSONContent, Noul
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic.fields import FieldInfo
 
 EXTRA_KEY = "jevex"
@@ -221,10 +223,16 @@ class SchemaSpec:
             )
         return questions
 
-    def categorise_question(self) -> Choice:
-        """One Choice per statement: which field does it state, or none of them."""
+    def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
+        """One Choice per statement: which field does it state, or none of them.
+
+        ``fields`` limits the options to those field names (in schema order).
+        """
+        allowed = None if fields is None else set(fields)
         options: dict[str, JSONContent | None] = {
-            f.name: f.questions.categorise or f.label for f in self.fields if f.kind != "model"
+            f.name: f.questions.categorise or f.label
+            for f in self.fields
+            if f.kind != "model" and (allowed is None or f.name in allowed)
         }
         options[NONE_OPTION] = "None of these details"
         return Choice(
