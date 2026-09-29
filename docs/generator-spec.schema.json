@@ -129,95 +129,227 @@
       "$ref": "#/$defs/MatchSpec"
     },
     "normalise": {
+      "description": "Built-in normalisers, applied in order.",
       "items": {
         "anyOf": [
           {
-            "const": "parse_date"
+            "enum": [
+              "parse_date",
+              "parse_money",
+              "parse_number",
+              "parse_range",
+              "strip",
+              "unit"
+            ],
+            "type": "string"
           },
           {
-            "type": "object",
+            "additionalProperties": false,
             "properties": {
               "parse_date": {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "order": {
+                    "enum": [
+                      "ymd",
+                      "dmy",
+                      "mdy"
+                    ],
                     "type": "string"
                   },
                   "precision": {
+                    "enum": [
+                      "day",
+                      "month",
+                      "year"
+                    ],
                     "type": "string"
                   }
                 },
-                "additionalProperties": false
+                "type": "object"
               }
             },
             "required": [
               "parse_date"
             ],
-            "additionalProperties": false
+            "type": "object"
           },
           {
-            "const": "parse_money"
-          },
-          {
-            "type": "object",
+            "additionalProperties": false,
             "properties": {
               "parse_money": {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "currency": {
+                    "pattern": "^[A-Z]{3}$",
                     "type": "string"
                   }
                 },
-                "additionalProperties": false
+                "type": "object"
               }
             },
             "required": [
               "parse_money"
             ],
-            "additionalProperties": false
+            "type": "object"
           },
           {
-            "const": "parse_number"
-          },
-          {
-            "const": "parse_range"
-          },
-          {
-            "const": "strip"
-          },
-          {
-            "const": "unit"
-          },
-          {
-            "type": "object",
+            "additionalProperties": false,
             "properties": {
               "unit": {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "from": {
+                    "enum": [
+                      "L",
+                      "Nm",
+                      "PS",
+                      "bhp",
+                      "cc",
+                      "cm",
+                      "cm3",
+                      "cm³",
+                      "ft lb",
+                      "ft-lb",
+                      "g/km",
+                      "hp",
+                      "kW",
+                      "kWh",
+                      "kg",
+                      "kgs",
+                      "kilograms",
+                      "kilometers",
+                      "kilometres",
+                      "km",
+                      "km per hour",
+                      "km/h",
+                      "kmh",
+                      "kph",
+                      "kw",
+                      "kwh",
+                      "l",
+                      "l/100 km",
+                      "l/100km",
+                      "lb ft",
+                      "lb-ft",
+                      "lb.ft",
+                      "lbft",
+                      "liter",
+                      "liters",
+                      "liters/100km",
+                      "litre",
+                      "litres",
+                      "litres/100km",
+                      "ltr",
+                      "m",
+                      "meters",
+                      "metres",
+                      "mi",
+                      "mile",
+                      "miles",
+                      "miles per hour",
+                      "millimeters",
+                      "millimetres",
+                      "mm",
+                      "mpg",
+                      "mph",
+                      "newton meters",
+                      "newton metres",
+                      "nm",
+                      "s",
+                      "sec",
+                      "second",
+                      "seconds",
+                      "secs"
+                    ],
                     "type": "string"
                   },
                   "to": {
+                    "enum": [
+                      "L",
+                      "Nm",
+                      "PS",
+                      "bhp",
+                      "cc",
+                      "cm",
+                      "cm3",
+                      "cm³",
+                      "ft lb",
+                      "ft-lb",
+                      "g/km",
+                      "hp",
+                      "kW",
+                      "kWh",
+                      "kg",
+                      "kgs",
+                      "kilograms",
+                      "kilometers",
+                      "kilometres",
+                      "km",
+                      "km per hour",
+                      "km/h",
+                      "kmh",
+                      "kph",
+                      "kw",
+                      "kwh",
+                      "l",
+                      "l/100 km",
+                      "l/100km",
+                      "lb ft",
+                      "lb-ft",
+                      "lb.ft",
+                      "lbft",
+                      "liter",
+                      "liters",
+                      "liters/100km",
+                      "litre",
+                      "litres",
+                      "litres/100km",
+                      "ltr",
+                      "m",
+                      "meters",
+                      "metres",
+                      "mi",
+                      "mile",
+                      "miles",
+                      "miles per hour",
+                      "millimeters",
+                      "millimetres",
+                      "mm",
+                      "mpg",
+                      "mph",
+                      "newton meters",
+                      "newton metres",
+                      "nm",
+                      "s",
+                      "sec",
+                      "second",
+                      "seconds",
+                      "secs"
+                    ],
                     "type": "string"
                   },
                   "gallon": {
+                    "enum": [
+                      "uk",
+                      "us"
+                    ],
                     "type": "string"
                   }
                 },
-                "additionalProperties": false
+                "type": "object"
               }
             },
             "required": [
               "unit"
             ],
-            "additionalProperties": false
+            "type": "object"
           }
         ]
       },
       "maxItems": 8,
       "title": "Normalise",
-      "type": "array",
-      "description": "Built-in normalisers, applied in order."
+      "type": "array"
     },
     "provenance": {
       "$ref": "#/$defs/Provenance"

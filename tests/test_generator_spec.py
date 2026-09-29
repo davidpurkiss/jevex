@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from jevex.generators import (
     BUILTIN_NORMALISER_ARGS,
     GeneratorSpec,
     InvalidGeneratorError,
+    RegexGenerator,
     generator_spec_json_schema,
 )
 from jevex.generators.regex import MAX_PATTERN_LENGTH
@@ -192,8 +194,122 @@ def test_json_schema_describes_the_compact_normaliser_form() -> None:
     schema = generator_spec_json_schema()
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"id", "field", "match"}
-    options = schema["properties"]["normalise"]["items"]["anyOf"]
-    assert {"const": "parse_number"} in options
+    normalise = schema["properties"]["normalise"]
+    assert normalise["maxItems"] == 8
+    options = normalise["items"]["anyOf"]
+    assert all("type" in o for o in options)  # every option is typed (LLM structured output)
+    assert options[0] == {"type": "string", "enum": sorted(BUILTIN_NORMALISER_ARGS)}
     unit = next(o for o in options if o.get("required") == ["unit"])
-    assert set(unit["properties"]["unit"]["properties"]) == {"from", "to", "gallon"}
+    args = unit["properties"]["unit"]["properties"]
+    assert set(args) == {"from", "to", "gallon"}
+    assert args["gallon"] == {"type": "string", "enum": ["uk", "us"]}
+    assert {"s", "seconds", "km/h", "kph", "PS", "kW"} <= set(args["from"]["enum"])
     assert "NormaliserStep" not in schema.get("$defs", {})
+
+
+def test_the_model_schema_is_the_published_schema() -> None:
+    published = generator_spec_json_schema()
+    del published["$schema"]
+    assert GeneratorSpec.model_json_schema() == published
+
+
+def test_anthropic_structured_output_keeps_the_normaliser_arguments() -> None:
+    anthropic = pytest.importorskip("anthropic")
+    schema = anthropic.transform_schema(GeneratorSpec)
+    options = schema["properties"]["normalise"]["items"]["anyOf"]
+    unit = next(o for o in options if "unit" in o.get("properties", {}))
+    assert set(unit["properties"]["unit"]["properties"]) == {"from", "to", "gallon"}
+    assert "enum" in unit["properties"]["unit"]["properties"]["from"]
+
+
+# --- hardening -----------------------------------------------------------------------
+
+
+def test_byte_escapes_are_rejected() -> None:
+    with pytest.raises(InvalidGeneratorError, match=r"\\C"):
+        GeneratorSpec.parse(minimal(match={"regex": r"(\C)", "group": 1}))
+    with pytest.raises(InvalidGeneratorError, match=r"\\C"):
+        RegexGenerator(id="g", pattern=r"x\\\C")  # escaped backslash, then \C
+    # An escaped backslash followed by a literal C is fine.
+    assert GeneratorSpec.parse(minimal(match={"regex": r"\\C(\d+)", "group": 1}))
+
+
+def test_a_spec_runs_on_non_ascii_text() -> None:
+    spec = GeneratorSpec.parse(
+        minimal(match={"regex": r"(\d+(?:\.\d+)?)\s*s\b", "group": 1}, field="Car.time")
+    )
+    text = "Ça fait 0–62 en 9.1 s, très rapide — été 7 s"
+    assert [c.raw for c in spec.to_generator().generate(st(text))] == ["9.1", "7"]
+
+
+def test_yaml_aliases_are_refused_quickly() -> None:
+    levels = ["a: &a [x, x, x, x, x, x, x, x, x]"]
+    for i in range(1, 9):
+        prev, cur = chr(ord("a") + i - 1), chr(ord("a") + i)
+        levels.append(f"{cur}: &{cur} [{', '.join([f'*{prev}'] * 9)}]")
+    laughs = "\n".join(["id: g", "field: A.b", "match: {regex: x}", "provenance:", "  note:"])
+    bomb = "\n".join(levels) + "\n" + laughs + " *i\n"
+    start = time.perf_counter()
+    with pytest.raises(InvalidGeneratorError, match="aliases"):
+        GeneratorSpec.from_yaml(bomb)
+    assert time.perf_counter() - start < 1
+
+
+def test_duplicate_yaml_keys_are_refused() -> None:
+    with pytest.raises(InvalidGeneratorError, match="duplicate key 'id'"):
+        GeneratorSpec.from_yaml("id: g\nfield: A.b\nmatch: {regex: x}\nid: other\n")
+
+
+def test_error_messages_quote_values_briefly() -> None:
+    with pytest.raises(InvalidGeneratorError) as info:
+        GeneratorSpec.parse(minimal(normalise=[{"unit": {"from": ["x" * 5000] * 50}}]))
+    assert len(str(info.value)) < 300
+
+
+def test_deep_nesting_is_an_invalid_spec() -> None:
+    depth = 3000
+    deep = "id: g\nfield: A.b\nmatch: {regex: x}\nprovenance: {note: " + "[" * depth
+    with pytest.raises(InvalidGeneratorError):
+        GeneratorSpec.from_yaml(deep + "]" * depth + "}\n")
+    nested: object = "x"
+    for _ in range(depth):
+        nested = [nested]
+    with pytest.raises(InvalidGeneratorError):
+        GeneratorSpec.parse(minimal(provenance={"note": nested}))
+
+
+def test_long_form_steps_with_unknown_keys_are_rejected() -> None:
+    with pytest.raises(InvalidGeneratorError, match="unknown keys arg"):
+        GeneratorSpec.parse(minimal(normalise=[{"name": "unit", "arg": {"from": "s"}}]))
+    with pytest.raises(InvalidGeneratorError, match="unknown keys bogus"):
+        GeneratorSpec.parse(minimal(normalise=[{"name": "strip", "bogus": 1}]))
+    spec = GeneratorSpec.parse(minimal(normalise=[{"name": "unit", "args": {"from": "s"}}]))
+    assert spec.normalise[0].args == {"from": "s"}
+
+
+def test_unit_conversions_are_checked_when_both_ends_are_given() -> None:
+    with pytest.raises(InvalidGeneratorError, match="can't convert mph"):
+        GeneratorSpec.parse(minimal(normalise=[{"unit": {"from": "mph", "to": "kW"}}]))
+    GeneratorSpec.parse(minimal(normalise=[{"unit": {"from": "km/h", "to": "mph"}}]))
+    GeneratorSpec.parse(minimal(normalise=[{"unit": {"from": "mpg", "to": "l/100km"}}]))
+
+
+@pytest.mark.parametrize("group", [True, "1", 1.0])
+def test_group_must_be_an_integer(group: object) -> None:
+    with pytest.raises(InvalidGeneratorError, match=r"match\.group"):
+        GeneratorSpec.parse(minimal(match={"regex": r"(\d+)", "group": group}))
+
+
+def test_round_trip_survives_characters_yaml_folds() -> None:
+    spec = GeneratorSpec.parse(minimal(match={"regex": "a\x85b(\\d)", "group": 1}))
+    assert GeneratorSpec.from_yaml(spec.to_yaml()) == spec
+    # Ordinary non-ASCII stays readable.
+    dash = GeneratorSpec.parse(minimal(match={"regex": "0–62 (\\d)", "group": 1}))
+    assert "0–62" in dash.to_yaml()
+
+
+def test_specs_are_exported_at_the_top_level() -> None:
+    import jevex
+
+    assert jevex.GeneratorSpec is GeneratorSpec
+    assert jevex.generator_spec_json_schema is generator_spec_json_schema
