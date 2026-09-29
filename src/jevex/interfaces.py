@@ -168,11 +168,15 @@ class ImageProcessor(Protocol):
 
 @runtime_checkable
 class ComponentGate(Protocol):
-    """Returns the ids of components relevant to each field group."""
+    """The ids of components relevant to each field group, per schema.
+
+    Returns ``{schema name: {group: [component ids]}}``. Taking every schema at once lets
+    an implementation ask all their questions about one component in one request.
+    """
 
     async def gate(
-        self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
-    ) -> dict[str, list[str]]: ...
+        self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
+    ) -> dict[str, dict[str, list[str]]]: ...
 
 
 @runtime_checkable
