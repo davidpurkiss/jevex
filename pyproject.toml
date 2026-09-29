@@ -1,0 +1,29 @@
+[project]
+name = "jevex"
+version = "0.0.1"
+description = "Extract typed records from web pages and PDFs using Jev, with LLM fallbacks that learn declarative generators."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "David Purkiss" }]
+requires-python = ">=3.12"
+dependencies = []
+keywords = ["extraction", "scraping", "pdf", "html", "pydantic", "jev", "llm"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Markup :: HTML",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/davidpurkiss/jevex"
+Repository = "https://github.com/davidpurkiss/jevex"
+Issues = "https://github.com/davidpurkiss/jevex/issues"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
