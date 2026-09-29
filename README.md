@@ -6,6 +6,16 @@ jevex narrows each document step by step (document → component → statement �
 
 > **Status:** early planning. This release only reserves the package name; there is no usable API yet.
 
+## Development
+
+```sh
+uv sync                     # create .venv with dev tools
+uv run pre-commit install   # ruff on every commit
+uv run ruff check && uv run ruff format --check
+uv run pyright
+uv run pytest
+```
+
 ## License
 
 Apache 2.0
