@@ -13,7 +13,7 @@ Stage order and default implementations (spec: *Pipeline architecture*):
  1    Fetcher                SimpleFetcher                  #22
  2    Cleaner                boilerplate stripper           #11
  3    DocumentGate           Noul per schema                #12
- 4    StructuredExtractor    JSON-LD, microdata, app state  #29
+ 4    StructuredExtractor    JSON-LD, microdata, app state  #29, #30
  5    LayoutParser           HTML segmenter; Docling (PDF)  #13, #24
  6    ImageProcessor         OCR                            #26
  7    ComponentGate          Noul per component × group     #14
