@@ -18,6 +18,9 @@ uv run pyright
 uv run pytest
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 Apache 2.0
