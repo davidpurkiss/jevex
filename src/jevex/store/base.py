@@ -102,7 +102,9 @@ class GeneratorStats(BaseModel):
         return self.wins / self.hits if self.hits else None
 
 
-MAX_ENTRY_USD = 1_000_000_000.0
+# One charge above this is a units bug; keeping it low means the ledger's int64
+# nano-dollar sum can't overflow short of ~9,000 such charges.
+MAX_ENTRY_USD = 1_000_000.0
 
 
 class SpendEntry(BaseModel):

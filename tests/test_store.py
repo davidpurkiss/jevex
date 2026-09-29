@@ -424,11 +424,13 @@ async def test_store_calls_do_not_use_the_shared_executor(tmp_path: Path) -> Non
     pending = [
         asyncio.ensure_future(store.record_generator_stats("g", documents=1)) for _ in range(40)
     ]
-    await asyncio.sleep(0.05)
-    # asyncio's default executor (DNS lookups, other to_thread work) is still free.
-    await asyncio.wait_for(asyncio.to_thread(lambda: None), timeout=1)
-    blocker.execute("ROLLBACK")
-    blocker.close()
+    try:
+        await asyncio.sleep(0.05)
+        # asyncio's default executor (DNS lookups, other to_thread work) is still free.
+        await asyncio.wait_for(asyncio.to_thread(lambda: None), timeout=1)
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
     await asyncio.gather(*pending)
     assert (await store.generator_stats("g")).documents == 40
     await store.aclose()
