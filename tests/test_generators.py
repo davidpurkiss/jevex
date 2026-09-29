@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 import pytest
@@ -18,7 +20,8 @@ from jevex.generators import (
     default_registry,
 )
 from jevex.generators.regex import MAX_PATTERN_LENGTH
-from jevex.interfaces import CandidateGenerator, Scope
+from jevex.interfaces import CandidateGenerator, FieldAwareGenerator, Scope
+from jevex.normalise import NormaliseError, normalise
 
 
 def st(text: str) -> Statement:
@@ -199,6 +202,113 @@ def test_key_value_needs_a_separator_and_a_value() -> None:
     assert raws(KeyValue(), "No separator here") == []
     assert raws(KeyValue(), "Colour: ") == []
     assert raws(KeyValue(), "Time 10:30") == []
+
+
+class Listing(BaseModel):
+    title: str = Field(description="Title")
+    power_kw: float = Field(description="Power", unit="kW")
+    price: Decimal = Field(description="Price", unit="GBP")
+    seats: int = Field(description="Seats")
+    boot_litres: list[float] = Field(default_factory=list, description="Boot", unit="l")
+    registered: date = Field(description="Registered")
+
+
+LISTING = SchemaSpec.from_model(Listing)
+
+
+def kv_chain(text: str, field: str) -> list[object] | None:
+    """The key_value chain for ``field``, or None when there's no candidate."""
+    cands = KeyValue().generate_for(st(text), LISTING.field(field))
+    assert len(cands) <= 1
+    return [step.model_dump() for step in cands[0].normalise] if cands else None
+
+
+@pytest.mark.parametrize(
+    ("text", "field", "steps"),
+    [
+        ("Power: 150PS (110kW)", "power_kw", ["parse_number", {"unit": {"from": "PS"}}]),
+        ("0-62 mph: 9.1 seconds", "power_kw", ["parse_number", {"unit": {"from": "s"}}]),
+        ("Seats: 5", "seats", ["parse_number"]),
+        ("Price: £18,495 on the road", "price", [{"parse_money": {"currency": "GBP"}}]),
+        ("Price: 25k GBP", "price", [{"parse_money": {"currency": "GBP"}}]),
+        ("Price: from EUR 30,000", "price", [{"parse_money": {"currency": "EUR"}}]),
+        ("Boot: 380 to 1,237 litres", "boot_litres", ["parse_range", {"unit": {"from": "l"}}]),
+        ("Registered: 12 March 2024", "registered", [{"parse_date": {"order": "dmy"}}]),
+        ("Registered: 2024-03-12", "registered", [{"parse_date": {"order": "ymd"}}]),
+        ("Registered: 12/03/2024.", "registered", [{"parse_date": {"order": "dmy"}}]),
+        ("Registered: March 2024", "registered", [{"parse_date": {"precision": "month"}}]),
+        ("Registered: 2019 (UK)", "registered", [{"parse_date": {"precision": "year"}}]),
+        ("Title: 12 March 2024", "title", ["strip"]),
+        ("Title: 150PS", "title", ["strip"]),
+    ],
+)
+def test_key_value_chain_fits_the_field_kind(text: str, field: str, steps: list[object]) -> None:
+    assert kv_chain(text, field) == steps
+
+
+@pytest.mark.parametrize(
+    ("text", "field"),
+    [
+        ("Colour: Moonstone Grey", "power_kw"),
+        ("Registered: soon", "registered"),
+        # A bare number with more numbers after it is ambiguous.
+        ("Engine: 1.5 TSI 150PS", "power_kw"),
+        ("Seats: 5 (7 optional)", "seats"),
+        # A digit before the quantity would be what the parser reads.
+        ("Warranty: 3 years, then £500", "price"),
+        ("Registered: Q1 2024", "registered"),
+    ],
+)
+def test_key_value_skips_values_that_wont_parse_for_the_field(text: str, field: str) -> None:
+    assert kv_chain(text, field) is None
+
+
+def test_key_value_without_a_field_keeps_strip_and_needs_a_separator() -> None:
+    assert chain(KeyValue(), "Registered: 12 March 2024", "12 March 2024") == ["strip"]
+    assert (
+        KeyValue().generate_for(st("Registered 12 March 2024"), LISTING.field("registered")) == []
+    )
+    assert isinstance(KeyValue(), FieldAwareGenerator)
+    assert not isinstance(NumberWithUnit(), FieldAwareGenerator)
+
+
+@pytest.mark.parametrize(
+    ("text", "field", "raw", "value"),
+    [
+        ("Power: 150PS (110kW)", "power_kw", "150PS (110kW)", 110.324812),
+        ("Price: £18,495 on the road", "price", "£18,495 on the road", Decimal(18495)),
+        (
+            "Registered: 12 March 2024 (first owner)",
+            "registered",
+            "12 March 2024 (first owner)",
+            date(2024, 3, 12),
+        ),
+        (
+            "Boot: 380 to 1,237 litres (seats down)",
+            "boot_litres",
+            "380 to 1,237 litres (seats down)",
+            [380.0, 1237.0],
+        ),
+    ],
+)
+def test_key_value_spans_normalise_end_to_end(
+    text: str, field: str, raw: str, value: object
+) -> None:
+    spec = LISTING.field(field)
+    [cand] = [
+        c
+        for c in default_registry().generate(st(text), spec, schema="Listing")
+        if c.generator_id == "key_value"
+    ]
+    assert cand.raw == raw
+    assert normalise(cand.raw, cand.normalise, spec) == value
+
+
+def test_key_value_money_in_another_currency_fails_validation() -> None:
+    spec = LISTING.field("price")
+    [cand] = KeyValue().generate_for(st("Price: from EUR 30,000"), spec)
+    with pytest.raises(NormaliseError, match="the field wants GBP"):
+        normalise(cand.raw, cand.normalise, spec)
 
 
 # --- noun phrases ----------------------------------------------------------------------
