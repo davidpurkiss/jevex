@@ -23,9 +23,13 @@ from jevex.layout import (
     ComponentType,
     DomLocation,
     ImageLocation,
+    LayoutStage,
     Location,
     PageLocation,
+    TableCell,
+    UnsupportedDocumentError,
 )
+from jevex.layout_html import HtmlLayoutParser
 from jevex.pipeline import Context, Pipeline, Stage
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
@@ -50,9 +54,11 @@ __all__ = [
     "Field",
     "FieldSpec",
     "GeneratorRegistry",
+    "HtmlLayoutParser",
     "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
+    "LayoutStage",
     "Location",
     "NormaliserStep",
     "NoulDocumentGate",
@@ -66,7 +72,9 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "TableCell",
     "TextReader",
+    "UnsupportedDocumentError",
     "__version__",
     "default_registry",
 ]

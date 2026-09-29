@@ -11,6 +11,7 @@ from jevex.clean import CleanStage
 from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient
+from jevex.layout import LayoutStage
 from jevex.pipeline import Context, Pipeline
 from jevex.schema import SchemaSpec
 
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from jevex.pipeline import Stage
 
 # Default stages in spec order; each lands with its issue (see jevex.interfaces).
-DEFAULT_STAGES: tuple[Stage, ...] = (CleanStage(), DocumentGateStage())
+DEFAULT_STAGES: tuple[Stage, ...] = (CleanStage(), DocumentGateStage(), LayoutStage())
 
 
 def default_pipeline() -> Pipeline:
