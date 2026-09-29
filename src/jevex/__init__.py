@@ -4,6 +4,7 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
     DocumentGateStage,
     DocumentText,
@@ -47,6 +48,7 @@ __all__ = [
     "EntityScope",
     "ExtractionResult",
     "Extractor",
+    "FetchError",
     "Field",
     "FieldSpec",
     "GeneratorRegistry",
@@ -60,8 +62,10 @@ __all__ = [
     "Pipeline",
     "Questions",
     "RegexGenerator",
+    "RobotsDisallowedError",
     "SchemaConfig",
     "SchemaSpec",
+    "SimpleFetcher",
     "Span",
     "Stage",
     "Statement",
