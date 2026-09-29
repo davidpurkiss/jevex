@@ -51,6 +51,9 @@ class SingleEntity:
 class EntityStage:
     """Sets ``SchemaRun.scopes`` for every active schema using ``resolver``.
 
+    Scopes keep only components that passed the component gate (when it ran), so
+    statements from irrelevant parts of the page never reach categorisation.
+
     Without a parsed document (no layout stage ran), every schema gets one empty scope,
     labelled as the resolver would label a single entity, so structured-data-only
     pipelines still produce a record.
@@ -70,6 +73,11 @@ class EntityStage:
                 ]
                 return
             run.scopes = await self.resolver.resolve(parsed, run.spec, ctx.jev)
+            relevant = run.relevant_components()
+            if relevant is not None:
+                # Only components that passed the component gate go downstream.
+                for scope in run.scopes:
+                    scope.component_ids = [c for c in scope.component_ids if c in relevant]
             if not run.scopes:
                 ctx.event(self.name, "no_entities", f"{run.name}: the resolver found no entities")
 
