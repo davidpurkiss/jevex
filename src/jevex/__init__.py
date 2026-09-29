@@ -11,6 +11,12 @@ from jevex.gate import (
     NoulDocumentGate,
     TextReader,
 )
+from jevex.generators import (
+    GeneratorRegistry,
+    InvalidGeneratorError,
+    RegexGenerator,
+    default_registry,
+)
 from jevex.layout import (
     BBox,
     Component,
@@ -43,14 +49,17 @@ __all__ = [
     "Extractor",
     "Field",
     "FieldSpec",
+    "GeneratorRegistry",
     "HtmlTextReader",
     "ImageLocation",
+    "InvalidGeneratorError",
     "Location",
     "NormaliserStep",
     "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
     "Questions",
+    "RegexGenerator",
     "SchemaConfig",
     "SchemaSpec",
     "Span",
@@ -59,4 +68,5 @@ __all__ = [
     "StatementKind",
     "TextReader",
     "__version__",
+    "default_registry",
 ]

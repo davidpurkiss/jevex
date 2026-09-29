@@ -190,8 +190,11 @@ class StatementClassifier(Protocol):
 
 @runtime_checkable
 class CandidateGenerator(Protocol):
-    id: str
-    scope: Scope
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def scope(self) -> Scope: ...
 
     def generate(self, statement: Statement) -> list[Candidate]: ...
 
@@ -205,7 +208,8 @@ class CandidateSelector(Protocol):
 
 @runtime_checkable
 class Normaliser(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def apply(self, value: Any, **args: Any) -> Any: ...
 
