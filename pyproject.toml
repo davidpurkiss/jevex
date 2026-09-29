@@ -9,6 +9,7 @@ authors = [{ name = "David Purkiss" }]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.11",
+    "typesafe-sdk>=0.7.2",
 ]
 keywords = ["extraction", "scraping", "pdf", "html", "pydantic", "jev", "llm"]
 classifiers = [
