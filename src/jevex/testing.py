@@ -22,9 +22,9 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from jevex.jev import (
     Choice,
@@ -40,6 +40,10 @@ from jevex.jev import (
     ScoreAnswer,
     TypeSafeBackend,
 )
+from jevex.llm import LLMResponse, LLMUsage, check_budget, record, validate_output
+
+if TYPE_CHECKING:
+    from jevex.llm import LLM
 
 type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer
 type Matcher = str | re.Pattern[str] | Callable[[str], bool] | None
@@ -269,3 +273,116 @@ class Cassette:
 def cassette(path: str | Path, *, inner: JevBackend | None = None) -> Cassette:
     """A cassette that records when ``JEVEX_RECORD=1`` and replays otherwise."""
     return Cassette(path, record=os.environ.get(RECORD_ENV) == "1", inner=inner)
+
+
+# --- LLMs ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FakeLLMCall:
+    prompt: str
+    schema: type[BaseModel]
+
+
+class FakeLLM:
+    """A scripted :class:`~jevex.llm.LLM`: answers from a function or a queue of outputs.
+
+    ``answer(prompt, schema)`` returns the output (a model instance or a dict/JSON it can
+    validate), or raise to simulate a failure. Token usage is estimated from the text so
+    budgets and cost accounting can be tested; ``price`` sets USD per million tokens.
+    """
+
+    def __init__(
+        self,
+        answer: Callable[[str, type[BaseModel]], object] | list[object],
+        *,
+        model: str = "fake-llm",
+        price: tuple[float, float] = (0.0, 0.0),
+    ) -> None:
+        self._queue: list[object] | None = None
+        self._answer: Callable[[str, type[BaseModel]], object] | None = None
+        if isinstance(answer, list):
+            self._queue = list(cast("list[object]", answer))
+        else:
+            self._answer = answer
+        self.model = model
+        self.price = price
+        self.calls: list[FakeLLMCall] = []
+
+    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+        check_budget()
+        self.calls.append(FakeLLMCall(prompt, schema))
+        if self._queue is not None:
+            if not self._queue:
+                raise UnscriptedQuestionError("FakeLLM has no more scripted answers")
+            raw = self._queue.pop(0)
+        else:
+            assert self._answer is not None
+            raw = self._answer(prompt, schema)
+        output = validate_output(schema, raw)
+        in_tokens = len(prompt) // 4 + 1
+        out_tokens = len(output.model_dump_json()) // 4 + 1
+        usage = LLMUsage(
+            in_tokens,
+            out_tokens,
+            (in_tokens * self.price[0] + out_tokens * self.price[1]) / 1_000_000,
+        )
+        record(usage)
+        return LLMResponse(output=output, usage=usage, model=self.model)
+
+
+class LLMCassette:
+    """Record/replay for any :class:`~jevex.llm.LLM`, like :class:`Cassette` for Jev.
+
+    Keyed by the prompt and the schema's JSON schema. In replay mode an unrecorded call
+    raises :class:`CassetteMissError`; ``JEVEX_RECORD=1`` (see :func:`llm_cassette`) records.
+    """
+
+    def __init__(self, path: str | Path, inner: LLM | None = None, *, record: bool = False):
+        self.path = Path(path)
+        self.record = record
+        self._inner = inner
+        self._entries: dict[str, dict[str, object]] = (
+            json.loads(self.path.read_text()) if self.path.exists() else {}
+        )
+
+    @staticmethod
+    def key(prompt: str, schema: type[BaseModel]) -> str:
+        blob = json.dumps({"prompt": prompt, "schema": schema.model_json_schema()}, sort_keys=True)
+        return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+        key = self.key(prompt, schema)
+        if not self.record:
+            if key not in self._entries:
+                raise CassetteMissError(
+                    f"no LLM recording {key} in {self.path}; run with {RECORD_ENV}=1 to record it"
+                )
+            entry = self._entries[key]
+            usage = cast("dict[str, Any]", entry["usage"])
+            return LLMResponse(
+                output=schema.model_validate(entry["output"]),
+                usage=LLMUsage(usage["input_tokens"], usage["output_tokens"], usage["cost"]),
+                model=str(entry["model"]),
+            )
+        if self._inner is None:
+            raise CassetteMissError("recording needs an inner LLM")
+        response = await self._inner.structured(prompt, schema)
+        self._entries[key] = {
+            "prompt": prompt,
+            "output": response.output.model_dump(mode="json"),
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "cost": response.usage.cost,
+            },
+            "model": response.model,
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(self._entries, indent=2, sort_keys=True) + "\n")
+        return response
+
+
+def llm_cassette(path: str | Path, inner: LLM | None = None) -> LLMCassette:
+    """An LLM cassette that records when ``JEVEX_RECORD=1`` and replays otherwise."""
+    return LLMCassette(path, inner, record=os.environ.get(RECORD_ENV) == "1")

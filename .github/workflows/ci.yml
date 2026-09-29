@@ -21,7 +21,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras
       - run: uv run ruff check --output-format=github
       - run: uv run ruff format --check
 
@@ -38,6 +38,6 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - run: uv sync --locked
+      - run: uv sync --locked --all-extras
       - run: uv run pyright
       - run: uv run pytest

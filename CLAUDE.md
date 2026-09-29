@@ -12,7 +12,7 @@ turned into declarative generators, so each run needs fewer LLM calls than the l
 ## Commands
 
 ```sh
-uv sync                                   # dev env (Python 3.12, see .python-version)
+uv sync --all-extras                      # dev env with every extra (as CI does)
 uv run ruff check && uv run ruff format --check
 uv run pyright                            # strict mode, src + tests
 uv run pytest                             # network blocked; live tests skipped
@@ -40,7 +40,8 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `pipeline.py` | `Stage` protocol, `Context`/`SchemaRun` (per-document state), `Pipeline` composition, `for_each_scope`/`for_each_schema` |
 | `extractor.py` | `Extractor`, `STAGE_ORDER`/`DEFAULT_STAGES`/`default_pipeline()`, `ExtractionResult`, `DocumentMeta` |
 | `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |
-| `testing.py` | `FakeJev` (scripted answers), `Cassette` record/replay |
+| `testing.py` | `FakeJev` / `FakeLLM` (scripted answers), `Cassette` / `LLMCassette` record/replay |
+| `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/litellm.py` (extras) |
 
 How the parts fit together:
 - A stage is anything with `name` and `async run(ctx)`. It reads earlier results from
