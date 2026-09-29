@@ -14,8 +14,9 @@ Durability: ``synchronous=NORMAL`` is WAL's usual setting. A committed write sur
 crash of the process but can be lost on power loss or an OS crash. For the ledger that
 means under-counting the last few charges, never corrupting the database.
 
-The spend ledger keeps one row per charge and nothing prunes it yet; a busy host adds
-roughly a row per Jev request and LLM call.
+The spend ledger keeps one row per charge and nothing prunes it yet. With a run budget,
+a busy host adds a row per document (its Jev spend) and per priced LLM call, plus one
+``llm_call`` row per LLM call when ``llm_rpm`` is set.
 """
 
 from __future__ import annotations

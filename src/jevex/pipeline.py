@@ -11,10 +11,11 @@ questions go out together.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from jevex._tasks import gather
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -146,13 +147,16 @@ class Context:
 async def for_each_scope[T](
     ctx: Context, fn: Callable[[SchemaRun, EntityScope], Awaitable[T]]
 ) -> list[T]:
-    """Run ``fn`` for every entity scope of every active schema, concurrently."""
-    return await asyncio.gather(*(fn(run, scope) for run in ctx.active for scope in run.scopes))
+    """Run ``fn`` for every entity scope of every active schema, concurrently.
+
+    The first failure cancels the other calls before it propagates.
+    """
+    return await gather(fn(run, scope) for run in ctx.active for scope in run.scopes)
 
 
 async def for_each_schema[T](ctx: Context, fn: Callable[[SchemaRun], Awaitable[T]]) -> list[T]:
-    """Run ``fn`` for every active schema, concurrently."""
-    return await asyncio.gather(*(fn(run) for run in ctx.active))
+    """Run ``fn`` for every active schema, concurrently (a failure cancels the rest)."""
+    return await gather(fn(run) for run in ctx.active)
 
 
 class Pipeline:

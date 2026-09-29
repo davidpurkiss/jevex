@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Self, overload
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jevex.budgets import BudgetEvent, Budgets, DocumentBudget
+from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
@@ -90,6 +90,17 @@ class JevUsageSummary(BaseModel):
     models: list[str]
 
 
+class LLMUsageSummary(BaseModel):
+    """The document's LLM calls through ``ctx.budget.call_llm``. ``unpriced_calls`` had no
+    known price, so ``cost`` leaves them out."""
+
+    model_config = ConfigDict(frozen=True)
+
+    calls: int = 0
+    cost: float = 0.0
+    unpriced_calls: int = 0
+
+
 class EventInfo(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -109,6 +120,7 @@ class DocumentMeta(BaseModel):
     gates: dict[str, GateDecision]
     active_schemas: list[str]
     jev: JevUsageSummary
+    llm: LLMUsageSummary = Field(default_factory=LLMUsageSummary)
     timings: dict[str, float]
     events: list[EventInfo]
     stopped: bool
@@ -197,6 +209,13 @@ class ExtractionResult:
                     seconds=usage.seconds,
                     models=sorted(usage.models),
                 ),
+                llm=LLMUsageSummary(
+                    calls=ctx.budget.llm_calls,
+                    cost=ctx.budget.llm_spend,
+                    unpriced_calls=ctx.budget.unpriced_calls,
+                )
+                if ctx.budget
+                else LLMUsageSummary(),
                 timings=dict(ctx.timings),
                 events=[
                     EventInfo(stage=e.stage, kind=e.kind, message=e.message, data=e.data)
@@ -250,7 +269,8 @@ class Extractor:
         :class:`~jevex.store.Store` or a URL such as ``"sqlite:///jevex.db"``) holds learned
         state and the spend ledger that shares the run budget across workers; a URL is
         opened on first use and closed by ``aclose``. With a run budget but no store, the
-        ledger is kept in memory. ``run_id`` labels this run's ledger entries."""
+        ledger is kept in memory. ``run_id`` labels this run's ledger entries; workers
+        that should share a ``period="run"`` budget pass the same one."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -271,6 +291,7 @@ class Extractor:
         self.budgets = budgets or Budgets()
         self.run_id = run_id or uuid.uuid4().hex[:12]
         self.run_started = datetime.now(UTC)
+        self._ledger: RunLedger | None = None
         self._store_source = store if isinstance(store, str | Path) else None
         self._store: Store | None = None if isinstance(store, str | Path) else store
         self._owns_store = False
@@ -297,23 +318,34 @@ class Extractor:
                 self._owns_store = True
         return self._store
 
+    async def ledger(self) -> RunLedger:
+        """The run ledger shared by this extractor's documents (and by the learner, #38)."""
+        store = await self.store()
+        if self._ledger is None or self._ledger.store is not store:
+            self._ledger = RunLedger(
+                self.budgets.run, store, run_id=self.run_id, started=self.run_started
+            )
+        return self._ledger
+
     async def extract(self, document: Document) -> ExtractionResult:
         """Run the pipeline over one document."""
-        budget = DocumentBudget(
-            self.budgets, await self.store(), self.run_id, run_started=self.run_started
-        )
+        budget = DocumentBudget(self.budgets, await self.ledger())
         jev = self.jev.metered(max_requests=self.budgets.per_document.max_jev_requests)
         ctx = Context.create(document, self.schemas, jev)
         ctx.budget = budget
-        if not await budget.allow_document():
-            ctx.stop("budget", "the run's Jev spend cap is reached")
-        else:
-            try:
-                await self.pipeline.run(ctx)
-            except JevRequestCapError as exc:
-                budget.hit("document", "max_jev_requests", str(exc))
-                ctx.stop("budget", str(exc))
-        await budget.finish(ctx.jev.usage.cost)
+        try:
+            if not await budget.start_document():
+                ctx.stop("budget", "the run's Jev spend cap is reached")
+            else:
+                try:
+                    await self.pipeline.run(ctx)
+                except JevRequestCapError as exc:
+                    budget.record_hit("document", "max_jev_requests", str(exc))
+                    ctx.stop("budget", str(exc))
+        finally:
+            # Every branch has settled (fan-outs cancel on failure), so this is the
+            # document's whole Jev spend, recorded even when a stage failed.
+            await budget.finish_document(ctx.jev.usage.cost)
         return ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
@@ -335,11 +367,17 @@ class Extractor:
 
     async def aclose(self) -> None:
         close = getattr(self._jev.backend, "aclose", None) if self._jev else None
-        if close is not None:
-            await close()
-        if self._owns_store and self._store is not None:
-            await self._store.aclose()
-            self._store, self._owns_store = None, False
+        try:
+            if close is not None:
+                await close()
+        finally:
+            store, owned = self._store, self._owns_store
+            if owned:
+                self._store, self._owns_store, self._ledger = None, False, None
+            # The lock binds to the loop that used it; a reopen may be on another loop.
+            self._store_lock = None
+            if owned and store is not None:
+                await store.aclose()
 
     def close(self) -> None:
         """Close the Jev client and the private loop used by ``extract_sync``."""

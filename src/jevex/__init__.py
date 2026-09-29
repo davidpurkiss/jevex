@@ -1,6 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
-from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget
+from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget, RunLedger
 from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
@@ -140,6 +140,7 @@ __all__ = [
     "RegexGenerator",
     "RobotsDisallowedError",
     "RunBudget",
+    "RunLedger",
     "SQLiteStore",
     "SchemaConfig",
     "SchemaSpec",

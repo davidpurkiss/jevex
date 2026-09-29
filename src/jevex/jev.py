@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from jevex._tasks import gather
+
 if TYPE_CHECKING:
     from typesafe_sdk import AsyncTypeSafeClient, NoulCriteria, RetryPolicy
 
@@ -380,7 +382,7 @@ class JevClient:
         if not questions:
             return {}
         batches = self._plan(state, questions)
-        responses = await asyncio.gather(*(self._send(state, batch) for batch in batches))
+        responses = await gather(self._send(state, batch) for batch in batches)
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
         for batch, response in zip(batches, responses, strict=True):
             for key in batch:
