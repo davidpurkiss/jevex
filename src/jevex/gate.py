@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from jevex.clean import decode_html
 from jevex.interfaces import GateDecision
-from jevex.jev import NoulAnswer
+from jevex.jev import NoulAnswer, UnexpectedAnswerError
 
 if TYPE_CHECKING:
     from jevex.document import Document
@@ -113,8 +113,10 @@ class NoulDocumentGate:
         for spec in by_page:
             ps = {i: answers[spec.name] for i, answers in zip(pages, page_ps, strict=True)}
             if ps:
-                best = max(ps.values())
-                decisions[spec.name] = GateDecision(p=best, passed=best >= self.threshold, pages=ps)
+                passed = [i for i, p in ps.items() if p >= self.threshold]
+                decisions[spec.name] = GateDecision(
+                    p=max(ps.values()), passed=bool(passed), pages=ps, passed_pages=passed
+                )
         return decisions
 
     async def _ask(self, state: str, schemas: list[SchemaSpec], jev: JevClient) -> dict[str, float]:
@@ -127,7 +129,9 @@ class NoulDocumentGate:
         out: dict[str, float] = {}
         for name, answer in answers.items():
             if not isinstance(answer, NoulAnswer):
-                raise TypeError(f"expected a Noul answer for {name!r}, got {answer.type}")
+                raise UnexpectedAnswerError(
+                    f"expected a Noul answer for {name!r}, got {answer.type}"
+                )
             out[name] = answer.p
         return out
 

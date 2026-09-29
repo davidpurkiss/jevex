@@ -29,6 +29,7 @@ from jevex.jev import (
     Question,
     ScoreAnswer,
     StateTooLargeError,
+    UnexpectedAnswerError,
 )
 from jevex.testing import FakeJev
 
@@ -141,7 +142,7 @@ async def test_non_noul_answer_raises() -> None:
             }
             return JevResponse(answers=answers)
 
-    with pytest.raises(TypeError, match="expected a Noul answer for 'Car'"):
+    with pytest.raises(UnexpectedAnswerError, match="expected a Noul answer for 'Car'"):
         await NoulDocumentGate().gate(html("<p>x</p>"), specs(Car), JevClient(ChoiceBackend()))
 
 
@@ -189,7 +190,9 @@ async def test_page_unit_asks_each_page_and_keeps_page_scores() -> None:
         for call in fake.calls
     )
     assert decisions == {
-        "Brochure": GateDecision(p=0.8, passed=True, pages={1: 0.1, 2: 0.8, 4: 0.3})
+        "Brochure": GateDecision(
+            p=0.8, passed=True, pages={1: 0.1, 2: 0.8, 4: 0.3}, passed_pages=[2]
+        )
     }
 
 
@@ -209,6 +212,7 @@ async def test_mixed_units_ask_the_whole_text_and_each_page() -> None:
     assert asked == {"one\n\ntwo": {"Car"}, "one": {"Brochure"}, "two": {"Brochure"}}
     assert decisions["Car"].pages == {}
     assert decisions["Brochure"].pages == {1: 0.9, 2: 0.9}
+    assert decisions["Brochure"].passed_pages == [1, 2]
 
 
 async def test_page_unit_on_unpaged_document_gates_the_whole_document() -> None:
