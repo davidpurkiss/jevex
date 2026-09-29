@@ -1,6 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
-from jevex.categorise import CategoriseStage, JevStatementClassifier
+from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
@@ -127,6 +127,7 @@ __all__ = [
     "StructuredSource",
     "TableCell",
     "TextReader",
+    "ToClassify",
     "Tolerance",
     "UnsupportedDocumentError",
     "__version__",
