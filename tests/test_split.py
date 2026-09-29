@@ -18,7 +18,13 @@ from jevex import (
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ParsedDocument, StatementSplitter
 from jevex.layout_html import HtmlLayoutParser
-from jevex.split import DuplicateStatementError, is_key_value, sentences
+from jevex.split import (
+    MAX_SEGMENT_CHARS,
+    DuplicateStatementError,
+    _chunks,  # pyright: ignore[reportPrivateUsage]
+    is_key_value,
+    sentences,
+)
 from jevex.testing import FakeJev
 from jevex.testsite import VehicleSpec, generate, render
 
@@ -139,6 +145,15 @@ def test_long_lines_are_chunked_without_losing_text() -> None:
     assert " ".join(said) == text
 
 
+def test_long_lines_without_sentence_boundaries_are_chunked_at_spaces() -> None:
+    text = " ".join(["approx", "max", "a", "turbo", "petrol", "hatchback"] * 3000)
+    chunks = _chunks(text)
+    assert len(chunks) > 1
+    assert all(len(c) <= 2 * MAX_SEGMENT_CHARS for c in chunks)
+    assert " ".join(chunks) == text
+    assert " ".join(sentences(text)) == text
+
+
 def test_sentences_is_safe_across_threads() -> None:
     texts = [
         " ".join(f"Car {i} does 0-62 mph in {i}.1 s." for i in range(300)),
@@ -182,6 +197,10 @@ def test_definition_list_items_are_pairs_only_with_their_term() -> None:
         ("Sunroof", "list_item")
     ]
     assert split(comp("list_item", "Petrol", path="/html/body/dl/dd")) == [("Petrol", "list_item")]
+    # A dd is trusted as a pair even when its label has no letter.
+    assert split(comp("list_item", "0-62: 9.1 s", path="/html/body/dl/dd")) == [
+        ("0-62: 9.1 s", "key_value")
+    ]
 
 
 async def layout_items(html: bytes) -> list[list[tuple[str, str]]]:

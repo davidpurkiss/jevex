@@ -118,15 +118,25 @@ _CLEAR_BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"“])")
 
 
 def _chunks(text: str) -> list[str]:
-    if len(text) <= MAX_SEGMENT_CHARS:
-        return [text]
+    """Pieces of about :data:`MAX_SEGMENT_CHARS`, cut at clear sentence boundaries, or at
+    whitespace when a stretch twice that long has none."""
     out: list[str] = []
-    start = 0
-    for m in _CLEAR_BOUNDARY.finditer(text):
-        if m.start() - start >= MAX_SEGMENT_CHARS:
-            out.append(text[start : m.start()])
-            start = m.end()
-    out.append(text[start:])
+    while len(text) > MAX_SEGMENT_CHARS:
+        limit = 2 * MAX_SEGMENT_CHARS
+        cut = None
+        for m in _CLEAR_BOUNDARY.finditer(text, MAX_SEGMENT_CHARS, limit):
+            cut = (m.start(), m.end())
+            break
+        if cut is None:
+            space = text.rfind(" ", MAX_SEGMENT_CHARS, limit)
+            if space == -1:
+                space = text.find(" ", limit)
+            if space == -1:
+                break
+            cut = (space, space + 1)
+        out.append(text[: cut[0]])
+        text = text[cut[1] :]
+    out.append(text)
     return out
 
 
@@ -223,7 +233,9 @@ class DefaultSplitter:
         if dl_part is None and len(lines) > 1 and any(is_key_value(line) for line in lines):
             return [(line, "key_value" if is_key_value(line) else "list_item") for line in lines]
         one = " ".join(lines)
-        pair = is_key_value(one) and dl_part != "dt"
+        # The layout parser renders a dd as "term: value", so trust it even for labels
+        # is_key_value would doubt ("0-62: 9.1 s", "2019: Launched").
+        pair = ": " in one if dl_part == "dd" else is_key_value(one) and dl_part != "dt"
         return [(one, "key_value" if pair else "list_item")]
 
 
