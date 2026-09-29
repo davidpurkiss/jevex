@@ -26,12 +26,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from jevex.generators import GeneratorRegistry, default_registry
-from jevex.jev import Choice, ChoiceAnswer, UnexpectedAnswerError
+from jevex.jev import Choice, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import DomLocation
 from jevex.normalise import NormaliseError, normalise
 from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.results import FieldMeta, Source
-from jevex.schema import NONE_OPTION
+from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 from jevex.statements import Statement
 from jevex.store import KeyMapping
 from jevex.structured import EmbeddedDataReader, StructuredBlob
@@ -49,6 +49,10 @@ ACCEPT_AT = 0.5
 
 MAX_PATHS = 300
 """Key paths asked about per blob; the rest are skipped (with an event)."""
+
+MAX_BLOBS = 20
+"""Blobs mapped per document, in reading order (JSON-LD first); a miss costs one Jev
+request per blob and schema, and pages can carry hundreds of ``data-*`` blobs."""
 
 MAX_VALUE_CHARS = 200
 """Values longer than this are cut in the state Jev sees (never in what is extracted)."""
@@ -148,12 +152,14 @@ class KeyPathMapper:
         registry: GeneratorRegistry | None = None,
         accept_at: float = ACCEPT_AT,
         max_paths: int = MAX_PATHS,
+        max_blobs: int = MAX_BLOBS,
     ) -> None:
         self.store = store
         self.reader = reader or EmbeddedDataReader()
         self.registry = registry or default_registry()
         self.accept_at = accept_at
         self.max_paths = max_paths
+        self.max_blobs = max_blobs
         # (fingerprint, schema) → path → field (None: no field). Used without a store.
         self._memory: dict[tuple[str, str], dict[str, str | None]] = {}
 
@@ -164,7 +170,16 @@ class KeyPathMapper:
         statements: list[Statement] = []
         fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
         events: list[tuple[str, str]] = []
-        for i, blob in enumerate(data.blobs):
+        blobs = data.blobs
+        if len(blobs) > self.max_blobs:
+            events.append(
+                (
+                    "structured_blobs_skipped",
+                    f"mapped {self.max_blobs} of {len(blobs)} embedded data blobs",
+                )
+            )
+            blobs = blobs[: self.max_blobs]
+        for i, blob in enumerate(blobs):
             flat = flatten(blob, i)
             if not flat.leaves:
                 continue
@@ -185,7 +200,7 @@ class KeyPathMapper:
                     name = mapping.get(shape)
                     if name is None or name in fields[schema.name]:
                         continue
-                    meta = self._meta(schema.field(name), leaves, ids, document)
+                    meta = await self._meta(schema.field(name), leaves, ids, document, jev)
                     if meta is not None:
                         fields[schema.name][name] = meta
         return StructuredResult(statements, fields, events)
@@ -271,24 +286,31 @@ class KeyPathMapper:
             out[shape] = answer
         return out
 
-    def _meta(
+    async def _meta(
         self,
         spec: FieldSpec,
         leaves: list[Leaf],
         ids: dict[str, str],
         document: Document,
+        jev: JevClient,
     ) -> FieldMeta | None:
         """The field's value from its leaves: the first that normalises (every one, for a
-        list field). ``None`` when none do; the error is kept on the meta."""
+        list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
+        "Automatic") is asked of Jev as the field's own question about the key-path
+        statement. When nothing works, the error is kept on the meta."""
         values: list[Any] = []
         errors: list[str] = []
         first: Leaf | None = None
+        confidence: float | None = None
         for leaf in leaves:
             try:
                 value = self._value(spec, leaf.value)
             except NormaliseError as exc:
-                errors.append(f"{leaf.path}: {exc}")
-                continue
+                asked = await self._ask_value(spec, leaf, jev) if not spec.many else None
+                if asked is None:
+                    errors.append(f"{leaf.path}: {exc}")
+                    continue
+                value, confidence = asked
             if first is None:
                 first = leaf
             for item in value if isinstance(value, list) and spec.many else [value]:  # pyright: ignore[reportUnknownVariableType]
@@ -306,11 +328,36 @@ class KeyPathMapper:
         if first is None:
             return FieldMeta(method="structured", source=source, error="; ".join(errors))
         return FieldMeta(
-            value=values if spec.many else values[0], method="structured", source=source
+            value=values if spec.many else values[0],
+            confidence=confidence,
+            method="structured",
+            source=source,
         )
 
+    async def _ask_value(
+        self, spec: FieldSpec, leaf: Leaf, jev: JevClient
+    ) -> tuple[Any, float] | None:
+        """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated"."""
+        state = {"statement": f"{leaf.path}: {_text(leaf.value)}"}
+        if spec.kind == "enum":
+            answer = (await jev.ask(state, {"enum": spec.enum_question()}))["enum"]
+            if not isinstance(answer, ChoiceAnswer):
+                raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+            if answer.choice == NOT_STATED_OPTION:
+                return None
+            return normalise(answer.choice, [], spec), answer.confidence
+        if spec.kind == "bool":
+            answer = (await jev.ask(state, {"bool": spec.bool_question()}))["bool"]
+            if not isinstance(answer, NoulAnswer):
+                raise UnexpectedAnswerError(f"expected a Noul answer, got {answer.type}")
+            value = answer.p >= 0.5
+            return value, answer.p if value else 1 - answer.p
+        return None
+
     def _value(self, spec: FieldSpec, raw: str | int | float | bool) -> Any:
-        if not isinstance(raw, str) or spec.kind in ("enum", "bool"):
+        if spec.kind == "enum" and isinstance(raw, str):
+            return normalise(_enum_option(spec, raw), [], spec)
+        if not isinstance(raw, str) or spec.kind == "bool":
             return normalise(raw, [], spec)
         statement = Statement(
             id="value",
@@ -340,6 +387,14 @@ class KeyPathMapper:
 
 
 _NOWHERE = DomLocation(dom_path="/")
+
+
+def _enum_option(spec: FieldSpec, raw: str) -> str:
+    """The option ``raw`` names, ignoring case and a schema.org URL prefix
+    (``"https://schema.org/InStock"`` → ``InStock``); ``raw`` itself if none matches."""
+    text = raw.strip().rstrip("/").rsplit("/", 1)[-1].strip()
+    by_lower = {str(o).lower(): str(o) for o in spec.options}
+    return by_lower.get(text.lower(), raw)
 
 
 @dataclass
