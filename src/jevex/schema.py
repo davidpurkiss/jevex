@@ -82,7 +82,7 @@ def Field(
     {description}?"), so write it as a noun phrase: "Price", "Engine displacement". For a
     ``bool``, write the claim that makes it True, as a clause: "The book is in stock", or
     "has an automatic gearbox" (read as "it has..."). A bare noun ("Sunroof") works too
-    too: it is asked as "Does the statement say it has sunroof?".
+    it is asked as "Does the statement say it has sunroof?".
     """
     extra: dict[str, Any] = {}
     if unit is not None:
