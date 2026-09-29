@@ -1,5 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
+from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
@@ -26,7 +27,9 @@ __version__ = "0.0.1"
 
 __all__ = [
     "BBox",
+    "BoilerplateCleaner",
     "Candidate",
+    "CleanStage",
     "Component",
     "ComponentType",
     "Context",
