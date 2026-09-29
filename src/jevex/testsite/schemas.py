@@ -1,0 +1,41 @@
+"""The schemas the test site's ground truth is written in (and eval extracts with)."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import BaseModel
+
+from jevex.schema import Field
+
+FuelType = Literal["petrol", "diesel", "hybrid", "phev", "ev"]
+
+
+class VehicleSpec(BaseModel):
+    """A manufacturer's technical specification for one vehicle variant."""
+
+    make: str = Field(description="Manufacturer (make) name")
+    model: str = Field(description="Model name")
+    trim: str = Field(description="Trim or variant name, e.g. SE L")
+    fuel_type: FuelType = Field(description="Fuel or powertrain type")
+    engine_size_cc: int | None = Field(description="Engine displacement", unit="cc")
+    power_kw: float = Field(description="Maximum power output", unit="kW")
+    zero_to_62_s: float = Field(description="0-62 mph acceleration time", unit="s")
+    top_speed_mph: int = Field(description="Top speed", unit="mph")
+    co2_g_km: int | None = Field(description="CO2 emissions", unit="g/km")
+    price_gbp: Decimal = Field(description="On-the-road price", unit="GBP")
+    seats: int = Field(description="Number of seats")
+    automatic: bool = Field(description="has an automatic gearbox")
+
+
+class Listing(BaseModel):
+    """A used car offered for sale."""
+
+    make: str = Field(description="Manufacturer (make) name")
+    model: str = Field(description="Model name")
+    year: int = Field(description="Year of first registration")
+    mileage_miles: int = Field(description="Mileage", unit="miles")
+    price_gbp: Decimal = Field(description="Asking price", unit="GBP")
+    fuel_type: FuelType = Field(description="Fuel or powertrain type")
+    colour: str = Field(description="Exterior colour")
