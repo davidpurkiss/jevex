@@ -171,7 +171,8 @@ async def test_literal_none_spans_and_duplicate_spans_become_one_option_each() -
     await run_both(ctx)
     question = only_call_questions(fake)["Car.model/choice0"]
     assert isinstance(question, Choice)
-    assert list(question.options) == ["Model", "none"]  # "none" here is the reserved option
+    # "none" is the reserved option; the whole short statement is a candidate too.
+    assert list(question.options) == ["Model", "Model: none", "none"]
 
 
 async def test_more_than_254_candidates_are_split_across_choices() -> None:

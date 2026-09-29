@@ -16,6 +16,7 @@ from jevex.generators import (
     NumberWithUnit,
     Range,
     RegexGenerator,
+    WholeStatement,
     Year,
     default_registry,
 )
@@ -386,8 +387,27 @@ def test_default_registry_picks_generators_by_field_kind() -> None:
     string = [g.id for g in reg.for_field(SPEC.field("model"), schema="VehicleSpec")]
     enum = [g.id for g in reg.for_field(SPEC.field("fuel_type"), schema="VehicleSpec")]
     assert number == ["number_with_unit", "money", "year", "range", "key_value"]
-    assert string == ["key_value", "noun_phrase"]
+    assert string == ["key_value", "noun_phrase", "whole_statement"]
     assert enum == []
+
+
+def test_whole_statement_proposes_short_statements_whole() -> None:
+    gen = WholeStatement()
+    assert raws(gen, "A Light in the Attic") == ["A Light in the Attic"]
+    assert raws(gen, "  Tipping the Velvet. ") == ["Tipping the Velvet"]
+    assert raws(gen, "Sapiens: A Brief History of Humankind") == [
+        "Sapiens: A Brief History of Humankind"
+    ]
+    assert raws(gen, " ".join(["word"] * 17)) == []
+    assert raws(gen, "...") == []
+    pair = Statement(
+        id="s1",
+        text="Colour: Red",
+        kind="key_value",
+        component_id="c1",
+        location=DomLocation(dom_path="/"),
+    )
+    assert gen.generate(pair) == []
 
 
 def test_registry_generate_dedupes_spans_and_sorts() -> None:

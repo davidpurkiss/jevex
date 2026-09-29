@@ -471,6 +471,36 @@ class NounPhrase:
         return out
 
 
+MAX_WHOLE_WORDS = 16
+_TRAILING_PUNCTUATION = re.compile(r"[\s.,;:!?]+$")
+
+
+@dataclass(frozen=True)
+class WholeStatement:
+    """A short statement's whole text, for names and titles that stopwords would split.
+
+    "A Light in the Attic" as a heading gives the candidate "A Light in the Attic" (the
+    noun-phrase chunker gives only "Light" and "Attic"). Statements longer than
+    :data:`MAX_WHOLE_WORDS` words aren't proposed: whole sentences are rarely a value.
+    Nor are ``key_value`` and ``table_cell`` statements, whose value :class:`KeyValue`
+    finds. Trailing punctuation is left out of the span.
+    """
+
+    id: str = "whole_statement"
+    scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"str"})))
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        if statement.kind in ("key_value", "table_cell"):
+            return []
+        text = statement.text
+        start = len(text) - len(text.lstrip())
+        trailing = _TRAILING_PUNCTUATION.search(text)
+        end = trailing.start() if trailing else len(text)
+        if end <= start or len(text[start:end].split()) > MAX_WHOLE_WORDS:
+            return []
+        return [_candidate(statement, start, end, self.id, _step("strip"))]
+
+
 BUILTIN_GENERATORS = (
     NumberWithUnit(),
     Money(),
@@ -479,4 +509,5 @@ BUILTIN_GENERATORS = (
     Range(),
     KeyValue(),
     NounPhrase(),
+    WholeStatement(),
 )
