@@ -122,7 +122,9 @@ class AnthropicLLM:
             in_t, out_t = response.usage.input_tokens, response.usage.output_tokens
             return LLMUsage(in_t, out_t, cost(served_by, in_t, out_t, self.prices))
         costs = [
-            cost(str(it.model), it.input_tokens, it.output_tokens, self.prices) for it in attempts
+            # An attempt without a model is the one that served.
+            cost(str(it.model or served_by), it.input_tokens, it.output_tokens, self.prices)
+            for it in attempts
         ]
         return LLMUsage(
             input_tokens=sum(it.input_tokens for it in attempts),

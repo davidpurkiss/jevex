@@ -135,6 +135,17 @@ async def test_anthropic_cost_sums_fallback_attempts_at_their_own_prices() -> No
     assert response.usage.cost == pytest.approx((100 * 4 + 5 * 20 + 12 * 2 + 7 * 10) / 1_000_000)
 
 
+async def test_anthropic_iteration_without_a_model_is_priced_as_the_serving_model() -> None:
+    body = message('{"title": "Dune"}')
+    body["usage"]["iterations"] = [{"type": "message", "input_tokens": 12, "output_tokens": 7}]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=body)
+
+    response = await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
+    assert response.usage.cost == pytest.approx((12 * 4 + 7 * 20) / 1_000_000)
+
+
 async def test_anthropic_refusal_still_records_usage() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=message(None, stop="refusal"))
