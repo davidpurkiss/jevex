@@ -3,6 +3,7 @@
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
+from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
@@ -24,9 +25,13 @@ from jevex.layout import (
     ComponentType,
     DomLocation,
     ImageLocation,
+    LayoutStage,
     Location,
     PageLocation,
+    TableCell,
+    UnsupportedDocumentError,
 )
+from jevex.layout_html import HtmlLayoutParser
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -81,6 +86,7 @@ __all__ = [
     "EmbeddedDataReader",
     "EntityScope",
     "EntityStage",
+    "EvalReport",
     "Extracted",
     "ExtractionResult",
     "Extractor",
@@ -92,11 +98,13 @@ __all__ = [
     "GeneratorRecord",
     "GeneratorRegistry",
     "GeneratorStats",
+    "HtmlLayoutParser",
     "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
     "JevCandidateSelector",
     "KeyMapping",
+    "LayoutStage",
     "Location",
     "NormaliseError",
     "NormaliseStage",
@@ -125,10 +133,15 @@ __all__ = [
     "StoreError",
     "StructuredBlob",
     "StructuredSource",
+    "TableCell",
     "TextReader",
+    "Tolerance",
+    "UnsupportedDocumentError",
     "VerifiedExample",
     "__version__",
     "default_registry",
+    "evaluate",
+    "load_corpus",
     "normalise",
     "open_store",
     "run_chain",

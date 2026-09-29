@@ -33,6 +33,17 @@ Homepage = "https://github.com/davidpurkiss/jevex"
 Repository = "https://github.com/davidpurkiss/jevex"
 Issues = "https://github.com/davidpurkiss/jevex/issues"
 
+[project.optional-dependencies]
+anthropic = [
+    "anthropic>=1.9.0",
+]
+openai = [
+    "openai>=3.22.0",
+]
+litellm = [
+    "litellm>=1.83.0",
+]
+
 [tool.hatch.version]
 path = "src/jevex/__init__.py"
 
