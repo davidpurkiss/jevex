@@ -46,6 +46,7 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
+from jevex.split import DefaultSplitter, StatementStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 from jevex.structured import (
     EmbeddedData,
@@ -67,6 +68,7 @@ __all__ = [
     "Component",
     "ComponentType",
     "Context",
+    "DefaultSplitter",
     "Document",
     "DocumentGateStage",
     "DocumentText",
@@ -113,6 +115,7 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "StatementStage",
     "StructuredBlob",
     "StructuredSource",
     "TableCell",
