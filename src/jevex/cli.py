@@ -115,7 +115,7 @@ async def load_document(source: str) -> Document:
 
 async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str, Any]:
     schemas = [load_schema(s) for s in args.schema]
-    if jev is None and not os.environ.get("TYPESAFE_API_KEY"):
+    if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
     try:
         extractor = Extractor(schemas, jev=jev, threshold=args.threshold)

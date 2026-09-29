@@ -12,3 +12,12 @@ class Book(BaseModel):
 
 
 NotAModel = 42
+
+
+class Outer(BaseModel):
+    """Holds a nested model for dotted-attribute loading."""
+
+    class Inner(BaseModel):
+        name: str = Field(description="Name")
+
+    inner: Inner | None = None

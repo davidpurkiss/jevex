@@ -276,3 +276,28 @@ async def test_bad_cap_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "five dollars")
     with pytest.raises(JevError, match="must be a number"):
         await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+
+
+async def test_sdk_errors_become_jev_backend_errors() -> None:
+    from jevex.jev import JevBackendError
+
+    def unauthorised(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(401, json={"detail": "bad key"})
+
+    sdk = AsyncTypeSafeClient(
+        api_key="ts-test-key",
+        transport=httpx2.MockTransport(unauthorised),
+        retry=RetryPolicy(max_retries=0),
+    )
+    backend = TypeSafeBackend(sdk)
+    with pytest.raises(JevBackendError):
+        await JevClient(backend).ask("s", {"q": Noul(instructions="?")})
+    await backend.aclose()
+
+
+def test_missing_key_is_a_jev_backend_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jevex.jev import JevBackendError
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(JevBackendError):
+        TypeSafeBackend()

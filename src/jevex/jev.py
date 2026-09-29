@@ -143,6 +143,10 @@ class UnexpectedAnswerError(JevError):
     """The backend answered a question with the wrong answer type."""
 
 
+class JevBackendError(JevError):
+    """The Jev API failed: bad or missing key, network error, rejected request, 5xx."""
+
+
 class JevBudgetExceededError(JevError):
     """Sending the request would take this process past ``JEVEX_JEV_MAX_COST_USD``."""
 
@@ -233,9 +237,12 @@ class TypeSafeBackend:
         model: str | None = None,
         retry: RetryPolicy | None = None,
     ) -> None:
-        from typesafe_sdk import AsyncTypeSafeClient
+        from typesafe_sdk import AsyncTypeSafeClient, TypeSafeError
 
-        self._client = client or AsyncTypeSafeClient(model=model, retry=retry)
+        try:
+            self._client = client or AsyncTypeSafeClient(model=model, retry=retry)
+        except TypeSafeError as exc:  # e.g. no TYPESAFE_API_KEY
+            raise JevBackendError(str(exc)) from exc
         self._model = model
 
     async def system_one(
@@ -256,10 +263,15 @@ class TypeSafeBackend:
                 case Score():
                     sdk_questions[key] = SdkScore(instructions=q.instructions, criteria=q.levels)
 
-        # The SDK's recursive JSON alias reads as partially unknown under strict pyright.
-        response = await self._client.system_one(  # pyright: ignore[reportUnknownMemberType]
-            state, sdk_questions, model=self._model
-        )
+        from typesafe_sdk import TypeSafeError
+
+        try:
+            # The SDK's recursive JSON alias reads as partially unknown under strict pyright.
+            response = await self._client.system_one(  # pyright: ignore[reportUnknownMemberType]
+                state, sdk_questions, model=self._model
+            )
+        except TypeSafeError as exc:  # after the SDK's own retries
+            raise JevBackendError(str(exc)) from exc
 
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
         for key, nou in response.nouls.items():

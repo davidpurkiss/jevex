@@ -198,7 +198,23 @@ def test_modules_in_the_current_directory_are_found(
 def test_missing_and_dotted_attributes() -> None:
     with pytest.raises(CliError, match="has no attribute 'Nope'"):
         load_schema("jevex.results:Nope")
-    assert load_schema("jevex.results:FieldMeta").__name__ == "FieldMeta"
+    assert load_schema(f"{FIXTURES / 'cli_schemas.py'}:Outer.Inner").__name__ == "Inner"
+
+
+def test_a_failing_schema_file_leaves_nothing_in_sys_modules(tmp_path: Path) -> None:
+    import sys
+
+    broken = tmp_path / "broken_schema.py"
+    broken.write_text("raise RuntimeError('boom')\n")
+    with pytest.raises(CliError, match="boom"):
+        load_schema(f"{broken}:X")
+    assert not [m for m in sys.modules if m.startswith("_jevex_schema_broken_schema_")]
+
+
+def test_whitespace_api_key_counts_as_missing(page: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "   ")
+    code = main(["extract", str(page), "--schema", SCHEMA], out=io.StringIO(), err=io.StringIO())
+    assert code == 1
 
 
 @pytest.mark.parametrize("value", ["5", "-0.1"])
