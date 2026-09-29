@@ -39,6 +39,8 @@ class Questions(BaseModel):
     - ``categorise``: this field's option description in the categorise Choice.
     - ``select``: instructions for choosing among candidate values.
     - ``verify``: Noul checking an LLM answer; ``{value}`` is replaced by the value.
+    - ``member``: for ``list[...]`` fields, the Noul asking whether one value (``{value}``)
+      is stated as one of them.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -47,6 +49,7 @@ class Questions(BaseModel):
     categorise: str | None = None
     select: str | None = None
     verify: str | None = None
+    member: str | None = None
 
 
 class SchemaConfig(BaseModel):
@@ -148,6 +151,14 @@ class FieldSpec:
         if self.kind != "bool":
             raise ValueError(f"{self.name} is not a bool field")
         return Noul(instructions=self.questions.select or f"Does the statement say {self.label}?")
+
+    def member_question(self, value: str) -> Noul:
+        """For ``list[...]`` fields: does the statement give ``value`` as one of them?"""
+        template = (
+            self.questions.member
+            or 'Does the statement give "{value}" as one of the {description}?'
+        )
+        return Noul(instructions=template.format(description=self.label, value=value))
 
     def verify_question(self, value: object) -> Noul:
         """Checks an LLM or vision answer against the statement."""

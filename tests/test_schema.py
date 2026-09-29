@@ -257,3 +257,19 @@ def test_enum_bool_and_verify_questions() -> None:
 
 def test_first_registered_is_date_kind() -> None:
     assert SchemaSpec.from_model(Listing).field("first_registered").annotation is date
+
+
+def test_member_question_default_and_override() -> None:
+    class M(BaseModel):
+        tags: list[str] = Field(default_factory=list, description="Tags")
+        colours: list[str] = Field(
+            default_factory=list,
+            description="Colours",
+            questions=Questions(member="Is {value} a {description}?"),
+        )
+
+    spec = SchemaSpec.from_model(M)
+    assert spec.field("tags").member_question("red") == Noul(
+        instructions='Does the statement give "red" as one of the Tags?'
+    )
+    assert spec.field("colours").member_question("red") == Noul(instructions="Is red a Colours?")

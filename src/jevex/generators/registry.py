@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from jevex.interfaces import FieldAwareGenerator
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
@@ -118,11 +120,19 @@ class GeneratorRegistry:
         locale: str | None = None,
         source: str | None = None,
     ) -> list[Candidate]:
-        """Candidates from every applicable generator, one per distinct span, in text order."""
+        """Candidates from every applicable generator, one per distinct span, in text order.
+
+        A :class:`~jevex.interfaces.FieldAwareGenerator` is given the field.
+        """
         seen: set[tuple[int, int]] = set()
         out: list[Candidate] = []
         for generator in self.for_field(field, schema=schema, locale=locale, source=source):
-            for candidate in generator.generate(statement):
+            candidates = (
+                generator.generate_for(statement, field)
+                if isinstance(generator, FieldAwareGenerator)
+                else generator.generate(statement)
+            )
+            for candidate in candidates:
                 key = (candidate.span.start, candidate.span.end)
                 if key not in seen:
                     seen.add(key)

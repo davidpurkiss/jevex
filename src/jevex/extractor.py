@@ -18,6 +18,7 @@ from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, select_records
 from jevex.schema import SchemaSpec
+from jevex.select import CandidateStage, SelectStage
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -53,6 +54,8 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     DocumentGateStage(),
     LayoutStage(),
     EntityStage(),
+    CandidateStage(),
+    SelectStage(),
     NormaliseStage(),
 )
 

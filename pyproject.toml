@@ -25,6 +25,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+jevex = "jevex.cli:entrypoint"
+
 [project.urls]
 Homepage = "https://github.com/davidpurkiss/jevex"
 Repository = "https://github.com/davidpurkiss/jevex"
@@ -58,6 +61,10 @@ extend-exclude = ["docs"]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT", "TC"]
 # Table-cell statements use these on purpose, e.g. "Performance › 0-62 mph (s) · SE: 9.1".
 allowed-confusables = ["›", "·", "–", "×", "’"]
+
+[tool.ruff.lint.per-file-ignores]
+# HTML templates and the phrasing bank read better unwrapped.
+"src/jevex/testsite/render.py" = ["E501"]
 
 [tool.ruff.lint.flake8-type-checking]
 # Pydantic resolves annotations at runtime, so their imports must stay at module level.
