@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import weakref
 from collections.abc import Mapping, Sequence
@@ -136,6 +137,46 @@ class StateTooLargeError(JevError):
 
 class MissingAnswerError(JevError):
     """The backend returned no answer for a question that was asked."""
+
+
+class JevBudgetExceededError(JevError):
+    """Sending the request would take this process past ``JEVEX_JEV_MAX_COST_USD``."""
+
+
+# --- Process-wide spend cap ------------------------------------------------------------
+#
+# A hard stop for live runs (agent loop, live tests, benchmarks): when
+# JEVEX_JEV_MAX_COST_USD is set, no request is sent once this process's estimated Jev
+# spend would exceed it. Per-document and per-run budgets are a separate, richer
+# feature (#34); this cap is the backstop that holds whatever the code above does.
+
+MAX_COST_ENV = "JEVEX_JEV_MAX_COST_USD"
+_process_cost = 0.0
+
+
+def process_cost() -> float:
+    """Estimated USD spent on Jev by this process so far."""
+    return _process_cost
+
+
+def reset_process_cost() -> None:
+    """Reset the process-wide spend counter (for tests)."""
+    global _process_cost
+    _process_cost = 0.0
+
+
+def _max_cost() -> float | None:
+    raw = os.environ.get(MAX_COST_ENV)
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise JevError(f"{MAX_COST_ENV} must be a number of US dollars, got {raw!r}") from None
+
+
+def _token_cost(tokens: int) -> float:
+    return tokens * PRICE_PER_MILLION_INPUT_TOKENS / 1_000_000
 
 
 # --- Metering --------------------------------------------------------------------------
@@ -340,18 +381,25 @@ class JevClient:
         return batches
 
     async def _send(self, state: JSONContent, batch: dict[str, Question]) -> JevResponse:
+        global _process_cost
+        estimated = estimate_tokens(state) + sum(
+            estimate_tokens(q.model_dump()) for q in batch.values()
+        )
+        cap = _max_cost()
+        if cap is not None and _process_cost + _token_cost(estimated) > cap:
+            raise JevBudgetExceededError(
+                f"Jev spend cap reached: ${_process_cost:.4f} spent, this request would add "
+                f"~${_token_cost(estimated):.4f}, cap is ${cap:.2f} ({MAX_COST_ENV})"
+            )
         async with self._limiter.semaphore():
             start = time.perf_counter()
             response = await self.backend.system_one(state, batch)
             elapsed = time.perf_counter() - start
+        tokens = response.input_tokens if response.input_tokens is not None else estimated
+        _process_cost += _token_cost(tokens)
         self.usage.requests += 1
         self.usage.questions += len(batch)
-        self.usage.input_tokens += (
-            response.input_tokens
-            if response.input_tokens is not None
-            else estimate_tokens(state)
-            + sum(estimate_tokens(q.model_dump()) for q in batch.values())
-        )
+        self.usage.input_tokens += tokens
         self.usage.seconds += elapsed
         if response.model:
             self.usage.models.add(response.model)

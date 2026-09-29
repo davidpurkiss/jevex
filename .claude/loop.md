@@ -43,8 +43,8 @@ Candidates are open issues with label `agent-ready` and without `agent-in-progre
   `gh api repos/$REPO/issues/<n>/dependencies/blocked_by --jq '[.[] | select(.state=="open")] | length'` must be `0`.
 - Drop any issue that already has an open PR (`gh pr list --search "<n> in:body is:open"`,
   then check the PR body for `Closes #<n>`).
-- Drop any issue labelled `live-api` unless #72's rules allow live calls in this run.
-  **Until #72 is closed, no run may make live calls.**
+- Drop any issue labelled `live-api` unless live calls are allowed (see **Live calls**
+  below). **Until #72 is closed, no run may make live calls.**
 - Order by milestone (the leading number of its title; no milestone sorts last), then
   by issue number. Take the first.
 
@@ -101,6 +101,22 @@ From here on, **any** failure must still go through step 9 (release the lock) an
 ## 9. Release the lock
 `gh issue edit <n> --remove-label agent-in-progress`. Comment on the issue:
 `**Loop attempt** <k>/3 finished NOW: <outcome>, PR #<pr> (merged | draft) / <what's needed>.`
+
+## Live calls (only once #72 is closed)
+A `live-api` issue may call real APIs only when all of these hold:
+- #72 is closed, and `JEVEX_SECRETS_FILE` is set and non-empty. If not, label the issue
+  `agent-blocked` with "needs keys" and stop.
+- This week's live spend is still under the weekly caps in #72. Add up the `Spend:` lines
+  of this week's #84 comments.
+- Load keys **only in the command that runs the live step**, never exported for the
+  whole session and never printed:
+  `(set -a; . "$JEVEX_SECRETS_FILE"; set +a; uv run pytest --live -m live tests/...)`.
+- `JEVEX_JEV_MAX_COST_USD` is already set by the runner and hard-stops Jev spend. Don't
+  raise it.
+- Websites: only the practice or test sites the issue names, honouring robots.txt.
+- Commit recordings (cassettes, fixtures), never keys. Before committing, check that no
+  secret value appears in `git diff --cached`.
+- Report the real spend (`jevex.jev.process_cost()` or the test output) in the log.
 
 ## 10. Log the run
 Comment on #84 in the run format from its description: outcome, issue, PR, reviewer
