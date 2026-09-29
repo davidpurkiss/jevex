@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" role="img" aria-label="jevex logo concept C: mascot">
+  <!-- Mark: "Jev-ex", a small friendly extractor holding up the value it found. -->
+  <g transform="translate(22 10)">
+    <ellipse cx="62" cy="140" rx="46" ry="6" fill="#1E1B4B" opacity="0.08"/>
+    <path d="M18 128 C 6 70, 34 22, 62 22 C 92 22, 118 70, 106 128 Z" fill="#8B5CF6"/>
+    <path d="M30 124 C 24 84, 40 44, 62 44 C 86 44, 100 84, 94 124 Z" fill="#A78BFA" opacity="0.45"/>
+    <circle cx="48" cy="70" r="11" fill="#FFFFFF"/><circle cx="51" cy="72" r="5" fill="#1E1B4B"/>
+    <circle cx="78" cy="70" r="11" fill="#FFFFFF"/><circle cx="81" cy="72" r="5" fill="#1E1B4B"/>
+    <path d="M52 92 Q 63 102 74 92" fill="none" stroke="#1E1B4B" stroke-width="4" stroke-linecap="round"/>
+    <path d="M104 86 L 122 50" stroke="#8B5CF6" stroke-width="9" stroke-linecap="round"/>
+    <rect x="108" y="18" width="44" height="26" rx="8" fill="#34D399"/>
+    <text x="130" y="37" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="15" font-weight="700" fill="#064E3B">9.1s</text>
+  </g>
+  <text x="196" y="104" font-family="'Nunito','Quicksand','Avenir Next',ui-rounded,system-ui,sans-serif"
+        font-size="84" font-weight="800" letter-spacing="-2" fill="#1E1B4B">jevex</text>
+</svg>
