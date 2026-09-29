@@ -468,3 +468,69 @@ def test_int_rounding_only_after_a_real_conversion_and_half_up() -> None:
     to_ps = steps("parse_number", {"unit": {"from": "kW"}})
     # 1.838746875 kW is exactly 2.5 PS: half rounds up, not to even
     assert normalise("1.838746875 kW", to_ps, EXTRA.field("power_ps")) == 3
+
+
+# --- list fields: several accepted candidates per statement (Selection.accepted) -------
+
+
+class Wheels(BaseModel):
+    wheel_sizes: list[float] = Field(default_factory=list, description="Wheel sizes")
+    front_wheel: float = Field(default=0, description="Front wheel size")
+
+
+WHEELS = SchemaSpec.from_model(Wheels)
+
+
+def many_pick(st: Statement, raws: list[str], confidence: float, *chain: object) -> Selection:
+    cands: list[Candidate] = []
+    for raw in raws:
+        start = st.text.index(raw)
+        cands.append(
+            Candidate.from_statement(
+                st,
+                Span(start=start, end=start + len(raw)),
+                generator_id="gen",
+                normalise=steps(*chain),
+            )
+        )
+    return Selection(candidate=cands[0], confidence=confidence, accepted=cands)
+
+
+def wheels_context(*statements: Statement) -> Context:
+    ctx = Context.create(Document.from_bytes(b"<p/>"), [WHEELS], FakeJev().client())
+    ctx.parsed = ParsedDocument(
+        document=ctx.document,
+        root=Component(id="root", type="section", location=LOC),
+        statements={s.id: s for s in statements},
+    )
+    return ctx
+
+
+async def test_list_fields_take_every_accepted_candidate_in_text_order() -> None:
+    a = statement("s1", "Wheel sizes: 19, 17 or 18 inch")
+    ctx = wheels_context(a)
+    run = ctx.schemas["Wheels"]
+    run.selections[("doc", "wheel_sizes", "s1")] = many_pick(a, ["19", "17"], 0.9, "parse_number")
+    await NormaliseStage().run(ctx)
+    meta = run.fields["doc"]["wheel_sizes"]
+    assert meta.value == [19.0, 17.0]
+    assert all(alt.raw not in ("19", "17") for alt in meta.alternatives)
+
+
+async def test_one_bad_accepted_candidate_keeps_the_others() -> None:
+    a = statement("s1", "Sizes: 17, eighteen")
+    ctx = wheels_context(a)
+    run = ctx.schemas["Wheels"]
+    run.selections[("doc", "wheel_sizes", "s1")] = many_pick(a, ["17", "eighteen"], 0.9, "strip")
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["wheel_sizes"].value == [17.0]
+
+
+async def test_scalar_fields_ignore_accepted() -> None:
+    a = statement("s1", "Front 18, rear 19")
+    ctx = wheels_context(a)
+    run = ctx.schemas["Wheels"]
+    sel = many_pick(a, ["18", "19"], 0.9, "parse_number")
+    run.selections[("doc", "front_wheel", "s1")] = sel
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["front_wheel"].value == 18.0

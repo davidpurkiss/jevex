@@ -39,8 +39,10 @@ from jevex.layout import Component
 from jevex.statements import Candidate, Statement
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from jevex.entities import EntityScope
-    from jevex.jev import ChoiceAnswer, JevClient
+    from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
     from jevex.schema import FieldSpec, SchemaSpec
 
 
@@ -86,13 +88,19 @@ class Scope(BaseModel):
 
 
 class Selection(BaseModel):
-    """The selector's pick for one statement and field. ``candidate`` is None for "none"."""
+    """The selector's pick for one statement and field. ``candidate`` is None for "none".
+
+    For ``list[...]`` fields, ``accepted`` holds every candidate the statement states (in
+    text order); ``candidate`` is the most confident of them. ``alternatives`` maps the
+    other raw spans that were weighed to their probabilities.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     candidate: Candidate | None
     confidence: float
     alternatives: dict[str, float] = Field(default_factory=dict[str, float])
+    accepted: list[Candidate] = Field(default_factory=list[Candidate])
 
 
 class LLMAnswer(BaseModel):
@@ -201,8 +209,16 @@ class CandidateGenerator(Protocol):
 
 @runtime_checkable
 class CandidateSelector(Protocol):
-    async def select(
-        self, statement: Statement, field: FieldSpec, candidates: list[Candidate], jev: JevClient
+    """Chooses among candidate spans, in two steps so the stage can batch every question
+    about a statement into one Jev request: ``questions`` says what to ask, ``selection``
+    reads the answers (keyed as ``questions`` returned them)."""
+
+    def questions(
+        self, statement: Statement, field: FieldSpec, candidates: list[Candidate]
+    ) -> dict[str, Question]: ...
+
+    def selection(
+        self, field: FieldSpec, candidates: list[Candidate], answers: Mapping[str, Answer]
     ) -> Selection: ...
 
 
