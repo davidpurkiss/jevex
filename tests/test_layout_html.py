@@ -431,6 +431,14 @@ def test_table_recovery_does_not_reach_into_templates(markup: str) -> None:
     assert outline(root) == [(0, "table", "Golf")]
 
 
+def test_a_template_end_tag_closes_cells_left_open_in_it() -> None:
+    root = parse_html(
+        "<table><tbody><template><tr><td>{{ a }}<td>{{ b }}</template>"
+        "<tr><td>Golf</td></tr></tbody></table><p>after</p>"
+    )
+    assert outline(root) == [(0, "table", "Golf"), (0, "paragraph", "after")]
+
+
 def test_a_table_opened_between_rows_ends_the_open_table() -> None:
     root = parse_html(
         "<table><tr><td>a</td></tr><table><tr><td>b</td></tr></table></table><p>after</p>"

@@ -394,7 +394,9 @@ class _TreeBuilder(HTMLParser):
             self._close(*_HEADINGS, stop=_SCOPE)  # "<h2>...</h3>" still ends the heading
             return
         stop = _SCOPE
-        if tag == "table":
+        if tag == "template":
+            stop = frozenset[str]()  # closes back to the template, whatever is left open
+        elif tag == "table":
             stop = frozenset[str]()
         elif tag in _TABLE_PARTS:
             stop = frozenset({"table"})
