@@ -46,7 +46,7 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
-from jevex.split import DefaultSplitter, StatementStage
+from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 from jevex.structured import (
     EmbeddedData,
@@ -73,6 +73,7 @@ __all__ = [
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
+    "DuplicateStatementError",
     "EmbeddedData",
     "EmbeddedDataReader",
     "EntityScope",
