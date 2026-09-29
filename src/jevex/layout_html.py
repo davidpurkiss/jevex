@@ -20,7 +20,7 @@ it was given. It then walks the DOM and maps it to components:
   and one per run of loose text between blocks. Wrapper ``div`` elements add no level.
 - ``img`` becomes an image component whose text is its alt text.
 
-Hidden content (``hidden``, ``aria-hidden="true"``, inline ``display:none``) and
+Hidden content (``hidden``, inline ``display:none``) and
 non-rendered elements (scripts, styles, forms' option lists, SVG...) are skipped. The
 parser never produces ``column`` components: HTML columns come from CSS, which it doesn't
 read.
@@ -159,6 +159,9 @@ _VOID_TAGS = frozenset(
 _TABLE_SECTIONS = frozenset({"thead", "tbody", "tfoot"})
 _CELLS = frozenset({"td", "th"})
 _TABLE_PARTS = _TABLE_SECTIONS | _CELLS | {"tr", "caption", "colgroup", "col"}
+_TABLE_CONTEXT = _TABLE_SECTIONS | {"table", "tr"}
+"""Where only table parts belong: other content found here is moved in front of the table."""
+_IN_TABLE = _TABLE_PARTS | {"script", "style", "template", "input"}
 
 # Start tags that close an open <p> (the HTML parsing algorithm's list).
 _CLOSES_P = (BLOCK_TAGS - _TABLE_PARTS - {"body", "li", "dd", "dt", "caption"}) | {
@@ -227,11 +230,19 @@ class _Node:
     def elements(self) -> list[_Node]:
         return [c for c in self.children if isinstance(c, _Node) and not c.skip]
 
-    def append(self, tag: str, attrs: dict[str, str]) -> _Node:
+    def append(self, tag: str, attrs: dict[str, str], *, before: _Node | None = None) -> _Node:
+        """Add a child element, last or in front of ``before``.
+
+        Only the element being built is ever inserted in front of, so a new element is
+        still the last of its tag and its ``index`` is the running count.
+        """
         skip = self.skip or tag in SKIP_TAGS or _hidden(attrs)
         node = _Node(tag, attrs, parent=self, skip=skip)
         node.index = self.counts[tag] = self.counts.get(tag, 0) + 1
-        self.children.append(node)
+        if before is None:
+            self.children.append(node)
+        else:
+            self.children.insert(self.children.index(before), node)
         if not skip and (tag in BLOCK_TAGS or tag in _HEADINGS):
             ancestor: _Node | None = self
             while ancestor is not None and not ancestor.has_block:
@@ -241,11 +252,8 @@ class _Node:
 
 
 def _hidden(attrs: dict[str, str]) -> bool:
-    return (
-        "hidden" in attrs
-        or attrs.get("aria-hidden", "").strip().lower() == "true"
-        or _HIDDEN_STYLE.search(attrs.get("style", "")) is not None
-    )
+    # aria-hidden content is still on screen, so it stays.
+    return "hidden" in attrs or _HIDDEN_STYLE.search(attrs.get("style", "")) is not None
 
 
 class _TreeBuilder(HTMLParser):
@@ -254,7 +262,8 @@ class _TreeBuilder(HTMLParser):
     Only the recoveries that change which block a piece of text lands in, or the element
     path to it, are implemented: implied ``html``/``head``/``body``, implied end tags for
     ``p``, ``li``, ``dt``/``dd``, table parts and headings, ``<tbody>`` around bare rows,
-    and end tags that have no matching open element in scope being ignored.
+    content misplaced between table rows moved in front of the table, and end tags that
+    have no matching open element in scope being ignored.
     """
 
     def __init__(self) -> None:
@@ -301,6 +310,16 @@ class _TreeBuilder(HTMLParser):
             self.ensure_body()
         self._imply_end_tags(tag)
         parent = self.stack[-1]
+        table = self._open_table()
+        if parent.tag in _TABLE_CONTEXT and tag not in _IN_TABLE and table is not None:
+            if tag == "form":
+                parent.append(tag, attrs)  # browsers keep it, empty, and read on
+                return
+            # Anything else between rows is shown in front of the table ("foster parenting").
+            assert table.parent is not None
+            parent, before = table.parent, table
+        else:
+            before = None
         if tag == "tr" and parent.tag == "table":
             parent = self._push(parent.append("tbody", {}))
         elif tag in _CELLS and parent.tag in _TABLE_SECTIONS | {"table"}:
@@ -309,7 +328,7 @@ class _TreeBuilder(HTMLParser):
             parent = self._push(parent.append("tr", {}))
         if len(self.stack) >= MAX_DEPTH:
             return
-        node = parent.append(tag, attrs)
+        node = parent.append(tag, attrs, before=before)
         if not closed and tag not in _VOID_TAGS:
             self.stack.append(node)
 
@@ -317,7 +336,20 @@ class _TreeBuilder(HTMLParser):
         self.stack.append(node)
         return node
 
+    def _open_table(self) -> _Node | None:
+        return next((n for n in reversed(self.stack) if n.tag == "table"), None)
+
     def _imply_end_tags(self, tag: str) -> None:
+        if tag in _TABLE_PARTS and self._open_table() is not None:
+            # Back to the table's own structure: close what was opened in a cell or in
+            # front of the table, then an unclosed caption or colgroup.
+            while self.stack[-1].tag not in _TABLE_PARTS | {"table"}:
+                self.stack.pop()
+            if tag in ("caption", "colgroup"):
+                while self.stack[-1].tag != "table":
+                    self.stack.pop()
+            elif tag != "col":
+                self._close("caption", "colgroup", stop=frozenset({"table"}))
         if tag in _CLOSES_P or tag in _HEADINGS or tag == "table":
             self._close("p", stop=_SCOPE)
         if tag in _HEADINGS and self.stack[-1].tag in _HEADINGS:
@@ -347,6 +379,9 @@ class _TreeBuilder(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in ("html", "body"):
             return  # content after </body> still belongs to the body, as in browsers
+        if tag in _HEADINGS:
+            self._close(*_HEADINGS, stop=_SCOPE)  # "<h2>...</h3>" still ends the heading
+            return
         stop = _SCOPE
         if tag == "table":
             stop = frozenset[str]()
@@ -362,7 +397,14 @@ class _TreeBuilder(HTMLParser):
             if not data.strip(" \t\n\r\f"):
                 return
             self.ensure_body()
-        self.stack[-1].children.append(data)
+        parent = self.stack[-1]
+        table = self._open_table()
+        if parent.tag in _TABLE_CONTEXT and table is not None and data.strip(" \t\n\r\f"):
+            assert table.parent is not None
+            siblings = table.parent.children
+            siblings.insert(siblings.index(table), data)
+            return
+        parent.children.append(data)
 
 
 # --- Segmenting --------------------------------------------------------------------------
@@ -620,15 +662,17 @@ def _heading_level(node: _Node) -> int:
 
 
 def _is_layout_table(table: _Node) -> bool:
-    """Whether a table arranges the page rather than holding data."""
+    """Whether a table arranges the page rather than holding data: it has a nested table,
+    or headings in its data cells (a heading in a ``th`` is just a header)."""
     if table.attrs.get("role", "").strip().lower() in ("presentation", "none"):
         return True
-    pending = table.elements()
+    pending = [(child, False) for child in table.elements()]
     while pending:
-        node = pending.pop()
-        if node.tag == "table" or _heading_level(node):
+        node, in_td = pending.pop()
+        if node.tag == "table" or (in_td and _heading_level(node)):
             return True
-        pending.extend(node.elements())
+        in_td = in_td or node.tag == "td"
+        pending.extend((child, in_td) for child in node.elements())
     return False
 
 
@@ -703,21 +747,26 @@ class _Converter:
     def __init__(self) -> None:
         self._next = 0
         self._headings: list[tuple[int, str]] = []
+        self._floor = 0
+        """Headings below this index belong to enclosing sectioning elements, which a
+        heading inside one doesn't close, whatever its rank."""
 
     def convert(self, block: _Block, depth: int = 0) -> Component:
         component_id = f"c{self._next}"
         self._next += 1
         if block.level:
-            while self._headings and self._headings[-1][0] >= block.level:
+            while len(self._headings) > self._floor and self._headings[-1][0] >= block.level:
                 self._headings.pop()
         trail = [text for _, text in self._headings]
-        outer = list(self._headings)
+        outer, outer_floor = list(self._headings), self._floor
+        if not block.level:
+            self._floor = len(self._headings)
         kids = block.children
         if depth + 1 >= MAX_COMPONENT_DEPTH:
             kids = _flattened(block)
         children = [self.convert(child, depth + 1) for child in kids]
         # Headings seen inside a container stay inside it.
-        self._headings = outer
+        self._headings, self._floor = outer, outer_floor
         if block.type == "heading":
             self._headings.append((block.level, block.text))
         return Component(

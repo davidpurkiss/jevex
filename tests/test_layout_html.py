@@ -99,7 +99,8 @@ def test_unrendered_and_hidden_content_is_skipped() -> None:
         "<div style='display: none'><p>css</p></div><select><option>opt</option></select>"
         "<svg><title>icon</title><path d='M0'/><path d='M1'/></svg><p>End</p>"
     )
-    assert [c.text for c in root.walk() if c.text] == ["Shown", "End"]
+    # aria-hidden only hides from screen readers; the text is still on screen.
+    assert [c.text for c in root.walk() if c.text] == ["Shown", "aria", "End"]
 
 
 def test_empty_markup_gives_an_empty_root() -> None:
@@ -191,6 +192,28 @@ def test_headings_inside_sectioning_elements_stay_inside() -> None:
         "Polo": ["Golf", "Related"],
         "Back in the page": ["Golf"],
     }
+
+
+def test_outer_headings_survive_same_rank_headings_in_sectioning_elements() -> None:
+    root = parse_html(
+        "<h1>Golf</h1><section><h1>Performance</h1><p>9.1 s</p></section>"
+        "<h2>Specs</h2><aside><h2>Related</h2><p>Polo</p></aside><p>Boot: 380 l</p>"
+    )
+    trails = {c.text: c.heading_trail for c in only(root, "paragraph")}
+    assert trails == {
+        "9.1 s": ["Golf", "Performance"],
+        "Polo": ["Golf", "Specs", "Related"],
+        "Boot: 380 l": ["Golf", "Specs"],
+    }
+
+
+def test_a_mismatched_heading_end_tag_still_ends_the_heading() -> None:
+    root = parse_html("<h2>Specs</h3><p>Power 150 PS</p><p>Torque</p>")
+    assert outline(root) == [
+        (0, "heading", "Specs"),
+        (0, "paragraph", "Power 150 PS"),
+        (0, "paragraph", "Torque"),
+    ]
 
 
 def test_aria_headings_and_empty_headings() -> None:
@@ -351,6 +374,53 @@ def test_layout_tables_are_read_as_containers() -> None:
         (0, "paragraph", "Left"),
         (0, "paragraph", "Right"),
     ]
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<table><caption>Performance<tr><td>Power</td><td>150 PS</td></tr></table>",
+        "<table><colgroup><col span=2><tr><td>Power</td><td>150 PS</td></tr></table>",
+        "<table><tr><td>Power</td><td>150 PS</td></tr><caption>Performance</caption></table>",
+        "<table><form action=x><tr><td>Power</td><td>150 PS</td></tr></form></table>",
+    ],
+)
+def test_unclosed_captions_colgroups_and_forms_keep_the_rows(markup: str) -> None:
+    root = parse_html(markup)
+    tables = only(root, "table")
+    assert [t.text for t in tables] == ["Power | 150 PS"]
+    assert [path(c) for c in tables] == ["/html/body/table"]
+    assert [c.text for c in only(root, "caption")] == (
+        ["Performance"] if "caption" in markup else []
+    )
+
+
+def test_content_between_rows_moves_in_front_of_the_table() -> None:
+    root = parse_html(
+        "<p>Before</p><table>Loose text<div>In a <b>div</b><tr><td>Power</td><td>150 PS</td>"
+        "</tr>Late</table><p>After</p>"
+    )
+    assert outline(root) == [
+        (0, "paragraph", "Before"),
+        (0, "paragraph", "Loose text"),
+        (0, "paragraph", "In a div"),
+        (0, "paragraph", "Late"),
+        (0, "table", "Power | 150 PS"),
+        (0, "paragraph", "After"),
+    ]
+    assert [path(c) for c in root.children] == [
+        "/html/body/p[1]",
+        "/html/body",
+        "/html/body/div",
+        "/html/body",
+        "/html/body/table",
+        "/html/body/p[2]",
+    ]
+
+
+def test_headings_in_header_cells_keep_a_data_table() -> None:
+    root = parse_html("<table><tr><th><h3>Power</h3></th><td>150 PS</td></tr></table>")
+    assert outline(root) == [(0, "table", "Power | 150 PS")]
 
 
 def test_a_table_without_text_is_dropped_but_keeps_its_caption() -> None:
