@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import GateDecision, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
     from jevex.results import FieldMeta
-    from jevex.schema import SchemaSpec
+    from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Statement
 
 
@@ -45,7 +45,9 @@ class SchemaRun:
     spec: SchemaSpec
     active: bool = True
     gate: GateDecision | None = None
-    component_ids: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
+    component_ids: dict[str, list[str]] | None = None
+    """Component-gate result: group → ids of components relevant to it. ``None`` when no
+    component gate ran, which means every component is relevant."""
     scopes: list[EntityScope] = field(default_factory=list["EntityScope"])
     categories: dict[str, ChoiceAnswer] = field(default_factory=dict[str, "ChoiceAnswer"])
     candidates: dict[tuple[str, str], list[Candidate]] = field(
@@ -62,6 +64,25 @@ class SchemaRun:
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     """Bare values by scope label, then field name, for stages with no metadata to give.
     Used only when ``fields`` has no entry for that field."""
+
+    def relevant_components(self) -> set[str] | None:
+        """Components that passed the gate for any group; ``None`` if nothing was gated."""
+        if self.component_ids is None:
+            return None
+        return {cid for ids in self.component_ids.values() for cid in ids}
+
+    def relevant_fields(self, component_id: str) -> list[FieldSpec]:
+        """The fields a component can state: those whose group it passed the gate for.
+
+        Every field when no component gate ran.
+        """
+        if self.component_ids is None:
+            return list(self.spec.fields)
+        return [
+            f
+            for f in self.spec.fields
+            if component_id in self.component_ids.get(f.group or f.name, ())
+        ]
 
     def set_field(self, scope: str, name: str, meta: FieldMeta) -> None:
         self.fields.setdefault(scope, {})[name] = meta
