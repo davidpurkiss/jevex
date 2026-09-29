@@ -87,6 +87,13 @@ bugs, a minimal document (or URL) and schema that reproduce the problem help mos
 **Security problems** go through private reporting instead of issues. See
 [SECURITY.md](SECURITY.md).
 
+## Releasing (maintainer)
+
+1. Bump `__version__` in `src/jevex/__init__.py`, the only place the version lives.
+2. Merge that, then publish a GitHub release tagged `v<version>`.
+3. `.github/workflows/release.yml` checks the tag matches, builds, and publishes to
+   PyPI through trusted publishing. No token is involved.
+
 ## License
 
 jevex is licensed under [Apache 2.0](LICENSE). By contributing, you agree that your

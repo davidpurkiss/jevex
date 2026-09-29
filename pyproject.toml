@@ -1,6 +1,6 @@
 [project]
 name = "jevex"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Extract typed records from web pages and PDFs using Jev, with LLM fallbacks that learn declarative generators."
 readme = "README.md"
 license = "Apache-2.0"
@@ -26,6 +26,9 @@ classifiers = [
 Homepage = "https://github.com/davidpurkiss/jevex"
 Repository = "https://github.com/davidpurkiss/jevex"
 Issues = "https://github.com/davidpurkiss/jevex/issues"
+
+[tool.hatch.version]
+path = "src/jevex/__init__.py"
 
 [build-system]
 requires = ["hatchling>=1.27"]
