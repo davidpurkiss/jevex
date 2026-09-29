@@ -36,6 +36,16 @@ Count open PRs from `agent/` branches (`gh pr list --state open --search "head:a
 These are drafts the loop could not merge. If there are **3 or more**, log
 `nothing-to-do` (reason: drafts waiting on the owner) and stop.
 
+## 3b. Finish a draft first
+Before picking new work, look for an open agent draft PR whose issue's last `**Loop attempt**`
+comment says a fix was made but not re-reviewed, and which isn't `agent-blocked`. If there's
+one, work on it instead of a new issue: claim its issue (step 5 counts this as an attempt),
+check out its branch, merge `origin/main` into it and fix any conflicts, run the checks, then
+run **one** fresh `reviewer` round. If the verdict is `ready` and CI passes, mark it ready
+(`gh pr ready <pr>`) and merge it (step 8). Otherwise fix what it found. If that's done within
+the run, re-review once more; if it's still not `ready`, leave the draft and comment on the
+issue with what's left. This keeps drafts from stalling everything blocked behind them.
+
 ## 4. Pick an issue
 Candidates are open issues with label `agent-ready` and without `agent-in-progress`,
 `agent-blocked` or `needs-human`.
