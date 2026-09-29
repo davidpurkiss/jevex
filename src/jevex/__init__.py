@@ -1,5 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
+from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
@@ -77,13 +78,17 @@ __all__ = [
     "BUILTIN_NORMALISERS",
     "BBox",
     "BoilerplateCleaner",
+    "BudgetEvent",
+    "Budgets",
     "Candidate",
     "CandidateStage",
     "CleanStage",
     "Component",
     "ComponentType",
     "Context",
+    "DocBudget",
     "Document",
+    "DocumentBudget",
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
@@ -124,6 +129,7 @@ __all__ = [
     "Questions",
     "RegexGenerator",
     "RobotsDisallowedError",
+    "RunBudget",
     "SQLiteStore",
     "SchemaConfig",
     "SchemaSpec",

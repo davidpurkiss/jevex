@@ -30,6 +30,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 
 | Module | What lives there |
 | --- | --- |
+| `budgets.py` | `Budgets`/`DocBudget`/`RunBudget`; `DocumentBudget` (per document, on `ctx.budget`): every LLM call goes through `ctx.budget.call_llm(...)` (returns `None` when a budget says no); run limits use the store's spend ledger. `Extractor(budgets=, store=, run_id=)` |
 | `document.py` | `Document` (bytes + content type; base64 in JSON), content sniffing |
 | `layout.py` | `Component` tree, `Location` union (`DomLocation`, `PageLocation`, `ImageLocation`), `BBox` |
 | `statements.py` | `Statement`, `Span`, `Candidate`, `NormaliserStep` (compact YAML form) |

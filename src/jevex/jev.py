@@ -147,6 +147,14 @@ class JevBackendError(JevError):
     """The Jev API failed: bad or missing key, network error, rejected request, 5xx."""
 
 
+class JevRequestCapError(JevError):
+    """A client's ``max_requests`` is used up (a document's ``DocBudget.max_jev_requests``).
+
+    The extractor stops that document and returns what it found; other documents carry
+    on. Unlike :class:`JevBudgetExceededError`, it never ends a run.
+    """
+
+
 class JevBudgetExceededError(JevError):
     """Sending the request would take this process past ``JEVEX_JEV_MAX_COST_USD``."""
 
@@ -332,10 +340,13 @@ class JevClient:
         request_token_budget: int = int(MAX_REQUEST_TOKENS * 0.9),
         state_token_budget: int = int(MAX_STATE_TOKENS * 0.9),
         usage: JevUsage | None = None,
+        max_requests: int | None = None,
         _limiter: _Limiter | None = None,
     ) -> None:
         self.backend = backend
         self.usage = usage if usage is not None else JevUsage()
+        self.max_requests = max_requests
+        self._started = 0  # requests begun, so concurrent sends can't pass the cap together
         self._request_budget = request_token_budget
         self._state_budget = state_token_budget
         self._limiter = _limiter or _Limiter(max_concurrency)
@@ -345,16 +356,20 @@ class JevClient:
         """A client for the real API, configured from ``TYPESAFE_*`` environment variables."""
         return cls(TypeSafeBackend(model=model), max_concurrency=max_concurrency)
 
-    def metered(self, usage: JevUsage | None = None) -> JevClient:
+    def metered(
+        self, usage: JevUsage | None = None, *, max_requests: int | None = None
+    ) -> JevClient:
         """A client sharing this backend and concurrency limit but with its own usage.
 
         The pipeline takes one per document, so each result reports its own Jev calls.
+        ``max_requests`` caps that client's requests (:class:`JevRequestCapError`).
         """
         return JevClient(
             self.backend,
             request_token_budget=self._request_budget,
             state_token_budget=self._state_budget,
             usage=usage if usage is not None else JevUsage(),
+            max_requests=max_requests,
             _limiter=self._limiter,
         )
 
@@ -401,6 +416,10 @@ class JevClient:
         estimated = estimate_tokens(state) + sum(
             estimate_tokens(q.model_dump()) for q in batch.values()
         )
+        if self.max_requests is not None:
+            if self._started >= self.max_requests:
+                raise JevRequestCapError(f"the cap of {self.max_requests} Jev requests is used up")
+            self._started += 1
         cap = _max_cost()
         if cap is not None and _process_cost + _token_cost(estimated) > cap:
             raise JevBudgetExceededError(

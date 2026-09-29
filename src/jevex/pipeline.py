@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Sequence
 
+    from jevex.budgets import DocumentBudget
     from jevex.document import Document
     from jevex.entities import EntityScope
     from jevex.interfaces import GateDecision, ParsedDocument, Selection
@@ -96,6 +97,9 @@ class Context:
     timings: dict[str, float] = field(default_factory=dict[str, float])
     events: list[Event] = field(default_factory=list[Event])
     stopped: bool = False
+    budget: DocumentBudget | None = None
+    """The document's budgets; LLM calls go through ``budget.call_llm`` (see
+    :mod:`jevex.budgets`). ``None`` outside an extractor, meaning unlimited."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
