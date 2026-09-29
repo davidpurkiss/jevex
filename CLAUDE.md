@@ -90,6 +90,8 @@ A change is done when all of these hold:
 
 ## Rules for agents working unattended
 
+The loop's run procedure is `.claude/loop.md`. The run log is issue #84.
+
 - **One issue per branch per PR.** Branch `agent/<issue>-<slug>`; the PR body starts
   with `Closes #<issue>`.
 - **Never push to `main`,** force-push, rewrite history, or change branch protection, CI
