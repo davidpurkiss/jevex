@@ -1,6 +1,7 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
 from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget
+from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
@@ -53,6 +54,7 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
+from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 from jevex.store import (
     GeneratorRecord,
@@ -83,17 +85,20 @@ __all__ = [
     "Budgets",
     "Candidate",
     "CandidateStage",
+    "CategoriseStage",
     "CleanStage",
     "Component",
     "ComponentGateStage",
     "ComponentType",
     "Context",
+    "DefaultSplitter",
     "DocBudget",
     "Document",
     "DocumentBudget",
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
+    "DuplicateStatementError",
     "EmbeddedData",
     "EmbeddedDataReader",
     "EntityScope",
@@ -117,6 +122,7 @@ __all__ = [
     "ImageLocation",
     "InvalidGeneratorError",
     "JevCandidateSelector",
+    "JevStatementClassifier",
     "KeyMapping",
     "LayoutStage",
     "Location",
@@ -148,12 +154,14 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "StatementStage",
     "Store",
     "StoreError",
     "StructuredBlob",
     "StructuredSource",
     "TableCell",
     "TextReader",
+    "ToClassify",
     "Tolerance",
     "UnsupportedDocumentError",
     "VerifiedExample",
