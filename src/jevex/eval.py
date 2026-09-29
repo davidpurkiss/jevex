@@ -17,10 +17,15 @@ A corpus is a directory with a ``truth.json`` in the test site's format (so
 records it returns against the expected ones:
 
 - per field: correct, wrong, missing (expected but not found) and spurious (found but not
-  expected), giving precision and recall. Numbers match within a tolerance, strings
-  after normalising case and whitespace, lists by item precision/recall;
-- per run: cost per document, latency, Jev requests and questions, LLM calls, and the
-  resolution mix (how many values each method produced).
+  expected), giving precision and recall. Numbers match within the field's tolerance
+  (:func:`field_tolerance`), strings after normalising case and whitespace, lists item
+  by item;
+- per run: cost per document, latency (mean, p50, p95), Jev requests and questions, LLM
+  calls, and the resolution mix (how many values each method produced).
+
+Errors that make the whole run meaningless (Jev's spend cap, a bad key or an unreachable
+API: :data:`RUN_ERRORS`) stop :func:`evaluate`. Any other error in one document is
+recorded on its :class:`DocumentRun` and the document is scored as all missing.
 """
 
 from __future__ import annotations
@@ -29,21 +34,32 @@ import asyncio
 import json
 import math
 import time
+import types
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
 from jevex.document import Document
+from jevex.generators.units import UNITS
+from jevex.jev import JevBackendError, JevBudgetExceededError
+from jevex.normalise import NormaliseError, canonical_unit, convert
 
 if TYPE_CHECKING:
-    from jevex.extractor import ExtractionResult, Extractor
+    from collections.abc import Mapping
 
-DEFAULT_REL_TOL = 0.005
-DEFAULT_ABS_TOL = 0.5
+    from jevex.extractor import ExtractionResult, Extractor
+    from jevex.schema import FieldSpec
+
 TRUTH_FILE = "truth.json"
+MEASURED_REL_TOL = 0.005
+"""±0.5% for measured quantities (floats), per docs/benchmarks.md."""
+
+RUN_ERRORS: tuple[type[Exception], ...] = (JevBudgetExceededError, JevBackendError)
+"""Errors that stop :func:`evaluate` instead of being scored against one document: the
+spend cap, and the Jev API failing (bad key, network, 5xx after retries)."""
 
 
 # --- corpus ----------------------------------------------------------------------------
@@ -51,37 +67,67 @@ TRUTH_FILE = "truth.json"
 
 @dataclass(frozen=True)
 class Expected:
+    """One expected record: its entity label and field values (JSON types)."""
+
     entity: str
     values: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class CorpusItem:
+    """One labelled document: where it is, the schema it's labelled in, what it holds."""
+
     path: Path
     schema: str
     records: tuple[Expected, ...]
 
 
 def load_corpus(directory: str | Path) -> list[CorpusItem]:
-    """Read ``truth.json`` from ``directory``; every listed document must exist."""
+    """Read ``truth.json`` from ``directory``; every listed document must exist.
+
+    Raises ``ValueError`` naming the page for a malformed manifest.
+    """
     root = Path(directory)
     truth = root / TRUTH_FILE
     try:
         manifest = json.loads(truth.read_text())
-        pages = cast("list[dict[str, Any]]", manifest["pages"])
+        pages = manifest["pages"]
+        if not isinstance(pages, list):
+            raise TypeError("'pages' must be a list")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise ValueError(f"{truth} isn't a corpus manifest: {exc}") from exc
     items: list[CorpusItem] = []
-    for page in pages:
-        path = root / str(page["path"])
-        if not path.is_file():
-            raise ValueError(f"{truth} lists {page['path']}, which doesn't exist")
-        records = tuple(
-            Expected(str(r["entity"]), dict(r["values"]))
-            for r in cast("list[dict[str, Any]]", page["records"])
-        )
-        items.append(CorpusItem(path=path, schema=str(page["schema"]), records=records))
+    for i, page in enumerate(cast("list[Any]", pages)):
+        try:
+            item = _corpus_item(root, page)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{truth} page {i}: {_describe(exc)}") from exc
+        if not item.path.is_file():
+            raise ValueError(f"{truth} lists {item.path.relative_to(root)}, which doesn't exist")
+        items.append(item)
     return items
+
+
+def _corpus_item(root: Path, page: Any) -> CorpusItem:
+    if not isinstance(page, dict):
+        raise TypeError(f"a page must be an object, not {type(page).__name__}")
+    entry = cast("dict[str, Any]", page)
+    records = entry["records"]
+    if not isinstance(records, list):
+        raise TypeError("'records' must be a list")
+    expected: list[Expected] = []
+    for j, record in enumerate(cast("list[Any]", records)):
+        r = cast("dict[str, Any]", record) if isinstance(record, dict) else None
+        if r is None or not isinstance(r.get("values"), dict):
+            raise TypeError(f"record {j} must be an object with a 'values' object")
+        expected.append(Expected(str(r.get("entity", "")), dict(r["values"])))
+    return CorpusItem(
+        path=root / str(entry["path"]), schema=str(entry["schema"]), records=tuple(expected)
+    )
+
+
+def _describe(exc: Exception) -> str:
+    return f"missing {exc}" if isinstance(exc, KeyError) else str(exc)
 
 
 # --- comparing values ------------------------------------------------------------------
@@ -89,13 +135,70 @@ def load_corpus(directory: str | Path) -> list[CorpusItem]:
 
 @dataclass(frozen=True)
 class Tolerance:
-    """Numbers match if within ``rel`` (fraction) or ``abs`` of each other."""
+    """Numbers match if within ``rel`` (a fraction) or ``abs`` of each other. The default
+    is an exact match."""
 
-    rel: float = DEFAULT_REL_TOL
-    abs: float = DEFAULT_ABS_TOL
+    rel: float = 0.0
+    abs: float = 0.0
 
 
-DEFAULT_TOLERANCE = Tolerance()
+EXACT = Tolerance()
+
+
+def field_tolerance(spec: FieldSpec) -> Tolerance:
+    """The default tolerance for a field, from its type and unit.
+
+    Counts (``int`` with no unit, like a year or seats) and money (``Decimal``, or a
+    currency unit) are stated exactly, so they match exactly. Measured quantities (``float``)
+    get ±0.5%. A field with a unit also allows the rounding a page introduces when it shows
+    the value in a comparable unit: power as whole PS or bhp is up to 0.37 kW out, a speed in
+    whole km/h up to 0.31 mph (:func:`rounding_slack`).
+    """
+    if spec.kind != "number":
+        return EXACT
+    base = _base_type(spec.annotation)
+    if base is Decimal or (spec.unit and _is_currency(spec.unit)):
+        return EXACT
+    rel = MEASURED_REL_TOL if base is float else 0.0
+    slack = rounding_slack(spec.unit) if spec.unit else 0.0
+    return Tolerance(rel=rel, abs=slack)
+
+
+def rounding_slack(unit: str) -> float:
+    """How far a value in ``unit`` can be off after a page rounds it to a whole number in a
+    comparable unit (one within a factor of two, so PS for kW but not W). 0 if none."""
+    try:
+        target = canonical_unit(unit)
+    except NormaliseError:
+        return 0.0
+    slack = 0.0
+    for other in {u.canonical for u in UNITS} - {target}:
+        try:
+            one = convert(1.0, other, target)
+        except NormaliseError:
+            continue
+        if 0.5 <= one <= 2.0:
+            slack = max(slack, one / 2)
+    return slack
+
+
+def _is_currency(unit: str) -> bool:
+    return len(unit) == 3 and unit.isalpha() and unit.isupper()
+
+
+def _base_type(annotation: Any) -> Any:
+    """``int | None`` → ``int``; ``list[float]`` → ``float``."""
+    while True:
+        origin = get_origin(annotation)
+        if origin in (Union, types.UnionType):
+            rest = [a for a in get_args(annotation) if a is not type(None)]
+            if len(rest) != 1:
+                return annotation
+            annotation = rest[0]
+        elif origin is list:
+            (annotation,) = get_args(annotation) or (Any,)
+        else:
+            return annotation
 
 
 def _canonical(value: Any) -> Any:
@@ -110,7 +213,7 @@ def _canonical(value: Any) -> Any:
     return value
 
 
-def values_match(expected: Any, actual: Any, tolerance: Tolerance = DEFAULT_TOLERANCE) -> bool:
+def values_match(expected: Any, actual: Any, tolerance: Tolerance = EXACT) -> bool:
     """Whether a found value counts as the expected one (scalars; see :func:`list_scores`)."""
     e, a = _canonical(expected), _canonical(actual)
     if isinstance(e, bool) or isinstance(a, bool):  # True == 1 in Python; not here
@@ -126,7 +229,7 @@ def values_match(expected: Any, actual: Any, tolerance: Tolerance = DEFAULT_TOLE
 
 
 def list_scores(
-    expected: list[Any], actual: list[Any], tolerance: Tolerance = DEFAULT_TOLERANCE
+    expected: list[Any], actual: list[Any], tolerance: Tolerance = EXACT
 ) -> tuple[int, int, int]:
     """(matched, expected count, found count) for list fields, each item matched once."""
     remaining = list(actual)
@@ -183,17 +286,21 @@ class FieldScore:
         }
 
 
-def score_value(expected: Any, actual: Any, tolerance: Tolerance = DEFAULT_TOLERANCE) -> FieldScore:
-    """Score one expected value against one found value (``None`` = not found)."""
+def score_value(expected: Any, actual: Any, tolerance: Tolerance = EXACT) -> FieldScore:
+    """Score one expected value against one found value (``None`` = not found).
+
+    Lists count per item, including against an empty side: expecting three items and
+    finding none is three missing, not one.
+    """
     s = FieldScore()
     exp_empty = expected is None or expected == []
     act_empty = actual is None or actual == []
     if exp_empty and act_empty:
         s.empty = 1
     elif exp_empty:
-        s.spurious = 1
+        s.spurious = len(cast("list[Any]", actual)) if isinstance(actual, list) else 1
     elif act_empty:
-        s.missing = 1
+        s.missing = len(cast("list[Any]", expected)) if isinstance(expected, list) else 1
     elif isinstance(expected, list) or isinstance(actual, list):
         exp_list = cast("list[Any]", expected if isinstance(expected, list) else [expected])
         act_list = cast("list[Any]", actual if isinstance(actual, list) else [actual])
@@ -212,40 +319,47 @@ def score_value(expected: Any, actual: Any, tolerance: Tolerance = DEFAULT_TOLER
 def match_records(
     expected: tuple[Expected, ...],
     found: list[dict[str, Any]],
-    tolerance: Tolerance = DEFAULT_TOLERANCE,
+    tolerances: Mapping[str, Tolerance] | None = None,
 ) -> list[tuple[Expected | None, dict[str, Any] | None]]:
-    """Pair expected and found records: same entity label first, then by field agreement.
+    """Pair expected and found records by how many field values agree.
+
+    The entity label only breaks ties: on a listing grid one skipped card shifts every
+    positional label, so trusting labels first would pair every record wrongly. Pairing is
+    greedy on the agreement matrix (best pair first), which is not always the optimal
+    assignment but is close for records that mostly agree or mostly don't.
 
     Unpaired expected records pair with ``None`` (every field missing) and unpaired found
     records with ``None`` (every field spurious).
     """
-    pairs: list[tuple[Expected | None, dict[str, Any] | None]] = []
-    left = list(expected)
-    right = list(found)
-    for exp in list(left):
-        same = next((f for f in right if f["entity"] == exp.entity), None)
-        if same is not None:
-            pairs.append((exp, same))
-            left.remove(exp)
-            right.remove(same)
+    tol = tolerances or {}
 
     def agreement(exp: Expected, rec: dict[str, Any]) -> int:
         values = cast("dict[str, Any]", rec["values"])
         return sum(
-            1
+            score_value(v, values.get(k), tol.get(k, EXACT)).correct
             for k, v in exp.values.items()
-            if v is not None and values_match(v, values.get(k), tolerance)
+            if v is not None
         )
 
-    while left and right:
-        exp, rec = max(
-            ((e, r) for e in left for r in right), key=lambda er: agreement(er[0], er[1])
-        )
-        pairs.append((exp, rec))
-        left.remove(exp)
-        right.remove(rec)
-    pairs.extend((exp, None) for exp in left)
-    pairs.extend((None, rec) for rec in right)
+    ranked = sorted(
+        (
+            (agreement(e, r), e.entity == r["entity"], -i, -j)
+            for i, e in enumerate(expected)
+            for j, r in enumerate(found)
+        ),
+        reverse=True,
+    )
+    pairs: list[tuple[Expected | None, dict[str, Any] | None]] = []
+    used_exp: set[int] = set()
+    used_found: set[int] = set()
+    for _, _, neg_i, neg_j in ranked:
+        i, j = -neg_i, -neg_j
+        if i not in used_exp and j not in used_found:
+            pairs.append((expected[i], found[j]))
+            used_exp.add(i)
+            used_found.add(j)
+    pairs.extend((e, None) for i, e in enumerate(expected) if i not in used_exp)
+    pairs.extend((None, r) for j, r in enumerate(found) if j not in used_found)
     return pairs
 
 
@@ -254,6 +368,8 @@ def match_records(
 
 @dataclass
 class DocumentRun:
+    """What happened on one document: its metrics and per-field scores."""
+
     path: str
     schema: str
     seconds: float
@@ -265,7 +381,11 @@ class DocumentRun:
     llm_cost: float
     methods: Counter[str]
     fields: dict[str, FieldScore]
+    """Keyed ``Schema.field``. Usually the document's own schema, plus spurious counts for
+    any other schema the extractor wrongly found records of."""
     error: str | None = None
+    """Set when extraction raised; the document then scores as all missing, and its usage
+    is 0 because the partial usage is lost with the exception."""
 
     @property
     def cost(self) -> float:
@@ -274,41 +394,55 @@ class DocumentRun:
 
 @dataclass
 class EvalReport:
+    """The result of :func:`evaluate`: one :class:`DocumentRun` per corpus document."""
+
     documents: list[DocumentRun] = field(default_factory=list[DocumentRun])
+
+    @property
+    def failed(self) -> list[DocumentRun]:
+        """Documents whose extraction raised."""
+        return [d for d in self.documents if d.error]
 
     def field_scores(self) -> dict[str, FieldScore]:
         """Per ``Schema.field`` totals across documents."""
         out: dict[str, FieldScore] = {}
         for doc in self.documents:
             for name, s in doc.fields.items():
-                out.setdefault(f"{doc.schema}.{name}", FieldScore()).add(s)
+                out.setdefault(name, FieldScore()).add(s)
         return dict(sorted(out.items()))
 
     def overall(self) -> FieldScore:
+        """Every field's counts added together (micro-averaged precision and recall)."""
         total = FieldScore()
         for s in self.field_scores().values():
             total.add(s)
         return total
 
     def summary(self) -> dict[str, Any]:
+        """Run-level metrics. Latency covers only documents that didn't fail."""
         n = len(self.documents) or 1
         overall = self.overall()
         methods: Counter[str] = Counter()
         for doc in self.documents:
             methods.update(doc.methods)
+        seconds = sorted(d.seconds for d in self.documents if not d.error)
         return {
             "documents": len(self.documents),
-            "errors": sum(1 for d in self.documents if d.error),
+            "errors": len(self.failed),
             "precision": overall.precision,
             "recall": overall.recall,
             "cost_per_document": sum(d.cost for d in self.documents) / n,
-            "seconds_per_document": sum(d.seconds for d in self.documents) / n,
+            "seconds_per_document": sum(seconds) / len(seconds) if seconds else None,
+            "latency_p50": _percentile(seconds, 0.5),
+            "latency_p95": _percentile(seconds, 0.95),
             "jev_requests_per_document": sum(d.jev_requests for d in self.documents) / n,
+            "jev_questions_per_document": sum(d.jev_questions for d in self.documents) / n,
             "llm_calls_per_document": sum(d.llm_calls for d in self.documents) / n,
             "resolution_mix": dict(sorted(methods.items())),
         }
 
     def to_dict(self) -> dict[str, Any]:
+        """The full report as JSON types: summary, per-field scores, per-document runs."""
         return {
             "summary": self.summary(),
             "fields": {k: v.to_dict() for k, v in self.field_scores().items()},
@@ -319,7 +453,9 @@ class EvalReport:
                     "seconds": d.seconds,
                     "cost": d.cost,
                     "jev_requests": d.jev_requests,
+                    "jev_questions": d.jev_questions,
                     "llm_calls": d.llm_calls,
+                    "methods": dict(sorted(d.methods.items())),
                     "error": d.error,
                 }
                 for d in self.documents
@@ -327,50 +463,100 @@ class EvalReport:
         }
 
 
-def _found_records(result: ExtractionResult, schema: str) -> list[dict[str, Any]]:
-    return [
-        {"entity": r.entity, "values": {n: getattr(r.record, n) for n in r.record.model_fields_set}}
-        for r in result.records
-        if r.schema_name == schema
-    ]
+def _percentile(sorted_values: list[float], q: float) -> float | None:
+    """Linear interpolation between closest ranks; ``None`` for no values."""
+    if not sorted_values:
+        return None
+    pos = q * (len(sorted_values) - 1)
+    lo = math.floor(pos)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
+
+
+def _found_records(result: ExtractionResult) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for r in result.records:
+        values = {n: getattr(r.record, n) for n in r.record.model_fields_set}
+        out.setdefault(r.schema_name, []).append({"entity": r.entity, "values": values})
+    return out
 
 
 def score_document(
     item: CorpusItem,
     result: ExtractionResult,
-    fields: list[str],
-    tolerance: Tolerance = DEFAULT_TOLERANCE,
+    tolerances: Mapping[str, Mapping[str, Tolerance]],
 ) -> dict[str, FieldScore]:
-    """Per-field scores for one document."""
-    scores = {name: FieldScore() for name in fields}
-    for exp, rec in match_records(item.records, _found_records(result, item.schema), tolerance):
+    """Per ``Schema.field`` scores for one document.
+
+    ``tolerances`` maps each schema the extractor has to its per-field tolerances. The
+    document's own schema is scored against its expected records; any record found for
+    another schema is wrong by definition, so its values count as spurious there.
+    """
+    own = tolerances[item.schema]
+    scores = {f"{item.schema}.{name}": FieldScore() for name in own}
+    found = _found_records(result)
+    for exp, rec in match_records(item.records, found.get(item.schema, []), own):
         exp_values = exp.values if exp else {}
         rec_values = cast("dict[str, Any]", rec["values"]) if rec else {}
-        for name in fields:
-            scores[name].add(score_value(exp_values.get(name), rec_values.get(name), tolerance))
+        for name, tol in own.items():
+            scores[f"{item.schema}.{name}"].add(
+                score_value(exp_values.get(name), rec_values.get(name), tol)
+            )
+    for schema, records in found.items():
+        if schema == item.schema:
+            continue
+        for rec in records:
+            for name, value in cast("dict[str, Any]", rec["values"]).items():
+                if value is not None:
+                    key = f"{schema}.{name}"
+                    scores.setdefault(key, FieldScore()).add(score_value(None, value))
     return scores
+
+
+def resolve_tolerances(
+    extractor: Extractor, overrides: Mapping[str, Tolerance] | None = None
+) -> dict[str, dict[str, Tolerance]]:
+    """Each schema's per-field tolerance: an override keyed ``Schema.field`` or ``field``,
+    else :func:`field_tolerance`."""
+    given = overrides or {}
+    return {
+        spec.name: {
+            f.name: given.get(f"{spec.name}.{f.name}", given.get(f.name, field_tolerance(f)))
+            for f in spec.fields
+        }
+        for spec in extractor.schemas
+    }
 
 
 async def evaluate(
     extractor: Extractor,
     corpus: list[CorpusItem],
     *,
-    tolerance: Tolerance = DEFAULT_TOLERANCE,
+    tolerances: Mapping[str, Tolerance] | None = None,
     concurrency: int = 4,
 ) -> EvalReport:
-    """Run ``extractor`` over the corpus and score it. Documents run ``concurrency`` at a time."""
-    fields = {s.name: [f.name for f in s.fields] for s in extractor.schemas}
-    unknown = sorted({i.schema for i in corpus} - set(fields))
+    """Run ``extractor`` over the corpus and score it. Documents run ``concurrency`` at a time.
+
+    ``tolerances`` overrides :func:`field_tolerance` per field (keys ``Schema.field`` or
+    ``field``). Raises the :data:`RUN_ERRORS` (spend cap, Jev API failure) rather than
+    scoring them; other per-document errors are recorded and scored as all missing.
+    """
+    resolved = resolve_tolerances(extractor, tolerances)
+    unknown = sorted({i.schema for i in corpus} - set(resolved))
     if unknown:
         raise ValueError(f"the corpus uses schemas the extractor doesn't have: {unknown}")
     semaphore = asyncio.Semaphore(concurrency)
 
     async def one(item: CorpusItem) -> DocumentRun:
         async with semaphore:
-            document = Document.from_path(item.path, url=item.path.as_posix())
+            document = await asyncio.to_thread(
+                Document.from_path, item.path, url=item.path.as_posix()
+            )
             start = time.perf_counter()
             try:
                 result = await extractor.extract(document)
+            except RUN_ERRORS:
+                raise
             except Exception as exc:  # scored as all-missing; the run carries on
                 return DocumentRun(
                     path=item.path.as_posix(),
@@ -382,7 +568,7 @@ async def evaluate(
                     llm_calls=0,
                     llm_cost=0.0,
                     methods=Counter(),
-                    fields=_all_missing(item, fields[item.schema], tolerance),
+                    fields=_all_missing(item, resolved[item.schema]),
                     error=f"{type(exc).__name__}: {exc}",
                 )
             seconds = time.perf_counter() - start
@@ -402,17 +588,15 @@ async def evaluate(
             llm_calls=0,
             llm_cost=0.0,
             methods=methods,
-            fields=score_document(item, result, fields[item.schema], tolerance),
+            fields=score_document(item, result, resolved),
         )
 
     return EvalReport(documents=list(await asyncio.gather(*(one(i) for i in corpus))))
 
 
-def _all_missing(
-    item: CorpusItem, fields: list[str], tolerance: Tolerance
-) -> dict[str, FieldScore]:
-    scores = {n: FieldScore() for n in fields}
+def _all_missing(item: CorpusItem, tolerances: Mapping[str, Tolerance]) -> dict[str, FieldScore]:
+    scores = {f"{item.schema}.{n}": FieldScore() for n in tolerances}
     for exp in item.records:
-        for n in fields:
-            scores[n].add(score_value(exp.values.get(n), None, tolerance))
+        for n, tol in tolerances.items():
+            scores[f"{item.schema}.{n}"].add(score_value(exp.values.get(n), None, tol))
     return scores

@@ -40,6 +40,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `pipeline.py` | `Stage` protocol, `Context`/`SchemaRun` (per-document state), `Pipeline` composition, `for_each_scope`/`for_each_schema` |
 | `extractor.py` | `Extractor`, `STAGE_ORDER`/`DEFAULT_STAGES`/`default_pipeline()`, `ExtractionResult`, `DocumentMeta` |
 | `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |
+| `eval.py` | `jevex eval`: corpus (`truth.json`) loading, record matching, per-field tolerances and scores, `EvalReport` |
 | `testing.py` | `FakeJev` (scripted answers), `Cassette` record/replay |
 
 How the parts fit together:

@@ -3,6 +3,7 @@
 from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
+from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
@@ -61,6 +62,7 @@ __all__ = [
     "DomLocation",
     "EntityScope",
     "EntityStage",
+    "EvalReport",
     "Extracted",
     "ExtractionResult",
     "Extractor",
@@ -96,8 +98,11 @@ __all__ = [
     "Statement",
     "StatementKind",
     "TextReader",
+    "Tolerance",
     "__version__",
     "default_registry",
+    "evaluate",
+    "load_corpus",
     "normalise",
     "run_chain",
 ]

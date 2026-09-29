@@ -159,6 +159,8 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
             return await evaluate(extractor, corpus, concurrency=max(1, args.concurrency))
         except ValueError as exc:
             raise CliError(str(exc)) from exc
+        except JevError as exc:  # the spend cap or the API itself: the run can't be scored
+            raise CliError(f"Jev: {exc}") from exc
 
 
 def format_report(report: EvalReport) -> str:
@@ -167,13 +169,18 @@ def format_report(report: EvalReport) -> str:
     def pct(x: float | None) -> str:
         return "   –  " if x is None else f"{x * 100:5.1f}%"
 
+    def secs(x: float | None) -> str:
+        return "–" if x is None else f"{x:.2f}s"
+
     s = report.summary()
     lines = [
         f"documents: {s['documents']}  errors: {s['errors']}",
         f"precision: {pct(s['precision'])}  recall: {pct(s['recall'])}",
-        f"per document: ${s['cost_per_document']:.5f}  {s['seconds_per_document']:.2f}s  "
-        f"{s['jev_requests_per_document']:.1f} Jev requests  "
+        f"per document: ${s['cost_per_document']:.5f}  {s['jev_requests_per_document']:.1f} "
+        f"Jev requests ({s['jev_questions_per_document']:.1f} questions)  "
         f"{s['llm_calls_per_document']:.1f} LLM calls",
+        f"latency: mean {secs(s['seconds_per_document'])}  p50 {secs(s['latency_p50'])}  "
+        f"p95 {secs(s['latency_p95'])}",
         f"resolution mix: {s['resolution_mix'] or 'none'}",
         "",
         f"{'field':40} {'precision':>9} {'recall':>7} "
@@ -257,7 +264,8 @@ def main(
 ) -> int:
     """Run the CLI and return its exit code.
 
-    0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``).
+    0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``),
+    including ``jevex eval`` runs where any document failed (the report is still printed).
     2: a usage error, no command, or a command that isn't implemented yet.
     ``jev``, ``out`` and ``err`` are injectable for tests.
     """
@@ -280,7 +288,10 @@ def main(
                 stdout.write("\n")
             else:
                 stdout.write(format_report(report))
-            return EXIT_OK
+            for doc in report.failed:
+                print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
+            # A run with failed documents isn't a clean measurement, even though it's scored.
+            return EXIT_ERROR if report.failed else EXIT_OK
         payload = asyncio.run(_extract(args, jev))
     except CliError as exc:
         print(f"jevex: error: {exc}", file=stderr)
