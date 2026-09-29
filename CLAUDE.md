@@ -38,6 +38,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `jev.py` | The only code that talks to Jev: `Noul`/`Choice`/`Score` questions, answers, `JevClient` (batching, splitting, metering), `JevBackend` protocol, `TypeSafeBackend` |
 | `schema.py` | `jevex.Field`, `Questions`, `SchemaConfig`, `SchemaSpec`/`FieldSpec` and every generated question |
 | `interfaces.py` | Protocols for the 15 pluggable parts + shared types (`ParsedDocument`, `GateDecision`, `Selection`...). Its docstring maps each protocol to the issue that ships its default |
+| `component_gate.py` | Component gate (stage 7): `gate_units` (a container's run of blocks, chunked; tables alone), `NoulComponentGate` (one Noul per unit × field group, all schemas in one request), `ComponentGateStage`. Results on `SchemaRun.component_ids`; `EntityStage` keeps only passing components; `SchemaRun.relevant_fields(cid)` for the classifier |
 | `pipeline.py` | `Stage` protocol, `Context`/`SchemaRun` (per-document state), `Pipeline` composition, `for_each_scope`/`for_each_schema` |
 | `extractor.py` | `Extractor`, `STAGE_ORDER`/`DEFAULT_STAGES`/`default_pipeline()`, `ExtractionResult`, `DocumentMeta` |
 | `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Self, overload
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex.clean import CleanStage
+from jevex.component_gate import ComponentGateStage
 from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient
@@ -54,6 +55,7 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     CleanStage(),
     DocumentGateStage(),
     LayoutStage(),
+    ComponentGateStage(),
     StatementStage(),
     EntityStage(),
     CandidateStage(),
