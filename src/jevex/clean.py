@@ -127,7 +127,7 @@ class BoilerplateCleaner:
     def clean(self, document: Document) -> Document:
         if not document.is_html:
             return document
-        text, encoding = _decode(document.content)
+        text, encoding = decode_html(document.content)
         stripper = _Stripper(self)
         stripper.feed(text)
         stripper.close()
@@ -276,7 +276,7 @@ class CleanStage:
         ctx.document = self.cleaner.clean(ctx.document)
 
 
-def _decode(content: bytes) -> tuple[str, str]:
+def decode_html(content: bytes) -> tuple[str, str]:
     """Decode with the page's charset if that round-trips exactly, else as UTF-8.
 
     ``surrogateescape`` keeps undecodable bytes, so UTF-8 always round-trips. Falling back

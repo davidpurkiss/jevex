@@ -451,4 +451,5 @@ async def test_extractor_cleans_by_default() -> None:
     async with Extractor([Car], jev=JevClient(fake)) as ex:
         result = await ex.extract(html("<nav>menu</nav><p>Golf</p>"))
     assert "clean" in result.meta.timings
-    assert fake.calls == []
+    # The document gate is the first stage to read the page, and sees it cleaned.
+    assert [call.state for call in fake.calls] == ["Golf"]

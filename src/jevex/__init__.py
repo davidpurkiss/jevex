@@ -4,6 +4,13 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.gate import (
+    DocumentGateStage,
+    DocumentText,
+    HtmlTextReader,
+    NoulDocumentGate,
+    TextReader,
+)
 from jevex.layout import (
     BBox,
     Component,
@@ -28,15 +35,19 @@ __all__ = [
     "ComponentType",
     "Context",
     "Document",
+    "DocumentGateStage",
+    "DocumentText",
     "DomLocation",
     "EntityScope",
     "ExtractionResult",
     "Extractor",
     "Field",
     "FieldSpec",
+    "HtmlTextReader",
     "ImageLocation",
     "Location",
     "NormaliserStep",
+    "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
     "Questions",
@@ -46,5 +57,6 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "TextReader",
     "__version__",
 ]
