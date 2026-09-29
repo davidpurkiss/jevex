@@ -7,7 +7,7 @@ every worker on the same database:
 Record                 Purpose                                      Used by
 =====================  ==========================================  =================
 ``GeneratorRecord``    learned candidate generators                 #37, #38, #41
-``KeyMapping``         structured-data key path → field             #30
+``KeyMapping``         structured-data key path → field (or none)   #30
 ``VerifiedExample``    regression tests and eval corpus             #38, #42
 ``GeneratorStats``     hit and win counts, for pruning              #40
 spend ledger           run-level budgets shared across workers      #34
@@ -38,7 +38,7 @@ from jevex.store.sqlite import SQLiteStore
 
 def open_store(url: str | Path) -> Store:
     """Open a store from a URL: ``sqlite:///relative.db``, ``sqlite:////abs/path.db``,
-    ``sqlite://:memory:``, or a bare path (SQLite).
+    ``sqlite://:memory:`` (or ``sqlite:///:memory:``), or a bare path (SQLite).
 
     ``postgres://`` URLs are #36.
     """
@@ -46,7 +46,7 @@ def open_store(url: str | Path) -> Store:
         return SQLiteStore(url)
     if url.startswith(("postgres://", "postgresql://")):
         raise StoreError("the Postgres store isn't available yet (#36)")
-    if url in ("sqlite://", "sqlite://:memory:", ":memory:"):
+    if url in ("sqlite://", "sqlite://:memory:", "sqlite:///:memory:", ":memory:"):
         return SQLiteStore(":memory:")
     if url.startswith("sqlite:///"):
         return SQLiteStore(Path(url.removeprefix("sqlite:///")))

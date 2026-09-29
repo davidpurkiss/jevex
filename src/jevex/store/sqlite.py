@@ -3,18 +3,30 @@
 WAL lets readers run alongside a writer. Every write takes the database's write lock up
 front (``BEGIN IMMEDIATE``), and ``busy_timeout`` makes a process wait for that lock
 rather than fail. So read-modify-write operations (stats increments, ``try_spend``) are
-atomic across processes, not only across tasks.
+atomic across processes, not only across tasks. A failed write always rolls back, so it
+never leaves the lock held.
 
-``sqlite3`` is blocking, so each call runs in a worker thread. One connection per store
-is serialised by a lock; open one store per process (don't share it across a fork).
+``sqlite3`` is blocking, so each store runs its calls on its own single worker thread,
+which also serialises them; it never takes threads from asyncio's shared executor. Open
+one store per process (don't share it across a fork).
+
+Durability: ``synchronous=NORMAL`` is WAL's usual setting. A committed write survives a
+crash of the process but can be lost on power loss or an OS crash. For the ledger that
+means under-counting the last few charges, never corrupting the database.
+
+The spend ledger keeps one row per charge and nothing prunes it yet; a busy host adds
+roughly a row per Jev request and LLM call.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import math
+import random
 import sqlite3
-import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,18 +54,22 @@ CREATE TABLE generators (
     field TEXT NOT NULL,
     spec TEXT NOT NULL,
     scope TEXT NOT NULL,
-    enabled INTEGER NOT NULL,
     created_at REAL NOT NULL
 );
 CREATE INDEX generators_field ON generators (field, created_at);
 
+CREATE TABLE generator_disables (
+    generator_id TEXT PRIMARY KEY
+);
+
 CREATE TABLE key_mappings (
     fingerprint TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
     path TEXT NOT NULL,
-    field TEXT NOT NULL,
+    field TEXT,
     normalisers TEXT NOT NULL,
     created_at REAL NOT NULL,
-    PRIMARY KEY (fingerprint, path)
+    PRIMARY KEY (fingerprint, schema_name, path)
 );
 
 CREATE TABLE examples (
@@ -79,7 +95,7 @@ CREATE TABLE generator_stats (
 
 CREATE TABLE spend (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    amount_micro_usd INTEGER NOT NULL,
+    amount_nano_usd INTEGER NOT NULL,
     kind TEXT NOT NULL,
     run_id TEXT,
     note TEXT,
@@ -87,6 +103,9 @@ CREATE TABLE spend (
 );
 CREATE INDEX spend_at ON spend (at);
 """
+
+_NANO = 1_000_000_000
+_INT64_MAX = 2**63 - 1
 
 
 def _ts(value: datetime) -> float:
@@ -99,41 +118,75 @@ def _dt(value: float) -> datetime:
     return datetime.fromtimestamp(value, UTC)
 
 
-def _micro(usd: float) -> int:
-    # Integer millionths of a dollar, so ledger sums are exact and a cap is hit exactly.
-    return round(usd * 1_000_000)
+def _nano(usd: float) -> int:
+    # Integer billionths of a dollar: Jev charges a few nano-dollars per token, and
+    # integer sums are exact, so a cap is hit exactly.
+    return round(usd * _NANO)
+
+
+def _nano_cap(usd: float) -> int:
+    if not math.isfinite(usd) or usd < 0:
+        raise ValueError(f"cap_usd must be finite and non-negative, not {usd!r}")
+    return min(round(usd * _NANO), _INT64_MAX)
 
 
 def _json(value: Any) -> str:
     return json.dumps(to_jsonable_python(value), ensure_ascii=False, sort_keys=True)
 
 
+def _busy(exc: sqlite3.Error) -> bool:
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
 class SQLiteStore:
     """:class:`~jevex.store.Store` on a SQLite file (or ``":memory:"`` for tests).
 
-    The database and its tables are created on first open. A database written by a newer
-    jevex (a higher schema version) is refused rather than misread.
+    The database and its tables are created on first open; several processes may open a
+    new database at once. A database written by a newer jevex (a higher schema version)
+    is refused rather than misread.
     """
 
     def __init__(self, path: Path | str, *, busy_timeout_s: float = 30.0) -> None:
-        self.path = path if path == ":memory:" else Path(path)
-        self._lock = threading.Lock()
+        self.path: Path | str = ":memory:" if str(path) == ":memory:" else Path(path)
+        self._busy_timeout_s = busy_timeout_s
+        self._conn: sqlite3.Connection | None = None
         try:
             self._conn = sqlite3.connect(
                 self.path,
                 timeout=busy_timeout_s,
                 isolation_level=None,  # autocommit; transactions are explicit
-                check_same_thread=False,  # used from worker threads, behind self._lock
+                check_same_thread=False,  # opened here, then used only by the store's thread
             )
             self._conn.execute(f"PRAGMA busy_timeout = {int(busy_timeout_s * 1000)}")
             if self.path != ":memory:":
-                mode = self._conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
-                if str(mode).lower() != "wal":
-                    raise StoreError(f"{self.path}: couldn't enable WAL mode (got {mode})")
+                self._enable_wal(self._conn)
                 self._conn.execute("PRAGMA synchronous = NORMAL")
             self._migrate()
-        except sqlite3.Error as exc:
-            raise StoreError(f"can't open store {self.path}: {exc}") from exc
+        except BaseException as exc:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+            if isinstance(exc, sqlite3.Error):
+                raise StoreError(f"can't open store {self.path}: {exc}") from exc
+            raise
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jevex-store")
+
+    def _enable_wal(self, conn: sqlite3.Connection) -> None:
+        # Switching the journal mode needs an exclusive lock, and SQLite reports busy
+        # at once instead of honouring busy_timeout. Several processes opening a new
+        # database together hit that, so retry until the timeout.
+        deadline = time.monotonic() + self._busy_timeout_s
+        while True:
+            try:
+                mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                break
+            except sqlite3.OperationalError as exc:
+                if not _busy(exc) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(random.uniform(0.01, 0.05))
+        if str(mode).lower() != "wal":
+            raise StoreError(f"{self.path}: couldn't enable WAL mode (got {mode})")
 
     def _migrate(self) -> None:
         with self._write() as cur:
@@ -151,48 +204,66 @@ class SQLiteStore:
 
     # -- plumbing ---------------------------------------------------------------------
 
+    @property
+    def _db(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise StoreError(f"store {self.path} is closed")
+        return self._conn
+
     @contextmanager
     def _write(self) -> Generator[sqlite3.Cursor]:
-        """A write transaction holding the database's write lock from the start."""
-        self._conn.execute("BEGIN IMMEDIATE")
+        """A write transaction holding the database's write lock from the start.
+
+        Any failure, including a failed ``COMMIT``, rolls back unless SQLite already
+        did, so the lock is never left held and the original error is what's raised.
+        """
+        conn = self._db
+        conn.execute("BEGIN IMMEDIATE")
         try:
-            yield self._conn.cursor()
+            yield conn.cursor()
+            conn.execute("COMMIT")
         except BaseException:
-            self._conn.execute("ROLLBACK")
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             raise
-        self._conn.execute("COMMIT")
 
     async def _call[T](self, fn: Callable[[], T]) -> T:
-        def locked() -> T:
-            with self._lock:
-                try:
-                    return fn()
-                except sqlite3.Error as exc:
-                    raise StoreError(f"store {self.path}: {exc}") from exc
+        def run() -> T:
+            try:
+                return fn()
+            except sqlite3.Error as exc:
+                raise StoreError(f"store {self.path}: {exc}") from exc
 
-        return await asyncio.to_thread(locked)
+        if self._conn is None:
+            raise StoreError(f"store {self.path} is closed")
+        return await asyncio.get_running_loop().run_in_executor(self._executor, run)
 
     def _rows(self, sql: str, params: tuple[Any, ...] = ()) -> Iterator[sqlite3.Row]:
-        cur = self._conn.execute(sql, params)
+        cur = self._db.execute(sql, params)
         cur.row_factory = sqlite3.Row
         return iter(cur.fetchall())
 
     # -- generators -------------------------------------------------------------------
 
+    _SELECT_GENERATORS = (
+        "SELECT g.*, d.generator_id IS NOT NULL AS disabled FROM generators g "
+        "LEFT JOIN generator_disables d ON d.generator_id = g.id"
+    )
+
     async def put_generator(self, generator: GeneratorRecord) -> None:
         def run() -> None:
             with self._write() as cur:
                 cur.execute(
-                    "INSERT OR REPLACE INTO generators VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO generators VALUES (?, ?, ?, ?, ?)",
                     (
                         generator.id,
                         generator.field,
                         _json(generator.spec),
                         _json(generator.scope),
-                        int(generator.enabled),
                         _ts(generator.created_at),
                     ),
                 )
+                self._set_enabled(cur, generator.id, generator.enabled)
 
         await self._call(run)
 
@@ -203,13 +274,14 @@ class SQLiteStore:
             field=row["field"],
             spec=json.loads(row["spec"]),
             scope=json.loads(row["scope"]),
-            enabled=bool(row["enabled"]),
+            enabled=not row["disabled"],
             created_at=_dt(row["created_at"]),
         )
 
     async def get_generator(self, generator_id: str) -> GeneratorRecord | None:
         def run() -> GeneratorRecord | None:
-            rows = list(self._rows("SELECT * FROM generators WHERE id = ?", (generator_id,)))
+            sql = f"{self._SELECT_GENERATORS} WHERE g.id = ?"
+            rows = list(self._rows(sql, (generator_id,)))
             return self._generator(rows[0]) if rows else None
 
         return await self._call(run)
@@ -220,29 +292,37 @@ class SQLiteStore:
         where: list[str] = []
         params: list[Any] = []
         if field is not None:
-            where.append("field = ?")
+            where.append("g.field = ?")
             params.append(field)
         if not include_disabled:
-            where.append("enabled = 1")
-        sql = "SELECT * FROM generators"
+            where.append("d.generator_id IS NULL")
+        sql = self._SELECT_GENERATORS
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY created_at, id"
+        sql += " ORDER BY g.created_at, g.id"
 
         return await self._call(
             lambda: [self._generator(r) for r in self._rows(sql, tuple(params))]
         )
 
+    @staticmethod
+    def _set_enabled(cur: sqlite3.Cursor, generator_id: str, enabled: bool) -> None:
+        if enabled:
+            cur.execute("DELETE FROM generator_disables WHERE generator_id = ?", (generator_id,))
+        else:
+            cur.execute("INSERT OR IGNORE INTO generator_disables VALUES (?)", (generator_id,))
+
     async def set_generator_enabled(self, generator_id: str, enabled: bool) -> None:
         def run() -> None:
             with self._write() as cur:
-                cur.execute(
-                    "UPDATE generators SET enabled = ? WHERE id = ?", (int(enabled), generator_id)
-                )
-                if cur.rowcount == 0:
-                    raise KeyError(generator_id)
+                self._set_enabled(cur, generator_id, enabled)
 
         await self._call(run)
+
+    async def disabled_generator_ids(self) -> set[str]:
+        return await self._call(
+            lambda: {r["generator_id"] for r in self._rows("SELECT * FROM generator_disables")}
+        )
 
     # -- key mappings -----------------------------------------------------------------
 
@@ -250,9 +330,10 @@ class SQLiteStore:
         def run() -> None:
             with self._write() as cur:
                 cur.execute(
-                    "INSERT OR REPLACE INTO key_mappings VALUES (?, ?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO key_mappings VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         mapping.fingerprint,
+                        mapping.schema_name,
                         mapping.path,
                         mapping.field,
                         _json(mapping.normalisers),
@@ -262,20 +343,27 @@ class SQLiteStore:
 
         await self._call(run)
 
-    async def key_mappings(self, fingerprint: str) -> list[KeyMapping]:
+    async def key_mappings(
+        self, fingerprint: str, *, schema: str | None = None
+    ) -> list[KeyMapping]:
+        sql = "SELECT * FROM key_mappings WHERE fingerprint = ?"
+        params: tuple[Any, ...] = (fingerprint,)
+        if schema is not None:
+            sql += " AND schema_name = ?"
+            params = (fingerprint, schema)
+        sql += " ORDER BY path, schema_name"
+
         def run() -> list[KeyMapping]:
             return [
                 KeyMapping(
                     fingerprint=r["fingerprint"],
+                    schema=r["schema_name"],
                     path=r["path"],
                     field=r["field"],
                     normalisers=json.loads(r["normalisers"]),
                     created_at=_dt(r["created_at"]),
                 )
-                for r in self._rows(
-                    "SELECT * FROM key_mappings WHERE fingerprint = ? ORDER BY path",
-                    (fingerprint,),
-                )
+                for r in self._rows(sql, params)
             ]
 
         return await self._call(run)
@@ -373,12 +461,12 @@ class SQLiteStore:
     @staticmethod
     def _insert_spend(cur: sqlite3.Cursor, entry: SpendEntry) -> None:
         cur.execute(
-            "INSERT INTO spend (amount_micro_usd, kind, run_id, note, at) VALUES (?, ?, ?, ?, ?)",
-            (_micro(entry.amount_usd), entry.kind, entry.run_id, entry.note, _ts(entry.at)),
+            "INSERT INTO spend (amount_nano_usd, kind, run_id, note, at) VALUES (?, ?, ?, ?, ?)",
+            (_nano(entry.amount_usd), entry.kind, entry.run_id, entry.note, _ts(entry.at)),
         )
 
     @staticmethod
-    def _spend_query(
+    def _spend_filter(
         since: datetime | None, kind: str | None, run_id: str | None
     ) -> tuple[str, tuple[Any, ...]]:
         where: list[str] = []
@@ -392,10 +480,7 @@ class SQLiteStore:
         if run_id is not None:
             where.append("run_id = ?")
             params.append(run_id)
-        sql = "SELECT COALESCE(SUM(amount_micro_usd), 0) FROM spend"
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-        return sql, tuple(params)
+        return (" WHERE " + " AND ".join(where) if where else ""), tuple(params)
 
     async def record_spend(self, entry: SpendEntry) -> None:
         def run() -> None:
@@ -411,19 +496,34 @@ class SQLiteStore:
         kind: Literal["jev", "llm"] | None = None,
         run_id: str | None = None,
     ) -> float:
-        sql, params = self._spend_query(since, kind, run_id)
-        micro = await self._call(lambda: int(self._conn.execute(sql, params).fetchone()[0]))
-        return micro / 1_000_000
+        where, params = self._spend_filter(since, kind, run_id)
+        sql = f"SELECT COALESCE(SUM(amount_nano_usd), 0) FROM spend{where}"
+        nano = await self._call(lambda: int(self._db.execute(sql, params).fetchone()[0]))
+        return nano / _NANO
 
     async def try_spend(
-        self, entry: SpendEntry, *, cap_usd: float, since: datetime | None = None
+        self,
+        entry: SpendEntry,
+        *,
+        cap_usd: float | None = None,
+        max_count: int | None = None,
+        since: datetime | None = None,
+        kind: Literal["jev", "llm"] | None = None,
     ) -> bool:
-        sql, params = self._spend_query(since, None, None)
+        cap = None if cap_usd is None else _nano_cap(cap_usd)
+        if max_count is not None and max_count < 0:
+            raise ValueError(f"max_count must be non-negative, not {max_count}")
+        if kind is not None and entry.kind != kind:
+            raise ValueError(f"a {entry.kind} entry can't be checked against {kind} limits")
+        where, params = self._spend_filter(since, kind, None)
+        sql = f"SELECT COALESCE(SUM(amount_nano_usd), 0), COUNT(*) FROM spend{where}"
 
         def run() -> bool:
             with self._write() as cur:
-                spent = int(cur.execute(sql, params).fetchone()[0])
-                if spent + _micro(entry.amount_usd) > _micro(cap_usd):
+                spent, count = cur.execute(sql, params).fetchone()
+                if cap is not None and int(spent) + _nano(entry.amount_usd) > cap:
+                    return False
+                if max_count is not None and int(count) + 1 > max_count:
                     return False
                 self._insert_spend(cur, entry)
                 return True
@@ -431,4 +531,11 @@ class SQLiteStore:
         return await self._call(run)
 
     async def aclose(self) -> None:
-        await self._call(self._conn.close)
+        conn = self._conn
+        if conn is None:
+            return
+        try:
+            await self._call(conn.close)
+        finally:
+            self._conn = None
+            self._executor.shutdown(wait=True)

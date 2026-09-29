@@ -19,8 +19,10 @@ class StoreError(Exception):
 class GeneratorRecord(BaseModel):
     """A learned generator: an opaque spec plus the fields the store filters on.
 
-    ``field`` is ``"Schema.field"``. ``enabled`` is cleared by pruning (#40) or by a
-    layer disabling it (#41); disabled generators are kept, not deleted.
+    ``field`` is ``"Schema.field"``. ``enabled`` reflects the store's disable list (see
+    :meth:`Store.set_generator_enabled`): putting a record with ``enabled=False`` adds its
+    id to that list, and ``enabled=True`` removes it. Disabled generators are kept, not
+    deleted.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -36,15 +38,22 @@ class GeneratorRecord(BaseModel):
 class KeyMapping(BaseModel):
     """A structured-data mapping: in documents with ``fingerprint``, ``path`` is ``field``.
 
-    ``normalisers`` is the chain to apply, in :class:`~jevex.statements.NormaliserStep`'s
-    compact form. One mapping per (fingerprint, path); putting another replaces it.
+    ``schema`` is the schema the mapping was learned for, so extractors with different
+    schemas can share a store. ``field`` is ``None`` when Jev answered "none" for the
+    path: recording that keeps a later hit a pure lookup, with no question asked again
+    (spec: *Structured-data stage*). ``normalisers`` is the chain to apply, in
+    :class:`~jevex.statements.NormaliserStep`'s compact form. One mapping per
+    (fingerprint, schema, path); putting another replaces it.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # ``schema`` would shadow a BaseModel attribute, so the field is ``schema_name``;
+    # construct it with ``schema=`` (or ``schema_name=``).
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
     fingerprint: str
+    schema_name: str = Field(alias="schema")
     path: str
-    field: str
+    field: str | None
     normalisers: list[Any] = Field(default_factory=list[Any])
     created_at: datetime = Field(default_factory=utcnow)
 
@@ -93,12 +102,19 @@ class GeneratorStats(BaseModel):
         return self.wins / self.hits if self.hits else None
 
 
+MAX_ENTRY_USD = 1_000_000_000.0
+
+
 class SpendEntry(BaseModel):
-    """One charge in the spend ledger. ``kind`` is ``"jev"`` or ``"llm"``."""
+    """One charge in the spend ledger. ``kind`` is ``"jev"`` or ``"llm"``.
+
+    Amounts are non-negative and finite: the ledger records charges, not refunds, so a
+    shared cap can only fill up.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    amount_usd: float
+    amount_usd: float = Field(ge=0, le=MAX_ENTRY_USD, allow_inf_nan=False)
     kind: Literal["jev", "llm"]
     run_id: str | None = None
     note: str | None = None
@@ -110,7 +126,9 @@ class Store(Protocol):
     """Everything jevex learns, shared by every process using the same backend.
 
     All methods are async (a store does I/O). Writes are atomic: a concurrent reader
-    sees a write entirely or not at all.
+    sees a write entirely or not at all. Cancelling a task that awaits a write doesn't
+    undo it: the write may still commit (for :meth:`try_spend` that means a charge that
+    is counted, never one that overshoots the cap).
     """
 
     # Generators
@@ -127,13 +145,26 @@ class Store(Protocol):
         ...
 
     async def set_generator_enabled(self, generator_id: str, enabled: bool) -> None:
-        """Enable or disable a generator. Raises ``KeyError`` if there's no such id."""
+        """Enable or disable a generator by id.
+
+        Works for any id, stored here or not: the store's layer can disable a generator
+        from a lower layer (a project or community pack) without copying its spec
+        (spec: *Layering*, #41). Pruning (#40) uses the same list.
+        """
+        ...
+
+    async def disabled_generator_ids(self) -> set[str]:
+        """Every id this store disables, whether or not its spec is stored here."""
         ...
 
     # Key mappings
     async def put_key_mapping(self, mapping: KeyMapping) -> None: ...
 
-    async def key_mappings(self, fingerprint: str) -> list[KeyMapping]: ...
+    async def key_mappings(
+        self, fingerprint: str, *, schema: str | None = None
+    ) -> list[KeyMapping]:
+        """Mappings for one fingerprint, by path, optionally for one schema."""
+        ...
 
     # Verified examples
     async def add_example(self, example: VerifiedExample) -> None:
@@ -169,13 +200,24 @@ class Store(Protocol):
         ...
 
     async def try_spend(
-        self, entry: SpendEntry, *, cap_usd: float, since: datetime | None = None
+        self,
+        entry: SpendEntry,
+        *,
+        cap_usd: float | None = None,
+        max_count: int | None = None,
+        since: datetime | None = None,
+        kind: Literal["jev", "llm"] | None = None,
     ) -> bool:
-        """Record ``entry`` only if it keeps spend since ``since`` within ``cap_usd``.
+        """Record ``entry`` only if it keeps the ledger within the given limits.
 
-        The check and the write are one transaction, so workers sharing a cap can't
-        overshoot it together. Returns whether the entry was recorded. The cap covers
-        every kind and run; filter with :meth:`spend` for reporting.
+        Both limits count the entries at or after ``since`` whose kind is ``kind`` (every
+        kind when ``None``), plus ``entry`` itself: ``cap_usd`` caps their total and
+        ``max_count`` their number. So #34 can give Jev and the LLM their own caps
+        (``kind=``), a spend cap per period (``since=``) and a rate limit
+        (``max_count`` over the last minute). The check and the write are one
+        transaction, so workers sharing a limit can't overshoot it together. Returns
+        whether the entry was recorded. With ``kind`` set, ``entry`` must be of that
+        kind (``ValueError`` otherwise).
         """
         ...
 
