@@ -25,6 +25,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.scripts]
+jevex = "jevex.cli:entrypoint"
+
 [project.urls]
 Homepage = "https://github.com/davidpurkiss/jevex"
 Repository = "https://github.com/davidpurkiss/jevex"
