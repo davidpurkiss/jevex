@@ -1,5 +1,6 @@
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -17,7 +18,13 @@ from jevex import (
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ParsedDocument, StatementSplitter
 from jevex.layout_html import HtmlLayoutParser
-from jevex.split import is_key_value, sentences
+from jevex.split import (
+    MAX_SEGMENT_CHARS,
+    DuplicateStatementError,
+    _chunks,  # pyright: ignore[reportPrivateUsage]
+    is_key_value,
+    sentences,
+)
 from jevex.testing import FakeJev
 from jevex.testsite import VehicleSpec, generate, render
 
@@ -98,6 +105,69 @@ def test_whitespace_is_collapsed_and_empty_text_gives_nothing() -> None:
     assert split(comp("paragraph", "   ")) == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Range: approx. 300 miles.", ["Range: approx. 300 miles."]),
+        ("Price excl. VAT is £20,000.", ["Price excl. VAT is £20,000."]),
+        ("It costs £24,995 excl. VAT.", ["It costs £24,995 excl. VAT."]),
+        ("Max. speed is 155 mph.", ["Max. speed is 155 mph."]),
+        ("Est. delivery: 3 weeks.", ["Est. delivery: 3 weeks."]),
+        ("It has 4 cyl. and 6 gears.", ["It has 4 cyl. and 6 gears."]),
+        ("Vol. 2, pp. 34-56.", ["Vol. 2, pp. 34-56."]),
+        ("The VW ID.3 Pro is here.", ["The VW ID.3 Pro is here."]),
+        ("The ID.4 GTX is quick.", ["The ID.4 GTX is quick."]),
+        # A real sentence end after an abbreviation stays split.
+        ("It takes 5 min. Then it charges.", ["It takes 5 min.", "Then it charges."]),
+        # Inline enumerations still split.
+        (
+            "Features include: 1. heated seats 2. a sunroof.",
+            ["Features include:", "1. heated seats", "2. a sunroof."],
+        ),
+    ],
+)
+def test_mid_sentence_abbreviations_and_model_names_dont_split(
+    text: str, expected: list[str]
+) -> None:
+    assert sentences(text) == expected
+
+
+def test_a_range_label_with_an_abbreviation_stays_a_pair() -> None:
+    assert split(comp("paragraph", "Range: approx. 300 miles.")) == [
+        ("Range: approx. 300 miles.", "key_value")
+    ]
+
+
+def test_long_lines_are_chunked_without_losing_text() -> None:
+    text = " ".join(f"Sentence {i} is approx. {i} words long." for i in range(1000))
+    said = sentences(text)
+    assert len(said) == 1000
+    assert " ".join(said) == text
+
+
+def test_long_lines_without_sentence_boundaries_are_chunked_at_spaces() -> None:
+    text = " ".join(["approx", "max", "a", "turbo", "petrol", "hatchback"] * 3000)
+    chunks = _chunks(text)
+    assert len(chunks) > 1
+    assert all(len(c) <= 2 * MAX_SEGMENT_CHARS for c in chunks)
+    assert " ".join(chunks) == text
+    assert " ".join(sentences(text)) == text
+
+
+def test_sentences_is_safe_across_threads() -> None:
+    texts = [
+        " ".join(f"Car {i} does 0-62 mph in {i}.1 s." for i in range(300)),
+        " ".join(f"Book {i} costs £{i}.99 today." for i in range(300)),
+    ]
+
+    def rejoin(text: str) -> str:
+        return " ".join(sentences(text))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(rejoin, texts * 10))
+    assert results == texts * 10
+
+
 def test_unknown_languages_fall_back_to_english() -> None:
     assert sentences("One. Two.", language="xx") == ["One.", "Two."]
     assert sentences("Das ist gut. Das auch.", language="de") == ["Das ist gut.", "Das auch."]
@@ -118,13 +188,46 @@ def test_label_value_list_items_are_pairs() -> None:
     ]
 
 
-def test_definition_list_items_are_pairs() -> None:
+def test_definition_list_items_are_pairs_only_with_their_term() -> None:
     # The layout parser renders ``<dt>Fuel</dt><dd>Petrol</dd>`` as "Fuel: Petrol" at the dd.
     item = comp("list_item", "Fuel: Petrol", path="/html/body/dl/dd[2]")
     assert split(item) == [("Fuel: Petrol", "key_value")]
-    # A term without a value is still from a dl.
+    # A term without a value, and a value without a term, aren't pairs.
     assert split(comp("list_item", "Sunroof", path="/html/body/dl/dt")) == [
-        ("Sunroof", "key_value")
+        ("Sunroof", "list_item")
+    ]
+    assert split(comp("list_item", "Petrol", path="/html/body/dl/dd")) == [("Petrol", "list_item")]
+    # A dd is trusted as a pair even when its label has no letter.
+    assert split(comp("list_item", "0-62: 9.1 s", path="/html/body/dl/dd")) == [
+        ("0-62: 9.1 s", "key_value")
+    ]
+
+
+async def layout_items(html: bytes) -> list[list[tuple[str, str]]]:
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html, content_type="text/html"))
+    return [split(c) for c in root.walk() if c.type == "list_item"]
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        b"<ul><li>Engine: 1.5 TSI<br>Power: 150 PS</li></ul>",
+        b"<ul><li><p>Engine: 1.5 TSI</p><p>Power: 150 PS</p></li></ul>",
+    ],
+)
+async def test_a_list_item_of_several_pairs_gives_one_pair_each(html: bytes) -> None:
+    assert await layout_items(html) == [
+        [("Engine: 1.5 TSI", "key_value"), ("Power: 150 PS", "key_value")]
+    ]
+
+
+async def test_a_list_item_without_pairs_stays_one_statement() -> None:
+    assert await layout_items(b"<ul><li><strong>Engine</strong><br>1.5 TSI</li></ul>") == [
+        [("Engine 1.5 TSI", "list_item")]
+    ]
+    assert split(comp("list_item", "Heated seats\nPower: 150 PS")) == [
+        ("Heated seats", "list_item"),
+        ("Power: 150 PS", "key_value"),
     ]
 
 
@@ -160,6 +263,9 @@ def test_statements_carry_the_component_context() -> None:
         (f"Colour{chr(0xFF1A)}Red", True),  # fullwidth colon
         ("The show starts at 10:30", False),
         ("Aspect ratio 16:9", False),
+        ("ISBN-13: 978-0-14-032872-1", True),
+        ("Series 5: 2019", True),
+        ("Model 3: 39,990", True),
         ("12:30", False),
         ("See https://example.com", False),
         ("No colon here", False),
@@ -218,6 +324,15 @@ async def test_stage_splits_every_component_in_reading_order() -> None:
     await StatementStage().run(ctx)
     assert ctx.parsed is not None
     assert list(ctx.parsed.statements) == ["ld.0", "h.0", "p.0", "p.1", "l1.0", "l2.0", "l4.0"]
+
+
+async def test_stage_refuses_duplicate_statement_ids() -> None:
+    clash = Statement(id="p.0", text="x", kind="structured", component_id="ld", location=LOC)
+    ctx = context(
+        comp("section", cid="root", children=[comp("paragraph", "Hi.", cid="p")]), [clash]
+    )
+    with pytest.raises(DuplicateStatementError, match=r"'p\.0'"):
+        await StatementStage().run(ctx)
 
 
 async def test_stage_does_nothing_without_a_parsed_document() -> None:
@@ -288,11 +403,14 @@ def test_site_prose_pages_give_one_statement_per_sentence(
 def test_site_text_is_covered_by_statements(
     site_statements: list[tuple[str, str, list[Statement], Component]],
 ) -> None:
-    """Every word of every non-table component's text reaches some statement."""
+    """Every word of every non-table component reaches one of its own statements."""
     for path, _, statements, root in site_statements:
-        said = Counter(w for s in statements for w in s.text.split())
+        said: dict[str, Counter[str]] = {}
+        for s in statements:
+            said.setdefault(s.component_id, Counter()).update(s.text.split())
         for c in root.walk():
             if c.type in ("table", "section", "column", "list", "breakout"):
                 continue
+            own = said.get(c.id, Counter())
             for word in c.text.split():
-                assert said[word] > 0, (path, c.id, word)
+                assert own[word] > 0, (path, c.id, word)

@@ -13,6 +13,7 @@ dependencies = [
     "protego>=0.7.0",
     "pydantic>=2.11",
     "pysbd>=0.3.4",
+    "pyyaml>=6.0.2",
     "typesafe-sdk>=0.7.2",
 ]
 keywords = ["extraction", "scraping", "pdf", "html", "pydantic", "jev", "llm"]
@@ -59,8 +60,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-socket>=0.8.1",
-    "pyyaml>=6.0.3",
     "ruff>=0.16.9",
+    "types-pyyaml>=6.0",
 ]
 
 [tool.ruff]

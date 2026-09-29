@@ -17,9 +17,14 @@ from jevex.gate import (
 )
 from jevex.generators import (
     GeneratorRegistry,
+    GeneratorSpec,
     InvalidGeneratorError,
+    MatchSpec,
+    Provenance,
     RegexGenerator,
+    SpecScope,
     default_registry,
+    generator_spec_json_schema,
 )
 from jevex.layout import (
     BBox,
@@ -48,8 +53,19 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
-from jevex.split import DefaultSplitter, StatementStage
+from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
+from jevex.store import (
+    GeneratorRecord,
+    GeneratorStats,
+    KeyMapping,
+    SpendEntry,
+    SQLiteStore,
+    Store,
+    StoreError,
+    VerifiedExample,
+    open_store,
+)
 from jevex.structured import (
     EmbeddedData,
     EmbeddedDataReader,
@@ -77,6 +93,7 @@ __all__ = [
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
+    "DuplicateStatementError",
     "EmbeddedData",
     "EmbeddedDataReader",
     "EntityScope",
@@ -91,15 +108,20 @@ __all__ = [
     "FieldSpec",
     "FunctionNormaliser",
     "GateUnit",
+    "GeneratorRecord",
     "GeneratorRegistry",
+    "GeneratorSpec",
+    "GeneratorStats",
     "HtmlLayoutParser",
     "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
     "JevCandidateSelector",
     "JevStatementClassifier",
+    "KeyMapping",
     "LayoutStage",
     "Location",
+    "MatchSpec",
     "NormaliseError",
     "NormaliseStage",
     "NormaliserRegistry",
@@ -108,9 +130,11 @@ __all__ = [
     "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
+    "Provenance",
     "Questions",
     "RegexGenerator",
     "RobotsDisallowedError",
+    "SQLiteStore",
     "SchemaConfig",
     "SchemaSpec",
     "SelectStage",
@@ -119,10 +143,14 @@ __all__ = [
     "SkippedBlob",
     "Source",
     "Span",
+    "SpecScope",
+    "SpendEntry",
     "Stage",
     "Statement",
     "StatementKind",
     "StatementStage",
+    "Store",
+    "StoreError",
     "StructuredBlob",
     "StructuredSource",
     "TableCell",
@@ -130,11 +158,14 @@ __all__ = [
     "ToClassify",
     "Tolerance",
     "UnsupportedDocumentError",
+    "VerifiedExample",
     "__version__",
     "default_registry",
     "evaluate",
     "gate_units",
+    "generator_spec_json_schema",
     "load_corpus",
     "normalise",
+    "open_store",
     "run_chain",
 ]

@@ -39,7 +39,7 @@ from jevex.layout import Component
 from jevex.statements import Candidate, Statement
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from jevex.categorise import ToClassify
     from jevex.entities import EntityScope
@@ -53,6 +53,27 @@ class ParsedDocument(BaseModel):
     document: Document
     root: Component
     statements: dict[str, Statement] = Field(default_factory=dict[str, Statement])
+
+    def restricted_to(self, component_ids: Iterable[str]) -> ParsedDocument:
+        """A copy holding only ``component_ids`` (and their statements).
+
+        The root is always kept, so the tree stays a tree; a kept component's parent
+        should be kept too (the component gate passes ancestors), or it's dropped with
+        the parent. Statements of components not in the tree (structured data) are kept.
+        """
+        keep = set(component_ids)
+        in_tree = {c.id for c in self.root.walk()}
+
+        def prune(component: Component) -> Component:
+            children = [prune(c) for c in component.children if c.id in keep]
+            return component.model_copy(update={"children": children})
+
+        statements = {
+            sid: s
+            for sid, s in self.statements.items()
+            if s.component_id in keep or s.component_id not in in_tree
+        }
+        return ParsedDocument(document=self.document, root=prune(self.root), statements=statements)
 
     def statements_in(self, component_ids: list[str]) -> list[Statement]:
         """Statements belonging to the given components, in document order."""
