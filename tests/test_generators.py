@@ -117,6 +117,12 @@ def test_money_ignores_plain_numbers() -> None:
         ("£18,4950", []),  # malformed: never truncate to a wrong "£18,495"
         ("£5.99p", []),
         ("£1.5x", []),
+        ("a £1.5 million refit", ["£1.5 million"]),
+        ("£2 billion", ["£2 billion"]),
+        ("EUR 3 million", ["EUR 3 million"]),
+        ("£2 m", ["£2 m"]),
+        ("£299pm or £1,200pcm", ["£299", "£1,200"]),
+        ("£299 pm", ["£299"]),
     ],
 )
 def test_money_never_truncates_amounts(text: str, expected: list[str]) -> None:
@@ -152,6 +158,7 @@ def test_years_are_not_found_inside_identifiers() -> None:
 
 def test_years() -> None:
     assert raws(Year(), "the 2024 model year, built 1999, ref 12024, 2024.5") == ["2024", "1999"]
+    assert raws(Year(), "MY2024 and MY24") == ["2024"]
     assert chain(Year(), "2024 model year", "2024") == [{"parse_date": {"precision": "year"}}]
 
 

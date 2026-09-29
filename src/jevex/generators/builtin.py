@@ -8,8 +8,9 @@ Normaliser steps these generators emit:
 
 - ``parse_number``: "18,495" → 18495, "9.1" → 9.1
 - ``{unit: {from: <canonical>}}``: the unit found; the normaliser converts to the field's unit
-- ``{parse_money: {currency: <code>}}``: "£18,495", "25k GBP", "£1.5m", "€2bn" → amount in
-  that currency, with the ``k``/``m``/``bn`` multiplier applied
+- ``{parse_money: {currency: <code>}}``: "£18,495", "25k GBP", "£1.5m", "€2bn",
+  "£1.5 million" → amount in that currency, with any multiplier (k, m, bn, thousand,
+  million, billion) applied
 - ``{parse_date: {order?, precision?}}``: dates, month-years and years
 - ``parse_range``: "5–7" → [5, 7]
 - ``strip``: trim whitespace and trailing punctuation
@@ -96,10 +97,12 @@ class NumberWithUnit:
 
 _CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
-_MULTIPLIER = r"(?:bn|[kKmM])"
+# "£25k", "£1.5m", "€2bn", and spelled or spaced: "£1.5 million", "EUR 3 bn", "£2 m".
+_MULTIPLIER = r"(?:bn|[kKmM](?![a-zA-Z])|\s?(?i:million|billion|thousand|mn|bn|m)\b)"
 # Every amount must end cleanly: "£18,4950" or "£1.5x" yield nothing rather than a
-# truncated (and silently wrong) "£18,495" / "£1.5".
-_END = r"(?![\w]|[.,]\d)"
+# truncated (and silently wrong) "£18,495" / "£1.5". A period suffix may follow
+# directly: "£299pm", "£1,200pcm", "£45pw", "£30,000pa".
+_END = r"(?:(?![\w]|[.,]\d)|(?=p(?:cm|m|a|w)\b))"
 _MONEY = re.compile(
     rf"(?P<sym>[£$€¥])\s?(?:{_NUM}){_MULTIPLIER}?{_END}"
     rf"|(?<![\w.,])(?:{_NUM}){_MULTIPLIER}?\s?(?P<c2>{_CODES})\b"
@@ -173,7 +176,8 @@ class DateGenerator:
         return sorted(out, key=lambda c: (c.span.start, -c.span.end))
 
 
-_YEAR = re.compile(r"(?<![\w.,])(?:19|20)\d{2}(?![\w]|[.,]\d)")
+# Standalone years, plus the model-year form "MY2024"; never inside VINs or part numbers.
+_YEAR = re.compile(r"(?:(?<=MY)|(?<![\w.,]))(?:19|20)\d{2}(?![\w]|[.,]\d)")
 
 
 @dataclass(frozen=True)
