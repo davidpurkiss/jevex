@@ -84,6 +84,9 @@ The full list is in [`CLAUDE.md`](CLAUDE.md#conventions). The short version:
 Use the [issue templates](https://github.com/davidpurkiss/jevex/issues/new/choose). For
 bugs, a minimal document (or URL) and schema that reproduce the problem help most.
 
+**Security problems** go through private reporting instead of issues. See
+[SECURITY.md](SECURITY.md).
+
 ## License
 
 jevex is licensed under [Apache 2.0](LICENSE). By contributing, you agree that your
