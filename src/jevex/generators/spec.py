@@ -223,6 +223,7 @@ class _SpecLoader(yaml.SafeLoader):
     and specs never need them. A duplicate key would silently win, hiding a typo.
     """
 
+    # The types-pyyaml stub types compose_node's index differently from the runtime.
     def compose_node(self, parent: yaml.Node | None, index: int) -> yaml.Node | None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if self.check_event(yaml.AliasEvent):
             event = cast("object", self.peek_event())  # pyright: ignore[reportUnknownMemberType]

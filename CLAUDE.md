@@ -41,6 +41,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `extractor.py` | `Extractor`, `STAGE_ORDER`/`DEFAULT_STAGES`/`default_pipeline()`, `ExtractionResult`, `DocumentMeta` |
 | `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |
 | `eval.py` | `jevex eval`: corpus (`truth.json`) loading, record matching, per-field tolerances and scores, `EvalReport` |
+| `store/` | Learned state: `Store` protocol and records (`base.py`), `SQLiteStore` (WAL, `BEGIN IMMEDIATE` writes, integer nano-dollar spend ledger, own worker thread), `open_store(url)` |
 | `testing.py` | `FakeJev` / `FakeLLM` (scripted answers), `Cassette` / `LLMCassette` record/replay |
 | `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/litellm.py` (extras) |
 
