@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in jevex doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. A small document and schema that reproduce it help most.
+        Please don't paste API keys or private documents.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >-
+        A minimal script, with the schema and the document (or its URL). If Jev or an LLM
+        is involved, say which answers or calls look wrong.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or traceback
+      description: The full traceback, or the relevant part of the `ExtractionResult`.
+      render: text
+  - type: input
+    id: jevex-version
+    attributes:
+      label: jevex version
+      placeholder: "0.0.1, or a commit hash"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version and OS
+      placeholder: "3.12.7 on macOS 15"
+    validations:
+      required: true
+  - type: dropdown
+    id: input-type
+    attributes:
+      label: Input type
+      options:
+        - HTML
+        - PDF (text)
+        - PDF (scanned / OCR)
+        - Not specific to one input type

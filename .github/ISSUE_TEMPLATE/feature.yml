@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a new capability or a change to an existing one.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [design spec](https://github.com/davidpurkiss/jevex/blob/main/docs/design-spec.md)
+        and the [open issues](https://github.com/davidpurkiss/jevex/issues) first: it may
+        already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to extract or do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How you'd like it to work. A sketch of the API or config is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other designs you ruled out.
+  - type: input
+    id: spec-section
+    attributes:
+      label: Related spec section
+      description: The section of `docs/design-spec.md` this touches, if any.
