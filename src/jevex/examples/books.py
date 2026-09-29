@@ -11,15 +11,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
 from jevex.clean import BoilerplateCleaner, CleanStage, decode_html
-from jevex.document import Document
 from jevex.extractor import default_pipeline
-from jevex.pipeline import Pipeline
 from jevex.schema import Field
+
+if TYPE_CHECKING:
+    from jevex.document import Document
+    from jevex.pipeline import Pipeline
 
 
 class Book(BaseModel):

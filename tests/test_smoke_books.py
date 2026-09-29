@@ -12,6 +12,7 @@ re-record, rather than failing builds that can't reach the API.
 """
 
 import os
+import re
 from decimal import Decimal
 from pathlib import Path
 
@@ -96,7 +97,7 @@ async def test_star_ratings_are_written_out_as_text() -> None:
 def scripted_jev(expected: Book) -> FakeJev:
     """Answers a careful reader would give for this page."""
 
-    def pick(value: str):  # noqa: ANN202 - a Choice picker
+    def pick(value: str):
         def choose(q: Choice) -> str:
             return value if value in q.options else "none"
 
@@ -105,19 +106,26 @@ def scripted_jev(expected: Book) -> FakeJev:
     return (
         FakeJev(strict=True)
         .noul("Does this document describe", p=0.97)
-        .noul("Does this section contain", p=0.05)
-        .noul("Does this section contain", p=0.9, state=f"Rating: {expected.rating} out of")
+        .noul("Does this section", p=0.05)
+        .noul("Does this section", p=0.9, state=f"Rating: {expected.rating} out of")
         .choice("Which detail", "none")
         .choice("Which detail", "title", state=f'"statement": "{expected.title}"')
         .choice("Which detail", "price", state=f'"statement": "£{expected.price}"')
-        .choice("Which detail", "stock_count", state="available)")
+        # "In stock (22 available)" states two fields: the count, and that it's in stock.
+        .choice(
+            "Which detail",
+            "stock_count",
+            confidence=0.55,
+            probabilities={"in_stock": 0.4},
+            state="available)",
+        )
         .choice("Which detail", "rating", state=f"Rating: {expected.rating}")
         .choice("Which of these", "none")
-        .choice("Which of these is the Title", pick(expected.title))
-        .choice("Which of these is the Price", pick(f"£{expected.price}"))
-        .choice("Which of these is the Number", pick(str(expected.stock_count)))
-        .choice("What is the Star rating", expected.rating)
-        .noul("the book is in stock", p=0.95)
+        .choice(re.compile("(?i)which of these is the title"), pick(expected.title))
+        .choice(re.compile("(?i)which of these is the price"), pick(f"£{expected.price}"))
+        .choice(re.compile("(?i)which of these is the number"), pick(str(expected.stock_count)))
+        .choice(re.compile("(?i)what is the star rating"), expected.rating)
+        .noul(re.compile("(?i)does the statement say the book is in stock"), p=0.95)
     )
 
 

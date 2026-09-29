@@ -132,15 +132,23 @@ class FieldSpec:
         """Description with its unit, as shown to Jev in option lists."""
         return f"{self.description} ({self.unit})" if self.unit else self.description
 
+    @property
+    def phrase(self) -> str:
+        """The label as it reads mid-sentence: "Price (GBP)" → "price (GBP)".
+
+        Acronyms keep their case ("VIN", "EV range").
+        """
+        return _lower_first(self.label)
+
     def select_instructions(self) -> str:
-        return self.questions.select or f"Which of these is the {self.label}?"
+        return self.questions.select or f"Which of these is the {self.phrase}?"
 
     def select_question(self, candidates: list[str]) -> Choice:
         """Choice over candidate spans plus "none". Duplicate spans are merged."""
         if NONE_OPTION in candidates:
             raise ValueError(f"a candidate span may not be the reserved option {NONE_OPTION!r}")
         options: dict[str, JSONContent | None] = dict.fromkeys(candidates)
-        options[NONE_OPTION] = f"None of these is the {self.description}"
+        options[NONE_OPTION] = f"None of these is the {_lower_first(self.description)}"
         return Choice(instructions=self.select_instructions(), options=dict(options))
 
     def enum_question(self) -> Choice:
@@ -148,30 +156,42 @@ class FieldSpec:
         if self.kind != "enum":
             raise ValueError(f"{self.name} is not an enum field")
         options: dict[str, JSONContent | None] = dict.fromkeys(self.options)
-        options[NOT_STATED_OPTION] = f"The statement does not state the {self.description}"
+        options[NOT_STATED_OPTION] = (
+            f"The statement does not state the {_lower_first(self.description)}"
+        )
         return Choice(
-            instructions=self.questions.select or f"What is the {self.label}?", options=options
+            instructions=self.questions.select or f"What is the {self.phrase}?", options=options
         )
 
     def bool_question(self) -> Noul:
         if self.kind != "bool":
             raise ValueError(f"{self.name} is not a bool field")
-        return Noul(instructions=self.questions.select or f"Does the statement say {self.label}?")
+        return Noul(instructions=self.questions.select or f"Does the statement say {self.phrase}?")
 
     def member_question(self, value: str) -> Noul:
         """For ``list[...]`` fields: does the statement give ``value`` as one of them?"""
-        template = (
-            self.questions.member
-            or 'Does the statement give "{value}" as one of the {description}?'
-        )
-        return Noul(instructions=template.format(description=self.label, value=value))
+        # A custom template gets the description as written; the default reads it mid-sentence.
+        template = self.questions.member
+        if template is None:
+            template, description = (
+                'Does the statement give "{value}" as one of the {description}?',
+                self.phrase,
+            )
+        else:
+            description = self.label
+        return Noul(instructions=template.format(description=description, value=value))
 
     def verify_question(self, value: object) -> Noul:
         """Checks an LLM or vision answer against the statement."""
-        template = (
-            self.questions.verify or "The statement states that the {description} is {value}."
-        )
-        return Noul(instructions=template.format(description=self.label, value=value))
+        template = self.questions.verify
+        if template is None:
+            template, description = (
+                "The statement states that the {description} is {value}.",
+                self.phrase,
+            )
+        else:
+            description = self.label
+        return Noul(instructions=template.format(description=description, value=value))
 
 
 @dataclass(frozen=True)
@@ -227,10 +247,7 @@ class SchemaSpec:
             override = next(
                 (f.questions.component_gate for f in members if f.questions.component_gate), None
             )
-            listed = _join_or([f.label for f in members])
-            questions[group] = Noul(
-                instructions=override or f"Does this section contain the {listed}?"
-            )
+            questions[group] = Noul(instructions=override or _gate_instructions(members))
         return questions
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
@@ -325,6 +342,19 @@ def _lower_first(text: str) -> str:
     if len(text) > 1 and text[1].isupper():
         return text
     return text[:1].lower() + text[1:]
+
+
+def _gate_instructions(members: Sequence[FieldSpec]) -> str:
+    """ "Does this section contain the price (GBP)?"; bools read as a claim: "Does this
+    section say whether the book is in stock?"."""
+    things = [f.phrase for f in members if f.kind != "bool"]
+    claims = [f.phrase for f in members if f.kind == "bool"]
+    parts: list[str] = []
+    if things:
+        parts.append(f"contain the {_join_or(things)}")
+    if claims:
+        parts.append(f"say whether {_join_or(claims)}")
+    return f"Does this section {' or '.join(parts)}?"
 
 
 def _join_or(items: list[str]) -> str:

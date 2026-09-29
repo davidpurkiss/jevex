@@ -220,7 +220,7 @@ async def test_list_candidate_fields_accept_several_spans_per_statement() -> Non
     await run_both(ctx)
     questions = only_call_questions(fake)
     assert all(isinstance(q, Noul) for q in questions.values())
-    assert Noul(instructions='Does the statement give "SE" as one of the Trim names?') in (
+    assert Noul(instructions='Does the statement give "SE" as one of the trim names?') in (
         questions.values()
     )
     sel = ctx.schemas["Car"].selections[("doc", "trims", "s1")]
@@ -241,17 +241,17 @@ async def test_no_candidates_means_no_question() -> None:
 
 
 async def test_enum_is_answered_directly() -> None:
-    fake = FakeJev().choice("What is the Fuel type", "diesel", confidence=0.93)
+    fake = FakeJev().choice("What is the fuel type", "diesel", confidence=0.93)
     ctx = context(fake, [st("s1", "Runs on diesel")], {"s1": "fuel_type"})
     await run_both(ctx)
     assert only_call_questions(fake) == {
         "Car.fuel_type/enum": Choice(
-            instructions="What is the Fuel type?",
+            instructions="What is the fuel type?",
             options={
                 "petrol": None,
                 "diesel": None,
                 "ev": None,
-                "not stated": "The statement does not state the Fuel type",
+                "not stated": "The statement does not state the fuel type",
             },
         )
     }
@@ -263,7 +263,7 @@ async def test_enum_is_answered_directly() -> None:
 
 
 async def test_enum_not_stated_records_nothing() -> None:
-    fake = FakeJev().choice("What is the Fuel type", "not stated")
+    fake = FakeJev().choice("What is the fuel type", "not stated")
     ctx = context(fake, [st("s1", "Fuel: see brochure")], {"s1": "fuel_type"})
     await run_both(ctx)
     assert "fuel_type" not in ctx.schemas["Car"].fields.get("doc", {})
@@ -271,8 +271,8 @@ async def test_enum_not_stated_records_nothing() -> None:
 
 async def test_most_confident_enum_answer_wins_ties_to_the_earliest() -> None:
     fake = FakeJev()
-    fake.choice("What is the Fuel type", "petrol", confidence=0.9, state="petrol engine")
-    fake.choice("What is the Fuel type", "diesel", confidence=0.9, state="diesel only")
+    fake.choice("What is the fuel type", "petrol", confidence=0.9, state="petrol engine")
+    fake.choice("What is the fuel type", "diesel", confidence=0.9, state="diesel only")
     a, b = st("s1", "A petrol engine"), st("s2", "Available as diesel only")
     ctx = context(fake, [a, b], {"s1": "fuel_type", "s2": "fuel_type"})
     await run_both(ctx)
@@ -306,7 +306,7 @@ async def test_list_enum_collects_options_within_and_across_statements() -> None
     ctx = context(fake, [a, b], {"s1": "colours", "s2": "colours"})
     await run_both(ctx)
     assert (
-        Noul(instructions='Does the statement give "red" as one of the Colours?') in fake.questions
+        Noul(instructions='Does the statement give "red" as one of the colours?') in fake.questions
     )
     meta = ctx.schemas["Car"].fields["doc"]["colours"]
     assert meta.value == ["red", "blue", "grey"]
@@ -330,7 +330,7 @@ async def test_results_dont_depend_on_reply_order() -> None:
 
 
 async def test_values_from_other_routes_are_not_overwritten() -> None:
-    fake = FakeJev().choice("What is the Fuel type", "diesel")
+    fake = FakeJev().choice("What is the fuel type", "diesel")
     ctx = context(fake, [st("s1", "Runs on diesel")], {"s1": "fuel_type"})
     ctx.schemas["Car"].set_field("doc", "fuel_type", FieldMeta(value="petrol", method="structured"))
     await run_both(ctx)

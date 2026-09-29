@@ -137,8 +137,8 @@ def test_noul_component_gate_is_a_component_gate() -> None:
 async def test_groups_pass_the_units_jev_says_contain_them() -> None:
     fake = (
         FakeJev()
-        .noul("contain the Price (GBP)?", p=0.9, state="24,995")
-        .noul("Engine power (kW) or 0-62", p=0.8, state="Power: 110 kW")
+        .noul("contain the price (GBP)?", p=0.9, state="24,995")
+        .noul("engine power (kW) or 0-62", p=0.8, state="Power: 110 kW")
     )
     result = await NoulComponentGate().gate(
         parsed(page()), [SchemaSpec.from_model(Car)], fake.client()
@@ -189,7 +189,7 @@ def context(fake: FakeJev, root: Component | None) -> Context:
 
 
 async def test_stage_sets_component_ids_and_scopes_keep_only_passing_components() -> None:
-    fake = FakeJev().noul("Price", p=0.9, state="24,995")
+    fake = FakeJev().noul("price", p=0.9, state="24,995")
     ctx = context(fake, page())
     await ComponentGateStage().run(ctx)
     await EntityStage().run(ctx)
@@ -256,8 +256,8 @@ async def test_a_real_page_gates_by_section() -> None:
     root = await HtmlLayoutParser().parse(doc)
     fake = (
         FakeJev()
-        .noul("Engine power", p=0.9, state="0-62 mph: 9.1 s")
-        .noul("Price", p=0.9, state="24,995")
+        .noul("engine power", p=0.9, state="0-62 mph: 9.1 s")
+        .noul("price", p=0.9, state="24,995")
     )
     result = await NoulComponentGate().gate(
         ParsedDocument(document=doc, root=root), [SchemaSpec.from_model(Car)], fake.client()

@@ -179,10 +179,10 @@ def test_component_gates_per_group() -> None:
         "mileage",
     ]
     assert gates["price"] == Noul(
-        instructions="Does this section contain the Asking price or Currency?"
+        instructions="Does this section contain the asking price or currency?"
     )
     assert gates["first_registered"] == Noul(
-        instructions="Does this section contain the First registration date?"
+        instructions="Does this section contain the first registration date?"
     )
 
 
@@ -225,7 +225,7 @@ def test_select_question() -> None:
         },
     )
     assert spec.field("engine_size_cc").select_instructions() == (
-        "Which of these is the Engine displacement (cc)?"
+        "Which of these is the engine displacement (cc)?"
     )
     with pytest.raises(ValueError, match="reserved"):
         spec.field("model").select_question(["none"])
@@ -235,14 +235,14 @@ def test_enum_bool_and_verify_questions() -> None:
     vehicle = SchemaSpec.from_model(VehicleSpec)
     listing = SchemaSpec.from_model(Listing)
     assert vehicle.field("fuel_type").enum_question() == Choice(
-        instructions="What is the Fuel or powertrain type?",
+        instructions="What is the fuel or powertrain type?",
         options={
             "petrol": None,
             "diesel": None,
             "hybrid": None,
             "phev": None,
             "ev": None,
-            "not stated": "The statement does not state the Fuel or powertrain type",
+            "not stated": "The statement does not state the fuel or powertrain type",
         },
     )
     assert listing.field("automatic").bool_question() == Noul(
@@ -270,7 +270,7 @@ def test_member_question_default_and_override() -> None:
 
     spec = SchemaSpec.from_model(M)
     assert spec.field("tags").member_question("red") == Noul(
-        instructions='Does the statement give "red" as one of the Tags?'
+        instructions='Does the statement give "red" as one of the tags?'
     )
     assert spec.field("colours").member_question("red") == Noul(instructions="Is red a Colours?")
 
