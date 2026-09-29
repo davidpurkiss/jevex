@@ -11,8 +11,8 @@ list item              one each; a ``Label: value`` item, a ``dd``   ``list_item
 heading                one (a product page's title is its ``h1``)    ``sentence``
 caption                one                                           ``caption``
 image                  its alt text                                  ``alt_text``
-table                  none yet: cells rendered with headers are     (#25)
-                       #25
+table                  one per cell, with its row and column         ``table_cell``
+                       headers (:mod:`jevex.tables`)
 containers             none; their children are split instead
 =====================  ===========================================  ===============
 
@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from jevex.layout import DomLocation
 from jevex.statements import Statement
+from jevex.tables import table_statements
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -199,7 +200,9 @@ class DefaultSplitter:
             pieces = [(_WHITESPACE.sub(" ", text), "caption")]
         elif kind == "image":
             pieces = [(_WHITESPACE.sub(" ", text), "alt_text")]
-        else:  # containers; tables are #25
+        elif kind == "table":
+            return table_statements(component)
+        else:  # containers: their children are split instead
             return []
         return [
             Statement(

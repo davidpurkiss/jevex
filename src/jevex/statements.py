@@ -42,6 +42,20 @@ class Span(BaseModel):
         return text[self.start : self.end]
 
 
+class TableCellRef(BaseModel):
+    """Where a ``table_cell`` statement sits in its table, with the headers that give it
+    meaning. ``col_headers`` has one label per column the cell covers (stacked header rows
+    joined: "1.5 TSI SE"); entity resolvers use it to split a comparison table by column."""
+
+    model_config = ConfigDict(frozen=True)
+
+    row: int = Field(ge=0)
+    col: int = Field(ge=0)
+    row_headers: list[str] = Field(default_factory=list[str])
+    col_headers: list[str] = Field(default_factory=list[str])
+    group: str | None = None
+
+
 class Statement(BaseModel):
     """One atomic piece of text: a sentence, list item, key/value pair or table cell.
 
@@ -57,6 +71,8 @@ class Statement(BaseModel):
     component_id: str
     heading_trail: list[str] = Field(default_factory=list[str])
     location: Location
+    table: TableCellRef | None = None
+    """Set on ``table_cell`` statements."""
 
 
 class NormaliserStep(BaseModel):
