@@ -125,13 +125,28 @@ def test_generate_rejects_bad_sizes(n_models: int, n_listings: int) -> None:
 
 def test_rebuild_replaces_an_earlier_build(tmp_path: Path) -> None:
     build(42, tmp_path)
-    stale = tmp_path / "stale.html"
-    stale.write_text("old")
     build(7, tmp_path)
-    assert not stale.exists()
     on_disk = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.html")}
     listed = {p["path"] for p in json.loads((tmp_path / "truth.json").read_text())["pages"]}
     assert on_disk == listed | {"index.html"}
+
+
+def test_build_refuses_a_foreign_truth_json_and_keeps_its_files(tmp_path: Path) -> None:
+    (tmp_path / "truth.json").write_text('{"records": []}')
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "report.pdf").write_bytes(b"%PDF-1.4")
+    with pytest.raises(ValueError, match="refusing"):
+        build(42, tmp_path)
+    assert (tmp_path / "docs" / "report.pdf").exists()
+    assert (tmp_path / "truth.json").read_text() == '{"records": []}'
+
+
+def test_rebuild_keeps_files_it_did_not_write(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    mine = tmp_path / "specs" / "my-notes.md"
+    mine.write_text("keep me")
+    build(7, tmp_path)
+    assert mine.read_text() == "keep me"
 
 
 def test_build_refuses_an_unrelated_directory(tmp_path: Path) -> None:

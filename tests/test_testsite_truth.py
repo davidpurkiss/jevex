@@ -5,6 +5,7 @@ field of every record against the text for *that* entity, allowing only the docu
 rounding (PS/bhp for kW, km/h for mph).
 """
 
+import json
 import re
 from html import unescape
 from html.parser import HTMLParser
@@ -185,3 +186,49 @@ def test_the_checker_catches_a_wrong_value() -> None:
     page = next(p for p in render(generate(42)) if p.family == "table")
     page.records[0]["values"]["co2_g_km"] = 999
     assert any("co2_g_km" in p for p in page_problems(page))
+
+
+def json_ld_problems(page: Page) -> list[str]:
+    """Every JSON-LD value must equal the page's single record."""
+    blob = page.html.split('<script type="application/ld+json">')[1].split("</script>")[0]
+    ld = json.loads(blob)
+    v = page.records[0]["values"]
+    expected: dict[str, Any] = {
+        "brand": v["make"],
+        "model": v["model"],
+        "vehicleConfiguration": v["trim"],
+        "fuelType": FUEL_WORDS[v["fuel_type"]][0],
+        "enginePower": v["power_kw"],
+        "accelerationTime": v["zero_to_62_s"],
+        "speed": v["top_speed_mph"],
+        "seatingCapacity": v["seats"],
+        "vehicleTransmission": "Automatic" if v["automatic"] else "Manual",
+        "price": v["price_gbp"],
+        "emissionsCO2": v["co2_g_km"],
+        "engineDisplacement": v["engine_size_cc"],
+    }
+    engine = ld["vehicleEngine"]
+    actual: dict[str, Any] = {
+        "brand": ld["brand"]["name"],
+        "model": ld["model"],
+        "vehicleConfiguration": ld["vehicleConfiguration"],
+        "fuelType": ld["fuelType"],
+        "enginePower": engine["enginePower"]["value"],
+        "accelerationTime": ld["accelerationTime"]["value"],
+        "speed": ld["speed"]["value"],
+        "seatingCapacity": ld["seatingCapacity"],
+        "vehicleTransmission": ld["vehicleTransmission"],
+        "price": ld["offers"]["price"],
+        "emissionsCO2": ld.get("emissionsCO2"),
+        "engineDisplacement": engine["engineDisplacement"]["value"]
+        if "engineDisplacement" in engine
+        else None,
+    }
+    return [f"{page.path} json-ld {k}" for k in expected if str(actual[k]) != str(expected[k])]
+
+
+@pytest.mark.parametrize("seed", [42, 1, 7, 2024])
+def test_json_ld_matches_the_truth(seed: int) -> None:
+    pages = [p for p in render(generate(seed)) if p.json_ld]
+    assert pages
+    assert [p for page in pages for p in json_ld_problems(page)] == []

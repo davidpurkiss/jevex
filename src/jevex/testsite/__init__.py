@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -23,14 +22,13 @@ TRUTH_FILE = "truth.json"
 def build(seed: int = 42, out_dir: str | Path = "testsite/build") -> dict[str, Any]:
     """Generate and write the site for ``seed``. Returns the ground-truth manifest.
 
-    ``out_dir`` is replaced if it holds an earlier build (it has a ``truth.json``), so no
-    stale pages survive. Any other non-empty directory is refused.
+    If ``out_dir`` holds an earlier build, its files (the pages its ``truth.json`` lists,
+    ``index.html`` and ``truth.json``) are removed first, so no stale pages survive. Any
+    other non-empty directory is refused, and nothing else in it is ever deleted.
     """
     out = Path(out_dir)
     if out.exists() and any(out.iterdir()):
-        if not (out / TRUTH_FILE).is_file():
-            raise ValueError(f"{out} isn't empty and isn't a test-site build; refusing to write")
-        shutil.rmtree(out)
+        _remove_previous_build(out)
     dataset = generate(seed)
     pages = render(dataset)
     for page in pages:
@@ -45,6 +43,24 @@ def build(seed: int = 42, out_dir: str | Path = "testsite/build") -> dict[str, A
     }
     (out / TRUTH_FILE).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest
+
+
+def _remove_previous_build(out: Path) -> None:
+    """Delete exactly what an earlier build wrote. Refuse if ``out`` isn't one."""
+    refusal = f"{out} isn't empty and isn't a jevex test-site build; refusing to write"
+    try:
+        manifest = json.loads((out / TRUTH_FILE).read_text())
+        paths = [page["path"] for page in manifest["pages"]]
+        is_build = isinstance(manifest["seed"], int) and isinstance(manifest["digest"], str)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError(refusal) from None
+    if not is_build or not all(isinstance(p, str) and ".." not in p for p in paths):
+        raise ValueError(refusal)
+    for relative in [*paths, "index.html", TRUTH_FILE]:
+        (out / relative).unlink(missing_ok=True)
+    for directory in sorted((d for d in out.rglob("*") if d.is_dir()), reverse=True):
+        if not any(directory.iterdir()):
+            directory.rmdir()
 
 
 def digest(pages: list[Page]) -> str:
