@@ -418,6 +418,30 @@ def test_content_between_rows_moves_in_front_of_the_table() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<table><tbody><template><tr><td>{{ name }}</td></tr></template>"
+        "<tr><td>Golf</td></tr></tbody></table>",
+        "<table><tr><td>Golf<template><td>{{ name }}</td></template></td></tr></table>",
+    ],
+)
+def test_table_recovery_does_not_reach_into_templates(markup: str) -> None:
+    root = parse_html(markup)
+    assert outline(root) == [(0, "table", "Golf")]
+
+
+def test_a_table_opened_between_rows_ends_the_open_table() -> None:
+    root = parse_html(
+        "<table><tr><td>a</td></tr><table><tr><td>b</td></tr></table></table><p>after</p>"
+    )
+    assert [(c.text, path(c)) for c in root.children] == [
+        ("a", "/html/body/table[1]"),
+        ("b", "/html/body/table[2]"),
+        ("after", "/html/body/p"),
+    ]
+
+
 def test_headings_in_header_cells_keep_a_data_table() -> None:
     root = parse_html("<table><tr><th><h3>Power</h3></th><td>150 PS</td></tr></table>")
     assert outline(root) == [(0, "table", "Power | 150 PS")]

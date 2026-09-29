@@ -337,7 +337,13 @@ class _TreeBuilder(HTMLParser):
         return node
 
     def _open_table(self) -> _Node | None:
-        return next((n for n in reversed(self.stack) if n.tag == "table"), None)
+        """The innermost open table, unless a ``template`` (its own context) is nearer."""
+        for node in reversed(self.stack):
+            if node.tag == "template":
+                return None
+            if node.tag == "table":
+                return node
+        return None
 
     def _imply_end_tags(self, tag: str) -> None:
         if tag in _TABLE_PARTS and self._open_table() is not None:
@@ -350,6 +356,8 @@ class _TreeBuilder(HTMLParser):
                     self.stack.pop()
             elif tag != "col":
                 self._close("caption", "colgroup", stop=frozenset({"table"}))
+        if tag == "table" and self.stack[-1].tag in _TABLE_CONTEXT:
+            self._close("table", stop=frozenset())  # a table between rows ends the open one
         if tag in _CLOSES_P or tag in _HEADINGS or tag == "table":
             self._close("p", stop=_SCOPE)
         if tag in _HEADINGS and self.stack[-1].tag in _HEADINGS:
@@ -366,13 +374,16 @@ class _TreeBuilder(HTMLParser):
             self._close(*_CELLS, stop=frozenset({"table", "tr"}))
 
     def _close(self, *tags: str, stop: frozenset[str]) -> bool:
-        """Close the nearest open element named in ``tags``, unless ``stop`` comes first."""
+        """Close the nearest open element named in ``tags``, unless ``stop`` comes first.
+
+        A ``template`` always stops the search: its content is a context of its own.
+        """
         for i in range(len(self.stack) - 1, 0, -1):
             node = self.stack[i]
             if node.tag in tags:
                 del self.stack[i:]
                 return True
-            if node.tag in stop:
+            if node.tag in stop or node.tag == "template":
                 return False
         return False
 
