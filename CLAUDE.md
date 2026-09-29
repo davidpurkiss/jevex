@@ -30,9 +30,11 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 
 | Module | What lives there |
 | --- | --- |
+| `categorise.py` | Statement categorisation (stage 10): `JevStatementClassifier` (one request per statement with one Choice per schema, options limited to the fields the component gate passed; items are `ToClassify`), `CategoriseStage` (answers with full distributions on `SchemaRun.categories`). `select.field_statements` routes the top field plus any other at p ≥ `ALSO_CATEGORY_P` |
 | `document.py` | `Document` (bytes + content type; base64 in JSON), content sniffing |
 | `layout.py` | `Component` tree, `Location` union (`DomLocation`, `PageLocation`, `ImageLocation`), `BBox` |
 | `statements.py` | `Statement`, `Span`, `Candidate`, `NormaliserStep` (compact YAML form) |
+| `split.py` | Statement splitting (stage 9): `DefaultSplitter` (pysbd sentences, list items, `Label: value` pairs, headings, captions, alt text; tables are #25), `StatementStage` |
 | `entities.py` | `EntityScope` |
 | `jev.py` | The only code that talks to Jev: `Noul`/`Choice`/`Score` questions, answers, `JevClient` (batching, splitting, metering), `JevBackend` protocol, `TypeSafeBackend` |
 | `schema.py` | `jevex.Field`, `Questions`, `SchemaConfig`, `SchemaSpec`/`FieldSpec` and every generated question |
