@@ -606,6 +606,7 @@ def test_tables_and_templates_survive_the_depth_cap(opener: str, depth: int) -> 
         opener * depth + "<table><tr><td>a</td></tr><p>x</p><tr><td>b</td></tr></table>"
         "<table><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></table>"
         "<template><p>secret</p></template>"
+        "<ul><li>a<li>b</ul><dl><dt>Colour<dd>Red</dl>"
     )
     first, grid = only(root, "table")
     assert first.text == "a\nb"
@@ -614,6 +615,7 @@ def test_tables_and_templates_survive_the_depth_cap(opener: str, depth: int) -> 
     texts = [c.text for c in root.walk() if c.text]
     assert texts.index("x") < texts.index("a\nb")  # still moved in front of its table
     assert "secret" not in "".join(texts)
+    assert [c.text for c in only(root, "list_item")] == ["a", "b", "Colour: Red"]
 
 
 def test_endlessly_nested_tables_stop_growing_but_keep_their_text() -> None:
@@ -622,7 +624,8 @@ def test_endlessly_nested_tables_stop_growing_but_keep_their_text() -> None:
     )
     assert "var x" not in root.model_dump_json()
     assert "tpl" not in root.model_dump_json()
-    # Nested tables are layout tables, so every cell's text is a paragraph; none is lost.
+    # Nested tables are layout tables, so cells' text becomes paragraphs. Past
+    # MAX_DEPTH_HARD neighbouring cells can run together, but no text is dropped.
     assert sum(c.text.count("cell") for c in root.walk()) == 500
     assert Component.model_validate_json(root.model_dump_json()) == root
 

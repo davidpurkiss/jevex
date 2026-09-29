@@ -168,9 +168,10 @@ _TABLE_SECTIONS = frozenset({"thead", "tbody", "tfoot"})
 _CELLS = frozenset({"td", "th"})
 _TABLE_PARTS = _TABLE_SECTIONS | _CELLS | {"tr", "caption", "colgroup", "col"}
 _TABLE_CONTEXT = _TABLE_SECTIONS | {"table", "tr"}
-_CAP_KEEP = _TABLE_PARTS | {"table", "template"}
-"""Elements the depth cap never closes: closing them would change what is shown."""
 """Where only table parts belong: other content found here is moved in front of the table."""
+_CAP_KEEP = _TABLE_PARTS | _LIST_TAGS | {"table", "template", "dl", "li", "dt", "dd"}
+"""Elements the depth cap never closes: closing them would change what is shown, or undo a
+table's or list's structure."""
 _IN_TABLE = _TABLE_PARTS | {"script", "style", "template", "input"}
 
 # Start tags that close an open <p> (the HTML parsing algorithm's list).
@@ -362,9 +363,9 @@ class _TreeBuilder(HTMLParser):
             self.stack.append(node)
 
     def _make_room(self) -> bool:
-        """At the depth cap, close inline elements so the next one opens as a sibling.
+        """At the depth cap, close elements so the next one opens as a sibling.
 
-        Table structure, templates and skipped subtrees stay open, so the stack can pass
+        Table and list structure, templates and skipped subtrees stay open, so the stack can pass
         the cap by those (tables nested in cells, for instance). Past ``MAX_DEPTH_HARD``
         this gives up and returns False.
         """
