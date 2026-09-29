@@ -2,8 +2,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from jevex.testsite import build, digest, generate, render
-from jevex.testsite.dataset import MAKES
 from jevex.testsite.schemas import Listing, VehicleSpec
 
 SCHEMAS = {"VehicleSpec": VehicleSpec, "Listing": Listing}
@@ -70,12 +71,74 @@ def test_truth_values_appear_on_the_page() -> None:
                 assert f"{values['mileage_miles']:,}" in page.html
 
 
-def test_makes_are_fictional_and_values_plausible() -> None:
+REAL_NAMES = {
+    # A sanity denylist of real makes and models that invented names must avoid.
+    "vento",
+    "strada",
+    "sable",
+    "nimbus",
+    "golf",
+    "polo",
+    "focus",
+    "fiesta",
+    "civic",
+    "corolla",
+    "astra",
+    "corsa",
+    "clio",
+    "fenwick",
+    "ford",
+    "fiat",
+    "kia",
+    "mini",
+}
+
+
+def test_names_are_fictional() -> None:
     data = generate(42)
-    assert {m.make for m in data.models} <= set(MAKES)
+    names = {m.make.lower() for m in data.models} | {m.name.lower() for m in data.models}
+    assert not names & REAL_NAMES
+
+
+def test_values_are_plausible_and_trims_step_up() -> None:
+    data = generate(42)
+    for model in data.models:
+        prices = [v.price_gbp for v in model.variants]
+        powers = [v.power_kw for v in model.variants]
+        assert prices == sorted(prices)
+        assert powers == sorted(powers)
+        assert len({v.seats for v in model.variants}) == 1
     for v in data.variants:
         assert 3.0 <= v.zero_to_62_s <= 14.0
+        assert v.top_speed_mph <= 155
         assert (v.engine_size_cc is None) == (v.fuel_type == "ev")
+        assert (v.co2_g_km == 0) == (v.fuel_type == "ev")
+        if v.fuel_type in ("hybrid", "phev", "ev"):
+            assert v.automatic
+
+
+@pytest.mark.parametrize(("n_models", "n_listings"), [(0, 5), (17, 5), (4, -1)])
+def test_generate_rejects_bad_sizes(n_models: int, n_listings: int) -> None:
+    with pytest.raises(ValueError, match=r"n_models|n_listings"):
+        generate(42, n_models=n_models, n_listings=n_listings)
+
+
+def test_rebuild_replaces_an_earlier_build(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    stale = tmp_path / "stale.html"
+    stale.write_text("old")
+    build(7, tmp_path)
+    assert not stale.exists()
+    on_disk = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.html")}
+    listed = {p["path"] for p in json.loads((tmp_path / "truth.json").read_text())["pages"]}
+    assert on_disk == listed | {"index.html"}
+
+
+def test_build_refuses_an_unrelated_directory(tmp_path: Path) -> None:
+    (tmp_path / "notes.txt").write_text("mine")
+    with pytest.raises(ValueError, match="refusing"):
+        build(42, tmp_path)
+    assert (tmp_path / "notes.txt").exists()
 
 
 def test_build_writes_the_site_and_truth(tmp_path: Path) -> None:

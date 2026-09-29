@@ -11,8 +11,9 @@ Template families (the ``family`` in the ground truth):
 
 Each page gets its own ``random.Random(f"{seed}:{path}")``, so pages don't change when
 others are added. Pages carry realistic boilerplate (nav, cookie banner, footer) for the
-cleaner. Displayed values are rounded as a real page would round them (150 PS for
-110.3 kW), so eval compares numbers within a tolerance.
+cleaner. Power (whole kW in the truth) may be shown as rounded PS or bhp, within about
+0.37 kW of the truth, and top speed (whole mph) as rounded km/h, within about 0.31 mph,
+so eval compares those numbers with a small tolerance. Everything else is shown exactly.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from decimal import Decimal
 
     from jevex.testsite.dataset import Dataset, Model
     from jevex.testsite.schemas import Listing, VehicleSpec
@@ -43,6 +45,12 @@ FUEL_WORDS = {
 
 @dataclass
 class Page:
+    """One rendered page and its ground truth.
+
+    ``records[].entity`` is ``"document"`` for single-record pages, the trim name on
+    ``table``/``kv`` pages, and ``listing-N`` on grids (matching the card's ``id``).
+    """
+
     path: str
     family: str
     schema: str
@@ -51,6 +59,7 @@ class Page:
     json_ld: bool = False
 
     def truth(self) -> dict[str, Any]:
+        """The page's entry in ``truth.json``."""
         return {
             "path": self.path,
             "family": self.family,
@@ -70,8 +79,8 @@ def _power(rng: random.Random, kw: float) -> str:
     return f"{round(kw * (PS_PER_KW if unit == 'PS' else BHP_PER_KW))}{rng.choice(('', ' '))}{unit}"
 
 
-def _price(rng: random.Random, gbp: object) -> str:
-    amount = f"{int(str(gbp)):,}"
+def _price(rng: random.Random, gbp: Decimal) -> str:
+    amount = f"{int(gbp):,}"
     return rng.choice((f"£{amount}", f"£{amount}", f"{amount} GBP"))
 
 
@@ -134,7 +143,7 @@ SENTENCES: dict[str, tuple[Callable[[random.Random, VehicleSpec], str], ...]] = 
         lambda r, v: (
             f"CO2 emissions are {v.co2_g_km} g/km."
             if v.co2_g_km
-            else "It produces zero tailpipe emissions."
+            else "Tailpipe CO2 emissions are 0 g/km."
         ),
     ),
 }
@@ -166,7 +175,7 @@ def _cell(rng: random.Random, name: str, v: VehicleSpec) -> str:
         case "top_speed_mph":
             return _top_speed(rng, v.top_speed_mph)
         case "co2_g_km":
-            return f"{v.co2_g_km}" if v.co2_g_km else "0"
+            return str(v.co2_g_km)
         case "price_gbp":
             return _price(rng, v.price_gbp)
         case "seats":
@@ -233,7 +242,7 @@ def _json_ld(v: VehicleSpec) -> str:
             "value": v.engine_size_cc,
             "unitCode": "CMQ",
         }
-    if v.co2_g_km:
+    if v.co2_g_km is not None:
         data["emissionsCO2"] = v.co2_g_km
     return f'<script type="application/ld+json">{json.dumps(data, sort_keys=True)}</script>'
 

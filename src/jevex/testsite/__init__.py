@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,16 @@ TRUTH_FILE = "truth.json"
 
 
 def build(seed: int = 42, out_dir: str | Path = "testsite/build") -> dict[str, Any]:
-    """Generate and write the site for ``seed``. Returns the ground-truth manifest."""
+    """Generate and write the site for ``seed``. Returns the ground-truth manifest.
+
+    ``out_dir`` is replaced if it holds an earlier build (it has a ``truth.json``), so no
+    stale pages survive. Any other non-empty directory is refused.
+    """
     out = Path(out_dir)
+    if out.exists() and any(out.iterdir()):
+        if not (out / TRUTH_FILE).is_file():
+            raise ValueError(f"{out} isn't empty and isn't a test-site build; refusing to write")
+        shutil.rmtree(out)
     dataset = generate(seed)
     pages = render(dataset)
     for page in pages:
