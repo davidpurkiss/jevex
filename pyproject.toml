@@ -8,6 +8,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "David Purkiss" }]
 requires-python = ">=3.12"
 dependencies = [
+    "google-re2>=1.1.20251105",
     "pydantic>=2.11",
     "typesafe-sdk>=0.7.2",
 ]
@@ -54,7 +55,7 @@ extend-exclude = ["docs"]
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT", "TC"]
 # Table-cell statements use these on purpose, e.g. "Performance › 0-62 mph (s) · SE: 9.1".
-allowed-confusables = ["›", "·", "–", "×"]
+allowed-confusables = ["›", "·", "–", "×", "’"]
 
 [tool.ruff.lint.flake8-type-checking]
 # Pydantic resolves annotations at runtime, so their imports must stay at module level.
