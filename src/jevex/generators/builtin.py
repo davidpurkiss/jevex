@@ -8,7 +8,8 @@ Normaliser steps these generators emit:
 
 - ``parse_number``: "18,495" → 18495, "9.1" → 9.1
 - ``{unit: {from: <canonical>}}``: the unit found; the normaliser converts to the field's unit
-- ``{parse_money: {currency: <code>}}``: "£18,495", "25k" → amount in that currency
+- ``{parse_money: {currency: <code>}}``: "£18,495", "25k GBP", "£1.5m", "€2bn" → amount in
+  that currency, with the ``k``/``m``/``bn`` multiplier applied
 - ``{parse_date: {order?, precision?}}``: dates, month-years and years
 - ``parse_range``: "5–7" → [5, 7]
 - ``strip``: trim whitespace and trailing punctuation
@@ -95,10 +96,14 @@ class NumberWithUnit:
 
 _CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
+_MULTIPLIER = r"(?:bn|[kKmM])"
+# Every amount must end cleanly: "£18,4950" or "£1.5x" yield nothing rather than a
+# truncated (and silently wrong) "£18,495" / "£1.5".
+_END = r"(?![\w]|[.,]\d)"
 _MONEY = re.compile(
-    rf"(?P<sym>[£$€¥])\s?(?P<a1>{_NUM})(?P<k1>[kK]\b)?"
-    rf"|(?<![\w.,])(?P<a2>{_NUM})(?P<k2>[kK])?\s?(?P<c2>{_CODES})\b"
-    rf"|\b(?P<c3>{_CODES})\s?(?P<a3>{_NUM})(?P<k3>[kK]\b)?"
+    rf"(?P<sym>[£$€¥])\s?(?:{_NUM}){_MULTIPLIER}?{_END}"
+    rf"|(?<![\w.,])(?:{_NUM}){_MULTIPLIER}?\s?(?P<c2>{_CODES})\b"
+    rf"|\b(?P<c3>{_CODES})\s?(?:{_NUM}){_MULTIPLIER}?{_END}"
 )
 
 
@@ -115,7 +120,7 @@ class Money:
             if m.group("sym"):
                 currency = _CURRENCY_SYMBOLS[m.group("sym")]
             else:
-                currency = (m.group("c2") or m.group("c3")).upper()
+                currency = m.group("c2") or m.group("c3")
             out.append(
                 _candidate(
                     statement,
@@ -168,7 +173,7 @@ class DateGenerator:
         return sorted(out, key=lambda c: (c.span.start, -c.span.end))
 
 
-_YEAR = re.compile(r"(?<![\d.,])(?:19|20)\d{2}(?![\d.,]\d|\d)")
+_YEAR = re.compile(r"(?<![\w.,])(?:19|20)\d{2}(?![\w]|[.,]\d)")
 
 
 @dataclass(frozen=True)
@@ -212,7 +217,7 @@ class Range:
 
 
 _KEY_VALUE = re.compile(r":\s+(?=\S)")
-_TRAILING = " \t.;,"
+_TRAILING = " \t\r\n.;,"
 
 
 @dataclass(frozen=True)
@@ -360,13 +365,15 @@ class NounPhrase:
         run: list[re.Match[str]] = []
 
         def flush() -> None:
-            words = run[:MAX_PHRASE_WORDS]
-            if words and not all(w.group().replace(".", "").isdigit() for w in words):
-                out.append(
-                    _candidate(
-                        statement, words[0].start(), words[-1].end(), self.id, _step("strip")
+            # Long runs become consecutive chunks, so no words are dropped.
+            for i in range(0, len(run), MAX_PHRASE_WORDS):
+                words = run[i : i + MAX_PHRASE_WORDS]
+                if not all(w.group().replace(".", "").isdigit() for w in words):
+                    out.append(
+                        _candidate(
+                            statement, words[0].start(), words[-1].end(), self.id, _step("strip")
+                        )
                     )
-                )
             run.clear()
 
         last_end = 0

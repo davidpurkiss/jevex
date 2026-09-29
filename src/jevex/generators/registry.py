@@ -23,7 +23,10 @@ def scope_matches(
     """Whether a generator with ``scope`` applies. Empty scope parts match anything.
 
     ``fields`` entries may be bare (``zero_to_62_s``) or qualified
-    (``VehicleSpec.zero_to_62_s``). A scope locale of ``en`` matches ``en-GB``.
+    (``VehicleSpec.zero_to_62_s``). A scope locale of ``en`` matches ``en-GB``; locales
+    compare case-insensitively with ``_`` treated as ``-``. A locale- or source-scoped
+    generator does **not** run when the document's locale or source is unknown: a
+    decimal-comma generator mustn't guess.
     """
     if scope.kinds and field.kind not in scope.kinds:
         return False
@@ -31,13 +34,15 @@ def scope_matches(
         return False
     if scope.schemas and schema not in scope.schemas:
         return False
-    if (
-        scope.locale
-        and locale
-        and not (locale == scope.locale or locale.startswith(f"{scope.locale}-"))
-    ):
-        return False
+    if scope.locale:
+        want, have = _locale(scope.locale), _locale(locale or "")
+        if not have or not (have == want or have.startswith(f"{want}-")):
+            return False
     return not (scope.sources and (source is None or source not in scope.sources))
+
+
+def _locale(tag: str) -> str:
+    return tag.replace("_", "-").lower()
 
 
 class GeneratorRegistry:
@@ -66,9 +71,11 @@ class GeneratorRegistry:
 
     @property
     def ids(self) -> list[str]:
+        """Generator ids in registry (tie-winning) order."""
         return [g.id for g in self._generators]
 
     def get(self, generator_id: str) -> CandidateGenerator:
+        """The generator with this id; ``KeyError`` if there's none."""
         for g in self._generators:
             if g.id == generator_id:
                 return g
@@ -83,6 +90,7 @@ class GeneratorRegistry:
         return GeneratorRegistry([*self._generators, generator])
 
     def without(self, generator_id: str) -> GeneratorRegistry:
+        """A registry without this generator; ``KeyError`` if it isn't registered."""
         self.get(generator_id)
         return GeneratorRegistry(g for g in self._generators if g.id != generator_id)
 
@@ -94,6 +102,7 @@ class GeneratorRegistry:
         locale: str | None = None,
         source: str | None = None,
     ) -> list[CandidateGenerator]:
+        """Generators whose scope matches this field and document, in registry order."""
         return [
             g
             for g in self._generators

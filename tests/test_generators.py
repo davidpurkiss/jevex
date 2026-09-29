@@ -109,6 +109,20 @@ def test_money_ignores_plain_numbers() -> None:
     assert raws(Money(), "18,495 miles") == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("£1.5m budget", ["£1.5m"]),
+        ("EUR 2.5bn deal", ["EUR 2.5bn"]),
+        ("£18,4950", []),  # malformed: never truncate to a wrong "£18,495"
+        ("£5.99p", []),
+        ("£1.5x", []),
+    ],
+)
+def test_money_never_truncates_amounts(text: str, expected: list[str]) -> None:
+    assert raws(Money(), text) == expected
+
+
 # --- dates and years -------------------------------------------------------------------
 
 
@@ -130,6 +144,10 @@ def test_us_style_month_first_date() -> None:
     assert chain(DateGenerator(), "on March 12, 2024", "March 12, 2024") == [
         {"parse_date": {"order": "mdy"}}
     ]
+
+
+def test_years_are_not_found_inside_identifiers() -> None:
+    assert raws(Year(), "VIN WVW2024ZZZ, part A2024, 2024x") == []
 
 
 def test_years() -> None:
@@ -166,6 +184,10 @@ def test_key_value_reads_rendered_table_cells() -> None:
     assert raws(KeyValue(), "Performance › 0-62 mph (s) · 1.5 TSI SE: 9.1") == ["9.1"]
 
 
+def test_key_value_strips_trailing_newlines() -> None:
+    assert raws(KeyValue(), "Colour: Grey\n") == ["Grey"]
+
+
 def test_key_value_needs_a_separator_and_a_value() -> None:
     assert raws(KeyValue(), "No separator here") == []
     assert raws(KeyValue(), "Colour: ") == []
@@ -191,10 +213,13 @@ def test_noun_phrases_keep_numbers_with_thousands_separators_whole() -> None:
     ]
 
 
-def test_noun_phrases_skip_pure_numbers_and_cap_length() -> None:
+def test_noun_phrases_skip_pure_numbers_and_chunk_long_runs() -> None:
     assert raws(NounPhrase(), "42, 7.5") == []
     long = " ".join(f"Word{i}" for i in range(12))
-    assert raws(NounPhrase(), long) == [" ".join(f"Word{i}" for i in range(8))]
+    assert raws(NounPhrase(), long) == [
+        " ".join(f"Word{i}" for i in range(8)),
+        " ".join(f"Word{i}" for i in range(8, 12)),
+    ]
 
 
 # --- declarative regex generators ------------------------------------------------------
@@ -271,6 +296,7 @@ def test_registry_generate_dedupes_spans_and_sorts() -> None:
         (Scope(locale="en"), True),
         (Scope(locale="en-GB"), True),
         (Scope(locale="de-DE"), False),
+        (Scope(locale="EN_gb"), True),
         (Scope(sources=frozenset({"structured"})), False),
     ],
 )
@@ -279,6 +305,21 @@ def test_scope_matching(scope: Scope, matches: bool) -> None:
     reg = GeneratorRegistry([gen])
     found = reg.for_field(SPEC.field("zero_to_62_s"), schema="VehicleSpec", locale="en-GB")
     assert (found == [gen]) is matches
+
+
+def test_locale_scoped_generators_skip_documents_of_unknown_locale() -> None:
+    gen = RegexGenerator(id="g", pattern=r"\d+,\d+", scope=Scope(locale="de"))
+    reg = GeneratorRegistry([gen])
+    assert reg.for_field(SPEC.field("zero_to_62_s"), schema="VehicleSpec", locale=None) == []
+    assert reg.for_field(SPEC.field("zero_to_62_s"), schema="VehicleSpec", locale="de-AT") == [gen]
+
+
+def test_re2_errors_are_readable(capfd: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(InvalidGeneratorError) as info:
+        RegexGenerator(id="bad", pattern=r"(a")
+    assert "missing )" in str(info.value)
+    assert "b'" not in str(info.value)
+    assert capfd.readouterr().err == ""
 
 
 def test_registry_is_immutable_and_replaces_by_id() -> None:

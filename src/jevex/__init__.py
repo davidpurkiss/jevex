@@ -3,6 +3,12 @@
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.generators import (
+    GeneratorRegistry,
+    InvalidGeneratorError,
+    RegexGenerator,
+    default_registry,
+)
 from jevex.layout import (
     BBox,
     Component,
@@ -31,12 +37,15 @@ __all__ = [
     "Extractor",
     "Field",
     "FieldSpec",
+    "GeneratorRegistry",
     "ImageLocation",
+    "InvalidGeneratorError",
     "Location",
     "NormaliserStep",
     "PageLocation",
     "Pipeline",
     "Questions",
+    "RegexGenerator",
     "SchemaConfig",
     "SchemaSpec",
     "Span",
@@ -44,4 +53,5 @@ __all__ = [
     "Statement",
     "StatementKind",
     "__version__",
+    "default_registry",
 ]

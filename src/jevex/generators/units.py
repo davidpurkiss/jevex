@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Unit:
+    """A canonical unit and the spellings that mean it."""
+
     canonical: str
     spellings: tuple[str, ...]
     case_sensitive: tuple[str, ...] = ()

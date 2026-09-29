@@ -7,10 +7,13 @@ cause catastrophic backtracking on hostile input. The pattern length is capped.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from jevex.interfaces import Scope
 from jevex.statements import Candidate, NormaliserStep, Span, Statement
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 MAX_PATTERN_LENGTH = 500
 
@@ -24,9 +27,10 @@ class _Match(Protocol):
 
 
 class _Pattern(Protocol):
-    groups: int
+    @property
+    def groups(self) -> int: ...
 
-    def finditer(self, text: str) -> Any: ...
+    def finditer(self, text: str) -> Iterator[_Match]: ...
 
 
 def compile_re2(pattern: str) -> _Pattern:
@@ -35,12 +39,20 @@ def compile_re2(pattern: str) -> _Pattern:
         raise InvalidGeneratorError(
             f"pattern is {len(pattern)} characters; the limit is {MAX_PATTERN_LENGTH}"
         )
+    # google-re2 ships without type stubs; the Protocols above describe what we use.
     import re2  # pyright: ignore[reportMissingTypeStubs]
 
+    options = re2.Options()  # pyright: ignore[reportUnknownMemberType]
+    options.log_errors = False  # otherwise every rejected pattern logs to stderr
+    re2_error = cast("type[Exception]", re2.error)  # pyright: ignore[reportUnknownMemberType]
     try:
-        return cast("_Pattern", re2.compile(pattern))  # pyright: ignore[reportUnknownMemberType]
-    except Exception as exc:  # re2 raises its own error type for unsupported syntax
-        raise InvalidGeneratorError(f"pattern does not compile under RE2: {exc}") from exc
+        compiled = re2.compile(pattern, options)  # pyright: ignore[reportUnknownMemberType]
+    except re2_error as exc:
+        message: object = exc.args[0] if exc.args else exc
+        if isinstance(message, bytes):
+            message = message.decode(errors="replace")
+        raise InvalidGeneratorError(f"pattern does not compile under RE2: {message}") from None
+    return cast("_Pattern", compiled)
 
 
 @dataclass(frozen=True)
@@ -52,6 +64,7 @@ class RegexGenerator:
     group: int = 0
     normalise: tuple[NormaliserStep, ...] = ()
     scope: Scope = field(default_factory=Scope)
+    _compiled: _Pattern = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         compiled = compile_re2(self.pattern)
@@ -59,12 +72,11 @@ class RegexGenerator:
             raise InvalidGeneratorError(
                 f"group {self.group} doesn't exist; the pattern has {compiled.groups} group(s)"
             )
-        object.__setattr__(self, "_compiled", compiled)
+        object.__setattr__(self, "_compiled", compiled)  # frozen dataclass
 
     def generate(self, statement: Statement) -> list[Candidate]:
-        compiled = cast("_Pattern", self.__dict__["_compiled"])
         out: list[Candidate] = []
-        for match in cast("list[_Match]", list(compiled.finditer(statement.text))):
+        for match in self._compiled.finditer(statement.text):
             start, end = match.span(self.group)
             if start < 0 or start == end:  # optional group didn't take part, or empty
                 continue
