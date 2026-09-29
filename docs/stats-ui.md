@@ -26,8 +26,10 @@ sits behind the caller's own auth), and long-term metrics storage (export to Pro
 
 The UI reads data; it never computes extraction. Two sources, one schema:
 
-1. **Store** (`Store` interface, #35): per-document results meta, generator stats (hit and
-   win counts), the spend ledger and budget events. It's live and append-only.
+1. **Store** (`Store` interface, #35): generator stats (documents, hit and win counts),
+   generator disables and the spend ledger (one row per charge, by kind and run). It's
+   live, and the ledger is append-only. Per-document results meta and budget events aren't
+   stored yet; the stats UI (#51) needs them added to the store or kept in a run log.
 2. **Replay output** (`jevex eval --replay`, #47): per-batch CSV rows, plus the
    ground-truth accuracy the store doesn't have.
 
