@@ -164,6 +164,16 @@ def test_json_ld_nested_too_deeply_is_skipped() -> None:
     assert data.skipped[0].reason == "invalid JSON-LD: nested too deeply"
 
 
+def test_json_ld_nodes_deep_in_top_level_arrays_are_found() -> None:
+    blob = only(read("", ld("[" * 1500 + '{"@type": "Car"}' + "]" * 1500)))
+    assert blob.data == {"@type": "Car"}
+
+
+def test_json_nan_and_infinity_read_as_none() -> None:
+    blob = only(read("", ld('{"@type": "Offer", "price": NaN, "max": -Infinity}')))
+    assert blob.data == {"@type": "Offer", "price": None, "max": None}
+
+
 def test_empty_json_ld_script_is_skipped() -> None:
     assert read("", ld("  ")).skipped[0].reason.startswith("invalid JSON-LD: expected a value")
 
@@ -535,6 +545,11 @@ def test_bad_devalue_payload_is_skipped() -> None:
     assert data.skipped[0].reason == "invalid JSON: devalue payload must be a non-empty array"
 
 
+def test_js_numbers_too_large_to_hold_read_as_none() -> None:
+    blob = only(read("<script>window.__INITIAL_STATE__ = {big: 1e999, 1e999: -2e400}</script>"))
+    assert blob.data == {"big": None, "1e999": None}
+
+
 # --- devalue ---------------------------------------------------------------------------
 
 
@@ -560,6 +575,16 @@ def test_unflatten_devalue_special_values_and_cycles() -> None:
     }
 
 
+def test_unflatten_devalue_decodes_shared_references_once() -> None:
+    """Each entry refers twice to the next: decoding must not double at every level."""
+    flat: list[Any] = [[i + 1, i + 1] for i in range(40)] + ["leaf"]
+    value = unflatten_devalue(flat)
+    assert value[0] is value[1]
+    for _ in range(40):
+        value = value[0]
+    assert value == "leaf"
+
+
 @pytest.mark.parametrize(
     ("flat", "value"),
     [
@@ -582,6 +607,8 @@ def test_unflatten_devalue_values(flat: Any, value: Any) -> None:
         ([{"a": 5}], "devalue reference 5 is out of range"),
         ([{"a": "1"}], "devalue reference '1' is not an index"),
         ([{"a": -9}], "devalue reference -9 is not a special value"),
+        ([["BigInt", "12.5"]], "bad devalue BigInt ['12.5']"),
+        ([["BigInt"]], "bad devalue BigInt []"),
         (3, "devalue reference 3 is not a special value"),
     ],
 )
@@ -611,6 +638,11 @@ def test_data_attributes_parse_json_and_keep_everything_without_a_noise_filter()
     assert kept == {"car": {"make": "Kia"}, "list": "[1,", "testid": "t"}
     filtered = only(read(body)).data
     assert filtered == {"car": {"make": "Kia"}, "list": "[1,"}
+
+
+def test_data_attribute_json_too_deep_to_parse_is_kept_as_text() -> None:
+    deep = "[" * 20000 + "]" * 20000
+    assert only(read(f"<div data-x='{deep}'></div>")).data == {"x": deep}
 
 
 # --- The reader as a whole -------------------------------------------------------------

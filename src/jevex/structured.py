@@ -593,8 +593,8 @@ def _attribute_value(value: str) -> Any:
     stripped = value.strip()
     if stripped[:1] in ("{", "["):
         try:
-            return json.loads(stripped)
-        except ValueError:
+            return json.loads(stripped, parse_constant=_no_constant)
+        except (ValueError, RecursionError):
             pass
     return value
 
@@ -616,14 +616,19 @@ def _add_property(item: dict[str, Any], name: str, value: Any) -> None:
 
 def _json_ld_nodes(value: Any) -> list[dict[str, Any]]:
     """Top-level nodes: a list's items, a ``@graph``'s nodes, or the object itself."""
-    if isinstance(value, list):
-        return [n for v in cast("list[Any]", value) for n in _json_ld_nodes(v)]
-    if not isinstance(value, dict):
-        return []
-    node = cast("dict[str, Any]", value)
-    if "@graph" in node:
-        return _json_ld_nodes(node["@graph"])
-    return [{k: v for k, v in node.items() if k != "@context"}]
+    nodes: list[dict[str, Any]] = []
+    stack: list[Any] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, list):
+            stack.extend(reversed(cast("list[Any]", item)))
+        elif isinstance(item, dict):
+            node = cast("dict[str, Any]", item)
+            if "@graph" in node:
+                stack.append(node["@graph"])
+            else:
+                nodes.append({k: v for k, v in node.items() if k != "@context"})
+    return nodes
 
 
 def _inline_refs(value: Any, by_id: dict[str, dict[str, Any]], own_id: Any) -> Any:
@@ -650,10 +655,15 @@ class _ParseError(ValueError):
     pass
 
 
+def _no_constant(_: str) -> None:
+    """``NaN`` and ``Infinity`` in JSON read as ``None``, like ``null``: they aren't values
+    a record can hold, and ``nan`` would never compare equal."""
+
+
 def _parse_json_or_js(text: str) -> Any:
     """JSON, or failing that a JavaScript literal (trailing commas, single quotes...)."""
     try:
-        return json.loads(text, strict=False)
+        return json.loads(text, strict=False, parse_constant=_no_constant)
     except ValueError:
         pass
     except RecursionError:
@@ -682,7 +692,8 @@ def unflatten_devalue(flat: Any) -> Any:
     array, and tagged arrays (``["Date", "2026-..."]``, ``["Reactive", 3]``) mark special
     values. Dates come back as ISO strings, sets as lists, maps as objects when their keys
     are strings, and ``undefined``, ``NaN`` and infinities as ``None``. A value that
-    refers back to itself is cut to ``None`` where it loops.
+    refers back to itself is cut to ``None`` where it loops. Values referred to more than
+    once are decoded once and shared, so treat the result as read-only.
     """
     if isinstance(flat, int) and not isinstance(flat, bool):
         return _special(flat)
@@ -690,45 +701,60 @@ def unflatten_devalue(flat: Any) -> Any:
         raise _ParseError("devalue payload must be a non-empty array")
     values = cast("list[Any]", flat)
 
-    def hydrate(index: Any, active: frozenset[int]) -> Any:
+    hydrated: dict[int, Any] = {}
+    active: set[int] = set()
+
+    def hydrate(index: Any) -> Any:
         if not isinstance(index, int) or isinstance(index, bool):
             raise _ParseError(f"devalue reference {index!r} is not an index")
         if index < 0:
             return _special(index)
         if index >= len(values):
             raise _ParseError(f"devalue reference {index} is out of range")
+        # Shared references reuse one decoded value, so the work stays linear however
+        # often a payload repeats them.
+        if index in hydrated:
+            return hydrated[index]
         if index in active:
             return None
-        active = active | {index}
-        value = values[index]
+        active.add(index)
+        try:
+            hydrated[index] = decode(values[index])
+        finally:
+            active.discard(index)
+        return hydrated[index]
+
+    def decode(value: Any) -> Any:
         if isinstance(value, dict):
-            return {k: hydrate(v, active) for k, v in cast("dict[str, Any]", value).items()}
+            return {k: hydrate(v) for k, v in cast("dict[str, Any]", value).items()}
         if not isinstance(value, list):
             return value
         items = cast("list[Any]", value)
         if not items or not isinstance(items[0], str):
-            return [None if i == _HOLE else hydrate(i, active) for i in items]
+            return [None if i == _HOLE else hydrate(i) for i in items]
         tag, args = items[0], items[1:]
-        if tag in ("Date", "RegExp", "BigInt", "URL"):
-            return int(args[0]) if tag == "BigInt" else args[0] if args else None
+        if tag == "BigInt":
+            try:
+                return int(args[0])
+            except (IndexError, TypeError, ValueError):
+                raise _ParseError(f"bad devalue BigInt {args!r}") from None
+        if tag in ("Date", "RegExp", "URL"):
+            return args[0] if args else None
         if tag == "Set":
-            return [hydrate(i, active) for i in args]
+            return [hydrate(i) for i in args]
         if tag in ("Map", "null"):
             pairs = [
-                (
-                    hydrate(args[i], active) if tag == "Map" else args[i],
-                    hydrate(args[i + 1], active),
-                )
+                (hydrate(args[i]) if tag == "Map" else args[i], hydrate(args[i + 1]))
                 for i in range(0, len(args) - 1, 2)
             ]
             if all(isinstance(k, str) for k, _ in pairs):
                 return dict(pairs)
             return [list(p) for p in pairs]
         # Reactive, ShallowReactive, Ref, Object and other wrappers hold one value.
-        return hydrate(args[0], active) if args else None
+        return hydrate(args[0]) if args else None
 
     try:
-        return hydrate(0, frozenset())
+        return hydrate(0)
     except RecursionError:
         raise _ParseError("devalue payload is nested too deeply") from None
 
@@ -873,7 +899,7 @@ class _JsParser:
             if not args or not isinstance(args[0], str):
                 raise self.error("JSON.parse needs a string")
             try:
-                return json.loads(args[0], strict=False)
+                return json.loads(args[0], strict=False, parse_constant=_no_constant)
             except ValueError as e:
                 raise self.error(f"JSON.parse argument is not JSON ({e})") from None
         while self.accept("."):
@@ -986,7 +1012,8 @@ class _JsParser:
                 match = _JS_NUMBER.match(self.text, self.pos)
                 if match and not _JS_IDENT.match(self.text, self.pos):
                     self.pos = match.end()
-                    key = str(_js_number(match.group()))
+                    number = _js_number(match.group())
+                    key = match.group() if number is None else str(number)
                 else:
                     name = self.ident()
                     if name is None:
@@ -1069,7 +1096,7 @@ class _JsParser:
             raise self.error(f"bad escape {digits!r}") from None
 
 
-def _js_number(literal: str) -> int | float:
+def _js_number(literal: str) -> int | float | None:
     sign = -1 if literal.startswith("-") else 1
     body = literal.lstrip("+-")
     prefix = body[:2].lower()
@@ -1077,5 +1104,5 @@ def _js_number(literal: str) -> int | float:
         return sign * int(body[2:], {"0x": 16, "0o": 8, "0b": 2}[prefix])
     if any(c in body for c in ".eE"):
         number = sign * float(body)
-        return number if math.isfinite(number) else 0.0
+        return number if math.isfinite(number) else None
     return sign * int(body)
