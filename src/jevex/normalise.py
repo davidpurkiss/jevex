@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import Selection
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import FieldSpec
-    from jevex.statements import NormaliserStep
+    from jevex.statements import Candidate, NormaliserStep
 
 
 class NormaliseError(ValueError):
@@ -475,17 +475,25 @@ class NormaliseStage:
     ) -> FieldMeta:
         field = run.spec.field(field_name)
         ranked = sorted(picks, key=lambda p: -p[1].confidence)
-        accepted: list[tuple[str, Selection, Any]] = []
+        accepted: list[tuple[str, Selection, Candidate, Any]] = []
         errors: list[str] = []
         for statement_id, selection in ranked:
-            candidate = selection.candidate
-            assert candidate is not None
-            try:
-                value = normalise(candidate.raw, candidate.normalise, field, registry=self.registry)
-            except NormaliseError as exc:
-                errors.append(str(exc))
-                continue
-            accepted.append((statement_id, selection, value))
+            assert selection.candidate is not None
+            # List fields take every candidate the statement states; others take the pick.
+            wanted = (
+                (selection.accepted or [selection.candidate])
+                if field.many
+                else [selection.candidate]
+            )
+            for candidate in wanted:
+                try:
+                    value = normalise(
+                        candidate.raw, candidate.normalise, field, registry=self.registry
+                    )
+                except NormaliseError as exc:
+                    errors.append(str(exc))
+                    continue
+                accepted.append((statement_id, selection, candidate, value))
 
         if not accepted:
             statement_id, selection = ranked[0]
@@ -498,11 +506,11 @@ class NormaliseStage:
                 error="; ".join(errors),
             )
 
-        best_id, best, best_value = accepted[0]
+        best_id, best, _, best_value = accepted[0]
         if field.many:
-            in_order = sorted(accepted, key=lambda a: _position(ctx, a[0], a[1]))
+            in_order = sorted(accepted, key=lambda a: _position(ctx, a[0], a[2]))
             items: list[Any] = []
-            for _, _, v in in_order:
+            for _, _, _, v in in_order:
                 for item in v if isinstance(v, list) else [v]:  # pyright: ignore[reportUnknownVariableType]
                     if item not in items:
                         items.append(item)
@@ -513,7 +521,11 @@ class NormaliseStage:
             method="generator",
             generator_id=best.candidate.generator_id if best.candidate else None,
             source=_source(ctx, best_id, best),
-            alternatives=_alternatives(ranked, [] if field.many else [best_id]),
+            alternatives=_alternatives(
+                ranked,
+                [] if field.many else [best_id],
+                accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
+            ),
         )
 
 
@@ -529,10 +541,16 @@ def _source(ctx: Context, statement_id: str, selection: Selection) -> Source:
     )
 
 
-def _alternatives(ranked: list[tuple[str, Selection]], exclude: list[str]) -> list[Alternative]:
+def _alternatives(
+    ranked: list[tuple[str, Selection]],
+    exclude: list[str],
+    *,
+    accepted_raws: set[str] | None = None,
+) -> list[Alternative]:
     """Other picks and the options each question weighed, one per raw span, most likely
-    first. The chosen span itself is never listed."""
+    first. Chosen spans (and, for list fields, every accepted span) are never listed."""
     chosen = {s.candidate.raw for sid, s in ranked if sid in exclude and s.candidate is not None}
+    chosen |= accepted_raws or set()
     best: dict[str, float] = {}
     for statement_id, selection in ranked:
         if selection.candidate and statement_id not in exclude:
@@ -549,7 +567,8 @@ def _alternatives(ranked: list[tuple[str, Selection]], exclude: list[str]) -> li
     ]
 
 
-def _position(ctx: Context, statement_id: str, selection: Selection) -> tuple[int, int]:
+def _position(ctx: Context, statement_id: str, candidate: Candidate) -> tuple[int, int]:
+    """Document order: the statement's position, then the span's offset within it."""
     order = list(ctx.parsed.statements) if ctx.parsed else []
     index = order.index(statement_id) if statement_id in order else len(order)
-    return index, selection.candidate.span.start if selection.candidate else 0
+    return index, candidate.span.start
