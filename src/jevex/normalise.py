@@ -16,7 +16,7 @@ import re
 import types
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from pydantic import TypeAdapter, ValidationError
@@ -380,7 +380,7 @@ def normalise(
     chain = list(steps)
     value = run_chain(raw, chain, field, registry=registry)
     target = _target_type(field, value)
-    converted = any(step.name == "unit" for step in chain)
+    converted = any(_converts(step, field) for step in chain)
     value = _round_for_int(value, target, converted=converted)
     try:
         return TypeAdapter(target).validate_python(value)
@@ -404,6 +404,19 @@ def _target_type(field: FieldSpec, value: Any) -> Any:
     return list[item] if isinstance(value, list) else item
 
 
+def _converts(step: NormaliserStep, field: FieldSpec) -> bool:
+    """Whether a step is a unit conversion between two different units."""
+    if step.name != "unit":
+        return False
+    source, target = step.args.get("from"), step.args.get("to") or field.unit
+    if not source or not target:
+        return False
+    try:
+        return canonical_unit(source) != canonical_unit(target)
+    except NormaliseError:
+        return False
+
+
 def _is_int_type(target: Any) -> bool:
     while get_origin(target) is Annotated:
         target = get_args(target)[0]
@@ -420,7 +433,7 @@ def _round_for_int(value: Any, target: Any, *, converted: bool) -> Any:
     if isinstance(value, list):
         return [_round_for_int(v, target, converted=converted) for v in value]  # pyright: ignore[reportUnknownVariableType]
     if isinstance(value, float) and (converted or value.is_integer()):
-        return round(value)
+        return int(Decimal(str(value)).quantize(Decimal(1), rounding=ROUND_HALF_UP))
     return value
 
 

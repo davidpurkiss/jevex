@@ -457,3 +457,14 @@ async def test_alternatives_never_repeat_the_chosen_span() -> None:
     await NormaliseStage().run(ctx)
     alts = run.fields["doc"]["zero_to_62_s"].alternatives
     assert [(x.raw, x.p) for x in alts] == [("62", 0.2)]
+
+
+def test_int_rounding_only_after_a_real_conversion_and_half_up() -> None:
+    same_unit = steps("parse_number", {"unit": {"from": "PS"}})
+    with pytest.raises(NormaliseError):
+        normalise(
+            "9.5 PS", same_unit, EXTRA.field("power_ps")
+        )  # nothing converted: 9.5 isn't an int
+    to_ps = steps("parse_number", {"unit": {"from": "kW"}})
+    # 1.838746875 kW is exactly 2.5 PS: half rounds up, not to even
+    assert normalise("1.838746875 kW", to_ps, EXTRA.field("power_ps")) == 3
