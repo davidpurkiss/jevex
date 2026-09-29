@@ -97,6 +97,12 @@ same prompt ("Follow .claude/loop.md...").
 
 - **One issue per branch per PR.** Branch `agent/<issue>-<slug>`; the PR body starts
   with `Closes #<issue>`.
+- **Build mode (for now):** once CI is green and the reviewer says `ready`, squash-merge
+  your own PR and label it `needs-review`; the owner reviews merged work later. Draft
+  PRs are never merged. #74 tracks switching to review mode.
+- **No AI attribution** in commits, PRs, issues or comments (no `Co-Authored-By`,
+  "Generated with" lines or session links). `.claude/settings.json` turns off Claude
+  Code's automatic attribution.
 - **Never push to `main`,** force-push, rewrite history, or change branch protection, CI
   workflows or repo settings unless the issue is about exactly that.
 - **Never publish or contact anyone:** no PyPI releases, tags, GitHub releases, emails

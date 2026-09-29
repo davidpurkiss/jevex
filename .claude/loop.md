@@ -2,7 +2,7 @@
 
 You are one run of jevex's unattended development loop. You start with no memory.
 GitHub is the only state: issues, labels, "blocked by" dependencies, PRs and the run log
-(issue #84). Do **one issue** per run, end with a PR, log the run, and stop.
+(issue #84). Do **one issue** per run, end with a merged PR, log the run, and stop.
 
 Read `CLAUDE.md` first and follow it, especially **Rules for agents working unattended**
 and **Definition of done**. If anything here conflicts with CLAUDE.md, CLAUDE.md wins.
@@ -33,7 +33,8 @@ label and comment `Stale lock released by loop run NOW.`
 
 ## 3. Capacity
 Count open PRs from `agent/` branches (`gh pr list --state open --search "head:agent/"`).
-If there are **3 or more**, log `nothing-to-do` (reason: waiting on review) and stop.
+These are drafts the loop could not merge. If there are **3 or more**, log
+`nothing-to-do` (reason: drafts waiting on the owner) and stop.
 
 ## 4. Pick an issue
 Candidates are open issues with label `agent-ready` and without `agent-in-progress`,
@@ -62,8 +63,9 @@ From here on, **any** failure must still go through step 9 (release the lock) an
 - Read the issue, the spec sections it cites in `docs/design-spec.md`, and the code it touches.
 - Branch: `agent/<n>-<short-slug>` from `origin/main`. If that branch already exists on
   origin from an earlier attempt (and has no open PR), check it out and continue from it.
-- Implement to CLAUDE.md's definition of done. Commit in logical steps, using the
-  commit and PR attribution your Claude Code settings give you.
+- Implement to CLAUDE.md's definition of done. Commit in logical steps. **No AI
+  attribution** anywhere: no `Co-Authored-By` trailers, no "Generated with" lines, no
+  session links in commits, PRs or comments.
 - If the issue is ambiguous, needs a product decision, or needs a credential, **don't
   guess**. Comment what you need, label it `agent-blocked` (keep `agent-ready`), then go
   to step 9.
@@ -85,15 +87,20 @@ From here on, **any** failure must still go through step 9 (release the lock) an
   - what changed and why, briefly
   - **Departures from the spec** (if any)
   - **Review**: the reviewer's final DONE-WHEN CHECK, plus SHOULD FIX items not done and why
-  - it ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
+- Label the PR `needs-review` (`gh pr edit <pr> --add-label needs-review`); the owner
+  reviews merged work later and swaps it for `reviewed`.
 - Open it as a **draft** if the reviewer still says `changes-needed` or checks fail.
-- **Don't merge.** A human reviews agent PRs until an auto-merge policy exists (#74).
 - Wait for CI (`gh pr checks <pr> --watch`). If CI fails on something you can fix, fix
   it and push, up to 2 times. Otherwise convert the PR to a draft and explain in a comment.
+- **Merge when ready** (build mode, until #74 switches the loop to review mode): if the
+  PR is not a draft, the reviewer verdict is `ready` and every CI check passed, run
+  `gh pr merge <pr> --squash --delete-branch`. If `main` moved and the branch is behind,
+  `gh pr update-branch <pr>`, wait for CI again, then merge. Draft PRs are never merged;
+  they wait for the owner and count towards step 3's limit.
 
 ## 9. Release the lock
 `gh issue edit <n> --remove-label agent-in-progress`. Comment on the issue:
-`**Loop attempt** <k>/3 finished NOW: <outcome>, PR #<pr> / <what's needed>.`
+`**Loop attempt** <k>/3 finished NOW: <outcome>, PR #<pr> (merged | draft) / <what's needed>.`
 
 ## 10. Log the run
 Comment on #84 in the run format from its description: outcome, issue, PR, reviewer
