@@ -41,7 +41,7 @@ from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jevex.clean import STATE_PATTERN, decode_html
+from jevex.clean import STATE_PATTERN, html_text_of
 from jevex.layout import DomLocation
 
 if TYPE_CHECKING:
@@ -223,7 +223,7 @@ class EmbeddedDataReader:
         if not document.is_html or not self.sources:
             return EmbeddedData()
         builder = _TreeBuilder()
-        builder.feed(decode_html(document.content)[0])
+        builder.feed(html_text_of(document.content))
         builder.close()
         out = _Collector(builder.root, document.url)
         if "json_ld" in self.sources:
