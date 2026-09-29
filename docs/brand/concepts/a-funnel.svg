@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 160" role="img" aria-label="jevex logo concept A: funnel">
+  <!-- Mark: four bars narrowing (document → component → statement → value), ending in the value.
+       Also reads as a falling bar chart: fewer LLM calls every run. -->
+  <g transform="translate(20 8)">
+    <rect x="0"  y="0"   width="124" height="20" rx="10" fill="#C4B5FD"/>
+    <rect x="18" y="30"  width="88"  height="20" rx="10" fill="#A78BFA"/>
+    <rect x="34" y="60"  width="56"  height="20" rx="10" fill="#7C3AED"/>
+    <rect x="46" y="90"  width="32"  height="20" rx="10" fill="#5B21B6"/>
+    <circle cx="62" cy="130" r="8" fill="#34D399"/>
+    <circle cx="62" cy="130" r="14" fill="none" stroke="#34D399" stroke-width="3" opacity="0.35"/>
+  </g>
+  <text x="170" y="104" font-family="'Nunito','Quicksand','Avenir Next',ui-rounded,system-ui,sans-serif"
+        font-size="84" font-weight="800" letter-spacing="-2" fill="#1E1B4B">jev<tspan fill="#7C3AED">ex</tspan></text>
+</svg>

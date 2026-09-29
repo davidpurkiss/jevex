@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 
 import httpx2
 import pytest
@@ -218,3 +218,61 @@ async def test_typesafe_backend_round_trip() -> None:
     )
     assert client.usage.input_tokens == 321
     assert client.usage.models == {"jev-1.13.0"}
+
+
+# --- Process-wide spend cap ------------------------------------------------------------
+
+
+@pytest.fixture
+def fresh_spend() -> Iterator[None]:
+    from jevex.jev import reset_process_cost
+
+    reset_process_cost()
+    yield
+    reset_process_cost()
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_spend_cap_blocks_request_before_sending(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jevex.jev import JevBudgetExceededError, process_cost
+
+    backend = RecordingBackend()  # reports 100 input tokens per request
+    client = JevClient(backend)
+    # Each request reports 100 tokens ($0.0000042) and is estimated at ~14 tokens before
+    # sending. Two fit under $0.000007; after that, spend is already past the cap.
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000070")
+    await client.ask("s", {"q": Noul(instructions="?")})
+    await client.ask("s", {"q": Noul(instructions="?")})
+    assert process_cost() == pytest.approx(2 * 100 * 0.042 / 1_000_000)
+    with pytest.raises(JevBudgetExceededError, match="spend cap"):
+        await client.ask("s", {"q": Noul(instructions="?")})
+    assert len(backend.calls) == 2
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_spend_cap_is_shared_across_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jevex.jev import JevBudgetExceededError
+
+    # One request spends $0.0000042; a second one would pass $0.0000045.
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000045")
+    await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+    with pytest.raises(JevBudgetExceededError):
+        await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_no_cap_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JEVEX_JEV_MAX_COST_USD", raising=False)
+    client = JevClient(RecordingBackend())
+    for _ in range(5):
+        await client.ask("s", {"q": Noul(instructions="?")})
+    assert client.usage.requests == 5
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_bad_cap_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jevex.jev import JevError
+
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "five dollars")
+    with pytest.raises(JevError, match="must be a number"):
+        await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})

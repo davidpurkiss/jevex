@@ -20,6 +20,9 @@ uv run pytest --live -m live              # real APIs (needs keys; costs money)
 JEVEX_RECORD=1 uv run pytest tests/...    # re-record Jev cassettes
 ```
 
+The package version lives only in `src/jevex/__init__.py` (`__version__`). Releases
+come from publishing a GitHub release (`release.yml`); agents never do that.
+
 CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.13.
 `main` is protected: changes go through a PR and all three checks must pass.
 
@@ -108,8 +111,10 @@ same prompt ("Follow .claude/loop.md...").
 - **Never publish or contact anyone:** no PyPI releases, tags, GitHub releases, emails
   or posts outside this repo's issues and PRs.
 - **No real API calls** (Jev, LLMs, websites) outside tests marked `live`, and only in
-  runs where the loop's secrets and budget rules (#72) allow them. Never commit keys;
-  `.env` is gitignored.
+  runs where the loop's secrets and budget rules (#72, `.claude/loop.md` **Live calls**)
+  allow them. Never commit keys; `.env` is gitignored. `JEVEX_JEV_MAX_COST_USD` hard-caps
+  Jev spend per process (`JevBudgetExceededError`). Live tests take the
+  `typesafe_api_key` fixture, which skips them when there's no key.
 - **Stay in scope.** If you find a bug or missing piece outside the issue, open a new
   issue for it (with an `agent-ready` or `needs-human` label and "blocked by" links)
   instead of fixing it in the same PR.
