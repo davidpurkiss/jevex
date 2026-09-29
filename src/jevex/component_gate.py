@@ -195,12 +195,17 @@ def gate_units(root: Component, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[G
                 chunk = visit(child, lead)
                 size = sum(len(_text(b)) + 1 for b in chunk)
                 continue
-            if is_table or length > max_chars:
-                lead = chunk if only_headings(chunk) else []
+            headings_first = only_headings(chunk)
+            if is_table or length > max_chars or (headings_first and size + length > max_chars):
+                # The block is split into pieces; leading headings open the first one.
+                lead = chunk if headings_first else []
                 if not lead:
                     close()
                 lead_size = sum(len(_text(b)) + 1 for b in lead)
-                pieces = _pieces(child, max(max_chars - lead_size, max_chars // 2))
+                if lead_size > max_chars // 2:
+                    close()  # too many headings to share a piece: they get their own unit
+                    lead, lead_size = [], 0
+                pieces = _pieces(child, max_chars - lead_size)
                 if pieces:
                     emit(child.id if is_table else f"{container.id}#{part}", [*lead, child], pieces)
                     part += 0 if is_table else 1

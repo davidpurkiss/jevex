@@ -186,6 +186,25 @@ def test_an_oversized_list_is_split_by_items() -> None:
     assert lines == [f"Feature number {i}" for i in range(20)]
 
 
+def test_a_heading_before_a_long_paragraph_leads_its_first_piece() -> None:
+    root = comp(
+        "section", "", "r", comp("heading", "H" * 50, "h"), comp("paragraph", "p " * 990, "p")
+    )
+    units = gate_units(root)
+    assert all(u.component_ids == ("h", "p") for u in units)
+    assert units[0].text.startswith("H" * 50 + "\n")
+    assert all(len(u.text) <= 2000 for u in units)
+
+
+def test_many_leading_headings_get_their_own_unit_and_no_unit_is_oversized() -> None:
+    headings = [comp("heading", f"Heading number {i} " * 2, f"h{i}") for i in range(40)]
+    root = comp("section", "", "r", *headings, table("t", 300))
+    units = gate_units(root)
+    assert all(len(u.text) <= 2000 for u in units)
+    assert units[0].component_ids == tuple(f"h{i}" for i in range(40))
+    assert all(u.component_ids == ("t",) for u in units[1:])
+
+
 def test_headings_join_the_table_or_section_they_introduce() -> None:
     root = comp(
         "section",
