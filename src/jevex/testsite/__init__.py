@@ -54,8 +54,11 @@ def _remove_previous_build(out: Path) -> None:
         is_build = isinstance(manifest["seed"], int) and isinstance(manifest["digest"], str)
     except (OSError, ValueError, KeyError, TypeError):
         raise ValueError(refusal) from None
-    if not is_build or not all(isinstance(p, str) and ".." not in p for p in paths):
-        raise ValueError(refusal)
+    root = out.resolve()
+    if not is_build or not all(
+        isinstance(p, str) and (root / p).resolve().is_relative_to(root) for p in paths
+    ):
+        raise ValueError(refusal)  # never delete outside out_dir (absolute paths, "..")
     for relative in [*paths, "index.html", TRUTH_FILE]:
         (out / relative).unlink(missing_ok=True)
     for directory in sorted((d for d in out.rglob("*") if d.is_dir()), reverse=True):

@@ -165,3 +165,16 @@ def test_build_writes_the_site_and_truth(tmp_path: Path) -> None:
     for page in manifest["pages"]:
         assert (tmp_path / page["path"]).is_file()
     assert on_disk["digest"] == digest(render(generate(42)))
+
+
+@pytest.mark.parametrize("escape", ["absolute", "dotdot"])
+def test_rebuild_never_deletes_outside_the_directory(tmp_path: Path, escape: str) -> None:
+    site, victim = tmp_path / "site", tmp_path / "victim.txt"
+    site.mkdir()
+    victim.write_text("keep")
+    path = str(victim) if escape == "absolute" else "../victim.txt"
+    manifest = {"seed": 1, "digest": "x", "pages": [{"path": path}]}
+    (site / "truth.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="refusing"):
+        build(42, site)
+    assert victim.read_text() == "keep"
