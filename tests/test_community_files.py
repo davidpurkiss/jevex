@@ -1,5 +1,5 @@
 """GitHub only reports a broken issue form by silently dropping it from the chooser, so the
-forms are checked here. PyYAML comes in with the dev tools (pre-commit depends on it)."""
+forms are checked here."""
 
 from __future__ import annotations
 
