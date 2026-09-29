@@ -137,7 +137,6 @@ wheels = [
 
 [[package]]
 name = "jevex"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },

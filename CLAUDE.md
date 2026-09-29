@@ -20,6 +20,9 @@ uv run pytest --live -m live              # real APIs (needs keys; costs money)
 JEVEX_RECORD=1 uv run pytest tests/...    # re-record Jev cassettes
 ```
 
+The package version lives only in `src/jevex/__init__.py` (`__version__`). Releases
+come from publishing a GitHub release (`release.yml`); agents never do that.
+
 CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.13.
 `main` is protected: changes go through a PR and all three checks must pass.
 
