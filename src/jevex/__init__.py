@@ -1,6 +1,7 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
 from jevex.clean import BoilerplateCleaner, CleanStage
+from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
@@ -81,6 +82,7 @@ __all__ = [
     "CandidateStage",
     "CleanStage",
     "Component",
+    "ComponentGateStage",
     "ComponentType",
     "Context",
     "Document",
@@ -100,6 +102,7 @@ __all__ = [
     "FieldMeta",
     "FieldSpec",
     "FunctionNormaliser",
+    "GateUnit",
     "GeneratorRecord",
     "GeneratorRegistry",
     "GeneratorSpec",
@@ -117,6 +120,7 @@ __all__ = [
     "NormaliseStage",
     "NormaliserRegistry",
     "NormaliserStep",
+    "NoulComponentGate",
     "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
@@ -150,6 +154,7 @@ __all__ = [
     "__version__",
     "default_registry",
     "evaluate",
+    "gate_units",
     "generator_spec_json_schema",
     "load_corpus",
     "normalise",
