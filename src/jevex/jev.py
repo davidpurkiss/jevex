@@ -139,6 +139,10 @@ class MissingAnswerError(JevError):
     """The backend returned no answer for a question that was asked."""
 
 
+class UnexpectedAnswerError(JevError):
+    """The backend answered a question with the wrong answer type."""
+
+
 class JevBudgetExceededError(JevError):
     """Sending the request would take this process past ``JEVEX_JEV_MAX_COST_USD``."""
 

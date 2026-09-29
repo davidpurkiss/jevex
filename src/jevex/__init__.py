@@ -4,6 +4,13 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.gate import (
+    DocumentGateStage,
+    DocumentText,
+    HtmlTextReader,
+    NoulDocumentGate,
+    TextReader,
+)
 from jevex.generators import (
     GeneratorRegistry,
     InvalidGeneratorError,
@@ -34,6 +41,8 @@ __all__ = [
     "ComponentType",
     "Context",
     "Document",
+    "DocumentGateStage",
+    "DocumentText",
     "DomLocation",
     "EntityScope",
     "ExtractionResult",
@@ -41,10 +50,12 @@ __all__ = [
     "Field",
     "FieldSpec",
     "GeneratorRegistry",
+    "HtmlTextReader",
     "ImageLocation",
     "InvalidGeneratorError",
     "Location",
     "NormaliserStep",
+    "NoulDocumentGate",
     "PageLocation",
     "Pipeline",
     "Questions",
@@ -55,6 +66,7 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "TextReader",
     "__version__",
     "default_registry",
 ]

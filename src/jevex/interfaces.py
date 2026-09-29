@@ -58,13 +58,19 @@ class ParsedDocument(BaseModel):
 
 
 class GateDecision(BaseModel):
-    """A document-gate answer for one schema. ``pages`` is set for per-page gating."""
+    """A document-gate answer for one schema.
+
+    For per-page gating, ``pages`` maps each asked page (1-based) to its probability and
+    ``passed_pages`` lists the pages that passed, so later stages can skip the rest. Pages
+    missing from ``pages`` weren't asked (no text layer), so they aren't ruled out.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     p: float
     passed: bool
     pages: dict[int, float] = Field(default_factory=dict[int, float])
+    passed_pages: list[int] = Field(default_factory=list[int])
 
 
 class Scope(BaseModel):
