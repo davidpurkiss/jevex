@@ -110,6 +110,8 @@ class FieldSpec:
     group: str | None = None
     questions: Questions = field(default_factory=Questions)
     model: type[BaseModel] | None = None
+    constraints: tuple[Any, ...] = ()
+    """The field's own validation metadata (``ge``, ``max_length``, ``Annotated`` validators)."""
 
     @property
     def needs_candidates(self) -> bool:
@@ -244,6 +246,7 @@ def _field_spec(name: str, info: FieldInfo) -> FieldSpec:
         group=jevex_extra.get("group"),
         questions=Questions.model_validate(jevex_extra.get("questions") or {}),
         model=annotation if kind == "model" else None,
+        constraints=tuple(info.metadata),
     )
 
 

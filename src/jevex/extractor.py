@@ -12,6 +12,7 @@ from jevex.clean import CleanStage
 from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient
+from jevex.normalise import NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, select_records
@@ -50,6 +51,7 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     CleanStage(),
     DocumentGateStage(),
     EntityStage(),
+    NormaliseStage(),
 )
 
 
