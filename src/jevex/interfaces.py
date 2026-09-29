@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from jevex.entities import EntityScope
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
+    from jevex.keypaths import StructuredResult
     from jevex.schema import FieldSpec, SchemaSpec
 
 
@@ -166,11 +167,11 @@ class DocumentGate(Protocol):
 
 @runtime_checkable
 class StructuredExtractor(Protocol):
-    """Reads embedded data and returns it as ``structured`` statements."""
+    """Reads embedded data: ``structured`` statements plus the field values they give."""
 
     async def extract(
         self, document: Document, schemas: list[SchemaSpec], jev: JevClient
-    ) -> list[Statement]: ...
+    ) -> StructuredResult: ...
 
 
 @runtime_checkable

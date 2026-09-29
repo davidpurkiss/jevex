@@ -25,6 +25,7 @@ from jevex.generators import (
     default_registry,
     generator_spec_json_schema,
 )
+from jevex.keypaths import KeyPathMapper, StructuredResult, StructuredStage, flatten
 from jevex.layout import (
     BBox,
     Component,
@@ -113,6 +114,7 @@ __all__ = [
     "InvalidGeneratorError",
     "JevCandidateSelector",
     "KeyMapping",
+    "KeyPathMapper",
     "LayoutStage",
     "Location",
     "MatchSpec",
@@ -145,7 +147,9 @@ __all__ = [
     "Store",
     "StoreError",
     "StructuredBlob",
+    "StructuredResult",
     "StructuredSource",
+    "StructuredStage",
     "TableCell",
     "TextReader",
     "Tolerance",
@@ -154,6 +158,7 @@ __all__ = [
     "__version__",
     "default_registry",
     "evaluate",
+    "flatten",
     "gate_units",
     "generator_spec_json_schema",
     "load_corpus",

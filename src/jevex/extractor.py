@@ -13,6 +13,7 @@ from jevex.component_gate import ComponentGateStage
 from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient
+from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
 from jevex.normalise import NormaliseStage
 from jevex.pipeline import Context, Pipeline
@@ -53,6 +54,7 @@ STAGE_ORDER: tuple[str, ...] = (
 DEFAULT_STAGES: tuple[Stage, ...] = (
     CleanStage(),
     DocumentGateStage(),
+    StructuredStage(),
     LayoutStage(),
     ComponentGateStage(),
     EntityStage(),
