@@ -107,8 +107,7 @@ A change is done when all of these hold:
 - **When stuck** (unclear spec, a decision needed, a missing credential, repeated CI
   failure): stop, comment on the issue with what you tried and what you need, and label
   it `agent-blocked`. Don't guess at product decisions.
-- **Before opening a PR,** review your own diff for bugs, missed edge cases and dead code,
-  and fix what you find.
+- **Before opening a PR,** run the review described below and fix what it finds.
 
 ## Gotchas
 
@@ -122,3 +121,11 @@ A change is done when all of these hold:
   shared `JevClient`.
 - `jevex.Field` isn't recognised as a field specifier by type checkers, so a required
   field looks optional in direct constructor calls. This is a known limitation.
+
+## Review before a PR
+
+Before opening a PR, run the `reviewer` subagent (`.claude/agents/reviewer.md`) with
+the issue number. Fix every MUST FIX, then run it again until the verdict is `ready`,
+up to 3 rounds. Paste its final DONE-WHEN CHECK and any SHOULD FIX items you chose not
+to fix (with a reason) into the PR description under **Review**. If it is still
+`changes-needed` after 3 rounds, open the PR as a draft with the open findings listed.
