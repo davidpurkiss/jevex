@@ -52,6 +52,7 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
+from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
 from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
 from jevex.store import (
     GeneratorRecord,
@@ -85,10 +86,12 @@ __all__ = [
     "ComponentGateStage",
     "ComponentType",
     "Context",
+    "DefaultSplitter",
     "Document",
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
+    "DuplicateStatementError",
     "EmbeddedData",
     "EmbeddedDataReader",
     "EntityScope",
@@ -142,6 +145,7 @@ __all__ = [
     "Stage",
     "Statement",
     "StatementKind",
+    "StatementStage",
     "Store",
     "StoreError",
     "StructuredBlob",
