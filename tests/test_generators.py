@@ -404,6 +404,7 @@ def test_whole_statement_proposes_short_statements_whole() -> None:
     assert raws(gen, "...") == []
     assert raws(gen, "Who Moved My Cheese?") == ["Who Moved My Cheese?"]
     assert raws(gen, "Stop! ") == ["Stop!"]
+    assert raws(gen, "Title\r") == ["Title"]
     pair = Statement(
         id="s1",
         text="Colour: Red",
@@ -412,6 +413,11 @@ def test_whole_statement_proposes_short_statements_whole() -> None:
         location=DomLocation(dom_path="/"),
     )
     assert gen.generate(pair) == []
+
+
+def test_key_value_strips_only_its_own_trailing_characters() -> None:
+    assert raws(KeyValue(), "Colour: Red\r") == ["Red"]
+    assert raws(KeyValue(), "Time: 10:30:") == ["10:30:"]
 
 
 def test_whole_statement_skips_list_fields() -> None:

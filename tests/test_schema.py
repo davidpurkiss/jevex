@@ -356,9 +356,29 @@ def test_bool_select_and_verify_questions_read_as_claims() -> None:
         "Does the statement say it has an automatic gearbox?"
     )
     sunroof = spec.field("sunroof")
-    assert sunroof.bool_question().instructions == "Does the statement mention sunroof?"
-    assert sunroof.verify_question(True).instructions == "The statement mentions sunroof."
+    # The gate asks about relevance ("mention"); the value question asks about presence,
+    # so "No sunroof" can't make it True.
+    assert sunroof.bool_question().instructions == "Does the statement say it has sunroof?"
+    assert sunroof.verify_question(True).instructions == "The statement says it has sunroof."
     assert sunroof.verify_question(False).instructions == "The statement says there is no sunroof."
+
+
+def test_base_form_first_words_are_nouns_not_missing_subjects() -> None:
+    class H(BaseModel):
+        pool: bool = Field(description="Use of pool")
+        opener: bool = Field(description="Can opener included")
+        uses: bool = Field(description="uses premium fuel")
+
+    spec = SchemaSpec.from_model(H)
+    assert spec.field("pool").bool_question().instructions == (
+        "Does the statement say it has use of pool?"
+    )
+    assert spec.field("opener").bool_question().instructions == (
+        "Does the statement say it has can opener included?"
+    )
+    assert spec.field("uses").bool_question().instructions == (
+        "Does the statement say it uses premium fuel?"
+    )
 
 
 def test_phrase_keeps_acronyms_and_letter_names() -> None:
@@ -370,6 +390,7 @@ def test_phrase_keeps_acronyms_and_letter_names() -> None:
         x: str = Field(description="X")
         short: str = Field(description="A short title")
         phone: str = Field(description="iPhone model")
+        fuel: str = Field(description="Électrique range")
 
     spec = SchemaSpec.from_model(P)
     assert [f.phrase for f in spec.fields] == [
@@ -380,6 +401,7 @@ def test_phrase_keeps_acronyms_and_letter_names() -> None:
         "X",
         "a short title",
         "iPhone model",
+        "électrique range",
     ]
 
 

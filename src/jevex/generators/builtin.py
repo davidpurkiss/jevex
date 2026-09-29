@@ -316,7 +316,7 @@ def _value_span(text: str) -> tuple[int, int] | None:
     if not separators:
         return None
     start = separators[-1].end()
-    end = len(text.rstrip(_WHOLE_TRAILING))
+    end = len(text.rstrip(_TRAILING))
     return (start, end) if end > start else None
 
 
@@ -472,7 +472,7 @@ class NounPhrase:
 
 
 MAX_WHOLE_WORDS = 16
-_WHOLE_TRAILING = " \t\n.,;:"
+_WHOLE_TRAILING = " \t\r\n.,;:"
 """Stripped from the end of a whole statement. ``?`` and ``!`` stay: they can belong to a
 title ("Who Moved My Cheese?")."""
 

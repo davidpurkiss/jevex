@@ -82,7 +82,7 @@ def Field(
     {description}?"), so write it as a noun phrase: "Price", "Engine displacement". For a
     ``bool``, write the claim that makes it True, as a clause: "The book is in stock", or
     "has an automatic gearbox" (read as "it has..."). A bare noun ("Sunroof") works too
-    but is asked as "Does the statement mention sunroof?", which a "no sunroof" can pass.
+    too: it is asked as "Does the statement say it has sunroof?".
     """
     extra: dict[str, Any] = {}
     if unit is not None:
@@ -176,8 +176,10 @@ class FieldSpec:
         if self.questions.select:
             return Noul(instructions=self.questions.select)
         shape, claim = _claim(self)
-        verb = "say" if shape == "clause" else "mention"
-        return Noul(instructions=f"Does the statement {verb} {claim}?")
+        # A noun is asked about as present, not merely mentioned: "No sunroof" mentions one.
+        if shape == "noun":
+            claim = f"it has {claim}"
+        return Noul(instructions=f"Does the statement say {claim}?")
 
     def member_question(self, value: str) -> Noul:
         """For ``list[...]`` fields: does the statement give ``value`` as one of them?"""
@@ -201,8 +203,8 @@ class FieldSpec:
             if shape == "clause":
                 text = claim if value else f"it is not the case that {claim}"
                 return Noul(instructions=f"The statement says {text}.")
-            text = f"mentions {claim}" if value else f"says there is no {claim}"
-            return Noul(instructions=f"The statement {text}.")
+            text = f"it has {claim}" if value else f"there is no {claim}"
+            return Noul(instructions=f"The statement says {text}.")
         if template is None:
             template, description = (
                 "The statement states that the {description} is {value}.",
@@ -356,7 +358,7 @@ def _first_sentence(text: str) -> str:
     return text.split("\n\n", 1)[0].strip().rstrip(".")
 
 
-_FIRST_TOKEN = re.compile(r"[A-Za-z0-9]+")
+_FIRST_TOKEN = re.compile(r"[^\W_]+")
 
 
 def _lower_first(text: str) -> str:
@@ -380,7 +382,7 @@ def _lower_first(text: str) -> str:
 
 
 # Words that make a bool description a clause ("the book is in stock") rather than a noun
-# ("sunroof"). One of them first means the subject is missing ("has an automatic gearbox").
+# ("sunroof").
 _VERBS = frozenset(
     [
         "is",
@@ -415,12 +417,19 @@ _VERBS = frozenset(
 )
 
 
+# Only these, first, mean the subject is missing ("has an automatic gearbox"): base forms
+# such as "use" or "can" start nouns too ("Use of pool", "Can opener included").
+_LEADING_VERBS = frozenset(
+    ["is", "has", "was", "does", "comes", "includes", "offers", "supports", "needs", "uses", "runs"]
+)
+
+
 def _claim(field: FieldSpec) -> tuple[Literal["clause", "noun"], str]:
     """How a bool's description reads: as a claim ("the book is in stock", "it has an
     automatic gearbox") or as a thing ("sunroof")."""
     phrase = field.phrase
     words = [w.lower() for w in phrase.split()]
-    if words and words[0] in _VERBS:
+    if words and words[0] in _LEADING_VERBS:
         return "clause", f"it {phrase}"
     if any(w in _VERBS for w in words[1:]):
         return "clause", phrase

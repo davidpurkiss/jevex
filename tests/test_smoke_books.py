@@ -137,7 +137,7 @@ RATINGS = ("One", "Two", "Three", "Four", "Five")
 
 def page_titles(name: str) -> list[str]:
     """Every book title on the page (product and "recently viewed"), from its markup."""
-    html = (FIXTURES / f"{name}.html").read_text()
+    html = (FIXTURES / f"{name}.html").read_text(encoding="utf-8")
     titles = re.findall(r"<h1>([^<]+)</h1>", html) + re.findall(r'alt="([^"]+)"', html)
     return list(dict.fromkeys(titles))
 
