@@ -62,11 +62,8 @@ From here on, **any** failure must still go through step 9 (release the lock) an
 - Read the issue, the spec sections it cites in `docs/design-spec.md`, and the code it touches.
 - Branch: `agent/<n>-<short-slug>` from `origin/main`. If that branch already exists on
   origin from an earlier attempt (and has no open PR), check it out and continue from it.
-- Implement to CLAUDE.md's definition of done. Commit in logical steps. Every commit
-  message ends with:
-  ```
-  Co-Authored-By: Claude <noreply@anthropic.com>
-  ```
+- Implement to CLAUDE.md's definition of done. Commit in logical steps, using the
+  commit and PR attribution your Claude Code settings give you.
 - If the issue is ambiguous, needs a product decision, or needs a credential, **don't
   guess**. Comment what you need, label it `agent-blocked` (keep `agent-ready`), then go
   to step 9.
