@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 from collections.abc import Callable
@@ -205,6 +206,7 @@ MALFORMED: list[tuple[Any, str]] = [
         "page 0: record 0 must be an object with a 'values' object",
     ),
     ([{"schema": "X", "records": []}], "page 0: missing 'path'"),
+    ([{"path": "/nope/x.html", "schema": "X", "records": []}], "lists /nope/x.html, which doesn't"),
 ]
 
 
@@ -365,6 +367,30 @@ async def test_the_spend_cap_stops_the_run(tmp_path: Path) -> None:
     )
     with pytest.raises(JevBudgetExceededError):
         await evaluate(ex, load_corpus(tmp_path))
+
+
+async def test_a_run_error_cancels_the_documents_still_running(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    finished: list[str] = []
+
+    @dataclass
+    class CapOnFirst:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            if (ctx.document.url or "").endswith("used/page-1.html"):
+                raise JevBudgetExceededError("over the cap")
+            await asyncio.sleep(0.05)
+            finished.append(ctx.document.url or "")
+
+    ex = Extractor(
+        [VehicleSpec, Listing], jev=FakeJev().client(), pipeline=Pipeline([CapOnFirst()])
+    )
+    corpus = sorted(load_corpus(tmp_path), key=lambda i: not i.path.match("used/page-1.html"))
+    with pytest.raises(JevBudgetExceededError):
+        await evaluate(ex, corpus, concurrency=4)
+    await asyncio.sleep(0.2)  # long enough for any survivor to finish
+    assert finished == []
 
 
 # --- CLI -------------------------------------------------------------------------------

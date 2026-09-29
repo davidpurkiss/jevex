@@ -103,7 +103,7 @@ def load_corpus(directory: str | Path) -> list[CorpusItem]:
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"{truth} page {i}: {_describe(exc)}") from exc
         if not item.path.is_file():
-            raise ValueError(f"{truth} lists {item.path.relative_to(root)}, which doesn't exist")
+            raise ValueError(f"{truth} lists {page['path']}, which doesn't exist")
         items.append(item)
     return items
 
@@ -591,7 +591,17 @@ async def evaluate(
             fields=score_document(item, result, resolved),
         )
 
-    return EvalReport(documents=list(await asyncio.gather(*(one(i) for i in corpus))))
+    tasks = [asyncio.create_task(one(i)) for i in corpus]
+    try:
+        runs = await asyncio.gather(*tasks)
+    except BaseException:
+        # gather doesn't cancel the rest on the first error: stop them, so a hit spend cap
+        # or a dead API doesn't keep spending on documents whose results are discarded.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return EvalReport(documents=list(runs))
 
 
 def _all_missing(item: CorpusItem, tolerances: Mapping[str, Tolerance]) -> dict[str, FieldScore]:
