@@ -11,7 +11,7 @@ from jevex import (
 from jevex.generators import default_registry
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
-from jevex.tables import table_statements
+from jevex.tables import header_prefix, table_statements
 from jevex.testsite import VehicleSpec, generate, render
 
 
@@ -261,3 +261,24 @@ def test_a_one_trim_tables_repeated_header_row_stays_a_header() -> None:
         "<tr><th></th><th>SE</th></tr><tr><th>Torque</th><td>250</td></tr>"
     )
     assert texts(t) == ["Power · SE: 150", "Torque · SE: 250"]
+
+
+def test_header_prefix_is_what_a_cells_text_starts_with() -> None:
+    t = html_table(
+        "<thead><tr><th></th><th>SE</th><th>GT</th></tr></thead>"
+        "<tr><th>Performance</th></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td></tr>"
+    )
+    plain = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"))
+    labelled = table(cell(0, 0, "Colour", header=True), cell(0, 1, "Red"))
+    got = [
+        (header_prefix(s.table), s.text)
+        for s in [*table_statements(t), *table_statements(plain), *table_statements(labelled)]
+        if s.table is not None
+    ]
+    assert got == [
+        ("Performance › Power · SE: ", "Performance › Power · SE: 150"),
+        ("Performance › Power · GT: ", "Performance › Power · GT: 200"),
+        ("", "Engine | 1.5 TSI"),
+        ("Colour: ", "Colour: Red"),
+    ]

@@ -1,8 +1,10 @@
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 
 import pytest
+from pydantic import BaseModel
 
 from jevex import (
     BoilerplateCleaner,
@@ -11,20 +13,28 @@ from jevex import (
     DefaultSplitter,
     Document,
     DomLocation,
+    Extractor,
+    Field,
     SchemaSpec,
     Statement,
     StatementStage,
+    cut_statement,
 )
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ParsedDocument, StatementSplitter
+from jevex.jev import Choice
+from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
 from jevex.split import (
     MAX_SEGMENT_CHARS,
+    MAX_STATEMENT_CHARS,
     DuplicateStatementError,
     _chunks,  # pyright: ignore[reportPrivateUsage]
     is_key_value,
     sentences,
 )
+from jevex.statements import StatementKind
+from jevex.tables import table_statements
 from jevex.testing import FakeJev
 from jevex.testsite import VehicleSpec, generate, render
 
@@ -278,6 +288,106 @@ def test_is_key_value(text: str, expected: bool) -> None:
     assert is_key_value(text) is expected
 
 
+# --- cutting long statements ---------------------------------------------------------
+
+
+def stmt(text: str, kind: StatementKind = "list_item") -> Statement:
+    return Statement(id="c1.0", text=text, kind=kind, component_id="c1", location=LOC)
+
+
+def test_a_statement_that_fits_is_returned_as_is() -> None:
+    s = stmt("x" * MAX_STATEMENT_CHARS)
+    assert cut_statement(s) == [s]
+
+
+def test_long_statements_are_cut_at_sentence_ends() -> None:
+    text = "The car is quick. " * 3 + "It has a very long and winding sentence with no end in sight"
+    pieces = cut_statement(stmt(text), 60)
+    assert [p.text for p in pieces] == [
+        "The car is quick. The car is quick. The car is quick.",
+        "It has a very long and winding sentence with no end in sight",
+    ]
+    assert [p.id for p in pieces] == ["c1.0:0", "c1.0:1"]
+    assert {(p.kind, p.component_id, p.location) for p in pieces} == {("list_item", "c1", LOC)}
+
+
+def test_a_sentence_end_too_early_in_a_piece_is_passed_over_for_whitespace() -> None:
+    # The only sentence end is in the first half, so the cut falls at the last space.
+    pieces = cut_statement(stmt("Hi. " + "aaaa " * 20), 40)
+    assert [p.text for p in pieces] == [
+        "Hi. aaaa aaaa aaaa aaaa aaaa aaaa aaaa",
+        "aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa",
+        "aaaa aaaa aaaa aaaa aaaa",
+    ]
+
+
+def test_text_without_whitespace_is_cut_mid_word() -> None:
+    text = "x" * 250
+    pieces = cut_statement(stmt(text), 100)
+    assert [len(p.text) for p in pieces] == [100, 100, 50]
+    assert "".join(p.text for p in pieces) == text
+
+
+def test_every_piece_of_a_cut_pair_keeps_its_label() -> None:
+    pieces = cut_statement(stmt("Notes: " + "lorem ipsum " * 20, "key_value"), 60)
+    assert len(pieces) == 5
+    assert all(re.match(r"Notes: (lorem|ipsum)", p.text) and len(p.text) <= 60 for p in pieces)
+    assert all(p.kind == "key_value" for p in pieces)
+
+
+def test_every_piece_of_a_cut_table_cell_keeps_its_headers() -> None:
+    table = Component(
+        id="t1",
+        type="table",
+        text="(rows)",
+        cells=[
+            TableCell(row=0, col=0, text="", header=True),
+            TableCell(row=0, col=1, text="SE", header=True),
+            TableCell(row=1, col=0, text="Notes", header=True),
+            TableCell(row=1, col=1, text="lorem ipsum " * 20),
+        ],
+        location=DomLocation(dom_path="/html/body/table"),
+    )
+    [cell] = table_statements(table)
+    pieces = cut_statement(cell, 60)
+    assert len(pieces) == 5
+    assert all(re.match(r"Notes · SE: (lorem|ipsum)", p.text) and len(p.text) <= 60 for p in pieces)
+    assert all(p.table == cell.table for p in pieces)
+    assert pieces[0].id == "t1.r1c1:0"
+
+
+def test_a_label_longer_than_half_a_piece_isnt_repeated() -> None:
+    label = "Label with many words in it"  # 27 characters, over half of 50
+    pieces = cut_statement(stmt(f"{label}: " + "value " * 20, "key_value"), 50)
+    assert pieces[0].text.startswith(label)
+    assert not any(p.text.startswith(label) for p in pieces[1:])
+    assert all(len(p.text) <= 50 for p in pieces)
+
+
+def test_a_custom_splitters_prefix_that_doesnt_match_the_headers_isnt_repeated() -> None:
+    [cell] = table_statements(
+        Component(
+            id="t1",
+            type="table",
+            text="(rows)",
+            cells=[
+                TableCell(row=0, col=0, text="Notes", header=True),
+                TableCell(row=0, col=1, text="x"),
+            ],
+            location=DomLocation(dom_path="/html/body/table"),
+        )
+    )
+    reworded = cell.model_copy(update={"text": "The notes say " + "word " * 30})
+    pieces = cut_statement(reworded, 50)
+    assert pieces[0].text.startswith("The notes say")
+    assert not any(p.text.startswith("Notes") for p in pieces)
+
+
+def test_cut_statement_needs_a_positive_max_chars() -> None:
+    with pytest.raises(ValueError, match="max_chars must be positive, got 0"):
+        cut_statement(stmt("x"), 0)
+
+
 # --- the stage -----------------------------------------------------------------------
 
 
@@ -340,6 +450,56 @@ async def test_stage_does_nothing_without_a_parsed_document() -> None:
     ctx.parsed = None
     await StatementStage().run(ctx)
     assert ctx.parsed is None
+
+
+async def test_stage_cuts_long_statements_from_any_splitter() -> None:
+    class OneStatement:
+        def split(self, component: Component) -> list[Statement]:
+            return [
+                Statement(
+                    id=f"{component.id}.0",
+                    text=component.text,
+                    kind="list_item",
+                    component_id=component.id,
+                    location=LOC,
+                )
+            ]
+
+    long = "One two three. " * 20
+    ctx = context(comp("list_item", long.strip(), cid="li"))
+    await StatementStage(OneStatement(), max_chars=100).run(ctx)
+    assert ctx.parsed is not None
+    pieces = list(ctx.parsed.statements.values())
+    assert [s.id for s in pieces] == ["li.0:0", "li.0:1", "li.0:2", "li.0:3"]
+    assert all(len(s.text) <= 100 for s in pieces)
+    assert " ".join(s.text for s in pieces) == long.strip()
+    [event] = ctx.events
+    assert (event.stage, event.kind, event.data) == (
+        "statements",
+        "statements_cut",
+        {"pieces": {"li.0": 4}},
+    )
+    assert event.message == "1 statement(s) over 100 characters were cut into 4 pieces"
+
+
+async def test_stage_leaves_short_statements_alone_without_an_event() -> None:
+    ctx = context(comp("paragraph", "Quick. Cheap.", cid="p"))
+    await StatementStage().run(ctx)
+    assert ctx.parsed is not None
+    assert list(ctx.parsed.statements) == ["p.0", "p.1"]
+    assert ctx.events == []
+
+
+async def test_stage_refuses_a_piece_whose_id_is_taken() -> None:
+    clash = Statement(id="li.0:1", text="x", kind="structured", component_id="ld", location=LOC)
+    ctx = context(comp("list_item", "word " * 50, cid="li"), [clash])
+    with pytest.raises(DuplicateStatementError, match=r"'li\.0:1'"):
+        await StatementStage(max_chars=100).run(ctx)
+
+
+def test_stage_needs_a_positive_max_chars() -> None:
+    with pytest.raises(ValueError, match="max_chars must be positive, got 0"):
+        StatementStage(max_chars=0)
 
 
 def test_statements_is_a_default_stage_after_layout() -> None:
@@ -414,3 +574,47 @@ def test_site_text_is_covered_by_statements(
             own = said.get(c.id, Counter())
             for word in c.text.split():
                 assert own[word] > 0, (path, c.id, word)
+
+
+# --- oversized statements, end to end ------------------------------------------------
+
+
+class Car(BaseModel):
+    """A car."""
+
+    price: Decimal = Field(description="Price", unit="GBP")
+
+
+FILLER = "word " * 40_000  # 200k characters without a sentence end
+
+
+def pick_first_candidate(q: Choice) -> str:
+    return next(o for o in q.options if o != "none")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"<table><tr><th></th><th>SE</th></tr><tr><th>Notes</th><td>{FILLER}"
+        "Price £24,995.</td></tr></table>",
+        f"<ul><li>{FILLER}Price £24,995.</li></ul>",
+    ],
+    ids=["table cell", "list item"],
+)
+async def test_a_200k_character_statement_is_extracted_without_raising(body: str) -> None:
+    html = f"<html><body><main><h1>Kestrova</h1>{body}</main></body></html>"
+    fake = (
+        FakeJev(default_p=1.0)
+        .choice("Which detail", "price", state="24,995")
+        .choice("Which of these", pick_first_candidate, state="24,995")
+    )
+    async with Extractor([Car], jev=fake.client()) as ex:
+        result = await ex.extract(Document.from_bytes(html.encode(), url="https://cars.test/"))
+
+    assert result.one(Car).strict() == Car(price=Decimal("24995"))
+    [cut] = [e for e in result.meta.events if e.kind == "statements_cut"]
+    [pieces] = cut.data["pieces"].values()
+    assert pieces >= len(FILLER) // MAX_STATEMENT_CHARS
+    stated = [c.state for c in fake.calls if isinstance(c.state, dict) and "statement" in c.state]
+    assert stated
+    assert max(len(str(state["statement"])) for state in stated) <= MAX_STATEMENT_CHARS

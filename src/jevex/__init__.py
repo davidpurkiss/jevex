@@ -62,7 +62,7 @@ from jevex.resolve import EntityStage, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
-from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
+from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage, cut_statement
 from jevex.statements import (
     Candidate,
     NormaliserStep,
@@ -89,7 +89,7 @@ from jevex.structured import (
     StructuredBlob,
     StructuredSource,
 )
-from jevex.tables import table_statements
+from jevex.tables import header_prefix, table_statements
 
 __version__ = "0.0.1"
 
@@ -189,11 +189,13 @@ __all__ = [
     "UnsupportedDocumentError",
     "VerifiedExample",
     "__version__",
+    "cut_statement",
     "default_registry",
     "evaluate",
     "flatten",
     "gate_units",
     "generator_spec_json_schema",
+    "header_prefix",
     "load_corpus",
     "normalise",
     "open_store",
