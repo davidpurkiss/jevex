@@ -353,6 +353,29 @@ def test_an_image_without_text_read_from_it_is_one_block_as_before() -> None:
     )
 
 
+def test_a_pdf_figure_with_text_found_in_it_is_cut_like_a_section() -> None:
+    figure = comp(
+        "image",
+        "",
+        "f",
+        comp("caption", "Figure 3: prices", "cap"),
+        comp("paragraph", "Prices exclude VAT.", "fn"),
+    )
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "The Kestrova.", "p1"),
+        figure,
+        comp("paragraph", "Book a test drive.", "p2"),
+    )
+    assert [(u.id, u.component_ids) for u in gate_units(root)] == [
+        ("root#0", ("p1",)),
+        ("f#0", ("cap", "fn")),
+        ("root#1", ("p2",)),
+    ]
+
+
 # --- the gate ------------------------------------------------------------------------
 
 

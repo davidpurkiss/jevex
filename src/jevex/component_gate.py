@@ -3,13 +3,13 @@
 
 The layout tree is cut into **gate units**: each container's run of direct content
 blocks (headings, paragraphs, lists, captions, images), chunked to at most ``max_chars``,
-plus each table on its own. An image the image stage read text from is cut like a section:
-its alt text, then the paragraphs and headed sections found in it. A block longer than
-``max_chars`` is split across several units (tables by row groups with their headers
-repeated) rather than cut, and headings with nothing after them join the table or section
-they introduce. Jev is asked one Noul
-per unit × field group ("Does this section contain the price?"), with every schema's
-questions about a unit in one request.
+plus each table on its own. An image with text found in it (OCR from the image stage, or
+text Docling found in a PDF picture) is cut like a section: its alt text, then the
+paragraphs and headed sections found in it. A block longer than ``max_chars`` is split
+across several units (tables by row groups with their headers repeated) rather than cut,
+and headings with nothing after them join the table or section they introduce. Jev is
+asked one Noul per unit × field group ("Does this section contain the price?"), with every
+schema's questions about a unit in one request.
 
 A unit that passes for a group passes all its components and their descendants (and
 their ancestors, so the tree stays connected). The result lands on
@@ -48,9 +48,10 @@ _CONTAINERS = frozenset({"section", "column", "breakout"})
 
 def _opens(component: Component) -> bool:
     """Whether the gate cuts ``component``'s children into units rather than reading it as
-    one block: containers, and images with text read from them (a scanned page's OCR has
-    its own paragraphs and headings). An image with only its caption is one block, so a
-    figure still shares a unit with the text around it."""
+    one block: containers, and images with text found in them (a scanned page's OCR has its
+    own paragraphs and headings; a PDF picture can hold text and footnotes). An image with
+    only its caption is one block, so a figure still shares a unit with the text around
+    it."""
     if component.type == "image":
         return any(c.type != "caption" for c in component.children)
     return component.type in _CONTAINERS
