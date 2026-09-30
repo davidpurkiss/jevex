@@ -9,6 +9,7 @@ from jevex.llm import (
     LLMBudgetExceededError,
     LLMError,
     ModelPrice,
+    check_budget,
     cost,
     process_llm_cost,
     reset_process_llm_cost,
@@ -46,6 +47,40 @@ async def test_process_budget_stops_further_calls(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(LLMBudgetExceededError, match="spend cap"):
         await llm.structured("abc", Book)
     assert len(llm.calls) == 1
+
+
+async def test_ledger_cap_counts_spend_from_other_processes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "run.ledger"
+    ledger.write_text("llm 4\njev 9\n")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "5")
+    llm = FakeLLM(lambda p, s: {"title": "Dune"}, price=(1_000_000, 1_000_000))
+    await llm.structured("abc", Book)  # $4 spent elsewhere: still under the cap
+    assert ledger.read_text() == "llm 4\njev 9\nllm 6.000000000\n"
+    with pytest.raises(LLMBudgetExceededError, match=r"\$10\.0000 of \$5\.00"):
+        await llm.structured("abc", Book)
+    assert len(llm.calls) == 1
+    assert process_llm_cost() == pytest.approx(6)
+
+
+async def test_free_calls_leave_the_ledger_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "run.ledger"
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    await FakeLLM(lambda p, s: {"title": "Dune"}).structured("abc", Book)
+    assert not ledger.exists()
+
+
+def test_unreadable_ledger_blocks_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ledger = tmp_path / "run.ledger"
+    ledger.write_text("llm\n")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "5")
+    with pytest.raises(LLMError, match="bad line 1"):
+        check_budget()
 
 
 # --- FakeLLM and cassettes -------------------------------------------------------------

@@ -11,10 +11,11 @@ in extras: ``jevex.llm.anthropic`` (``jevex[anthropic]``), ``jevex.llm.openai``
 provider LiteLLM supports, including local Ollama).
 
 Spend is capped process-wide by ``JEVEX_LLM_MAX_COST_USD``: once this process has spent
-the cap, no further call is made. Unlike Jev's cap it can't pre-estimate a call (output
-size isn't known), so one call can overshoot, concurrent calls can all pass the check, and
-calls with unknown prices count as $0. It's a backstop; per-document and per-run budgets
-are #34.
+the cap, no further call is made. With ``JEVEX_SPEND_LEDGER`` set, the cap counts what
+every process wrote to that shared ledger instead (see ``jevex._spend``). Unlike Jev's
+cap it can't pre-estimate a call (output size isn't known), so one call can overshoot,
+concurrent calls can all pass the check, and calls with unknown prices count as $0.
+It's a backstop; per-document and per-run budgets are #34.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
+
+from jevex._spend import ledger_add, ledger_path, ledger_total
 
 ANTHROPIC_MODEL = "claude-opus-5-5"
 """Default model: strongest, for generator synthesis (``generator_llm``)."""
@@ -99,7 +102,7 @@ class LLMRefusalError(LLMError):
 
 
 class LLMBudgetExceededError(LLMError):
-    """This process has already spent ``JEVEX_LLM_MAX_COST_USD``."""
+    """``JEVEX_LLM_MAX_COST_USD`` is already spent (by this process, or in the ledger)."""
 
 
 # --- process-wide spend ----------------------------------------------------------------
@@ -126,15 +129,20 @@ def check_budget() -> None:
         cap = float(raw)
     except ValueError:
         raise LLMError(f"{MAX_COST_ENV} must be a number of US dollars, got {raw!r}") from None
-    if _process_cost >= cap:
+    ledger = ledger_path()
+    spent = _process_cost if ledger is None else ledger_total(ledger, "llm", LLMError)
+    if spent >= cap:
         raise LLMBudgetExceededError(
-            f"LLM spend cap reached: ${_process_cost:.4f} of ${cap:.2f} ({MAX_COST_ENV})"
+            f"LLM spend cap reached: ${spent:.4f} of ${cap:.2f} ({MAX_COST_ENV})"
         )
 
 
 def record(usage: LLMUsage) -> None:
     global _process_cost
     _process_cost += usage.cost or 0.0
+    ledger = ledger_path()
+    if ledger is not None and usage.cost:
+        ledger_add(ledger, "llm", usage.cost)
 
 
 def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:

@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import Iterator, Mapping
+from pathlib import Path
 
 import httpx2
 import pytest
@@ -277,6 +278,53 @@ async def test_bad_cap_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "five dollars")
     with pytest.raises(JevError, match="must be a number"):
         await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_ledger_cap_counts_spend_from_other_processes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from jevex.jev import JevBudgetExceededError, process_cost
+
+    ledger = tmp_path / "run.ledger"
+    ledger.write_text("jev 0.0000040\nllm 5\n")  # another process's spend
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000070")
+    backend = RecordingBackend()
+    client = JevClient(backend)
+    await client.ask("s", {"q": Noul(instructions="?")})  # ~$0.0000006 estimated: fits
+    with pytest.raises(JevBudgetExceededError, match="spend cap"):
+        await client.ask("s", {"q": Noul(instructions="?")})
+    assert len(backend.calls) == 1
+    assert ledger.read_text() == "jev 0.0000040\nllm 5\njev 0.000004200\n"
+    assert process_cost() == pytest.approx(0.0000042)  # this process's own spend
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_ledger_records_spend_without_a_cap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "run.ledger"
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.delenv("JEVEX_JEV_MAX_COST_USD", raising=False)
+    await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+    assert ledger.read_text() == "jev 0.000004200\n"
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_unreadable_ledger_blocks_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from jevex.jev import JevError
+
+    ledger = tmp_path / "run.ledger"
+    ledger.write_text("jev ???\n")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "1")
+    backend = RecordingBackend()
+    with pytest.raises(JevError, match="bad line 1"):
+        await JevClient(backend).ask("s", {"q": Noul(instructions="?")})
+    assert backend.calls == []
 
 
 async def test_sdk_errors_become_jev_backend_errors() -> None:

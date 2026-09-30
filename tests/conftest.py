@@ -11,6 +11,17 @@ import pytest
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
+@pytest.fixture(autouse=True)
+def _offline_spend_stays_off_the_ledger(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Agent runs set ``JEVEX_SPEND_LEDGER`` to count real spend. Fake and replayed calls
+    must not be charged to it, so only live tests and cassette recording keep it."""
+    if "live" in request.keywords or os.environ.get("JEVEX_RECORD") == "1":
+        return
+    monkeypatch.delenv("JEVEX_SPEND_LEDGER", raising=False)
+
+
 @pytest.fixture
 def typesafe_api_key() -> str:
     """The real Jev key for ``live`` tests; skips the test when it isn't set."""
