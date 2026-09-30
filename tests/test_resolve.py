@@ -1069,6 +1069,39 @@ async def test_children_inherit_the_parents_values_and_their_own_win() -> None:
     )
 
 
+async def test_children_are_categorised_only_for_the_nested_fields_their_section_passed() -> None:
+    # The intro passes the gate for doors but not power, so its statement is offered doors
+    # alone; the table passes for both.
+    fake = car_jev().noul("contain the power (PS)?", p=0.1, state="Every Kestrova")
+    result, fake = await extract_car(MODEL_PAGE, fake)
+
+    [gate] = [
+        call.questions
+        for call in fake.calls
+        if "CarModel.trims.doors" in call.questions and "Every Kestrova" in str(call.state)
+    ]
+    assert {k: q.instructions for k, q in gate.items()} == {
+        "CarModel.model": "Does this section contain the model name?",
+        "CarModel.trims": (
+            "Does this section contain the power (PS) or number of doors of the trims?"
+        ),
+        "CarModel.trims.power_ps": "Does this section contain the power (PS)?",
+        "CarModel.trims.doors": "Does this section contain the number of doors?",
+    }
+    offered = {
+        str(call.state): list(q.options)
+        for call in fake.calls
+        for key, q in call.questions.items()
+        if key == "CarModel.trims" and isinstance(q, Choice)
+    }
+    intro = "{'statement': 'Every Kestrova has 5 doors.', 'section': 'Kestrova'}"
+    assert offered[intro] == ["doors", "none"]
+    cell = "{'statement': 'Power · SE: 150PS', 'section': 'Kestrova'}"
+    assert offered[cell] == ["power_ps", "doors", "none"]
+    se, _ = result.one(CarModel).children["trims"]
+    assert se.record.model_dump() == {"power_ps": 150, "doors": 5}
+
+
 async def test_child_records_are_partial_until_complete() -> None:
     page = MODEL_PAGE.replace("<p>Every Kestrova has 5 doors.</p>", "")
     result, _ = await extract_car(page, car_jev())

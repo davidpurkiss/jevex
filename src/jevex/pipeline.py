@@ -50,6 +50,12 @@ class SchemaRun:
     component_ids: dict[str, list[str]] | None = None
     """Component-gate result: group → ids of components relevant to it. ``None`` when no
     component gate ran, which means every component is relevant."""
+    child_component_ids: dict[str, dict[str, list[str]]] = field(
+        default_factory=dict[str, dict[str, list[str]]]
+    )
+    """Component-gate results for the nested models' own field groups, keyed by the
+    nested-model field, then group. The entity stage gives them to that field's child run
+    as its ``component_ids``."""
     scopes: list[EntityScope] = field(default_factory=list["EntityScope"])
     categories: dict[str, ChoiceAnswer] = field(default_factory=dict[str, "ChoiceAnswer"])
     candidates: dict[tuple[str, str], list[Candidate]] = field(

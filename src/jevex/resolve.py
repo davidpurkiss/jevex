@@ -562,10 +562,12 @@ class EntityStage:
     (named ``"<Parent>.<field>"``, with ``SchemaRun.parent`` set), holding a copy of every
     parent scope and the children, so later stages extract the nested model's fields
     from both without knowing about children; records then inherit the parent scope's
-    values (see :class:`~jevex.extractor.ExtractionResult`). That run has no
-    component-gate result of its own: every nested field may come from any component
-    that passed the parent's gate. A field holding one model (not a list) keeps each
-    parent's first child and reports the rest in an ``extra_children`` event.
+    values (see :class:`~jevex.extractor.ExtractionResult`). Its ``component_ids`` are
+    the component gate's results for the nested model's own field groups
+    (``SchemaRun.child_component_ids``), so a component is categorised only for the nested
+    fields it passed for; without them (no gate ran), every nested field may come from any
+    component. A field holding one model (not a list) keeps each parent's first child and
+    reports the rest in an ``extra_children`` event.
     """
 
     resolver: EntityResolver = field(default_factory=SingleEntity)
@@ -628,7 +630,12 @@ class EntityStage:
             spec = run.spec.child(name)
             if not run.spec.field(name).many:
                 found = self._first_children(ctx, spec.name, found)
-            child = SchemaRun(spec, parent=run.name, parent_field=name)
+            child = SchemaRun(
+                spec,
+                component_ids=run.child_component_ids.get(name),
+                parent=run.name,
+                parent_field=name,
+            )
             child.scopes = [*(p.model_copy(deep=True) for p in parents), *found]
             out.append(child)
         return out

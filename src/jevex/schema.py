@@ -290,7 +290,8 @@ class SchemaSpec:
         )
 
     def component_gate_questions(self) -> dict[str, Noul]:
-        """One Noul per field group, keyed by group name."""
+        """One Noul per field group, keyed by group name. A nested-model field is asked
+        about by what its model holds: "...the power (PS) or number of doors of the trims?"."""
         questions: dict[str, Noul] = {}
         for group, members in self.groups.items():
             override = next(
@@ -502,8 +503,11 @@ def _claim(field: FieldSpec) -> tuple[Literal["clause", "noun"], str]:
 
 def _gate_instructions(members: Sequence[FieldSpec]) -> str:
     """ "Does this section contain the price (GBP)?"; bools ask for their claim: "Does this
-    section say whether the book is in stock?", or "...mention a sunroof?" for nouns."""
-    things = [f.phrase for f in members if f.kind != "bool"]
+    section say whether the book is in stock?", or "...mention a sunroof?" for nouns. A
+    nested model is asked about by what it holds (:func:`_nested_thing`)."""
+    things = [
+        _nested_thing(f) if f.kind == "model" else f.phrase for f in members if f.kind != "bool"
+    ]
     claims = [_claim(f) for f in members if f.kind == "bool"]
     clauses = [f"whether {text}" for shape, text in claims if shape == "clause"]
     nouns = [text for shape, text in claims if shape == "noun"]
@@ -515,6 +519,34 @@ def _gate_instructions(members: Sequence[FieldSpec]) -> str:
     if nouns:
         parts.append(f"mention {_join_or(nouns)}")
     return f"Does this section {' or '.join(parts)}?"
+
+
+def _nested_thing(field: FieldSpec) -> str:
+    """A nested-model field as the gate asks about it: "power (PS) or number of doors of the
+    trims". Its name alone ("the trims") doesn't tell Jev that a spec table of power and
+    doors holds them.
+
+    Named by the nested model's fields that read as things (bools that read as a claim,
+    nested models and unsupported types are left out), else by its docstring ("the trims
+    (one trim of a car)"), else by the field's own phrase.
+    """
+    if field.model is None:
+        return field.phrase
+    names: list[str] = []
+    for name, info in field.model.model_fields.items():
+        try:
+            nested = _field_spec(name, info)
+        except UnsupportedFieldError:
+            continue
+        if nested.kind == "model" or (nested.kind == "bool" and _claim(nested)[0] == "clause"):
+            continue
+        names.append(nested.phrase)
+    if names:
+        return f"{_join_or(names)} of the {field.phrase}"
+    docstring = field.model.__dict__.get("__doc__")
+    if docstring:
+        return f"{field.phrase} ({_lower_first(_first_sentence(inspect.cleandoc(docstring)))})"
+    return field.phrase
 
 
 def _join_or(items: list[str]) -> str:

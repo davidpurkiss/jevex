@@ -233,6 +233,8 @@ class ComponentGate(Protocol):
 
     Returns ``{schema name: {group: [component ids]}}``. Taking every schema at once lets
     an implementation ask all their questions about one component in one request.
+    ``schemas`` includes each nested model's spec (named ``"<Parent>.<field>"``); leaving
+    one out of the result leaves that child run ungated.
     """
 
     async def gate(

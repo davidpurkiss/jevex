@@ -13,7 +13,8 @@ schema's questions about a unit in one request.
 
 A unit that passes for a group passes all its components and their descendants (and
 their ancestors, so the tree stays connected). The result lands on
-``SchemaRun.component_ids`` (group → component ids). The entity stage then keeps only
+``SchemaRun.component_ids`` (group → component ids). Nested models are gated per field
+too, for the child runs ``ParentChild`` makes. The entity stage then keeps only
 passing components in each scope, so statements from irrelevant parts of the page never
 reach categorisation, and :meth:`~jevex.pipeline.SchemaRun.relevant_fields` tells the
 classifier which fields a component can state.
@@ -28,6 +29,7 @@ from typing import TYPE_CHECKING
 from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
+from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
 from jevex.tables import blank_rows
 
 if TYPE_CHECKING:
@@ -332,6 +334,13 @@ class ComponentGateStage:
     Sets ``SchemaRun.component_ids``. Without a parsed document the stage does nothing,
     and ``component_ids`` stays ``None`` (nothing gated). A schema where no component
     passes any group gets a ``no_relevant_components`` event.
+
+    Each nested-model field's model (:meth:`~jevex.schema.SchemaSpec.child`, named
+    ``"<Parent>.<field>"``) is gated too, in the same requests, and its results land on
+    ``SchemaRun.child_component_ids`` for the child run ``ParentChild`` makes, so a
+    component is categorised only for the nested fields it passed for. A component that
+    passes any of them also passes the nested-model field's group, so the entity resolver
+    sees it.
     """
 
     gate: ComponentGate = field(default_factory=NoulComponentGate)
@@ -342,9 +351,23 @@ class ComponentGateStage:
         runs = ctx.active
         if parsed is None or not runs:
             return
-        decisions = await self.gate.gate(parsed, [r.spec for r in runs], ctx.jev)
+        children = {run.name: _child_specs(run.spec) for run in runs}
+        specs = [r.spec for r in runs] + [s for kids in children.values() for s in kids.values()]
+        decisions = await self.gate.gate(parsed, specs, ctx.jev)
+        order = {c.id: i for i, c in enumerate(parsed.root.walk())}
         for run in runs:
             groups = decisions.get(run.name, {})
+            for name, spec in children[run.name].items():
+                child_groups = decisions.get(spec.name)
+                if child_groups is None:
+                    continue  # a gate that doesn't gate nested models: every field may be anywhere
+                run.child_component_ids[name] = child_groups
+                group = run.spec.field(name).group or name
+                passed = {
+                    *groups.get(group, ()),
+                    *(c for ids in child_groups.values() for c in ids),
+                }
+                groups[group] = sorted(passed, key=lambda c: order.get(c, len(order)))
             run.component_ids = groups
             if not any(groups.values()):
                 ctx.event(
@@ -353,3 +376,15 @@ class ComponentGateStage:
                     f"{run.name}: no component passed the component gate",
                     schema=run.name,
                 )
+
+
+def _child_specs(spec: SchemaSpec) -> dict[str, SchemaSpec]:
+    """The nested models' specs by field. One jevex can't extract is left out: that's only
+    an error if ``ParentChild`` is asked to fill it."""
+    out: dict[str, SchemaSpec] = {}
+    for f in spec.child_fields:
+        try:
+            out[f.name] = spec.child(f.name)
+        except (UnsupportedFieldError, ReservedFieldNameError):
+            continue
+    return out
