@@ -54,7 +54,7 @@ Candidates are open issues with label `agent-ready` and without `agent-in-progre
 - Drop any issue that already has an open PR (`gh pr list --search "<n> in:body is:open"`,
   then check the PR body for `Closes #<n>`).
 - Drop any issue labelled `live-api` unless live calls are allowed (see **Live calls**
-  below). **Until #72 is closed, no run may make live calls.**
+  below).
 - Order by milestone (the leading number of its title; no milestone sorts last), then
   by issue number. Take the first.
 
@@ -112,23 +112,29 @@ From here on, **any** failure must still go through step 9 (release the lock) an
 `gh issue edit <n> --remove-label agent-in-progress`. Comment on the issue:
 `**Loop attempt** <k>/3 finished NOW: <outcome>, PR #<pr> (merged | draft) / <what's needed>.`
 
-## Live calls (only once #72 is closed)
-A `live-api` issue may call real APIs only when all of these hold:
-- #72 is closed, and `JEVEX_SECRETS_FILE` is set and non-empty. If not, label the issue
-  `agent-blocked` with "needs keys" and stop.
-- This week's live spend is still under the weekly caps in #72. Add up the `Spend:` lines
-  of this week's #84 comments.
+## Live calls
+Only issues labelled `live-api` may call real APIs, and only when all of these hold:
+- `JEVEX_SECRETS_FILE` and `JEVEX_SPEND_LEDGER` are set and non-empty (the local runner
+  sets both; a run without them, such as a cloud routine, is offline). If the secrets
+  file is missing, label the issue `agent-blocked` with "needs keys" and stop.
+- The run still has budget: `JEVEX_JEV_MAX_COST_USD` (and `JEVEX_LLM_MAX_COST_USD` if the
+  issue needs an LLM) is above 0. The runner sets each to the smaller of the per-run cap
+  and what's left of the week (Jev $0.50 per run and $2 per week; LLM $2 and $10, as
+  agreed in #72). At 0 the week's budget is spent: skip `live-api` issues in step 4.
 - Load keys **only in the command that runs the live step**, never exported for the
-  whole session and never printed:
-  `(set -a; . "$JEVEX_SECRETS_FILE"; set +a; uv run pytest --live -m live tests/...)`.
-- `JEVEX_JEV_MAX_COST_USD` is already set by the runner and hard-stops Jev spend. Don't
-  raise it.
+  whole session and never printed. The file holds `ANTHROPIC_API_KEY_FOR_TESTS` so the
+  key can never switch Claude Code itself to API billing; map it for that one command:
+  `(set -a; . "$JEVEX_SECRETS_FILE"; set +a; ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY_FOR_TESTS:-}" uv run pytest --live -m live tests/...)`.
+- Don't change or unset `JEVEX_JEV_MAX_COST_USD`, `JEVEX_LLM_MAX_COST_USD` or
+  `JEVEX_SPEND_LEDGER`. Every jevex process adds its spend to the ledger, and the caps
+  count the ledger's total, so they hold across all the processes in the run.
 - Websites: only the practice or test sites the issue names, honouring robots.txt.
 - Commit recordings (cassettes, fixtures), never keys. Before committing, check that no
   secret value appears in `git diff --cached`.
-- Report the real spend (`jevex.jev.process_cost()` or the test output) in the log.
+- Report the run's real spend in the log. The ledger has one `<jev|llm> <usd>` line per
+  charge: `awk '{s[$1]+=$2} END {for (k in s) print k, s[k]}' "$JEVEX_SPEND_LEDGER"`.
 
 ## 10. Log the run
 Comment on #84 in the run format from its description: outcome, issue, PR, reviewer
-verdict, attempt, duration, spend (Jev and LLM; `none` until #72) and one or two lines of
-notes. End your session with a message that repeats the log comment.
+verdict, attempt, duration, spend (Jev and LLM, from the ledger; `$0` for offline runs)
+and one or two lines of notes. End your session with a message that repeats the log comment.

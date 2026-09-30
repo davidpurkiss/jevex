@@ -129,8 +129,11 @@ same prompt ("Follow .claude/loop.md...").
   or posts outside this repo's issues and PRs.
 - **No real API calls** (Jev, LLMs, websites) outside tests marked `live`, and only in
   runs where the loop's secrets and budget rules (#72, `.claude/loop.md` **Live calls**)
-  allow them. Never commit keys; `.env` is gitignored. `JEVEX_JEV_MAX_COST_USD` hard-caps
-  Jev spend per process (`JevBudgetExceededError`). Live tests take the
+  allow them. Never commit keys; `.env` is gitignored. `JEVEX_JEV_MAX_COST_USD` and
+  `JEVEX_LLM_MAX_COST_USD` hard-cap spend per process (`JevBudgetExceededError`,
+  `LLMBudgetExceededError`), or per run when the runner sets `JEVEX_SPEND_LEDGER`, a
+  ledger every process adds to. Tests drop the ledger unless they're live or recording
+  cassettes, so fake calls are never charged to it. Live tests take the
   `typesafe_api_key` fixture, which skips them when there's no key.
 - **Stay in scope.** If you find a bug or missing piece outside the issue, open a new
   issue for it (with an `agent-ready` or `needs-human` label and "blocked by" links)
