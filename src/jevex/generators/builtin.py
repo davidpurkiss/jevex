@@ -471,6 +471,44 @@ class NounPhrase:
         return out
 
 
+MAX_WHOLE_WORDS = 16
+_WHOLE_TRAILING = " \t\r\n.,;:"
+"""Stripped from the end of a whole statement. ``?`` and ``!`` stay: they can belong to a
+title ("Who Moved My Cheese?")."""
+
+
+@dataclass(frozen=True)
+class WholeStatement:
+    """A short statement's whole text, for names and titles that stopwords would split.
+
+    "A Light in the Attic" as a heading gives the candidate "A Light in the Attic" (the
+    noun-phrase chunker gives only "Light" and "Attic"). Statements of more than
+    ``max_words`` words aren't proposed: whole sentences are rarely a value. Nor are
+    ``key_value`` and ``table_cell`` statements, whose value :class:`KeyValue` finds, or
+    statements for ``list[...]`` fields, where the whole text is several values at once.
+    """
+
+    id: str = "whole_statement"
+    scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"str"})))
+    max_words: int = MAX_WHOLE_WORDS
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        if statement.kind in ("key_value", "table_cell"):
+            return []
+        text = statement.text
+        # Count words first, so a long statement costs one split and no scanning.
+        if len(text.split(maxsplit=self.max_words)) > self.max_words:
+            return []
+        start = len(text) - len(text.lstrip())
+        end = len(text.rstrip(_WHOLE_TRAILING))
+        if end <= start:
+            return []
+        return [_candidate(statement, start, end, self.id, _step("strip"))]
+
+    def generate_for(self, statement: Statement, field: FieldSpec) -> list[Candidate]:
+        return [] if field.many else self.generate(statement)
+
+
 BUILTIN_GENERATORS = (
     NumberWithUnit(),
     Money(),
@@ -479,4 +517,5 @@ BUILTIN_GENERATORS = (
     Range(),
     KeyValue(),
     NounPhrase(),
+    WholeStatement(),
 )

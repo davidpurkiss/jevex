@@ -179,10 +179,10 @@ def test_component_gates_per_group() -> None:
         "mileage",
     ]
     assert gates["price"] == Noul(
-        instructions="Does this section contain the Asking price or Currency?"
+        instructions="Does this section contain the asking price or currency?"
     )
     assert gates["first_registered"] == Noul(
-        instructions="Does this section contain the First registration date?"
+        instructions="Does this section contain the first registration date?"
     )
 
 
@@ -225,7 +225,7 @@ def test_select_question() -> None:
         },
     )
     assert spec.field("engine_size_cc").select_instructions() == (
-        "Which of these is the Engine displacement (cc)?"
+        "Which of these is the engine displacement (cc)?"
     )
     with pytest.raises(ValueError, match="reserved"):
         spec.field("model").select_question(["none"])
@@ -235,18 +235,18 @@ def test_enum_bool_and_verify_questions() -> None:
     vehicle = SchemaSpec.from_model(VehicleSpec)
     listing = SchemaSpec.from_model(Listing)
     assert vehicle.field("fuel_type").enum_question() == Choice(
-        instructions="What is the Fuel or powertrain type?",
+        instructions="What is the fuel or powertrain type?",
         options={
             "petrol": None,
             "diesel": None,
             "hybrid": None,
             "phev": None,
             "ev": None,
-            "not stated": "The statement does not state the Fuel or powertrain type",
+            "not stated": "The statement does not state the fuel or powertrain type",
         },
     )
     assert listing.field("automatic").bool_question() == Noul(
-        instructions="Does the statement say has an automatic gearbox?"
+        instructions="Does the statement say it has an automatic gearbox?"
     )
     assert vehicle.field("zero_to_62_s").verify_question(9.1) == Noul(
         instructions="The statement states that the 0-62 mph acceleration time (s) is 9.1."
@@ -270,7 +270,7 @@ def test_member_question_default_and_override() -> None:
 
     spec = SchemaSpec.from_model(M)
     assert spec.field("tags").member_question("red") == Noul(
-        instructions='Does the statement give "red" as one of the Tags?'
+        instructions='Does the statement give "red" as one of the tags?'
     )
     assert spec.field("colours").member_question("red") == Noul(instructions="Is red a Colours?")
 
@@ -309,3 +309,116 @@ def test_a_field_named_none_is_reserved() -> None:
 
     with pytest.raises(ReservedFieldNameError, match="reserved"):
         SchemaSpec.from_model(Odd)
+
+
+class Gated(BaseModel):
+    """A car."""
+
+    price: Decimal = Field(description="Asking price", unit="GBP", group="price")
+    vat: bool = Field(description="VAT is included", group="price")
+    sunroof: bool = Field(description="Sunroof", group="kit")
+    tow_bar: bool = Field(description="Tow bar", group="kit")
+    heated: bool = Field(description="The seats are heated", group="comfort")
+    cooled: bool = Field(description="The seats are cooled", group="comfort")
+    automatic: bool = Field(
+        description="has an automatic gearbox",
+        questions=Questions(component_gate="Is the gearbox described here?"),
+    )
+    in_stock: bool = Field(description="The book is in stock")
+
+
+def test_gate_questions_for_bools_and_mixed_groups() -> None:
+    questions = {
+        k: q.instructions
+        for k, q in SchemaSpec.from_model(Gated).component_gate_questions().items()
+    }
+    assert questions == {
+        "price": "Does this section contain the asking price (GBP) or say whether VAT is included?",
+        "kit": "Does this section mention sunroof or tow bar?",
+        "comfort": (
+            "Does this section say whether the seats are heated or whether the seats are cooled?"
+        ),
+        "automatic": "Is the gearbox described here?",
+        "in_stock": "Does this section say whether the book is in stock?",
+    }
+
+
+def test_bool_select_and_verify_questions_read_as_claims() -> None:
+    spec = SchemaSpec.from_model(Gated)
+    stock = spec.field("in_stock")
+    assert stock.bool_question().instructions == "Does the statement say the book is in stock?"
+    assert stock.verify_question(True).instructions == "The statement says the book is in stock."
+    assert stock.verify_question(False).instructions == (
+        "The statement says it is not the case that the book is in stock."
+    )
+    auto = spec.field("automatic")
+    assert auto.bool_question().instructions == (
+        "Does the statement say it has an automatic gearbox?"
+    )
+    sunroof = spec.field("sunroof")
+    # The gate asks about relevance ("mention"); the value question asks about presence,
+    # so "No sunroof" can't make it True.
+    assert sunroof.bool_question().instructions == "Does the statement say it has sunroof?"
+    assert sunroof.verify_question(True).instructions == "The statement says it has sunroof."
+    assert sunroof.verify_question(False).instructions == "The statement says there is no sunroof."
+
+
+def test_base_form_first_words_are_nouns_not_missing_subjects() -> None:
+    class H(BaseModel):
+        pool: bool = Field(description="Use of pool")
+        opener: bool = Field(description="Can opener included")
+        uses: bool = Field(description="uses premium fuel")
+
+    spec = SchemaSpec.from_model(H)
+    assert spec.field("pool").bool_question().instructions == (
+        "Does the statement say it has use of pool?"
+    )
+    assert spec.field("opener").bool_question().instructions == (
+        "Does the statement say it has can opener included?"
+    )
+    assert spec.field("uses").bool_question().instructions == (
+        "Does the statement say it uses premium fuel?"
+    )
+
+
+def test_phrase_keeps_acronyms_and_letter_names() -> None:
+    class P(BaseModel):
+        vin: str = Field(description="VIN")
+        ev_range: int = Field(description="EV range", unit="miles")
+        price: Decimal = Field(description="Price", unit="GBP")
+        pillar: str = Field(description="A-pillar colour")
+        x: str = Field(description="X")
+        short: str = Field(description="A short title")
+        phone: str = Field(description="iPhone model")
+        fuel: str = Field(description="Électrique range")
+
+    spec = SchemaSpec.from_model(P)
+    assert [f.phrase for f in spec.fields] == [
+        "VIN",
+        "EV range (miles)",
+        "price (GBP)",
+        "A-pillar colour",
+        "X",
+        "a short title",
+        "iPhone model",
+        "électrique range",
+    ]
+
+
+def test_custom_templates_get_the_description_as_written() -> None:
+    class C(BaseModel):
+        price: Decimal = Field(
+            description="Price",
+            unit="GBP",
+            questions=Questions(verify="Is {value} the {description}?"),
+        )
+        ok: bool = Field(
+            description="The car is OK",
+            questions=Questions(verify="Does it hold that {description}: {value}?"),
+        )
+
+    spec = SchemaSpec.from_model(C)
+    assert spec.field("price").verify_question(9).instructions == "Is 9 the Price (GBP)?"
+    assert spec.field("ok").verify_question(True).instructions == (
+        "Does it hold that The car is OK: True?"
+    )
