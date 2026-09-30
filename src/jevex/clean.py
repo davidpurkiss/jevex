@@ -43,6 +43,11 @@ SECTIONING_TAGS = frozenset({"article", "aside", "main", "nav", "section"})
 DROP_ROLES = frozenset({"navigation", "banner", "contentinfo"})
 """ARIA landmark roles removed like their equivalent tags."""
 
+DROP_CLASSES = frozenset({"nav", "navbar"})
+"""Class names (whole tokens, any case) that mark navigation built without ``<nav>``, as
+in Bootstrap's ``<ul class="nav nav-list">`` category sidebars. Only exact tokens count,
+so ``nav-tabs`` alone, ``navigation-guide`` or ``sat-nav`` don't."""
+
 CONSENT_PATTERN = re.compile(
     r"cookie[-_ ]?(?:banner|bar|notice|notification|popup|modal|law|message|warning"
     r"|disclaimer|dialog|overlay|wall|settings|preferences)"
@@ -64,7 +69,7 @@ STATE_PATTERN = re.compile(
 """Marks a plain ``<script>`` that embeds app state, which the structured-data stage reads."""
 
 PROTECTED_TAGS = frozenset({"html", "head", "body", "main", "article"})
-"""Never removed by role or pattern: sites put consent flags on ``<body class=...>``."""
+"""Never removed by role, class or pattern: sites put consent flags on ``<body class=...>``."""
 
 # Elements with no end tag; they never go on the open-element stack.
 _VOID_TAGS = frozenset(
@@ -104,9 +109,9 @@ class BoilerplateCleaner:
     """The default :class:`~jevex.interfaces.Cleaner`: drops boilerplate subtrees from HTML.
 
     Non-HTML documents, and HTML with nothing to remove, are returned unchanged. Pass
-    other tag sets or another pattern to widen or narrow what counts as boilerplate.
-    ``keep_data_scripts=False`` drops JSON and app-state scripts too, for pipelines
-    without a structured-data stage.
+    other tag, role or class sets, or another pattern, to widen or narrow what counts as
+    boilerplate. ``keep_data_scripts=False`` drops JSON and app-state scripts too, for
+    pipelines without a structured-data stage.
     """
 
     def __init__(
@@ -115,12 +120,14 @@ class BoilerplateCleaner:
         drop_tags: frozenset[str] = DROP_TAGS,
         page_tags: frozenset[str] = PAGE_TAGS,
         drop_roles: frozenset[str] = DROP_ROLES,
+        drop_classes: frozenset[str] = DROP_CLASSES,
         pattern: re.Pattern[str] | None = CONSENT_PATTERN,
         keep_data_scripts: bool = True,
     ) -> None:
         self.drop_tags = drop_tags
         self.page_tags = page_tags
         self.drop_roles = drop_roles
+        self.drop_classes = drop_classes
         self.pattern = pattern
         self.keep_data_scripts = keep_data_scripts
 
@@ -148,6 +155,8 @@ class BoilerplateCleaner:
             return False
         values = {name: value or "" for name, value in attrs}
         if values.get("role", "").strip().lower() in self.drop_roles:
+            return True
+        if not self.drop_classes.isdisjoint(values.get("class", "").lower().split()):
             return True
         if self.pattern is None:
             return False

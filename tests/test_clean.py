@@ -10,6 +10,7 @@ from jevex.extractor import default_pipeline
 from jevex.interfaces import Cleaner
 from jevex.jev import JevClient
 from jevex.testing import FakeJev
+from jevex.testsite import generate, render
 
 FIXTURES = Path(__file__).parent / "fixtures" / "clean"
 
@@ -147,6 +148,133 @@ def test_realistic_pages_keep_content_and_lose_boilerplate(name: str) -> None:
     assert cleaned.content_type == "text/html"
 
 
+# Real pages captured from the practice sites (source URLs and capture date in
+# fixtures/clean/README.md). Each lists text that must survive and text that must go.
+CAPTURED = {
+    "books_home.html": (
+        [
+            "<title>\n    All products | Books to Scrape - Sandbox",
+            '<li class="active">All products</li>',  # breadcrumb
+            "<strong>1000</strong> results",
+            "This is a demo website for web scraping purposes.",
+            'title="A Light in the Attic"',
+            "£51.77",
+            "It&#39;s Only the Himalayas</a></h3>",  # the last book
+            "Add to basket",
+            "Page 1 of 50",
+        ],
+        [
+            "We love being scraped!",
+            "category/books/mystery_3/index.html",  # category sidebar
+            "Historical Fiction",
+            "html5shim",
+            "jquery-1.9.1.min.js",
+            "bootstrap-datetimepicker.js",
+            "$(document).ready",
+        ],
+    ),
+    "books_category_travel.html": (
+        [
+            "<h1>Travel</h1>",
+            "<strong>11</strong> results.",
+            "Full Moon over Noah’s ...",
+            "£45.17",
+            "1,000 Places to See ...",
+        ],
+        [
+            "We love being scraped!",
+            "<strong>Travel</strong>",  # the sidebar's current category
+            "category/books/mystery_3/index.html",
+            "Sequential Art",
+        ],
+    ),
+    "quotes_home.html": (
+        [
+            "Quotes to Scrape",
+            "“The world as we have created it is a process of our thinking.",
+            '<small class="author" itemprop="author">Albert Einstein</small>',
+            'content="change,deep-thoughts,thinking,world"',
+            "A day without sunshine is like, you know, night.",
+            "Top Ten tags",
+        ],
+        [
+            'href="/page/2/"',  # pager, in a <nav>
+            "Quotes by:",
+            "GoodReads.com",
+            "Made with",
+        ],
+    ),
+    "quotes_author_einstein.html": (
+        [
+            '<h3 class="author-title">Albert Einstein</h3>',
+            '<span class="author-born-date">March 14, 1879</span>',
+            "in Ulm, Germany",
+            "the photoelectric effect",
+        ],
+        ["Quotes by:", "Zyte"],
+    ),
+    "quotes_tag_love.html": (
+        [
+            "Viewing tag:",
+            "It is better to be hated for what you are than to be loved",
+            "André Gide",
+            "Elie Wiesel",
+        ],
+        ['href="/tag/love/page/2/"', "Quotes by:"],
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(CAPTURED))
+def test_captured_pages_keep_content_and_lose_boilerplate(name: str) -> None:
+    kept, dropped = CAPTURED[name]
+    document = Document.from_path(FIXTURES / name)
+    cleaned = BoilerplateCleaner().clean(document)
+    text = cleaned.content.decode()
+    assert len(cleaned.content) < len(document.content)
+    for phrase in kept:
+        assert phrase in text, phrase
+    for phrase in dropped:
+        assert phrase not in text, phrase
+    for tag in ("<script", "<style", "<nav", "<header", "<footer", "<!--"):
+        assert tag not in text.lower()
+
+
+def test_captured_js_rendered_page_loses_its_data_script() -> None:
+    # quotes.toscrape.com/js/ builds its quotes from `var data = [...]` in an inline script,
+    # which isn't a data source the structured stage reads, so nothing of the quotes is
+    # left (#152).
+    document = Document.from_path(FIXTURES / "quotes_js.html")
+    assert "The world as we have created it" in document.content.decode()
+    text = BoilerplateCleaner().clean(document).content.decode()
+    assert "Quotes to Scrape" in text
+    assert "The world as we have created it" not in text
+    assert "<script" not in text
+    assert "Quotes by:" not in text
+
+
+def test_synthetic_test_site_keeps_main_and_drops_its_chrome() -> None:
+    pages = render(generate(42))
+    families = {page.family: page for page in reversed(pages)}  # the first of each family
+    families["prose (JSON-LD)"] = next(p for p in pages if "application/ld+json" in p.html)
+    assert len(families) == 6
+    for family, page in families.items():
+        document = Document.from_bytes(page.html.encode(), content_type="text/html")
+        text = BoilerplateCleaner().clean(document).content.decode()
+        main = re.search(r"<main>.*</main>", page.html, re.DOTALL)
+        assert main, family
+        assert main.group(0) in text, family
+        for phrase in (
+            "We use cookies",
+            "cookie-consent",
+            'href="/models.html"',
+            "Testsite Motors",
+        ):
+            assert phrase not in text, (family, phrase)
+        assert "__analytics" not in text, family
+        assert ("application/ld+json" in text) == ("application/ld+json" in page.html), family
+
+
 def test_drops_scripts_styles_and_non_content_embeds() -> None:
     body = (
         "<p>kept</p><script>var a = '<p>no</p>';</script><style>p{color:red}</style>"
@@ -222,6 +350,32 @@ def test_drops_page_level_header_and_footer_but_keeps_sectioned_ones() -> None:
 @pytest.mark.parametrize("role", ["navigation", "banner", "contentinfo", " Navigation "])
 def test_drops_landmark_roles(role: str) -> None:
     assert clean(f'<div role="{role}"><a>x</a></div><p>kept</p>') == "<p>kept</p>"
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    ['class="nav nav-list"', 'class="navbar navbar-default"', 'class=" x NAV "', "class=Navbar"],
+)
+def test_drops_navigation_marked_by_class(attrs: str) -> None:
+    assert clean(f"<ul {attrs}><li><a>Travel</a></li></ul><p>kept</p>") == "<p>kept</p>"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '<ul class="nav-tabs"><li>Specs</li></ul>',
+        '<div class="navigation-guide"><p>How to navigate</p></div>',
+        '<div class="sat-nav"><p>Sat nav: yes</p></div>',
+        '<div data-class="nav"><p>not a class</p></div>',
+    ],
+)
+def test_keeps_classes_that_only_contain_nav(body: str) -> None:
+    assert clean(body) == body
+
+
+def test_nav_class_on_a_protected_tag_is_kept() -> None:
+    body = '<main class="nav"><p>kept</p></main>'
+    assert clean(body) == body
 
 
 @pytest.mark.parametrize(
@@ -401,10 +555,15 @@ def test_malformed_utf16_passes_through_without_raising(content: bytes) -> None:
 
 
 def test_configuration_widens_or_narrows_what_is_dropped() -> None:
-    body = '<nav>menu</nav><form>search</form><div class="cookie-banner">c</div><p>kept</p>'
-    wider = BoilerplateCleaner(drop_tags=frozenset({"nav", "form"}))
+    body = (
+        '<nav>menu</nav><form>search</form><div class="cookie-banner">c</div>'
+        '<ul class="nav">m</ul><div class="sidebar">s</div><p>kept</p>'
+    )
+    wider = BoilerplateCleaner(
+        drop_tags=frozenset({"nav", "form"}), drop_classes=frozenset({"nav", "sidebar"})
+    )
     assert clean(body, wider) == "<p>kept</p>"
-    narrower = BoilerplateCleaner(drop_tags=frozenset(), pattern=None)
+    narrower = BoilerplateCleaner(drop_tags=frozenset(), drop_classes=frozenset(), pattern=None)
     assert clean(body, narrower) == body
 
 
