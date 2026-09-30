@@ -29,3 +29,18 @@ async def test_the_first_failure_cancels_the_rest_and_keeps_its_type() -> None:
         await gather([fail(), slow()])
     await asyncio.sleep(0.3)
     assert finished == []
+
+
+async def test_the_root_cause_wins_over_an_error_raised_while_cancelling() -> None:
+    async def bad_cleanup() -> None:
+        try:
+            await asyncio.sleep(1)
+        finally:
+            raise RuntimeError("cleanup error")
+
+    async def fail() -> None:
+        await asyncio.sleep(0.01)
+        raise ValueError("original")
+
+    with pytest.raises(ValueError, match="original"):
+        await gather([bad_cleanup(), fail()])

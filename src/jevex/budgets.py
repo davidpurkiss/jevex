@@ -245,12 +245,14 @@ class DocumentBudget:
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
     _pending: int = field(default=0, repr=False)
     """Reserved slots still waiting on the run ledger's checks."""
-    _settled: asyncio.Condition | None = field(default=None, repr=False)
+    _settled: asyncio.Event | None = field(default=None, repr=False)
+    """Set (and replaced) whenever a pending reservation settles; waiters re-check."""
 
-    def _settled_condition(self) -> asyncio.Condition:
-        if self._settled is None:
-            self._settled = asyncio.Condition()
-        return self._settled
+    def _notify_settled(self) -> None:
+        # Synchronous, so it's safe in a ``finally`` even while being cancelled.
+        if self._settled is not None:
+            self._settled.set()
+            self._settled = None
 
     def record_hit(self, scope: Scope, limit: str, message: str) -> None:
         """Report a budget hit in ``meta.budget_events`` (once per scope and limit; a
@@ -292,23 +294,25 @@ class DocumentBudget:
         """
         if self.llm_stopped:
             return False
-        if self._pending and self._calls_full():
-            settled = self._settled_condition()
-            async with settled:
-                await settled.wait_for(lambda: not (self._pending and self._calls_full()))
+        while self._pending and self._calls_full():
+            if self._settled is None:
+                self._settled = asyncio.Event()
+            await self._settled.wait()
         if self.llm_stopped or self._document_refusal():
             return False
         self.llm_calls += 1
         self._pending += 1
+        passed = False
         try:
             refusal = await self.ledger.refuse_llm()
+            passed = refusal is None
         finally:
+            # Any exit but "passed" (a refusal, a store error, cancellation) gives the
+            # slot back, and waiters are always woken.
             self._pending -= 1
-        if refusal is not None:
-            self.llm_calls -= 1  # give the slot back
-        if self._settled is not None:
-            async with self._settled:
-                self._settled.notify_all()
+            if not passed:
+                self.llm_calls -= 1
+            self._notify_settled()
         if refusal is None:
             return True
         if refusal.stops:

@@ -22,7 +22,7 @@ from jevex.budgets import period_start
 from jevex.jev import JevBackendError, Noul
 from jevex.llm import LLMResponse, LLMUsage, reset_process_llm_cost
 from jevex.pipeline import Context, SchemaRun, for_each_schema
-from jevex.store import SpendEntry, SQLiteStore
+from jevex.store import SpendEntry, SQLiteStore, StoreError
 from jevex.testing import FakeJev, FakeLLM
 
 
@@ -111,6 +111,48 @@ async def test_calls_waiting_on_the_ledger_dont_falsely_stop_llm_use(
     assert fake.calls == 0
     assert not budget.llm_stopped
     assert [e.limit for e in budget.events] == ["llm_rpm"]
+
+
+class SlowLedger(RunLedger):
+    """A ledger whose check takes time (or fails), to interrupt calls mid-reservation."""
+
+    def __init__(self, *, delay: float = 0.1, error: Exception | None = None) -> None:
+        super().__init__(RunBudget(llm_rpm=100), SQLiteStore(":memory:"))
+        self.delay = delay
+        self.error = error
+
+    async def refuse_llm(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        await asyncio.sleep(self.delay)
+        if self.error is not None:
+            error, self.error = self.error, None  # fail once
+            raise error
+
+
+async def test_a_call_cancelled_during_the_ledger_check_frees_its_slot_and_wakes_waiters() -> None:
+    budget = DocumentBudget(Budgets(per_document=DocBudget(max_llm_calls=1)), SlowLedger())
+    fake = ScriptedLLM()
+    first = asyncio.create_task(asyncio.wait_for(budget.call_llm(fake, "x", Title), 0.02))
+    await asyncio.sleep(0)  # the first call now holds the only slot, pending
+    second = asyncio.create_task(budget.call_llm(fake, "x", Title))
+    with pytest.raises(TimeoutError):
+        await first
+    assert await asyncio.wait_for(second, 1.0) is not None  # woken, took the freed slot
+    assert fake.calls == 1
+    assert budget.llm_calls == 1
+    assert budget.events == []
+
+
+async def test_a_ledger_error_gives_the_slot_back() -> None:
+    budget = DocumentBudget(
+        Budgets(per_document=DocBudget(max_llm_calls=1)),
+        SlowLedger(delay=0.0, error=StoreError("disk full")),
+    )
+    fake = ScriptedLLM()
+    with pytest.raises(StoreError):
+        await budget.call_llm(fake, "x", Title)
+    assert budget.llm_calls == 0
+    assert await budget.call_llm(fake, "x", Title) is not None
+    assert budget.events == []
 
 
 async def test_a_call_cap_hit_under_a_live_ledger_is_still_reported(store: SQLiteStore) -> None:

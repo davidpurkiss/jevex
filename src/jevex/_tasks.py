@@ -16,18 +16,15 @@ async def gather[T](aws: Iterable[Awaitable[T]]) -> list[T]:
     returns while its sibling branches keep running: their requests finish after the
     document's result was built, and they write into a context nobody reads. Here every
     branch has settled by the time the call returns or raises. The original exception is
-    raised, not an ``ExceptionGroup``; if several branches fail together, the first one
-    in branch order wins.
+    raised, not an ``ExceptionGroup``; if several branches fail, the first to fail wins.
     """
     tasks: list[asyncio.Task[T]] = []
     try:
         async with asyncio.TaskGroup() as group:
             tasks = [group.create_task(_await(aw)) for aw in aws]
     except BaseExceptionGroup as grouped:
-        for task in tasks:
-            error = task.exception() if task.done() and not task.cancelled() else None
-            if error is not None:
-                raise error from None
+        # TaskGroup collects errors as tasks finish, so the first is the first failure in
+        # time: the root cause, not an error a sibling raised while being cancelled.
         raise grouped.exceptions[0] from None
     return [task.result() for task in tasks]
 
