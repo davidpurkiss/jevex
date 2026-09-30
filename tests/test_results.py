@@ -308,10 +308,63 @@ def test_discriminated_unions_keep_their_real_members() -> None:
     assert record.tagged.engine == Petrol(kind="petrol", cc=1498)
 
 
-def test_a_model_nested_in_itself_keeps_its_real_type() -> None:
-    record = partial_model(Node).model_validate({"children": [{"name": "leaf"}]})
-    assert record.name is None
-    assert type(record.children[0]) is Node
+def test_a_model_nested_in_itself_is_partial_all_the_way_down() -> None:
+    partial = partial_model(Node)
+    record = partial.model_validate({"children": [{"children": [{"name": "leaf"}]}]})
+    [child] = record.children
+    assert type(child) is partial
+    assert record.model_dump() == {
+        "name": None,
+        "children": [{"name": None, "children": [{"name": "leaf", "children": None}]}],
+    }
+
+
+def test_a_bad_value_deep_in_a_recursive_record_is_blamed_on_its_field() -> None:
+    spec = SchemaSpec.from_model(Node)
+    bad = {"children": [{"children": [{"name": 5}]}]}
+    item = build_extracted(spec, "doc", {"name": meta("root"), "children": meta(bad["children"])})
+    assert item.meta["children"].error == "0.children.0.name: Input should be a valid string"
+    assert item.record.model_dump() == {"name": "root", "children": None}
+
+
+class Maker(BaseModel):
+    name: str
+    lines: list["Line"] = Field(description="Lines")
+
+
+class Line(BaseModel):
+    name: str
+    maker: Maker | None = Field(default=None, description="Maker")
+
+
+class Brand(BaseModel):
+    name: str
+    ranges: list["Range"] = Field(description="Ranges")
+
+
+class Range(BaseModel):
+    name: str
+    brand: Brand | None = Field(default=None, description="Brand")
+
+
+Maker.model_rebuild()
+Brand.model_rebuild()
+
+
+def test_models_nested_in_each_other_are_partial_whichever_is_asked_for_first() -> None:
+    maker, line = partial_model(Maker), partial_model(Line)  # the outer one first
+    record = maker.model_validate({"lines": [{"maker": {}}]})
+    [kid] = record.lines
+    assert type(kid) is line
+    assert type(kid.maker) is maker
+    assert (kid.name, kid.maker.name) == (None, None)
+
+    range_, brand = partial_model(Range), partial_model(Brand)  # the inner one first
+    record = brand.model_validate({"ranges": [{"brand": {}}]})
+    [kid] = record.ranges
+    assert type(kid) is range_
+    assert type(kid.brand) is brand
+    assert (kid.name, kid.brand.name) == (None, None)
 
 
 # --- building records ------------------------------------------------------------------

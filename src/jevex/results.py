@@ -21,6 +21,7 @@ from types import UnionType
 from typing import (
     TYPE_CHECKING,
     Any,
+    ForwardRef,
     Literal,
     Optional,
     Union,
@@ -36,6 +37,8 @@ from jevex.layout import Location
 from jevex.statements import Span
 
 if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
+
     from jevex.schema import SchemaSpec
 
 Method = Literal["structured", "jev", "generator", "llm", "vision"]
@@ -134,8 +137,6 @@ class FieldMetas(Mapping[str, FieldMeta]):
 
 
 _PARTIALS: dict[type[BaseModel], type[BaseModel]] = {}
-_BUILDING: set[type[BaseModel]] = set()
-"""Models whose partial is being built: a model nested in itself keeps its real type."""
 
 # What a user validator on the real model may raise besides ValidationError when it meets
 # an incomplete record (e.g. comparing a field with None).
@@ -148,7 +149,8 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
     Each field keeps its constraints, ``Annotated`` validators, alias and description;
     only the default and optionality change, and a nested model (``Variant``,
     ``list[Variant]``) becomes its partial too, so a child record missing a field fits
-    (except in a discriminated union, and in a model nested in itself).
+    (except in a discriminated union). That includes a model nested in itself, or models
+    nested in each other: their partials refer to each other, whichever is asked for first.
     Model-level behaviour (model and field validators, computed fields, serializers,
     ``extra="forbid"``) is left behind so a partial record can always be built. It's
     typed as ``type[M]`` for convenient attribute access, but it isn't a subclass.
@@ -156,50 +158,86 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
     """
     if model in _PARTIALS:
         return cast("type[M]", _PARTIALS[model])
-    _BUILDING.add(model)
-    try:
-        fields: dict[str, Any] = {}
-        for name, info in model.model_fields.items():
-            optional = copy(info)
-            optional.default = None
-            optional.default_factory = None
-            optional.validate_default = False  # a None default must never be validated
-            # A discriminated union's members keep their real type: pydantic needs each
-            # one's discriminator to stay a required Literal.
-            discriminated = info.discriminator is not None or any(
-                isinstance(m, Discriminator) for m in info.metadata
-            )
-            annotation = info.annotation if discriminated else _partial_annotation(info.annotation)
-            fields[name] = (Optional[annotation], optional)  # noqa: UP045 - built at runtime
-    finally:
-        _BUILDING.discard(model)
+    # Build the partials of every model reachable from this one together: each refers to
+    # the others by a forward reference, resolved once they all exist, so a cycle gets
+    # partials all the way round.
+    refs: dict[type[BaseModel], str] = {}
+    _collect_models(model, refs)
+    built = {m: _build_partial(m, refs) for m in refs}
+    namespace = {refs[m]: partial for m, partial in built.items()}
+    for partial in built.values():
+        partial.model_rebuild(_types_namespace=namespace)
+    _PARTIALS.update(built)
+    return cast("type[M]", built[model])
+
+
+def _collect_models(model: type[BaseModel], refs: dict[type[BaseModel], str]) -> None:
+    """Add ``model`` and every model its fields nest (that has no partial yet) to ``refs``,
+    each with a forward-reference name for its partial."""
+    if model in _PARTIALS or model in refs:
+        return
+    refs[model] = f"_jevex_partial_{len(refs)}"
+    for info in model.model_fields.values():
+        if not _discriminated(info):
+            for nested in _nested_models(info.annotation):
+                _collect_models(nested, refs)
+
+
+def _build_partial(model: type[BaseModel], refs: Mapping[type[BaseModel], str]) -> type[BaseModel]:
+    fields: dict[str, Any] = {}
+    for name, info in model.model_fields.items():
+        optional = copy(info)
+        optional.default = None
+        optional.default_factory = None
+        optional.validate_default = False  # a None default must never be validated
+        # A discriminated union's members keep their real type: pydantic needs each
+        # one's discriminator to stay a required Literal.
+        annotation = (
+            info.annotation if _discriminated(info) else _partial_annotation(info.annotation, refs)
+        )
+        fields[name] = (Optional[annotation], optional)  # noqa: UP045 - built at runtime
     # Keep the model's value-shaping config (strict, str_strip_whitespace, use_enum_values,
     # ...) so records hold what the real model would; drop extra="forbid", which is about
     # the whole model, and allow population by field name (stages use field names).
     config = cast("ConfigDict", {k: v for k, v in model.model_config.items() if k != "extra"})
     config["populate_by_name"] = True
     # create_model's overloads don't accept a dynamic **fields mapping alongside __config__.
-    partial = create_model(  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
+    return create_model(  # pyright: ignore[reportCallIssue, reportUnknownVariableType]
         f"Partial{model.__name__}",
         __config__=config,
         __module__=model.__module__,
         **fields,
     )
-    _PARTIALS[model] = partial
-    return cast("type[M]", partial)
 
 
-def _partial_annotation(annotation: Any) -> Any:
-    """``annotation`` with every nested model (in a list or a union too) made partial."""
+def _discriminated(info: FieldInfo) -> bool:
+    return info.discriminator is not None or any(
+        isinstance(m, Discriminator) for m in info.metadata
+    )
+
+
+def _nested_models(annotation: Any) -> Iterator[type[BaseModel]]:
+    """The models in ``annotation``: itself, or in a list or a union."""
     model: object = annotation
     if isinstance(model, type) and issubclass(model, BaseModel):
-        return model if model in _BUILDING else partial_model(model)
+        yield model
+    elif get_origin(annotation) in (list, Union, UnionType):
+        for arg in get_args(annotation):
+            yield from _nested_models(arg)
+
+
+def _partial_annotation(annotation: Any, refs: Mapping[type[BaseModel], str]) -> Any:
+    """``annotation`` with every nested model (in a list or a union too) made partial: the
+    cached partial, or a forward reference to one being built."""
+    model: object = annotation
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        return ForwardRef(refs[model]) if model in refs else _PARTIALS[model]
     origin = get_origin(annotation)
     if origin is list:
         (item,) = get_args(annotation) or (Any,)
-        return list[_partial_annotation(item)]
+        return list[_partial_annotation(item, refs)]
     if origin in (Union, UnionType):
-        return Union[tuple(_partial_annotation(a) for a in get_args(annotation))]  # noqa: UP007
+        return Union[tuple(_partial_annotation(a, refs) for a in get_args(annotation))]  # noqa: UP007
     return annotation
 
 
