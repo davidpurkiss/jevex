@@ -11,7 +11,7 @@ from jevex import (
 from jevex.generators import default_registry
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
-from jevex.tables import header_prefix, table_statements
+from jevex.tables import blank_rows, header_prefix, table_statements
 from jevex.testsite import VehicleSpec, generate, render
 
 
@@ -291,6 +291,68 @@ def test_a_one_trim_tables_repeated_header_row_stays_a_header() -> None:
         "<tr><th></th><th>SE</th></tr><tr><th>Torque</th><td>250</td></tr>"
     )
     assert texts(t) == ["Power · SE: 150", "Torque · SE: 250"]
+
+
+def test_a_label_with_blank_values_is_a_row_without_data_not_a_band() -> None:
+    t = html_table(
+        "<tr><th></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th>Towing</th><td></td><td>&nbsp;</td></tr>"
+        "<tr><th>Torque</th><td>250</td><td>320</td></tr>"
+    )
+    assert texts(t) == ["Torque · SE: 250", "Torque · GT: 320"]
+    assert blank_rows(t) == {1}
+    # Under a row header spanning down, the blank row isn't a header row either.
+    spanned = html_table(
+        "<tr><th colspan=2></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th rowspan=2>Performance</th><th>Power</th><td>150</td><td>200</td></tr>"
+        "<tr><th>Towing</th><td></td><td></td></tr>"
+        "<tr><th>Economy</th></tr>"
+        "<tr><th></th><th>MPG</th><td>50</td><td>45</td></tr>"
+    )
+    assert texts(spanned) == [
+        "Performance · Power · SE: 150",
+        "Performance · Power · GT: 200",
+        "Economy › MPG · SE: 50",
+        "Economy › MPG · GT: 45",
+    ]
+
+
+def test_a_blank_row_keeps_a_row_header_spanning_into_the_rows_below() -> None:
+    t = html_table(
+        "<thead><tr><th></th><th>SE</th><th>GT</th></tr></thead>"
+        "<tr><th rowspan=2>Towing (kg)</th><td></td><td></td></tr>"
+        "<tr><td>750</td><td>1000</td></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td></tr>"
+    )
+    assert texts(t) == [
+        "Towing (kg) · SE: 750",
+        "Towing (kg) · GT: 1000",
+        "Power · SE: 150",
+        "Power · GT: 200",
+    ]
+
+
+def test_empty_corners_and_spacer_columns_do_not_make_blank_rows() -> None:
+    corner = html_table(
+        "<tr><td></td><th>SE</th><th>GT</th><td class=gap></td></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td><td class=gap></td></tr>"
+    )
+    assert texts(corner) == ["Power · SE: 150", "Power · GT: 200"]
+    assert blank_rows(corner) == set()
+    # An empty cell in a column that never holds data leaves a band a band.
+    band = table(
+        cell(0, 1, "SE", header=True),
+        cell(1, 0, "Performance", header=True),
+        cell(1, 2, ""),
+        cell(2, 0, "Power", header=True),
+        cell(2, 1, "150"),
+    )
+    assert texts(band) == ["Performance › Power · SE: 150"]
+    assert blank_rows(band) == set()
+
+
+def test_a_table_of_empty_cells_gives_no_statements() -> None:
+    assert table_statements(table(cell(0, 0, "", header=True), cell(1, 0, " "))) == []
 
 
 def test_header_prefix_is_what_a_cells_text_starts_with() -> None:

@@ -337,6 +337,7 @@ def test_tables_give_cells_on_a_grid_with_headers_marked() -> None:
         "1.5 TSI SE | 2.0 TDI SE\n0-62 mph (s) | 9.1 | 8.5\nTop speed (mph) | 130 | 137"
     )
     assert table.cells == [
+        TableCell(row=0, col=0, text="", header=True),  # empty cells keep their place
         TableCell(row=0, col=1, text="1.5 TSI SE", header=True),
         TableCell(row=0, col=2, text="2.0 TDI SE", header=True),
         TableCell(row=1, col=0, text="0-62 mph (s)", header=True),
@@ -372,7 +373,7 @@ def test_row_and_column_spans_shift_later_cells() -> None:
 
 def headers(markup: str) -> dict[tuple[int, int], bool]:
     (table,) = parse_html(f"<table>{markup}</table>").children
-    return {(c.row, c.col): c.header for c in table.cells}
+    return {(c.row, c.col): c.header for c in table.cells if c.text}
 
 
 def test_bold_td_labels_in_the_header_row_and_first_column_are_headers() -> None:

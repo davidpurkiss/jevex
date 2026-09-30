@@ -419,9 +419,46 @@ def test_table_cells_keep_spans_and_mark_every_kind_of_header() -> None:
         TableCell(row=1, col=0, text="Performance", header=True, col_span=3),
         TableCell(row=2, col=0, text="0-62 mph (s)", header=True),
         TableCell(row=2, col=1, text="8.5", row_span=2),
+        TableCell(row=2, col=2, text=""),  # empty cells keep their place
         TableCell(row=3, col=0, text="Top speed", header=True),
     ]
     assert table.text == "Trim | SE\nPerformance\n0-62 mph (s) | 8.5\nTop speed"
+
+
+def test_empty_table_cells_keep_their_place_but_not_under_a_span() -> None:
+    doc = new_doc()
+    doc.add_table(
+        data=TableData(
+            num_rows=3,
+            num_cols=3,
+            table_cells=[
+                cell("", 0, 0),
+                cell("SE", 0, 1, column_header=True),
+                cell("GT", 0, 2, column_header=True),
+                cell("", 1, 0),  # listed before the filled cell at its position
+                cell("Towing", 1, 0, row_header=True),
+                cell("", 1, 1),
+                cell("", 1, 2),
+                cell("Power", 2, 0, row_header=True),
+                cell("150 PS", 2, 1, cols=2),
+                cell("", 2, 2),  # a slot of the spanning cell
+            ],
+        ),
+        prov=prov(1),
+    )
+    (table,) = from_docling(doc).children
+    assert table.cells == [
+        TableCell(row=0, col=0, text=""),
+        TableCell(row=0, col=1, text="SE", header=True),
+        TableCell(row=0, col=2, text="GT", header=True),
+        TableCell(row=1, col=0, text="Towing", header=True),
+        TableCell(row=1, col=1, text=""),
+        TableCell(row=1, col=2, text=""),
+        TableCell(row=2, col=0, text="Power", header=True),
+        TableCell(row=2, col=1, text="150 PS", col_span=2),
+    ]
+    assert table.text == "SE | GT\nTowing\nPower | 150 PS"
+    assert [s.text for s in table_statements(table)] == ["Power · SE / GT: 150 PS"]
 
 
 def test_a_table_without_text_leaves_only_its_caption() -> None:

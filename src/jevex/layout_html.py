@@ -704,27 +704,28 @@ class _Segmenter:
                 for k in range(c, c + col_span):
                     busy[k] = r + row_span
                 text = self.flat_text(cell)
-                if text:
-                    if cell.tag == "td" and not in_head and _bold_only(cell):
-                        bold.add((r, c))
-                    cells.append(
-                        TableCell(
-                            row=r,
-                            col=c,
-                            text=text,
-                            header=in_head or cell.tag == "th",
-                            row_span=row_span,
-                            col_span=col_span,
-                        )
+                if text and cell.tag == "td" and not in_head and _bold_only(cell):
+                    bold.add((r, c))
+                # Empty cells stay: they show that a row has data columns, left blank.
+                cells.append(
+                    TableCell(
+                        row=r,
+                        col=c,
+                        text=text,
+                        header=in_head or cell.tag == "th",
+                        row_span=row_span,
+                        col_span=col_span,
                     )
+                )
                 c += col_span
-        if not cells:
+        if not any(cell.text for cell in cells):
             return captions
         if bold:
             cells = _bold_headers(cells, bold)
         by_row: dict[int, list[str]] = {}
         for cell in cells:
-            by_row.setdefault(cell.row, []).append(cell.text)
+            if cell.text:
+                by_row.setdefault(cell.row, []).append(cell.text)
         text = "\n".join(" | ".join(texts) for texts in by_row.values())
         return [_Block("table", self.path(node), text, children=captions, cells=cells)]
 
@@ -798,8 +799,9 @@ def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[Ta
     def labelled(c: TableCell) -> bool:
         return c.header or (c.row, c.col) in bold
 
+    filled = [c for c in cells if c.text]  # an empty corner or value decides nothing
     rows: dict[int, list[TableCell]] = {}
-    for c in cells:
+    for c in filled:
         rows.setdefault(c.row, []).append(c)
     header_rows: set[int] = set()
     for r in sorted(rows):
@@ -808,17 +810,17 @@ def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[Ta
         header_rows.add(r)
     else:
         header_rows = set()
-    width = max(c.col + c.col_span for c in cells)
+    width = max(c.col + c.col_span for c in filled)
     first = rows[min(rows)]
     if (
         width == 2
         and any(c.col == 0 for c in first)
-        and all(labelled(c) for c in cells if c.col == 0)
+        and all(labelled(c) for c in filled if c.col == 0)
     ):
         # Labels and values: a bold first value ("Engine | 1.5 TSI") isn't a column header.
         # A first row with an empty corner (" | SE") still is one.
         header_rows = set()
-    first_column = [c for c in cells if c.col == 0 and c.row not in header_rows]
+    first_column = [c for c in filled if c.col == 0 and c.row not in header_rows]
     column = bool(first_column) and all(labelled(c) for c in first_column)
     return [
         c.model_copy(update={"header": True})

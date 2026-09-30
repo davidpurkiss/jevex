@@ -87,7 +87,9 @@ class TableCell(BaseModel):
 
     A cell spanning several rows or columns appears once, at its top-left position.
     ``header`` marks header cells (``<th>``, any cell in ``<thead>``, or a ``<td>`` label
-    set only in bold), whose text gives the other cells their meaning.
+    set only in bold), whose text gives the other cells their meaning. Empty cells are
+    kept, with ``text=""``: a label followed by blank data cells ("Towing | | ") is a row
+    whose values are missing, not a band over the rows below.
     """
 
     model_config = ConfigDict(frozen=True)
