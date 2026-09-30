@@ -567,3 +567,48 @@ async def test_a_capped_request_cancels_the_other_blobs_before_extract_returns()
     seen = len(finished)
     await asyncio.sleep(0.3)
     assert len(finished) == seen  # nothing finished after the result was built
+
+
+async def test_fields_sharing_a_name_dont_share_value_answers() -> None:
+    import enum
+
+    from jevex import Questions
+
+    class Fuel(enum.Enum):
+        PETROL = "petrol"
+        EV = "ev"
+
+    class EnumCar(BaseModel):
+        """A car."""
+
+        fuel: Fuel = Field(description="Fuel type")
+
+    class LiteralCar(BaseModel):
+        """A car."""
+
+        fuel: Literal["petrol", "ev"] = Field(description="Fuel type")
+
+    class ListCar(BaseModel):
+        """A car."""
+
+        fuel: list[Literal["petrol", "ev"]] = Field(
+            default_factory=list,
+            description="Fuel type",
+            questions=Questions(member="Is {value} a fuel it can run on?"),
+        )
+
+    data = {"fuel": "Fully electric"}
+    fake = (
+        FakeJev()
+        .choice('key path "fuel"', "fuel", confidence=0.9)
+        .choice(re.compile("(?i)what is the fuel type"), "ev", state="Fully electric")
+        .noul("Is ev a fuel it can run on?", p=0.9)
+    )
+    mapper = KeyPathMapper()
+    specs = [SchemaSpec.from_model(m) for m in (EnumCar, LiteralCar, ListCar)]
+    result = await mapper.extract(page(data), specs, fake.client())
+    assert result.fields["EnumCar"]["fuel"].value is Fuel.EV
+    assert result.fields["LiteralCar"]["fuel"].value == "ev"  # the string, not Fuel.EV
+    assert result.fields["ListCar"]["fuel"].value == ["ev"]  # asked its own member question
+    member_asks = [c for c in fake.calls if any(k.startswith("member") for k in c.questions)]
+    assert len(member_asks) == 1

@@ -53,7 +53,7 @@ from jevex.structured import EmbeddedDataReader, StructuredBlob, schema_type
 if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.interfaces import StructuredExtractor
-    from jevex.jev import JevClient, Question
+    from jevex.jev import JevClient, Question, ScoreAnswer
     from jevex.pipeline import Context
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.store import Store
@@ -67,6 +67,9 @@ MAX_PATHS = 300
 MAX_FALLBACK_VALUES = 3
 """Distinct values of a single-value enum/bool field asked of Jev per document when none
 reads directly; the first Jev can read wins."""
+
+MAX_LIST_FALLBACK_VALUES = 20
+"""Distinct values of a list enum field asked of Jev per document (one request each)."""
 
 MAX_BLOBS = 20
 """Blobs mapped per document, in reading order (JSON-LD first); a miss costs Jev requests
@@ -213,8 +216,8 @@ class KeyPathMapper:
         self.memory_size = memory_size
         # (fingerprint, schema) → path → field (None: no field). Used without a store.
         self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
-        # (field, question, options, many, raw value) → Jev's reading of an enum/bool value.
-        self._values: OrderedDict[tuple[str, str, str, bool, str], tuple[Any, float] | None] = (
+        # The exact state and questions sent → Jev's answers, for enum/bool value fallbacks.
+        self._values: OrderedDict[str, dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]] = (
             OrderedDict()
         )
 
@@ -462,7 +465,7 @@ class KeyPathMapper:
                 errors[i] = f"{leaf.path}: {exc}"
         asked: dict[str, tuple[Any, float] | None] = {}
         if errors and spec.kind in ("enum", "bool") and (spec.many or not direct):
-            limit = MAX_FALLBACK_VALUES if not spec.many else len(leaves)
+            limit = MAX_FALLBACK_VALUES if not spec.many else MAX_LIST_FALLBACK_VALUES
             raws = list(dict.fromkeys(_text(leaves[i].value) for i in errors))[:limit]
             by_raw = {_text(leaves[i].value): leaves[i] for i in reversed(list(errors))}
             results = await gather(self._ask_value_cached(spec, by_raw[r], jev) for r in raws)
@@ -507,40 +510,45 @@ class KeyPathMapper:
     async def _ask_value_cached(
         self, spec: FieldSpec, leaf: Leaf, jev: JevClient
     ) -> tuple[Any, float] | None:
-        """:meth:`_ask_value`, remembered per field question and raw value, so a value the
-        template repeats on every page is asked once for the mapper's lifetime."""
-        question = (
-            spec.enum_question().instructions
-            if spec.kind == "enum"
-            else spec.bool_question().instructions
-            if spec.kind == "bool"
-            else ""
-        )
-        key = (spec.name, str(question), repr(spec.options), spec.many, _text(leaf.value))
-        if key in self._values:
-            self._values.move_to_end(key)
-            return self._values[key]
-        result = await self._ask_value(spec, leaf, jev)
-        self._values[key] = result
-        while len(self._values) > self.memory_size * 4:
-            self._values.popitem(last=False)
-        return result
-
-    async def _ask_value(
-        self, spec: FieldSpec, leaf: Leaf, jev: JevClient
-    ) -> tuple[Any, float] | None:
         """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated".
+
+        Jev's raw answers are remembered, keyed by the exact state and questions sent, so
+        a value the template repeats on every page is asked once for the mapper's lifetime
+        and fields that merely share a name can't reuse each other's answers. The reading
+        is normalised to this field after the lookup.
 
         A list enum asks one Noul per option (as the selector does) and keeps those at
         p ≥ 0.5; its confidence is the lowest accepted p.
         """
         state = {"statement": f"{leaf.path}: {_text(leaf.value)}"}
+        questions: dict[str, Question]
+        options = [str(o) for o in spec.options]
         if spec.kind == "enum" and spec.many:
-            options = [str(o) for o in spec.options]
-            questions: dict[str, Question] = {
-                f"member{i}": spec.member_question(o) for i, o in enumerate(options)
-            }
+            questions = {f"member{i}": spec.member_question(o) for i, o in enumerate(options)}
+        elif spec.kind == "enum":
+            questions = {"enum": spec.enum_question()}
+        elif spec.kind == "bool":
+            questions = {"bool": spec.bool_question()}
+        else:
+            return None
+        key = json.dumps(
+            {
+                "state": state,
+                "questions": {k: q.model_dump(mode="json") for k, q in questions.items()},
+            },
+            sort_keys=True,
+            default=str,
+        )
+        if key in self._values:
+            self._values.move_to_end(key)
+            answers = self._values[key]
+        else:
             answers = await jev.ask(state, questions)
+            self._values[key] = answers
+            while len(self._values) > self.memory_size * 4:
+                self._values.popitem(last=False)
+
+        if spec.kind == "enum" and spec.many:
             accepted: list[tuple[str, float]] = []
             for i, option in enumerate(options):
                 answer = answers[f"member{i}"]
@@ -550,24 +558,19 @@ class KeyPathMapper:
                     accepted.append((option, answer.p))
             if not accepted:
                 return None
-            return (
-                [normalise(o, [], spec) for o, _ in accepted],
-                min(p for _, p in accepted),
-            )
+            return [normalise(o, [], spec) for o, _ in accepted], min(p for _, p in accepted)
         if spec.kind == "enum":
-            answer = (await jev.ask(state, {"enum": spec.enum_question()}))["enum"]
+            answer = answers["enum"]
             if not isinstance(answer, ChoiceAnswer):
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
             if answer.choice == NOT_STATED_OPTION:
                 return None
             return normalise(answer.choice, [], spec), answer.confidence
-        if spec.kind == "bool":
-            answer = (await jev.ask(state, {"bool": spec.bool_question()}))["bool"]
-            if not isinstance(answer, NoulAnswer):
-                raise UnexpectedAnswerError(f"expected a Noul answer, got {answer.type}")
-            value = answer.p >= 0.5
-            return value, answer.p if value else 1 - answer.p
-        return None
+        answer = answers["bool"]
+        if not isinstance(answer, NoulAnswer):
+            raise UnexpectedAnswerError(f"expected a Noul answer, got {answer.type}")
+        value = answer.p >= 0.5
+        return value, answer.p if value else 1 - answer.p
 
     def _value(self, spec: FieldSpec, raw: str | int | float | bool) -> Any:
         if spec.kind == "str":
