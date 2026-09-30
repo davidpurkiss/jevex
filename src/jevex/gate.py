@@ -53,7 +53,10 @@ class DocumentText:
 
 @runtime_checkable
 class TextReader(Protocol):
-    """Reads a document's text for the gate. Returns ``None`` for content it can't read."""
+    """Reads a document's text for the gate. Returns ``None`` for content it can't read.
+
+    The gate calls ``read`` in a worker thread, so it mustn't touch the event loop.
+    """
 
     def read(self, document: Document) -> DocumentText | None: ...
 

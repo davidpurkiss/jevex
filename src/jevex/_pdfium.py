@@ -1,8 +1,9 @@
 """pypdfium2 (``pdf`` extra), typed by what jevex uses of it.
 
 The document gate reads page text with it, the PDF layout parser cuts pages out with it and
-the image stage renders pictures and scanned pages with it. pdfium isn't thread-safe, so
-every use holds :data:`LOCK`.
+the image stage renders pictures and scanned pages with it. pdfium isn't thread-safe, even
+across documents, so every use holds :data:`LOCK`, which is Docling's own pdfium lock when
+Docling is installed.
 """
 
 from __future__ import annotations
@@ -17,8 +18,18 @@ if TYPE_CHECKING:
 
     from PIL.Image import Image as PILImage
 
-LOCK = threading.Lock()
-"""Held for every call into pdfium."""
+
+def _lock() -> threading.Lock:
+    if importlib.util.find_spec("docling") is None:
+        return threading.Lock()
+    # Docling converts in worker threads too; sharing its lock keeps us out of its way.
+    from docling.utils.locks import pypdfium2_lock
+
+    return pypdfium2_lock
+
+
+LOCK = _lock()
+"""Held for every call into pdfium. Not reentrant."""
 
 
 class TextPage(Protocol):

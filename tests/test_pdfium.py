@@ -38,3 +38,8 @@ def test_the_lock_is_released_after_a_failure() -> None:
     with pytest.raises(UnreadablePdfError):
         _pdfium.page_texts(b"not a pdf")
     assert not _pdfium.LOCK.locked()
+
+
+def test_the_lock_is_doclings_when_docling_is_installed() -> None:
+    locks = pytest.importorskip("docling.utils.locks")
+    assert _pdfium.LOCK is locks.pypdfium2_lock
