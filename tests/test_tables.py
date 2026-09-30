@@ -173,3 +173,62 @@ def test_the_test_sites_spec_tables_give_a_statement_per_trim_and_spec() -> None
         for trim, mine in by_trim.items():
             assert len(mine) == len(rows), (p.path, trim)  # every spec row, once per trim
         assert all(" · " in s.text and ": " in s.text for s in statements)
+
+
+def html_table(markup: str) -> Component:
+    page = f"<html><body><main><table>{markup}</table></main></body></html>".encode()
+    doc = BoilerplateCleaner().clean(Document.from_bytes(page, url="https://cars.test/"))
+    root = asyncio.run(HtmlLayoutParser().parse(doc))
+    [t] = [c for c in root.walk() if c.type == "table"]
+    return t
+
+
+def test_rowspan_row_headers_apply_to_every_row_they_cover() -> None:
+    t = html_table(
+        "<thead><tr><th colspan=2></th><th>SE</th><th>GT</th></tr></thead>"
+        "<tr><th rowspan=2>Performance</th><th>0-62 mph (s)</th><td>9.1</td><td>7.4</td></tr>"
+        "<tr><th>Top speed (mph)</th><td>130</td><td>155</td></tr>"
+    )
+    assert texts(t) == [
+        "Performance · 0-62 mph (s) · SE: 9.1",
+        "Performance · 0-62 mph (s) · GT: 7.4",
+        "Performance · Top speed (mph) · SE: 130",
+        "Performance · Top speed (mph) · GT: 155",
+    ]
+
+
+def test_a_band_above_the_header_row_is_a_group_not_the_headers() -> None:
+    t = html_table(
+        "<tr><th colspan=3>Technical data</th></tr>"
+        "<tr><th></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th>Power</th><td>150 PS</td><td>200 PS</td></tr>"
+    )
+    assert texts(t) == [
+        "Technical data › Power · SE: 150 PS",
+        "Technical data › Power · GT: 200 PS",
+    ]
+    assert [s.table.col_headers for s in table_statements(t) if s.table] == [["SE"], ["GT"]]
+
+
+def test_a_header_row_repeated_mid_table_replaces_the_column_headers() -> None:
+    t = html_table(
+        "<tr><th></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th>Power</th><td>150 PS</td><td>200 PS</td></tr>"
+        "<tr><th></th><th>SE L</th><th>R</th></tr>"
+        "<tr><th>Torque</th><td>250 Nm</td><td>320 Nm</td></tr>"
+    )
+    assert texts(t)[2:] == ["Torque · SE L: 250 Nm", "Torque · R: 320 Nm"]
+
+
+def test_a_data_cell_spanning_rows_takes_each_rows_header() -> None:
+    t = html_table(
+        "<tr><th></th><th>SE</th></tr>"
+        "<tr><th>Engine</th><td rowspan=2>1.5 TSI</td></tr>"
+        "<tr><th>Gearbox</th></tr>"
+    )
+    assert texts(t) == ["Engine · Gearbox · SE: 1.5 TSI"]
+
+
+def test_a_table_of_only_headers_keeps_its_content_as_rows() -> None:
+    t = html_table("<tr><th>Engine</th><th>1.5 TSI</th></tr><tr><th>Power</th><th>150 PS</th></tr>")
+    assert texts(t) == ["Engine | 1.5 TSI", "Power | 150 PS"]

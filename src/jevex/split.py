@@ -17,7 +17,8 @@ containers             none; their children are split instead
 =====================  ===========================================  ===============
 
 Each statement carries its component's ``heading_trail`` and ``location``. Ids are
-``<component id>.<n>``, so they're unique and stable for a given tree.
+``<component id>.<n>`` (table cells: ``<table id>.r<row>c<col>``), so they're unique
+and stable for a given tree.
 """
 
 from __future__ import annotations
