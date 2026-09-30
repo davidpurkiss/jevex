@@ -10,18 +10,21 @@ only goes on to process its spec pages. The per-page probabilities are kept on t
 :class:`~jevex.interfaces.GateDecision` for later stages to narrow to.
 
 The gate runs before layout, so it reads text through a :class:`TextReader`. The default
-reads HTML with the standard library. No PDF text reader ships yet (#100 adds one on
-Docling, the PDF layout parser), so a PDF is only gated when a reader is passed in;
-otherwise its schemas stay active, with a ``gate_skipped`` event.
+(:class:`DefaultTextReader`) reads HTML with the standard library, and a PDF's text layer
+page by page with pypdfium2 (``pdf`` extra). Without the extra, a PDF's schemas stay active,
+with a ``gate_skipped`` event. Pages without a text layer (scans) aren't asked, so layout
+keeps them.
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from jevex import _pdfium
 from jevex._tasks import gather
 from jevex.clean import html_text_of
 from jevex.interfaces import GateDecision
@@ -56,7 +59,7 @@ class TextReader(Protocol):
 
 
 class HtmlTextReader:
-    """The default :class:`TextReader`: the visible text of HTML documents.
+    """Reads the visible text of HTML documents.
 
     The ``<title>`` comes first, then the body text with one line per block element.
     Scripts, styles and other non-rendered elements are skipped. Other content types
@@ -67,6 +70,40 @@ class HtmlTextReader:
         if not document.is_html:
             return None
         return DocumentText(html_text(html_text_of(document.content)))
+
+
+class PdfTextReader:
+    """Reads a PDF's text layer with pypdfium2 (``pdf`` extra), one string per page.
+
+    This reads the text pdfium finds on each page, without Docling's layout models, so
+    gating a long brochure costs a fraction of laying it out. A page with no text layer
+    (a scan) reads as ``""``, so the gate doesn't ask about it. Other content types
+    return ``None``; a PDF pdfium can't open raises
+    :class:`~jevex.UnreadablePdfError`.
+    """
+
+    def read(self, document: Document) -> DocumentText | None:
+        if not document.is_pdf:
+            return None
+        pages = tuple(_page_text(text) for text in _pdfium.page_texts(document.content))
+        return DocumentText("\n\n".join(page for page in pages if page), pages=pages)
+
+
+class DefaultTextReader:
+    """The default :class:`TextReader`: :class:`HtmlTextReader` for HTML, and
+    :class:`PdfTextReader` for PDFs when the ``pdf`` extra is installed."""
+
+    def __init__(self) -> None:
+        self.readers: list[TextReader] = [HtmlTextReader()]
+        if _pdfium.installed():
+            self.readers.append(PdfTextReader())
+
+    def read(self, document: Document) -> DocumentText | None:
+        for reader in self.readers:
+            text = reader.read(document)
+            if text is not None:
+                return text
+        return None
 
 
 class NoulDocumentGate:
@@ -91,13 +128,14 @@ class NoulDocumentGate:
         if max_chars < 1:
             raise ValueError(f"max_chars must be positive, got {max_chars}")
         self.threshold = threshold
-        self.reader: TextReader = reader if reader is not None else HtmlTextReader()
+        self.reader: TextReader = reader if reader is not None else DefaultTextReader()
         self.max_chars = max_chars
 
     async def gate(
         self, document: Document, schemas: list[SchemaSpec], jev: JevClient
     ) -> dict[str, GateDecision]:
-        text = self.reader.read(document)
+        # Reading a long PDF takes a moment; don't hold up other documents meanwhile.
+        text = await asyncio.to_thread(self.reader.read, document)
         if text is None:
             return {}
         by_page = [s for s in schemas if s.config.gate_unit == "page" and text.pages is not None]
@@ -154,11 +192,13 @@ class DocumentGateStage:
         for run in runs:
             decision = decisions.get(run.name)
             if decision is None:
+                detail = f"no readable {ctx.document.content_type} text?"
+                if ctx.document.is_pdf and not _pdfium.installed():
+                    detail = "install jevex[pdf] to gate PDFs"
                 ctx.event(
                     self.name,
                     "gate_skipped",
-                    f"no gate decision for {run.name} (no readable {ctx.document.content_type} "
-                    "text?), so it stays active",
+                    f"no gate decision for {run.name} ({detail}), so it stays active",
                     schema=run.name,
                 )
                 continue
@@ -172,6 +212,15 @@ class DocumentGateStage:
                     schema=run.name,
                     p=decision.p,
                 )
+
+
+# --- PDF text ----------------------------------------------------------------------------
+
+
+def _page_text(text: str) -> str:
+    """A page's text with one line per line of text and runs of spaces collapsed."""
+    lines = (_SPACES.sub(" ", line).strip() for line in text.splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 # --- HTML text ---------------------------------------------------------------------------

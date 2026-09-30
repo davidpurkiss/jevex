@@ -1,10 +1,13 @@
+import io
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from jevex import (
     Context,
+    DefaultTextReader,
     Document,
     DocumentGateStage,
     DocumentText,
@@ -12,9 +15,12 @@ from jevex import (
     Field,
     HtmlTextReader,
     NoulDocumentGate,
+    PdfTextReader,
     SchemaConfig,
     SchemaSpec,
     TextReader,
+    UnreadablePdfError,
+    _pdfium,
 )
 from jevex.extractor import default_pipeline
 from jevex.gate import html_text
@@ -74,6 +80,45 @@ def html(body: str, head: str = "") -> Document:
 
 
 PDF = Document.from_bytes(b"%PDF-1.7 fake", content_type="application/pdf")
+SPEC_PDF = Path(__file__).parent / "fixtures" / "pdf" / "spec.pdf"
+SPEC_PAGE_1 = (
+    "Skoda Octavia Estate\n"
+    "The Octavia Estate combines a large boot with efficient engines. Prices start at "
+    "£27,500 on\nthe road.\n"
+    "Engines\n"
+    "Two petrol engines and one diesel are available.\n"
+    "1.5 TSI 150PS manual\n"
+    "1.5 TSI 150PS DSG\n"
+    "2.0 TDI 115PS manual\n"
+    "Performance\n"
+    "1.5 TSI SE 2.0 TDI SE L\n"
+    "0-62 mph (s) 8.5 10.4\n"
+    "Top speed (mph) 139 128\n"
+    "CO2 (g/km) 131 118\n"
+    "Figures are for the manufacturer's test cycle."
+)
+SPEC_PAGE_2 = (
+    "Dimensions\n"
+    "Exterior\n"
+    "Length is 4,698 mm and width is 1,829 mm.\n"
+    "Boot\n"
+    "The boot holds 640 litres with the seats up."
+)
+
+
+def spec_pdf() -> Document:
+    pytest.importorskip("pypdfium2")
+    return Document.from_path(SPEC_PDF)
+
+
+def pdf_with_a_blank_page() -> Document:
+    """The spec sheet with a page without a text layer (as a scan has) between its pages."""
+    pdfium = pytest.importorskip("pypdfium2")
+    pdf = pdfium.PdfDocument(SPEC_PDF.read_bytes())
+    pdf.new_page(595, 842, index=1)
+    out = io.BytesIO()
+    pdf.save(out)
+    return Document.from_bytes(out.getvalue())
 
 
 class PagesReader:
@@ -156,9 +201,19 @@ def test_rejects_bad_settings() -> None:
 # --- Unreadable documents --------------------------------------------------------------
 
 
-async def test_pdf_without_a_reader_gets_no_decision() -> None:
+async def test_pdf_gets_no_decision_without_the_pdf_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_pdfium, "installed", lambda: False)
     fake = FakeJev()
     assert await NoulDocumentGate().gate(PDF, specs(Car, Brochure), fake.client()) == {}
+    assert fake.calls == []
+
+
+async def test_other_content_types_get_no_decision() -> None:
+    fake = FakeJev()
+    image = Document.from_bytes(b"\x89PNG\r\n\x1a\n")
+    assert await NoulDocumentGate().gate(image, specs(Car), fake.client()) == {}
     assert fake.calls == []
 
 
@@ -251,15 +306,28 @@ async def test_stage_deactivates_ruled_out_schemas_and_records_decisions() -> No
 
 async def test_stage_keeps_schemas_the_gate_could_not_decide() -> None:
     fake = FakeJev()
-    ctx = context(PDF, fake, Car)
+    ctx = context(html('<img src="car.jpg">'), fake, Car)
     await DocumentGateStage().run(ctx)
 
     assert [run.name for run in ctx.active] == ["Car"]
     assert ctx.schemas["Car"].gate is None
     assert [(e.kind, e.data) for e in ctx.events] == [("gate_skipped", {"schema": "Car"})]
     assert ctx.events[0].message == (
-        "no gate decision for Car (no readable application/pdf text?), so it stays active"
+        "no gate decision for Car (no readable text/html text?), so it stays active"
     )
+
+
+async def test_stage_suggests_the_pdf_extra_when_a_pdf_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_pdfium, "installed", lambda: False)
+    ctx = context(PDF, FakeJev(), Car)
+    await DocumentGateStage().run(ctx)
+
+    assert [run.name for run in ctx.active] == ["Car"]
+    assert [e.message for e in ctx.events] == [
+        "no gate decision for Car (install jevex[pdf] to gate PDFs), so it stays active"
+    ]
 
 
 async def test_stage_only_gates_active_schemas() -> None:
@@ -285,7 +353,18 @@ async def test_stage_runs_a_custom_gate() -> None:
 
 def test_defaults_satisfy_the_protocols() -> None:
     assert isinstance(NoulDocumentGate(), DocumentGate)
-    assert isinstance(HtmlTextReader(), TextReader)
+    assert isinstance(NoulDocumentGate().reader, DefaultTextReader)
+    for reader in (DefaultTextReader(), HtmlTextReader(), PdfTextReader()):
+        assert isinstance(reader, TextReader)
+
+
+def test_default_reader_reads_pdfs_only_with_the_pdf_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("pypdfium2")
+    assert [type(r) for r in DefaultTextReader().readers] == [HtmlTextReader, PdfTextReader]
+    monkeypatch.setattr(_pdfium, "installed", lambda: False)
+    assert [type(r) for r in DefaultTextReader().readers] == [HtmlTextReader]
 
 
 # --- Extractor --------------------------------------------------------------------------
@@ -325,6 +404,57 @@ async def test_extractor_skips_later_stages_when_every_schema_is_gated_out() -> 
     assert result.meta.active_schemas == []
     assert result.meta.gates["Car"].passed is False
     assert result.meta.stopped
+
+
+# --- PDF text ---------------------------------------------------------------------------
+
+
+def test_pdf_reader_reads_one_string_per_page() -> None:
+    text = PdfTextReader().read(spec_pdf())
+    assert text == DocumentText(f"{SPEC_PAGE_1}\n\n{SPEC_PAGE_2}", pages=(SPEC_PAGE_1, SPEC_PAGE_2))
+
+
+def test_default_reader_reads_both_html_and_pdfs() -> None:
+    reader = DefaultTextReader()
+    assert reader.read(spec_pdf()) == PdfTextReader().read(spec_pdf())
+    assert reader.read(html("<p>Golf</p>")) == DocumentText("Golf")
+
+
+def test_pdf_reader_reads_a_page_without_a_text_layer_as_empty() -> None:
+    text = PdfTextReader().read(pdf_with_a_blank_page())
+    assert text == DocumentText(
+        f"{SPEC_PAGE_1}\n\n{SPEC_PAGE_2}", pages=(SPEC_PAGE_1, "", SPEC_PAGE_2)
+    )
+
+
+def test_pdf_reader_skips_other_documents() -> None:
+    assert PdfTextReader().read(html("<p>Golf</p>")) is None
+
+
+def test_pdf_reader_raises_on_a_pdf_it_cannot_open() -> None:
+    pytest.importorskip("pypdfium2")
+    with pytest.raises(UnreadablePdfError, match="pdfium couldn't open the PDF"):
+        PdfTextReader().read(PDF)
+
+
+async def test_default_gate_asks_about_each_pdf_page() -> None:
+    brochure_q = "Does this document describe a car brochure page?"
+    fake = (
+        FakeJev(strict=True)
+        .noul(CAR_Q, p=0.9, state=f"{SPEC_PAGE_1}\n\n{SPEC_PAGE_2}")
+        .noul(brochure_q, p=0.8, state=SPEC_PAGE_1)
+        .noul(brochure_q, p=0.2, state=SPEC_PAGE_2)
+    )
+    decisions = await NoulDocumentGate().gate(
+        pdf_with_a_blank_page(), specs(Car, Brochure), fake.client()
+    )
+
+    # The blank second page isn't asked, so it's missing from the page scores.
+    assert len(fake.calls) == 3
+    assert decisions == {
+        "Car": GateDecision(p=0.9, passed=True),
+        "Brochure": GateDecision(p=0.8, passed=True, pages={1: 0.8, 3: 0.2}, passed_pages=[1]),
+    }
 
 
 # --- HTML text --------------------------------------------------------------------------
