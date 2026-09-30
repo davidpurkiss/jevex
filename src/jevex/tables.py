@@ -10,6 +10,8 @@ A spec table's cell "9.1" means nothing alone; rendered as
   it covers, and a cell spanning columns names each ("SE / SE L").
 - **Row headers** are the header cells in its row (including ones spanning down from
   rows above, ``<th rowspan=2>Performance</th>``); a cell spanning rows takes each row's.
+  A row's headers joined are its label ("Kestrova" over "SE" → "Kestrova SE"), kept per
+  row a cell covers.
 - **Group headers** are body rows holding only header cells (a band like "Performance"
   across the table; a full-width header row counts as one even at the top). They
   prefix the rows below them until the next band. A header row repeated mid-table
@@ -72,7 +74,7 @@ def table_statements(table: Component) -> list[Statement]:
             row = sorted(rows[r], key=lambda c: c.col)
             if pairs and len(row) == 2:
                 label, value = _label(row[0].text), _clean(row[1].text)
-                ref = TableCellRef(row=r, col=1, row_headers=[label])
+                ref = TableCellRef(row=r, col=1, row_headers=[label], row_labels=[label])
                 out.append(_statement(table, f"r{r}c1", _render(None, [label], [], value), ref))
             else:
                 text = " | ".join(_clean(c.text) for c in row)
@@ -137,14 +139,17 @@ def table_statements(table: Component) -> list[Statement]:
         for c in row:
             if c.header:
                 continue
-            # A data cell spanning rows takes every covered row's headers.
-            row_headers = list(
-                dict.fromkeys(
+            # A data cell spanning rows takes every covered row's headers, and one label
+            # per covered row: its headers, joined ("Kestrova SE").
+            per_row = [
+                [
                     _label(h.text)
-                    for covered in range(c.row, c.row + c.row_span)
                     for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)
-                )
-            )
+                ]
+                for covered in range(c.row, c.row + c.row_span)
+            ]
+            row_headers = list(dict.fromkeys(h for headers in per_row for h in headers))
+            row_labels = list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
             # One label per column covered: its stacked headers, joined.
             labels = [
                 " ".join(col_headers[col])
@@ -161,6 +166,7 @@ def table_statements(table: Component) -> list[Statement]:
                         row=r,
                         col=c.col,
                         row_headers=row_headers,
+                        row_labels=row_labels,
                         col_headers=columns,
                         group=group,
                     ),
