@@ -466,6 +466,33 @@ def test_groups_other_than_lists_add_no_level() -> None:
     assert outline(from_docling(doc)) == [(0, "heading", "Engine"), (0, "paragraph", "1.5 TSI")]
 
 
+def test_a_heading_in_a_group_ranks_against_the_headings_around_it() -> None:
+    doc = new_doc()
+    doc.add_heading("Specs", level=1, prov=prov(1))
+    doc.add_text(DocItemLabel.TEXT, "Intro", prov=prov(1))
+    group = doc.add_group(name="key-values")
+    doc.add_heading("Engine", level=1, prov=prov(1), parent=group)
+    doc.add_text(DocItemLabel.TEXT, "1.5 TSI", prov=prov(1), parent=group)
+    doc.add_text(DocItemLabel.TEXT, "After the group", prov=prov(1))
+    doc.add_heading("Prices", level=2, prov=prov(1))
+    doc.add_text(DocItemLabel.TEXT, "£27,500", prov=prov(1))
+    root = from_docling(doc)
+    trails = {c.text: c.heading_trail for c in root.walk() if c.text}
+    assert trails == {
+        "Specs": [],
+        "Intro": ["Specs"],
+        "Engine": [],
+        "1.5 TSI": ["Engine"],
+        "After the group": ["Engine"],
+        "Prices": ["Engine"],
+        "£27,500": ["Engine", "Prices"],
+    }
+    assert [(c.type, c.text) for c in root.children] == [
+        ("section", ""),
+        ("section", ""),
+    ]
+
+
 def test_headings_inside_a_container_do_not_leak_out() -> None:
     doc = new_doc()
     doc.add_heading("Options", level=1, prov=prov(1))

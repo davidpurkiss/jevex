@@ -139,7 +139,7 @@ def from_docling(doc: DoclingDocument) -> Component:
     Component ids are ``c0``, ``c1``... in reading order, so they are stable for the same
     document.
     """
-    blocks = _Mapper(doc).children(doc.body)
+    blocks = _Mapper(doc).contents(doc.body)
     if len(blocks) == 1 and blocks[0].type == "section":
         # A document that starts with its own heading needs no extra level.
         blocks = blocks[0].children
@@ -174,9 +174,9 @@ class _Mapper:
     def children(
         self, node: NodeItem, *, attach: Sequence[RefItem] = (), in_list: bool = False
     ) -> list[_Block]:
-        """Blocks for the ``attach`` items and then the node's children, in order, grouped
-        under their headings. List items outside a list (``in_list`` false) are wrapped in
-        one."""
+        """Blocks for the ``attach`` items and then the node's children, in order. List
+        items outside a list (``in_list`` false) are wrapped in one. Headings aren't grouped
+        here: a node that adds no level leaves that to the container its blocks join."""
         own = {r.cref for r in attach}
         seen: set[str] = set()  # a caption can be both attached and a child
         blocks: list[_Block] = []
@@ -185,7 +185,14 @@ class _Mapper:
                 continue
             seen.add(ref.cref)
             blocks.extend(self.item(ref.resolve(self.doc)))
-        return _group(blocks if in_list else _wrap_loose_items(blocks))
+        return blocks if in_list else _wrap_loose_items(blocks)
+
+    def contents(
+        self, node: NodeItem, *, attach: Sequence[RefItem] = (), in_list: bool = False
+    ) -> list[_Block]:
+        """:meth:`children` of a container (the body, a list, a table, a picture), grouped
+        under their headings, so headings inside it rank only against each other."""
+        return _group(self.children(node, attach=attach, in_list=in_list))
 
     def item(self, item: NodeItem) -> list[_Block]:
         from docling_core.types.doc.common.content_layer import ContentLayer
@@ -204,7 +211,7 @@ class _Mapper:
             return []
         if isinstance(item, GroupItem):
             if item.label in (GroupLabel.LIST, GroupLabel.ORDERED_LIST):
-                items = self.children(item, in_list=True)
+                items = self.contents(item, in_list=True)
                 return [_container("list", items)] if items else []
             if item.label == GroupLabel.INLINE:
                 return self._inline(item)
@@ -212,7 +219,7 @@ class _Mapper:
         if isinstance(item, TableItem):
             return self._table(item)
         if isinstance(item, PictureItem):
-            children = self.children(item, attach=[*item.captions, *item.footnotes])
+            children = self.contents(item, attach=[*item.captions, *item.footnotes])
             return [self._located(_Block("image", children=children), item)]
         if not isinstance(item, TextItem):
             return self.children(item)  # key/value and form items: their text, if any
@@ -222,7 +229,7 @@ class _Mapper:
         if isinstance(item, ListItem):
             if item.marker and not _LIST_MARKER.fullmatch(item.marker.strip()):
                 text = _clean(f"{item.marker} {item.text}")
-            block = _Block("list_item", text, children=self.children(item))
+            block = _Block("list_item", text, children=self.contents(item))
             return [self._located(block, item)] if text or block.children else []
         if isinstance(item, TitleItem):
             block = _Block("heading", text, level=1)
@@ -271,7 +278,7 @@ class _Mapper:
                 row_span=max(1, c.end_row_offset_idx - c.start_row_offset_idx),
                 col_span=max(1, c.end_col_offset_idx - c.start_col_offset_idx),
             )
-        captions = self.children(item, attach=[*item.captions, *item.footnotes])
+        captions = self.contents(item, attach=[*item.captions, *item.footnotes])
         if not cells:
             return captions
         grid = [cells[p] for p in sorted(cells)]
