@@ -18,7 +18,7 @@ Stage order and default implementations (spec: *Pipeline architecture*):
  6    ImageProcessor         OCR                            #26
  7    ComponentGate          Noul per component × group     #14
  8    StatementSplitter      by component type              #15
- 9    EntityResolver         SingleEntity; MultiEntity      #21, #27
+ 9    EntityResolver         Single-, Multi-, ParentChild   #21, #27, #28
  10   StatementClassifier    Choice per statement           #16
  11   CandidateGenerator     built-ins + learned            #17
  12   CandidateSelector      Choice over candidates         #18

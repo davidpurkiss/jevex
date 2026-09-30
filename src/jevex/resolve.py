@@ -10,14 +10,14 @@ Jev says is about one trim.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 
 from jevex._tasks import gather
 from jevex.entities import EntityScope
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
-from jevex.pipeline import for_each_schema
-from jevex.schema import ALL_OPTION
+from jevex.pipeline import SchemaRun, for_each_schema
+from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
 from jevex.select import statement_state
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import EntityResolver, ParsedDocument
     from jevex.jev import JevClient, JSONContent
     from jevex.layout import Component
-    from jevex.pipeline import Context, SchemaRun
+    from jevex.pipeline import Context
     from jevex.schema import SchemaSpec
     from jevex.statements import Statement
 
@@ -80,6 +80,8 @@ class _Group:
     section: list[str]
     members: list[tuple[str, frozenset[str]]]
     """(label, ids of the statements it claims) per proposed entity."""
+    axis: int = 0
+    """For a table's group: 0 for its column labels, 1 for its row labels."""
 
     @property
     def labels(self) -> list[str]:
@@ -222,9 +224,153 @@ class MultiEntity:
         return shared
 
 
-def _table_groups(parsed: ParsedDocument, *, rows: bool) -> list[_Group]:
+ChildPlace = Literal[
+    "table_columns", "table_rows", "section", "list_item", "column", "breakout", "table"
+]
+"""Where ``ParentChild`` finds children: a table's columns or rows, or components of one
+type."""
+
+_CHILD_PLACES: frozenset[str] = frozenset(get_args(ChildPlace))
+
+
+@dataclass(frozen=True)
+class ParentChild:
+    """A parent record with child records in one of its nested-model fields: a model page
+    with a column per trim. The caller says where the children live, so no questions are
+    asked about structure.
+
+    ``field`` is the parent schema's nested ``BaseModel`` field the children fill
+    (``variants: list[Variant]``); by default, the schema's only one. A schema without
+    that field (or, by default, without any) is resolved as one parent, as with
+    :class:`SingleEntity`. ``children`` says where the children live:
+
+    - ``"table_columns"``: in each table whose cells have row and column headers, each
+      column label is a child holding the cells below it (a cell spanning columns goes to
+      each); ``"table_rows"`` does the same for each row's label (its headers joined).
+    - A component type (``"section"``, ``"list_item"``, ``"column"``, ``"breakout"``,
+      ``"table"``): each outermost component of that type is a child, labelled by its
+      first heading (or first text), with its subtree. A lone one holding others of its
+      type is a wrapper (a page-wide section around the trim sections, or the one under
+      the page's first heading), so the ones inside it are the children instead. Only
+      when a heading comes before it (the page's title names the parent) is it the one
+      child ("SE", with "Performance" and "Dimensions" sections inside). A one-child page
+      with no title before the child can't be told from a wrapper, so its sub-sections
+      become the children.
+
+    Every other statement is the parent's (labelled ``label``). Children inherit what it
+    states: a child field found only in the parent's statements ("Every Kestrova has 5
+    doors") is copied into each child record with ``meta.shared`` set, and a child's own
+    value wins. Children are extracted with the nested model's fields and questions (see
+    :meth:`~jevex.schema.SchemaSpec.child`); nested models inside a child aren't filled.
+    """
+
+    children: ChildPlace = "table_columns"
+    field: str | None = None
+    label: str = SINGLE_ENTITY_LABEL
+
+    def __post_init__(self) -> None:
+        if self.children not in _CHILD_PLACES:
+            raise ValueError(
+                f"children must be one of {sorted(_CHILD_PLACES)}, got {self.children!r}"
+            )
+
+    async def resolve(
+        self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
+    ) -> list[EntityScope]:
+        name = self._field(schema)
+        if name is None:
+            return await SingleEntity(label=self.label).resolve(parsed, schema, jev)
+        if self.children in ("table_columns", "table_rows"):
+            axis = 0 if self.children == "table_columns" else 1
+            groups = _table_groups(parsed, rows=axis == 1, min_labels=1)
+            # The same label in two tables (the "SE" column of each) is one child.
+            members = [m for g in groups if g.axis == axis for m in g.members]
+        else:
+            found = _type_members(parsed, self.children)
+            unique = _unique([label for label, _ in found])
+            members = [(u, ids) for u, (_, ids) in zip(unique, found, strict=True)]
+        claims: dict[str, set[str]] = {}
+        for label, ids in members:
+            claims.setdefault(label, set()).update(ids)
+        labels = _unique(list(claims), reserved=self.label)
+        owners: dict[str, list[str]] = {}
+        for label, ids in zip(labels, claims.values(), strict=True):
+            for sid in ids:
+                owners.setdefault(sid, []).append(label)  # a spanning cell is on each
+        statements = list(parsed.statements.values())
+        for s in statements:
+            owners.setdefault(s.id, [self.label])
+        parent, *children = _scopes(statements, [self.label, *labels], owners, set())
+        return [
+            parent,
+            *(c.model_copy(update={"parent": self.label, "field": name}) for c in children),
+        ]
+
+    def _field(self, schema: SchemaSpec) -> str | None:
+        """The nested-model field the children fill, or ``None`` if the schema has none."""
+        nested = [f.name for f in schema.child_fields]
+        if self.field is not None:
+            if self.field not in {f.name for f in schema.fields}:
+                return None
+            if self.field not in nested:
+                raise ChildFieldError(f"{schema.name}.{self.field} is not a nested model field")
+            name = self.field
+        elif len(nested) > 1:
+            raise ChildFieldError(
+                f"{schema.name} has several nested model fields ({', '.join(nested)}); "
+                "say which one holds the children with ParentChild(field=...)"
+            )
+        elif not nested:
+            return None
+        else:
+            name = nested[0]
+        try:
+            schema.child(name)
+        except (UnsupportedFieldError, ReservedFieldNameError) as exc:
+            raise ChildFieldError(f"{schema.name}.{name} can't hold children: {exc}") from exc
+        return name
+
+
+class ChildFieldError(ValueError):
+    """``ParentChild`` can't fill the field for children: the one named isn't a nested
+    model, none is named and the schema has several, or jevex can't extract the nested
+    model's fields."""
+
+
+def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozenset[str]]]:
+    """(label, statement ids) for each outermost component of type ``kind``, looking
+    inside a lone one that wraps others of its type."""
+    by_component: dict[str, list[str]] = {}
+    for s in parsed.statements.values():
+        by_component.setdefault(s.component_id, []).append(s.id)
+
+    def outermost(component: Component) -> list[Component]:
+        found: list[Component] = []
+        for child in component.children:
+            found.extend([child] if child.type == kind else outermost(child))
+        return found
+
+    found = outermost(parsed.root)
+    # A lone one under the page's title is a child with sub-parts ("SE" with "Performance"
+    # inside); one that holds the title (or has no heading) wraps the children. The
+    # heading trail is the layout's, so a gated-out title still counts.
+    while len(found) == 1 and (inner := outermost(found[0])):
+        lone = found[0]
+        if _starts_with_heading(lone) and lone.children[0].heading_trail:
+            break
+        found = inner
+    members: list[tuple[str, frozenset[str]]] = []
+    for component in found:
+        ids = frozenset(sid for c in component.walk() for sid in by_component.get(c.id, ()))
+        if (label := _label(component)) and ids:
+            members.append((label, ids))
+    return members
+
+
+def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) -> list[_Group]:
     """Per table whose cells have row and column headers: its column labels as one group,
-    and (with ``rows``) its row labels as another, each when there are two or more."""
+    and (with ``rows``) its row labels as another, each when there are ``min_labels`` or
+    more."""
     depths = _depths(parsed.root)
     by_table: dict[str, list[Statement]] = {}
     for s in parsed.statements.values():
@@ -242,17 +388,18 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool) -> list[_Group]:
             # one label as stacked column headers are. A data cell spanning rows gets its
             # rows' headers joined too (TableCellRef keeps no per-row split; #150).
             axes.append([(sid, [" ".join(ref.row_headers)]) for sid, ref in both])
-        for axis in axes:
+        for axis_no, axis in enumerate(axes):
             claims: dict[str, set[str]] = {}
             for sid, headers in axis:
                 for header in headers:
                     if label := _short(header):
                         claims.setdefault(label, set()).add(sid)
-            if len(claims) < 2:
+            if len(claims) < min_labels:
                 continue
             unique = _unique(list(claims))
             members = [(u, frozenset(ids)) for u, ids in zip(unique, claims.values(), strict=True)]
-            groups.append(_Group(0, depths[table_id], list(cells[0].heading_trail), members))
+            trail = list(cells[0].heading_trail)
+            groups.append(_Group(0, depths[table_id], trail, members, axis=axis_no))
     return groups
 
 
@@ -357,6 +504,10 @@ def _shape(component: Component) -> tuple[str, tuple[str, ...]]:
     return component.type, tuple(c.type for c in component.children)
 
 
+def _starts_with_heading(component: Component) -> bool:
+    return bool(component.children) and component.children[0].type == "heading"
+
+
 def _is_headed(component: Component) -> bool:
     return (
         component.type in _CONTAINERS
@@ -377,9 +528,10 @@ def _short(text: str) -> str:
     return section_text([text], max_heading_chars=MAX_ENTITY_LABEL_CHARS)
 
 
-def _unique(labels: Sequence[str]) -> list[str]:
-    """``labels`` with repeats numbered ("Golf", "Golf (2)"); none is "all of them"."""
-    seen: set[str] = {ALL_OPTION}
+def _unique(labels: Sequence[str], reserved: str | None = None) -> list[str]:
+    """``labels`` with repeats numbered ("Golf", "Golf (2)"); none is "all of them" or
+    ``reserved`` (a parent's label)."""
+    seen: set[str] = {ALL_OPTION} if reserved is None else {ALL_OPTION, reserved}
     out: list[str] = []
     for label in labels:
         unique, n = label, 1
@@ -405,6 +557,16 @@ class EntityStage:
     Without a parsed document (no layout stage ran), every schema gets one empty scope,
     labelled as the resolver would label a single entity, so structured-data-only
     pipelines still produce a record.
+
+    Child scopes (from :class:`ParentChild`: ``field`` set) don't stay on the schema's
+    run. Each nested-model field with children gets a run of its own in ``ctx.schemas``
+    (named ``"<Parent>.<field>"``, with ``SchemaRun.parent`` set), holding a copy of every
+    parent scope and the children, so later stages extract the nested model's fields
+    from both without knowing about children; records then inherit the parent scope's
+    values (see :class:`~jevex.extractor.ExtractionResult`). That run has no
+    component-gate result of its own: every nested field may come from any component
+    that passed the parent's gate. A field holding one model (not a list) keeps each
+    parent's first child and reports the rest in an ``extra_children`` event.
     """
 
     resolver: EntityResolver = field(default_factory=SingleEntity)
@@ -424,20 +586,22 @@ class EntityStage:
             # The resolver sees only what passed the component gate, so a resolver that
             # asks Jev (MultiEntity, #27) never pays for gated-out components.
             view = parsed if relevant is None else parsed.restricted_to(relevant)
-            run.scopes = await self.resolver.resolve(view, run.spec, ctx.jev)
+            scopes = await self.resolver.resolve(view, run.spec, ctx.jev)
             if relevant is not None:
                 # Only components (and statements) that passed the component gate go
                 # downstream.
-                for scope in run.scopes:
+                for scope in scopes:
                     scope.component_ids = [c for c in scope.component_ids if c in relevant]
                     scope.statement_ids = [s for s in scope.statement_ids if s in view.statements]
                     scope.shared_statement_ids = [
                         s for s in scope.shared_statement_ids if s in view.statements
                     ]
-            if not run.scopes:
+            run.scopes = [s for s in scopes if s.field is None]
+            children.extend(self._child_runs(ctx, run, scopes))
+            if not scopes:
                 ctx.event(self.name, "no_entities", f"{run.name}: the resolver found no entities")
                 return
-            if left := _unassigned(view, run.scopes):
+            if left := _unassigned(view, scopes):
                 ctx.event(
                     self.name,
                     "unassigned_statements",
@@ -445,7 +609,70 @@ class EntityStage:
                     statement_ids=left,
                 )
 
+        children: list[SchemaRun] = []
         await for_each_schema(ctx, resolve)
+        for child in children:
+            ctx.schemas[child.name] = child
+
+    def _child_runs(
+        self, ctx: Context, run: SchemaRun, scopes: list[EntityScope]
+    ) -> list[SchemaRun]:
+        """A run per nested-model field the resolver found children for."""
+        parents = [s for s in scopes if s.field is None]
+        by_field: dict[str, list[EntityScope]] = {}
+        for scope in scopes:
+            if scope.field is not None:
+                by_field.setdefault(scope.field, []).append(scope)
+        out: list[SchemaRun] = []
+        for name, found in by_field.items():
+            _check_children(run, name, parents, found)
+            spec = run.spec.child(name)
+            if not run.spec.field(name).many:
+                found = self._first_children(ctx, spec.name, found)
+            child = SchemaRun(spec, parent=run.name, parent_field=name)
+            child.scopes = [*(p.model_copy(deep=True) for p in parents), *found]
+            out.append(child)
+        return out
+
+    def _first_children(
+        self, ctx: Context, run_name: str, children: list[EntityScope]
+    ) -> list[EntityScope]:
+        """Each parent's first child, for a field that holds one model."""
+        by_parent: dict[str | None, list[EntityScope]] = {}
+        for child in children:
+            by_parent.setdefault(child.parent, []).append(child)
+        for kids in by_parent.values():
+            if len(kids) > 1:
+                ctx.event(
+                    self.name,
+                    "extra_children",
+                    f"{run_name} holds one record: kept {kids[0].label!r}, "
+                    f"left out {len(kids) - 1} more",
+                    labels=[k.label for k in kids[1:]],
+                )
+        return [kids[0] for kids in by_parent.values()]
+
+
+class InvalidScopeError(ValueError):
+    """A resolver returned child scopes that can't be extracted: the field isn't one of
+    the schema's nested models, the parent isn't one of its scopes, or labels repeat."""
+
+
+def _check_children(
+    run: SchemaRun, name: str, parents: list[EntityScope], children: list[EntityScope]
+) -> None:
+    if name not in {f.name for f in run.spec.child_fields}:
+        raise InvalidScopeError(f"{run.name}.{name} is not a nested model field")
+    labels = [s.label for s in [*parents, *children]]
+    if len(set(labels)) < len(labels):
+        raise InvalidScopeError(f"{run.name}: repeated entity labels in {labels}")
+    known = {s.label for s in parents}
+    for child in children:
+        if child.parent not in known:
+            raise InvalidScopeError(
+                f"{run.name}: child {child.label!r} names parent {child.parent!r}, "
+                f"which isn't one of its scopes"
+            )
 
 
 def _unassigned(parsed: ParsedDocument, scopes: list[EntityScope]) -> list[str]:

@@ -8,6 +8,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Discriminator,
     ValidationError,
     computed_field,
     field_serializer,
@@ -23,6 +24,7 @@ from jevex.results import (
     FieldMetas,
     Source,
     build_extracted,
+    inherit,
     partial_model,
 )
 from jevex.schema import SchemaSpec
@@ -223,13 +225,93 @@ def test_nested_errors_keep_their_path() -> None:
         build_extracted(
             SchemaSpec.from_model(WithNested),
             "doc",
-            {"engine": meta({"power": 100}), "tags": meta([1, "x", 3])},
+            {"engine": meta({"cyl": "four", "power": 100}), "tags": meta([1, "x", 3])},
         ),
     )
     assert item.record.engine is None
-    assert item.meta.engine.error == "cyl: Field required"
+    assert item.meta.engine.error is not None
+    assert item.meta.engine.error.startswith("cyl: ")
     assert item.meta.tags.error is not None
     assert item.meta.tags.error.startswith("1: ")
+
+
+def test_nested_models_are_partial_too() -> None:
+    partial = partial_model(WithNested)
+    item = cast(
+        "Extracted[WithNested]",
+        build_extracted(SchemaSpec.from_model(WithNested), "doc", {"engine": meta({"power": 100})}),
+    )
+    assert item.record.engine is not None
+    assert type(item.record.engine) is partial_model(Engine)
+    assert item.record.engine.model_dump() == {"cyl": None, "power": 100}
+    assert not item.complete  # the real Engine needs cyl
+    assert partial.model_validate({"engine": None}).engine is None
+
+
+class Fleet(BaseModel):
+    engines: list[Engine] = Field(description="Engines")
+    spare: Engine | None = Field(default=None, description="Spare")
+
+
+class Node(BaseModel):
+    name: str
+    children: list["Node"] = Field(default_factory=list, description="Children")
+
+
+def test_partial_models_make_models_in_lists_and_unions_partial() -> None:
+    record = partial_model(Fleet).model_validate(
+        {"engines": [{"cyl": 4}, {"power": 90}], "spare": {"cyl": 6}}
+    )
+    assert [type(e) for e in record.engines] == [partial_model(Engine)] * 2
+    assert record.spare is not None
+    assert record.spare.power is None
+
+
+class Petrol(BaseModel):
+    kind: Literal["petrol"]
+    cc: int
+
+
+class Electric(BaseModel):
+    kind: Literal["electric"]
+    kwh: int
+
+
+class Powered(BaseModel):
+    engine: Annotated[Petrol | Electric, Field(discriminator="kind", description="Engine")]
+    size: int
+
+
+class Tagged(BaseModel):
+    engine: Annotated[Petrol | Electric, Discriminator("kind")] = Field(description="Engine")
+    size: int
+
+
+class PoweredFleet(BaseModel):
+    cars: list[Powered] = Field(description="Cars")
+    tagged: Tagged | None = Field(default=None, description="Tagged")
+
+
+def test_discriminated_unions_keep_their_real_members() -> None:
+    record = partial_model(PoweredFleet).model_validate(
+        {"cars": [{"engine": {"kind": "electric", "kwh": 60}}]}
+    )
+    [car] = record.cars
+    assert type(car) is partial_model(Powered)
+    assert car.engine == Electric(kind="electric", kwh=60)
+    assert car.size is None
+    # The same with the discriminator given as Annotated metadata.
+    record = partial_model(PoweredFleet).model_validate(
+        {"tagged": {"engine": {"kind": "petrol", "cc": 1498}}}
+    )
+    assert record.tagged is not None
+    assert record.tagged.engine == Petrol(kind="petrol", cc=1498)
+
+
+def test_a_model_nested_in_itself_keeps_its_real_type() -> None:
+    record = partial_model(Node).model_validate({"children": [{"name": "leaf"}]})
+    assert record.name is None
+    assert type(record.children[0]) is Node
 
 
 # --- building records ------------------------------------------------------------------
@@ -350,6 +432,48 @@ def test_to_dict_is_json_ready() -> None:
     assert d["meta"]["fuel_type"]["value"] is None
 
 
+def test_inherit_adds_what_only_the_parent_found_as_shared() -> None:
+    own = {"power": FieldMeta(value=150), "cyl": FieldMeta(alternatives=[])}
+    parent = {"power": FieldMeta(value=100), "cyl": FieldMeta(value=4), "x": FieldMeta()}
+    got = inherit(own, parent)
+    assert got["power"] == FieldMeta(value=150)
+    assert got["cyl"] == FieldMeta(value=4, shared=True)
+    assert "x" not in got
+
+
+def test_children_fill_their_nested_field() -> None:
+    spec = SchemaSpec.from_model(Fleet)
+    engine = SchemaSpec.from_model(Engine)
+    kids = [
+        build_extracted(engine, "A", {"cyl": meta(4), "power": meta(90)}),
+        build_extracted(engine, "B", {"cyl": meta(6), "power": meta(10, confidence=0.1)}),
+    ]
+    item = build_extracted(spec, "doc", {}, children={"engines": kids, "spare": []})
+    assert item.children == {"engines": kids}
+    assert item.record.model_dump() == {
+        "engines": [{"cyl": 4, "power": 90}, {"cyl": 6, "power": 10}],
+        "spare": None,
+    }
+    assert item.meta["engines"] == FieldMeta(
+        value=[{"cyl": 4, "power": 90}, {"cyl": 6, "power": 10}]
+    )
+    assert item.complete
+    assert [c["entity"] for c in item.to_dict()["children"]["engines"]] == ["A", "B"]
+
+
+def test_a_filtered_child_value_leaves_the_parent_incomplete() -> None:
+    spec = SchemaSpec.from_model(Fleet)
+    engine = SchemaSpec.from_model(Engine)
+    kid = build_extracted(
+        engine, "A", {"cyl": meta(4), "power": meta(90, confidence=0.1)}, threshold=0.5
+    )
+    item = build_extracted(spec, "doc", {}, children={"engines": [kid], "spare": [kid]})
+    assert item.meta["engines"].value == [{"cyl": 4}]
+    assert item.meta["spare"].value == {"cyl": 4}
+    assert item.record.model_dump()["spare"] == {"cyl": 4, "power": None}
+    assert not item.complete
+
+
 def test_field_metas_is_a_mapping() -> None:
     metas = FieldMetas({"a": FieldMeta(value=1)})
     assert dict(metas) == {"a": FieldMeta(value=1)}
@@ -437,6 +561,27 @@ def test_unknown_threshold_keys_are_rejected() -> None:
     with pytest.raises(ValueError, match="feul"):
         extractor(thresholds={"feul": 0.9})
     extractor(thresholds={"VehicleSpec.model": 0.9, "title": 0.5})
+
+
+class Extra(BaseModel):
+    tags: dict[str, str]
+
+
+class PageWithExtra(BaseModel):
+    title: str = Field(description="Title")
+    extra: Extra | None = Field(default=None, description="Extra")
+
+
+def test_nested_models_jevex_cannot_extract_dont_stop_an_extractor() -> None:
+    Extractor([PageWithExtra], thresholds={"title": 0.5})
+    with pytest.raises(ValueError, match=r"PageWithExtra\.extra\.tags"):
+        Extractor([PageWithExtra], thresholds={"PageWithExtra.extra.tags": 0.5})
+
+
+def test_thresholds_can_name_a_nested_models_fields() -> None:
+    Extractor([Fleet], thresholds={"Fleet.engines.cyl": 0.9, "power": 0.5, "Fleet.spare": 0.1})
+    with pytest.raises(ValueError, match=r"Fleet\.engines\.bore"):
+        Extractor([Fleet], thresholds={"Fleet.engines.bore": 0.9})
 
 
 async def test_result_to_dict() -> None:

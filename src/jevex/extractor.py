@@ -24,8 +24,8 @@ from jevex.layout import LayoutStage
 from jevex.normalise import NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
-from jevex.results import Extracted, FieldMeta, build_extracted, select_records
-from jevex.schema import SchemaSpec
+from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
+from jevex.schema import ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
 from jevex.select import CandidateStage, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
@@ -142,7 +142,8 @@ class ExtractionResult:
 
     ``records`` holds one :class:`~jevex.results.Extracted` per entity per schema, in schema
     registration order. Use ``for_schema(Model)`` for typed access, or ``one()`` for
-    single-entity documents.
+    single-entity documents. Child entities (``ParentChild``) aren't records of their own:
+    they're in their parent's nested field and ``children``.
     """
 
     records: list[Extracted[BaseModel]]
@@ -197,19 +198,15 @@ class ExtractionResult:
         usage = ctx.jev.usage
         records: list[Extracted[BaseModel]] = []
         for run in ctx.schemas.values():
-            for entity, metas in _entity_metas(run).items():
-                records.append(
-                    build_extracted(
-                        run.spec, entity, metas, threshold=threshold, thresholds=thresholds
-                    )
-                )
+            if run.parent is None:
+                records.extend(_records(ctx, run, threshold, thresholds))
         return cls(
             records=records,
             meta=DocumentMeta(
                 url=ctx.document.url,
                 content_type=ctx.document.content_type,
                 gates={name: run.gate for name, run in ctx.schemas.items() if run.gate},
-                active_schemas=[run.name for run in ctx.active],
+                active_schemas=[run.name for run in ctx.active if run.parent is None],
                 jev=JevUsageSummary(
                     requests=usage.requests,
                     questions=usage.questions,
@@ -236,6 +233,72 @@ class ExtractionResult:
         )
 
 
+def _threshold_keys(specs: Sequence[SchemaSpec]) -> set[str]:
+    return {f.name for s in specs for f in s.fields} | {
+        f"{s.name}.{f.name}" for s in specs for f in s.fields
+    }
+
+
+def _child_specs(specs: Sequence[SchemaSpec]) -> list[SchemaSpec]:
+    """Specs of the nested models jevex can extract (a nested model it can't is only an
+    error if ``ParentChild`` is asked to fill it)."""
+    out: list[SchemaSpec] = []
+    for spec in specs:
+        for f in spec.child_fields:
+            try:
+                out.append(spec.child(f.name))
+            except (UnsupportedFieldError, ReservedFieldNameError):
+                continue
+    return out
+
+
+def _records(
+    ctx: Context, run: SchemaRun, threshold: float, thresholds: Mapping[str, float] | None
+) -> list[Extracted[BaseModel]]:
+    """A record per entity that found anything or has children, in scope order."""
+    child_runs = [r for r in ctx.schemas.values() if r.parent == run.name]
+    out: list[Extracted[BaseModel]] = []
+    for entity, metas in _entity_metas(run).items():
+        children = {
+            r.parent_field: _children(r, entity, threshold, thresholds)
+            for r in child_runs
+            if r.parent_field is not None
+        }
+        if _has_values(metas) or any(children.values()):
+            out.append(
+                build_extracted(
+                    run.spec,
+                    entity,
+                    metas,
+                    threshold=threshold,
+                    thresholds=thresholds,
+                    children=children,
+                )
+            )
+    return out
+
+
+def _children(
+    run: SchemaRun, parent: str, threshold: float, thresholds: Mapping[str, float] | None
+) -> list[Extracted[BaseModel]]:
+    """``parent``'s child records from a nested model's run: each child scope's own
+    values, plus whatever the run found in the parent's scope (inherited, ``shared``)."""
+    metas = _entity_metas(run)
+    inherited = metas.get(parent, {})
+    out: list[Extracted[BaseModel]] = []
+    for scope in run.scopes:
+        if scope.parent != parent:
+            continue
+        found = inherit(metas.get(scope.label, {}), inherited)
+        if _has_values(found):
+            out.append(
+                build_extracted(
+                    run.spec, scope.label, found, threshold=threshold, thresholds=thresholds
+                )
+            )
+    return out
+
+
 def _entity_metas(run: SchemaRun) -> dict[str, dict[str, FieldMeta]]:
     """Field metadata per entity, in scope order; bare ``values`` fill any gaps."""
     order = [s.label for s in run.scopes]
@@ -245,9 +308,12 @@ def _entity_metas(run: SchemaRun) -> dict[str, dict[str, FieldMeta]]:
         metas = dict(run.fields.get(label, {}))
         for name, value in run.values.get(label, {}).items():
             metas.setdefault(name, FieldMeta(value=value))
-        if any(m.found or m.alternatives for m in metas.values()):
-            out[label] = metas
+        out[label] = metas
     return out
+
+
+def _has_values(metas: Mapping[str, FieldMeta]) -> bool:
+    return any(m.found or m.alternatives for m in metas.values())
 
 
 class Extractor:
@@ -271,8 +337,9 @@ class Extractor:
         run_id: str | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
-        ``"field"`` or ``"Schema.field"``) set the confidence below which a value becomes
-        ``None`` in the record. It stays in ``meta`` with ``filtered=True``.
+        ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
+        model's children) set the confidence below which a value becomes ``None`` in the
+        record. It stays in ``meta`` with ``filtered=True``.
 
         ``budgets`` limits LLM and Jev use (:mod:`jevex.budgets`). ``store`` (a
         :class:`~jevex.store.Store` or a URL such as ``"sqlite:///jevex.db"``) holds learned
@@ -289,10 +356,10 @@ class Extractor:
         self.pipeline = pipeline if pipeline is not None else default_pipeline()
         self.threshold = threshold
         self.thresholds = dict(thresholds or {})
-        known = {f.name for s in self.schemas for f in s.fields} | {
-            f"{s.name}.{f.name}" for s in self.schemas for f in s.fields
-        }
-        unknown = sorted(set(self.thresholds) - known)
+        unknown = sorted(set(self.thresholds) - _threshold_keys(self.schemas))
+        if unknown:
+            # Nested models' fields too ("CarModel.trims.power_ps"): ParentChild's children.
+            unknown = sorted(set(unknown) - _threshold_keys(_child_specs(self.schemas)))
         if unknown:
             raise ValueError(f"thresholds for unknown fields: {unknown}")
         self._jev = jev

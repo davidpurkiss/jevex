@@ -455,3 +455,37 @@ def test_entity_questions_can_be_overridden() -> None:
 def test_entity_question_rejects_the_reserved_label() -> None:
     with pytest.raises(ValueError, match="reserved"):
         SchemaSpec.from_model(VehicleSpec).entity_question(["SE", ALL_OPTION])
+
+
+class Trim(BaseModel):
+    """One trim of a car."""
+
+    __jevex__ = SchemaConfig(entity_name="trim")
+
+    power_ps: int = Field(description="Power", unit="PS")
+
+
+class CarModel(BaseModel):
+    model: str = Field(description="Model name")
+    trims: list[Trim] = Field(description="Trims")
+    spare: Trim | None = Field(default=None, description="Spare")
+
+
+def test_child_specs_come_from_the_nested_model_under_a_qualified_name() -> None:
+    car = SchemaSpec.from_model(CarModel)
+    assert [f.name for f in car.child_fields] == ["trims", "spare"]
+    trims = car.child("trims")
+    assert trims.name == "CarModel.trims"
+    assert trims.model is Trim
+    assert trims.description == "One trim of a car."
+    assert trims.entity_name == "trim"
+    assert [f.name for f in trims.fields] == ["power_ps"]
+    assert car.child("spare").name == "CarModel.spare"
+
+
+def test_child_needs_a_nested_model_field() -> None:
+    car = SchemaSpec.from_model(CarModel)
+    with pytest.raises(TypeError, match=r"CarModel\.model is not a nested model field"):
+        car.child("model")
+    with pytest.raises(KeyError):
+        car.child("nope")
