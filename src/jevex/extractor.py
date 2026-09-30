@@ -18,6 +18,7 @@ from jevex.component_gate import ComponentGateStage
 from jevex.gate import DocumentGateStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient, JevRequestCapError
+from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
 from jevex.normalise import NormaliseStage
 from jevex.pipeline import Context, Pipeline
@@ -60,6 +61,7 @@ STAGE_ORDER: tuple[str, ...] = (
 DEFAULT_STAGES: tuple[Stage, ...] = (
     CleanStage(),
     DocumentGateStage(),
+    StructuredStage(),
     LayoutStage(),
     ComponentGateStage(),
     StatementStage(),
@@ -72,11 +74,16 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
 
 
 def default_pipeline() -> Pipeline:
-    """The pipeline ``Extractor`` builds when none is given, in :data:`STAGE_ORDER`."""
+    """The pipeline ``Extractor`` builds when none is given, in :data:`STAGE_ORDER`.
+
+    Stateful stages (the structured stage's in-memory mappings) are new in each call.
+    """
     unknown = [s.name for s in DEFAULT_STAGES if s.name not in STAGE_ORDER]
     if unknown:
         raise ValueError(f"default stages {unknown} are not in STAGE_ORDER {STAGE_ORDER}")
-    return Pipeline(sorted(DEFAULT_STAGES, key=lambda s: STAGE_ORDER.index(s.name)))
+    # The structured stage's mapper remembers mappings; each pipeline gets its own.
+    stages = [StructuredStage() if isinstance(s, StructuredStage) else s for s in DEFAULT_STAGES]
+    return Pipeline(sorted(stages, key=lambda s: STAGE_ORDER.index(s.name)))
 
 
 class JevUsageSummary(BaseModel):
@@ -333,6 +340,7 @@ class Extractor:
         jev = self.jev.metered(max_requests=self.budgets.per_document.max_jev_requests)
         ctx = Context.create(document, self.schemas, jev)
         ctx.budget = budget
+        ctx.store = await self.store()
         try:
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")

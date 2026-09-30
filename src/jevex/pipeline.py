@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from jevex.results import FieldMeta
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Statement
+    from jevex.store import Store
 
 
 @runtime_checkable
@@ -122,6 +123,9 @@ class Context:
     budget: DocumentBudget | None = None
     """The document's budgets; LLM calls go through ``budget.call_llm`` (see
     :mod:`jevex.budgets`). ``None`` outside an extractor, meaning unlimited."""
+    store: Store | None = None
+    """The extractor's store (learned state: key mappings, generators...), ``None`` without
+    one. Stages that learn read and write it here."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:

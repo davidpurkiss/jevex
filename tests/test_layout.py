@@ -178,7 +178,7 @@ async def test_stage_does_not_swallow_parser_errors() -> None:
 
 
 def test_default_pipeline_lays_out_after_gating() -> None:
-    assert default_pipeline().names[:3] == ["clean", "document_gate", "layout"]
+    assert default_pipeline().names[:4] == ["clean", "document_gate", "structured", "layout"]
 
 
 async def test_extractor_lays_out_the_cleaned_document() -> None:

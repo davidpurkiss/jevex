@@ -62,6 +62,8 @@ class SchemaConfig(BaseModel):
 
     document_question: str | None = None
     categorise_question: str | None = None
+    key_path_question: str | None = None
+    """Template for the structured-data question, with ``{path}`` and ``{example}``."""
     gate_unit: Literal["document", "page"] = "document"
 
 
@@ -270,6 +272,21 @@ class SchemaSpec:
             )
             questions[group] = Noul(instructions=override or _gate_instructions(members))
         return questions
+
+    def key_path_question(self, path: str, example: str) -> Choice:
+        """For embedded data: which field (or none) does the key path ``path`` hold?
+
+        ``example`` is one of its values, shown quoted. The options are the categorise
+        options (field descriptions plus "none").
+        """
+        template = (
+            self.config.key_path_question
+            or 'Which detail does the key path "{path}" hold (e.g. {example})?'
+        )
+        return Choice(
+            instructions=template.format(path=path, example=repr(example)),
+            options=self.categorise_question().options,
+        )
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
         """One Choice per statement: which field does it state, or none of them.
