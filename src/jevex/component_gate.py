@@ -112,7 +112,8 @@ def _table_rows(table: Component) -> tuple[list[str], list[str]]:
         return captions, [line for line in table.text.split("\n") if line.strip()]
     rows: dict[int, list[TableCell]] = {}
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
-        rows.setdefault(cell.row, []).append(cell)
+        if cell.text:
+            rows.setdefault(cell.row, []).append(cell)
     header: list[str] = list(captions)
     body: list[str] = []
     for cells in rows.values():

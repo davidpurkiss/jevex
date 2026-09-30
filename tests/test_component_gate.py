@@ -32,7 +32,7 @@ from jevex.jev import (
     ScoreAnswer,
     UnexpectedAnswerError,
 )
-from jevex.layout import MAX_SECTION_CHARS
+from jevex.layout import MAX_SECTION_CHARS, TableCell
 from jevex.layout_html import HtmlLayoutParser
 from jevex.testing import FakeJev
 
@@ -184,6 +184,20 @@ def test_an_oversized_table_is_split_by_rows_with_its_header_repeated() -> None:
         assert u.text.startswith("Trim | Price\n")
         assert u.component_ids == ("t",)
     assert "Trim 40 | £20040" in units[-1].text
+
+
+def test_an_oversized_tables_empty_cells_leave_no_gaps_in_its_pieces() -> None:
+    t = table("t", 40)
+    blank = [
+        TableCell(row=41, col=0, text="Towing", header=True),
+        TableCell(row=41, col=1, text=""),
+    ]
+    t = t.model_copy(update={"cells": [*t.cells, *blank]})
+    units = gate_units(comp("section", "", "r", t), max_chars=120)
+    lines = [line for u in units for line in u.text.split("\n")]
+    assert all(u.text.startswith("Trim | Price\n") for u in units)
+    assert "Towing" in lines
+    assert not any(line.startswith(" |") or line.endswith("| ") for line in lines)
 
 
 def test_an_oversized_list_is_split_by_items() -> None:

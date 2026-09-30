@@ -15,6 +15,9 @@ A spec table's cell "9.1" means nothing alone; rendered as
   prefix the rows below them until the next band. A header row repeated mid-table
   replaces the column headers from there on:
   ``Performance › 0-62 mph (s) · 1.5 TSI SE: 9.1``.
+- **Blank rows** hold only header cells followed by empty data cells, in columns that hold
+  data elsewhere ("Towing" with no value for any trim). They give no statement and are
+  neither a band nor a header row, so the rows below keep their own headers.
 
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
@@ -84,6 +87,16 @@ def table_statements(table: Component) -> list[Statement]:
                     out.setdefault(col, []).append(_label(c.text))
         return out
 
+    # Rows a data cell spans into aren't header-only, even if their own cells all are;
+    # nor are blank rows, whose data cells are there but empty.
+    has_data = {
+        covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
+    }
+    has_data |= _blank_rows(table.cells, cells)
+
+    def header_only(r: int) -> bool:
+        return r not in has_data and all(c.header for c in rows[r])
+
     # Header rows: the leading rows made only of header cells. A band among them
     # ("Technical data" above the header row, "Performance" just below it) is a group for
     # the body, not a column header.
@@ -91,7 +104,7 @@ def table_statements(table: Component) -> list[Statement]:
     leading: list[int] = []
     header_rows: list[int] = []
     for r in ordered:
-        if not all(c.header for c in rows[r]):
+        if not header_only(r):
             break
         leading.append(r)
         if _is_band(rows[r], width):
@@ -100,13 +113,6 @@ def table_statements(table: Component) -> list[Statement]:
             header_rows.append(r)
     col_headers = headers_of(header_rows)
     body = [r for r in ordered if r not in leading]
-    # Rows a data cell spans into aren't header-only, even if their own cells all are.
-    has_data = {
-        covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
-    }
-
-    def header_only(r: int) -> bool:
-        return r not in has_data and all(c.header for c in rows[r])
 
     # Row headers can span rows (<th rowspan=2>Performance</th>): index them by every row
     # they cover.
@@ -173,10 +179,32 @@ def _label_value(cells: list[TableCell], width: int) -> bool:
     )
 
 
+def _blank_rows(all_cells: list[TableCell], filled: list[TableCell]) -> set[int]:
+    """Rows whose filled cells are all headers, followed by an empty data cell in a column
+    that holds data in other rows: ``Towing | | ``. An empty cell before the headers is a
+    corner (`` | SE | GT``), and one in a column that never holds data a spacer."""
+    data_columns = {col for c in filled if not c.header for col in range(c.col, c.col + c.col_span)}
+    end: dict[int, int] = {}  # row -> the column after its last filled cell
+    labels_only: set[int] = set()
+    for c in filled:
+        end[c.row] = max(end.get(c.row, 0), c.col + c.col_span)
+        labels_only.add(c.row)
+    labels_only -= {c.row for c in filled if not c.header}
+    return {
+        c.row
+        for c in all_cells
+        if c.row in labels_only
+        and not c.header
+        and not _clean(c.text)
+        and c.col >= end[c.row]
+        and c.col in data_columns
+    }
+
+
 def _is_band(row: list[TableCell], width: int) -> bool:
     """A group header: one header cell alone at the start of its row ("Performance"),
     spanning the table or not. A lone cell further right is a column header instead (a
-    one-trim table's repeated header row, whose empty corner cell was dropped)."""
+    one-trim table's repeated header row, after its empty corner cell)."""
     return len(row) == 1 and row[0].header and row[0].col == 0 and width > 1
 
 

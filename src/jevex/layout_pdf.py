@@ -293,26 +293,38 @@ class _Mapper:
 
     def _table(self, item: TableItem) -> list[_Block]:
         cells: dict[tuple[int, int], TableCell] = {}
-        for c in item.data.table_cells:
+        # A filled cell first, so an empty one listed at its position doesn't hide it.
+        listed = sorted(item.data.table_cells, key=lambda c: not _clean(c.text))
+        for c in listed:
             position = (c.start_row_offset_idx, c.start_col_offset_idx)
-            text = _clean(c.text)
-            if not text or position in cells:  # a spanning cell can be listed per slot
+            if position in cells:  # a spanning cell can be listed per slot
                 continue
+            # Empty cells stay: they show that a row has data columns, left blank.
             cells[position] = TableCell(
                 row=c.start_row_offset_idx,
                 col=c.start_col_offset_idx,
-                text=text,
+                text=_clean(c.text),
                 header=c.column_header or c.row_header or c.row_section,
                 row_span=max(1, c.end_row_offset_idx - c.start_row_offset_idx),
                 col_span=max(1, c.end_col_offset_idx - c.start_col_offset_idx),
             )
         captions = self.contents(item, attach=[*item.captions, *item.footnotes])
-        if not cells:
+        if not any(cell.text for cell in cells.values()):
             return captions
-        grid = [cells[p] for p in sorted(cells)]
+        # An empty cell under another's span is a slot Docling listed again, not a cell.
+        covered = {
+            (r, k)
+            for cell in cells.values()
+            if cell.text
+            for r in range(cell.row, cell.row + cell.row_span)
+            for k in range(cell.col, cell.col + cell.col_span)
+            if (r, k) != (cell.row, cell.col)
+        }
+        grid = [cells[p] for p in sorted(cells) if cells[p].text or p not in covered]
         by_row: dict[int, list[str]] = {}
         for cell in grid:
-            by_row.setdefault(cell.row, []).append(cell.text)
+            if cell.text:
+                by_row.setdefault(cell.row, []).append(cell.text)
         text = "\n".join(" | ".join(texts) for texts in by_row.values())
         return [self._located(_Block("table", text, children=captions, cells=grid), item)]
 
