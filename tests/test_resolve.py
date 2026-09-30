@@ -393,6 +393,26 @@ async def test_multi_entity_lets_jev_pick_a_tables_rows_as_the_entities() -> Non
     ]
 
 
+async def test_multi_entity_joins_a_rows_stacked_headers_into_one_label() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th></th><th>Power</th><th>Price</th></tr>"
+        '<tr><th rowspan="2">Kestrova</th><th>SE</th><td>150PS</td><td>£20,000</td></tr>'
+        "<tr><th>SE L</th><td>180PS</td><td>£24,000</td></tr></table>"
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # One label per row, not "Kestrova" holding every row's cells.
+    assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
+    assert len(se.statement_ids) == len(se_l.statement_ids) == 2
+
+
+async def test_multi_entity_prefers_a_tables_columns_when_jev_accepts_both_axes() -> None:
+    parsed = await parse(TABLE_PAGE)
+    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["SE", "SE L"]
+
+
 async def test_multi_entity_without_confirm_splits_tables_by_column_only() -> None:
     parsed = await parse(ROW_KEYED)
     scopes = await MultiEntity(confirm=False).resolve(

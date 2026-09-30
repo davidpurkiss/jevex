@@ -102,7 +102,8 @@ class MultiEntity:
 
     1. **Table headers:** in a table whose cells have both row and column headers, each
        column label is proposed as an entity, holding the cells below it (a cell spanning
-       columns goes to each), and so is each row label, holding its row's cells.
+       columns goes to each), and so is each row's label (its headers joined: "Kestrova
+       SE"), holding its row's cells.
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
        first heading (or first text).
@@ -237,7 +238,9 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool) -> list[_Group]:
         both = [(sid, ref) for sid, ref in refs if ref.row_headers and ref.col_headers]
         axes = [[(sid, ref.col_headers) for sid, ref in both]]
         if rows:
-            axes.append([(sid, ref.row_headers) for sid, ref in both])
+            # A row's headers are levels ("Kestrova" spanning "SE" and "SE L"), joined into
+            # one label as stacked column headers are; a column label per covered column.
+            axes.append([(sid, [" ".join(ref.row_headers)]) for sid, ref in both])
         for axis in axes:
             claims: dict[str, set[str]] = {}
             for sid, headers in axis:
