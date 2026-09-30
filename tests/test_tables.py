@@ -96,9 +96,39 @@ def test_label_value_tables_and_header_only_tables() -> None:
 
 
 def test_a_table_without_headers_gives_one_statement_per_row() -> None:
-    t = table(cell(0, 0, "a"), cell(0, 1, "b"), cell(1, 0, "c"), cell(1, 1, "d"))
-    assert texts(t) == ["a | b", "c | d"]
+    t = table(
+        *(cell(0, c, text) for c, text in enumerate(["Kestrova", "SE", "£24,995"])),
+        *(cell(1, c, text) for c, text in enumerate(["Kestrova", "GT", "£31,250"])),
+    )
+    assert texts(t) == ["Kestrova | SE | £24,995", "Kestrova | GT | £31,250"]
     assert texts(table()) == []
+
+
+def test_a_two_column_table_without_headers_reads_as_labels_and_values() -> None:
+    t = table(
+        cell(0, 0, "Engine:"),
+        cell(0, 1, "1.5 TSI"),
+        cell(1, 0, "0-62 mph (s)"),
+        cell(1, 1, "9.1"),
+        cell(2, 1, "a value without its label"),
+    )
+    statements = table_statements(t)
+    assert [s.text for s in statements] == [
+        "Engine: 1.5 TSI",
+        "0-62 mph (s): 9.1",
+        "a value without its label",
+    ]
+    assert [s.id for s in statements] == ["t1.r0c1", "t1.r1c1", "t1.r2"]
+    ref = statements[0].table
+    assert ref is not None
+    assert (ref.row, ref.col, ref.row_headers, ref.col_headers) == (0, 1, ["Engine"], [])
+
+
+def test_two_columns_without_labels_or_with_spans_stay_rows() -> None:
+    numbers = table(cell(0, 0, "2019"), cell(0, 1, "150 PS"), cell(1, 0, "2021"), cell(1, 1, "163"))
+    assert texts(numbers) == ["2019 | 150 PS", "2021 | 163"]
+    spanning = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, "Note", cols=2))
+    assert texts(spanning) == ["Engine | 1.5 TSI", "Note"]
 
 
 def test_statements_carry_the_tables_context() -> None:
@@ -269,7 +299,7 @@ def test_header_prefix_is_what_a_cells_text_starts_with() -> None:
         "<tr><th>Performance</th></tr>"
         "<tr><th>Power</th><td>150</td><td>200</td></tr>"
     )
-    plain = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"))
+    plain = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(0, 2, "2.0 TDI"))
     labelled = table(cell(0, 0, "Colour", header=True), cell(0, 1, "Red"))
     got = [
         (header_prefix(s.table), s.text)
@@ -279,6 +309,33 @@ def test_header_prefix_is_what_a_cells_text_starts_with() -> None:
     assert got == [
         ("Performance › Power · SE: ", "Performance › Power · SE: 150"),
         ("Performance › Power · GT: ", "Performance › Power · GT: 200"),
-        ("", "Engine | 1.5 TSI"),
+        ("", "Engine | 1.5 TSI | 2.0 TDI"),
         ("Colour: ", "Colour: Red"),
     ]
+
+
+def test_bold_td_labels_are_headers_through_the_cleaner_and_parser() -> None:
+    pairs = html_table(
+        "<tr><td><strong>Engine:</strong></td><td>1.5 TSI</td></tr>"
+        "<tr><td><b>Power</b></td><td>150 PS</td></tr>"
+    )
+    assert texts(pairs) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+    comparison = html_table(
+        "<tr><td><b>Spec</b></td><td><b>SE</b></td><td><b>GT</b></td></tr>"
+        "<tr><td><b>Power</b></td><td>150 PS</td><td>200 PS</td></tr>"
+        "<tr><td colspan=3><strong>Economy</strong></td></tr>"
+        "<tr><td><b>Combined (mpg)</b></td><td>52.3</td><td><b>45.6</b></td></tr>"
+    )
+    statements = table_statements(comparison)
+    assert [s.text for s in statements] == [
+        "Power · SE: 150 PS",
+        "Power · GT: 200 PS",
+        "Economy › Combined (mpg) · SE: 52.3",
+        "Economy › Combined (mpg) · GT: 45.6",  # a bold value stays a value
+    ]
+    assert [s.table.col_headers for s in statements if s.table] == [["SE"], ["GT"]] * 2
+
+
+def test_header_less_two_column_html_table_reads_as_labels_and_values() -> None:
+    t = html_table("<tr><td>Engine</td><td>1.5 TSI</td></tr><tr><td>Power</td><td>150 PS</td></tr>")
+    assert texts(t) == ["Engine: 1.5 TSI", "Power: 150 PS"]

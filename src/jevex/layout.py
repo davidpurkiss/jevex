@@ -86,8 +86,8 @@ class TableCell(BaseModel):
     """One cell of a table component, placed on the table's grid (0-based).
 
     A cell spanning several rows or columns appears once, at its top-left position.
-    ``header`` marks header cells (``<th>``, or any cell in ``<thead>``), whose text gives
-    the other cells their meaning.
+    ``header`` marks header cells (``<th>``, any cell in ``<thead>``, or a ``<td>`` label
+    set only in bold), whose text gives the other cells their meaning.
     """
 
     model_config = ConfigDict(frozen=True)

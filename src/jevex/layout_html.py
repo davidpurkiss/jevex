@@ -13,8 +13,9 @@ it was given. It then walks the DOM and maps it to components:
 - ``ul``/``ol`` become lists of list items, and a ``dl`` a list with one ``term: value``
   item per pair.
 - A ``table`` becomes a table with its cells on a grid (spans resolved, header cells
-  marked). Tables used for page layout (nested tables or headings in cells, or
-  ``role="presentation"``) are read as plain containers instead.
+  marked, including ``td`` labels set only in bold). Tables used for page layout (nested
+  tables or headings in cells, or ``role="presentation"``) are read as plain containers
+  instead.
 - A ``figure`` holding one image or table attaches its ``figcaption`` to it.
 - Any other text becomes paragraphs: one per block element (``p``, ``div``, ``li``...),
   and one per run of loose text between blocks. Wrapper ``div`` elements add no level.
@@ -169,6 +170,7 @@ _VOID_TAGS = frozenset(
 )
 _TABLE_SECTIONS = frozenset({"thead", "tbody", "tfoot"})
 _CELLS = frozenset({"td", "th"})
+_BOLD = frozenset({"b", "strong"})
 _TABLE_PARTS = _TABLE_SECTIONS | _CELLS | {"tr", "caption", "colgroup", "col"}
 _TABLE_CONTEXT = _TABLE_SECTIONS | {"table", "tr"}
 """Where only table parts belong: other content found here is moved in front of the table."""
@@ -687,6 +689,7 @@ class _Segmenter:
                 rows.append((child, False))
         rows += foot
         cells: list[TableCell] = []
+        bold: set[tuple[int, int]] = set()  # (row, col) of td cells whose text is all bold
         busy: dict[int, int] = {}  # column -> first row where it is free again
         for r, (tr, in_head) in enumerate(rows):
             c = 0
@@ -702,6 +705,8 @@ class _Segmenter:
                     busy[k] = r + row_span
                 text = self.flat_text(cell)
                 if text:
+                    if cell.tag == "td" and not in_head and _bold_only(cell):
+                        bold.add((r, c))
                     cells.append(
                         TableCell(
                             row=r,
@@ -715,6 +720,8 @@ class _Segmenter:
                 c += col_span
         if not cells:
             return captions
+        if bold:
+            cells = _bold_headers(cells, bold)
         by_row: dict[int, list[str]] = {}
         for cell in cells:
             by_row.setdefault(cell.row, []).append(cell.text)
@@ -756,6 +763,69 @@ def _is_layout_table(table: _Node) -> bool:
         in_td = in_td or node.tag == "td"
         pending.extend((child, in_td) for child in node.elements())
     return False
+
+
+def _bold_only(cell: _Node) -> bool:
+    """Whether all of a cell's text is in ``b``/``strong`` (a colon after it aside)."""
+    found = False
+    pending: list[tuple[_Node | str, bool]] = [(child, False) for child in cell.children]
+    while pending:
+        node, inside = pending.pop()
+        if isinstance(node, str):
+            if node.replace(":", "").strip():
+                if not inside:
+                    return False
+                found = True
+        elif not node.skip:
+            if node.tag == "img" and not inside and node.attrs.get("alt", "").strip():
+                return False  # its alt text is part of the cell's text
+            inside = inside or node.tag in _BOLD
+            pending.extend((child, inside) for child in node.children)
+    return found
+
+
+def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[TableCell]:
+    """Mark bold-only ``td`` cells as headers where headers go.
+
+    Many sites build tables from ``td`` alone and set their labels in bold. A bold cell
+    counts as a header in the leading rows made only of headers and bold cells (unless
+    every row is, as in a table set all in bold, or the table is two columns of labels
+    and values), or in the first column when that column's cells below the header rows
+    all are. A bold value elsewhere (a total, a
+    highlighted price) stays data.
+    """
+
+    def labelled(c: TableCell) -> bool:
+        return c.header or (c.row, c.col) in bold
+
+    rows: dict[int, list[TableCell]] = {}
+    for c in cells:
+        rows.setdefault(c.row, []).append(c)
+    header_rows: set[int] = set()
+    for r in sorted(rows):
+        if not all(labelled(c) for c in rows[r]):
+            break
+        header_rows.add(r)
+    else:
+        header_rows = set()
+    width = max(c.col + c.col_span for c in cells)
+    first = rows[min(rows)]
+    if (
+        width == 2
+        and any(c.col == 0 for c in first)
+        and all(labelled(c) for c in cells if c.col == 0)
+    ):
+        # Labels and values: a bold first value ("Engine | 1.5 TSI") isn't a column header.
+        # A first row with an empty corner (" | SE") still is one.
+        header_rows = set()
+    first_column = [c for c in cells if c.col == 0 and c.row not in header_rows]
+    column = bool(first_column) and all(labelled(c) for c in first_column)
+    return [
+        c.model_copy(update={"header": True})
+        if (c.row, c.col) in bold and (c.row in header_rows or (column and c.col == 0))
+        else c
+        for c in cells
+    ]
 
 
 def _definition_parts(dl: _Node) -> list[_Node]:
