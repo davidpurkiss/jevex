@@ -62,7 +62,14 @@ from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage
-from jevex.statements import Candidate, NormaliserStep, Span, Statement, StatementKind
+from jevex.statements import (
+    Candidate,
+    NormaliserStep,
+    Span,
+    Statement,
+    StatementKind,
+    TableCellRef,
+)
 from jevex.store import (
     GeneratorRecord,
     GeneratorStats,
@@ -81,6 +88,7 @@ from jevex.structured import (
     StructuredBlob,
     StructuredSource,
 )
+from jevex.tables import table_statements
 
 __version__ = "0.0.1"
 
@@ -167,6 +175,7 @@ __all__ = [
     "StructuredSource",
     "StructuredStage",
     "TableCell",
+    "TableCellRef",
     "TextReader",
     "ToClassify",
     "Tolerance",
@@ -182,4 +191,5 @@ __all__ = [
     "normalise",
     "open_store",
     "run_chain",
+    "table_statements",
 ]
