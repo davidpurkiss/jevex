@@ -413,6 +413,25 @@ async def test_multi_entity_joins_a_rows_stacked_headers_into_one_label() -> Non
     assert len(se.statement_ids) == len(se_l.statement_ids) == 2
 
 
+async def test_multi_entity_gives_a_cell_spanning_rows_to_each_rows_entity() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th></th><th>Power</th><th>Warranty</th></tr>"
+        '<tr><th rowspan="2">Kestrova</th><th>SE</th><td>150PS</td>'
+        '<td rowspan="2">3 years</td></tr>'
+        "<tr><th>SE L</th><td>180PS</td></tr></table>"
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Not a third "Kestrova SE SE L" entity holding the warranty alone.
+    assert [c.state for c in fake.calls if "Kestrova" in str(c.state)] == [
+        {"names": ["Kestrova SE", "Kestrova SE L"]}
+    ]
+    assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
+    warranty = "Kestrova · SE · SE L · Warranty: 3 years"
+    assert texts(parsed, se.statement_ids) == ["Kestrova · SE · Power: 150PS", warranty]
+    assert texts(parsed, se_l.statement_ids) == [warranty, "Kestrova · SE L · Power: 180PS"]
+
+
 async def test_multi_entity_prefers_a_tables_columns_when_jev_accepts_both_axes() -> None:
     parsed = await parse(TABLE_PAGE)
     fake = FakeJev().noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
@@ -676,6 +695,23 @@ async def test_parent_child_can_take_a_tables_rows_as_the_children() -> None:
     assert [c.label for c in children] == ["Power", "Doors", "Warranty"]
     assert texts(parsed, children[0].statement_ids) == ["Power · SE: 150PS", "Power · SE L: 180PS"]
     assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+
+
+async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th>Warranty</th></tr>"
+        '<tr><th>SE</th><td rowspan="2">3 years</td></tr>'
+        "<tr><th>SE L</th></tr></table>"
+    )
+    _, se, se_l = await ParentChild(children="table_rows").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert (se.label, se_l.label) == ("SE", "SE L")
+    assert (
+        texts(parsed, se.statement_ids)
+        == texts(parsed, se_l.statement_ids)
+        == ["SE · SE L · Warranty: 3 years"]
+    )
 
 
 async def test_parent_child_takes_a_single_column_as_one_child() -> None:

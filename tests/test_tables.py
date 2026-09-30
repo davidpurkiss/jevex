@@ -257,6 +257,36 @@ def test_a_data_cell_spanning_rows_takes_each_rows_header() -> None:
         "<tr><th>Gearbox</th></tr>"
     )
     assert texts(t) == ["Engine · Gearbox · SE: 1.5 TSI"]
+    [s] = table_statements(t)
+    assert s.table is not None
+    assert (s.table.row_headers, s.table.row_labels) == (
+        ["Engine", "Gearbox"],
+        ["Engine", "Gearbox"],
+    )
+
+
+def test_a_rows_label_joins_its_headers_one_label_per_covered_row() -> None:
+    t = html_table(
+        "<tr><th></th><th></th><th>Warranty</th></tr>"
+        "<tr><th rowspan=2>Kestrova</th><th>SE</th><td rowspan=2>3 years</td></tr>"
+        "<tr><th>SE L</th></tr>"
+        "<tr><th>Ardent</th><th>GT</th><td>5 years</td></tr>"
+    )
+    refs = [s.table for s in table_statements(t) if s.table]
+    assert [(r.row_headers, r.row_labels) for r in refs] == [
+        (["Kestrova", "SE", "SE L"], ["Kestrova SE", "Kestrova SE L"]),
+        (["Ardent", "GT"], ["Ardent GT"]),
+    ]
+    assert texts(t)[0] == "Kestrova · SE · SE L · Warranty: 3 years"
+
+
+def test_a_covered_row_without_headers_gives_no_row_label() -> None:
+    t = html_table(
+        "<tr><th></th><th>SE</th></tr><tr><th>Engine</th><td rowspan=2>1.5 TSI</td></tr><tr></tr>"
+    )
+    [s] = table_statements(t)
+    assert s.table is not None
+    assert (s.table.row_headers, s.table.row_labels) == (["Engine"], ["Engine"])
 
 
 def test_a_table_of_only_headers_keeps_its_content_as_rows() -> None:

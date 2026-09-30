@@ -45,13 +45,17 @@ class Span(BaseModel):
 class TableCellRef(BaseModel):
     """Where a ``table_cell`` statement sits in its table, with the headers that give it
     meaning. ``col_headers`` has one label per column the cell covers (stacked header rows
-    joined: "1.5 TSI SE"); entity resolvers use it to split a comparison table by column."""
+    joined: "1.5 TSI SE"); entity resolvers use it to split a comparison table by column.
+    ``row_headers`` holds every header of the rows the cell covers, as its text shows them,
+    and ``row_labels`` one label per covered row (that row's headers joined: "Kestrova
+    SE"), so a cell spanning two rows can go to each row's entity."""
 
     model_config = ConfigDict(frozen=True)
 
     row: int = Field(ge=0)
     col: int = Field(ge=0)
     row_headers: list[str] = Field(default_factory=list[str])
+    row_labels: list[str] = Field(default_factory=list[str])
     col_headers: list[str] = Field(default_factory=list[str])
     group: str | None = None
 
