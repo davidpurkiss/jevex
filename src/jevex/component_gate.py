@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
+from jevex.layout import section_text
 
 if TYPE_CHECKING:
     from jevex.interfaces import ComponentGate, ParsedDocument
@@ -57,10 +58,10 @@ class GateUnit:
 
     def state(self) -> dict[str, str]:
         """What Jev sees: ``content`` is the unit's text; ``section``, when there is one,
-        is its heading trail joined with " › "."""
+        is its heading trail (:func:`~jevex.layout.section_text`)."""
         state = {"content": self.text}
-        if self.heading_trail:
-            state["section"] = " › ".join(self.heading_trail)
+        if section := section_text(self.heading_trail):
+            state["section"] = section
         return state
 
 

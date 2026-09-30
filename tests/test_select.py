@@ -8,7 +8,7 @@ from jevex import Context, Document, DomLocation, Field, SchemaSpec, Statement
 from jevex.entities import EntityScope
 from jevex.interfaces import CandidateSelector, ParsedDocument
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
-from jevex.layout import Component
+from jevex.layout import MAX_SECTION_CHARS, Component
 from jevex.results import FieldMeta
 from jevex.select import (
     CandidateStage,
@@ -165,6 +165,17 @@ async def test_candidates_are_generated_for_fields_that_need_them() -> None:
         "9.1 s",
     ]
     assert ("s2", "fuel_type") not in run.candidates  # enums need no candidates
+
+
+def test_statement_state_caps_the_heading_trail() -> None:
+    state = statement_state(st("s1", "9.1 s", trail=["Kestrova", "word " * 1000, "Performance"]))
+    assert isinstance(state, dict)
+    assert state["statement"] == "9.1 s"
+    section = str(state["section"])
+    assert section.startswith("Kestrova › word word")
+    assert section.endswith("… › Performance")
+    assert len(section) <= MAX_SECTION_CHARS
+    assert statement_state(st("s2", "9.1 s")) == {"statement": "9.1 s"}
 
 
 # --- selection over candidates ---------------------------------------------------------
