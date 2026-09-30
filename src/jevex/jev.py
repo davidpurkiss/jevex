@@ -204,9 +204,12 @@ def _token_cost(tokens: int) -> float:
 
 
 def _spent() -> float:
-    """Spend the cap compares against: the shared ledger's Jev total, else this process's."""
+    """Spend the cap compares against: the shared ledger's Jev total, but never less than
+    this process's own (so a ledger can only tighten the cap)."""
     ledger = ledger_path()
-    return _process_cost if ledger is None else ledger_total(ledger, "jev", JevError)
+    if ledger is None:
+        return _process_cost
+    return max(_process_cost, ledger_total(ledger, "jev", JevError))
 
 
 def _charge(usd: float) -> None:
@@ -214,7 +217,7 @@ def _charge(usd: float) -> None:
     _process_cost += usd
     ledger = ledger_path()
     if ledger is not None:
-        ledger_add(ledger, "jev", usd)
+        ledger_add(ledger, "jev", usd, JevError)
 
 
 # --- Metering --------------------------------------------------------------------------

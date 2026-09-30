@@ -14,6 +14,7 @@ local file read, which is why these helpers are sync.
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Literal
@@ -30,31 +31,46 @@ def ledger_path() -> Path | None:
 
 
 def ledger_total(path: Path, kind: Kind, error: type[Exception]) -> float:
-    """USD of ``kind`` recorded in ``path`` by every process (0 if the file is missing).
+    """USD of ``kind`` recorded in ``path`` by every process (creating an empty ledger).
 
-    A line that doesn't parse raises ``error``: a cap that can't read its ledger mustn't
-    let calls through.
+    Raises ``error`` when the ledger can't be written or has a line that isn't a finite,
+    non-negative charge: a cap that can't keep its ledger mustn't let calls through, and
+    a check before each call is the last point where refusing costs nothing.
     """
     try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return 0.0
+        with path.open("a+", encoding="utf-8") as f:
+            f.seek(0)
+            text = f.read()
+    except OSError as exc:
+        raise error(f"can't use the {LEDGER_ENV} file {path}: {exc}") from exc
     total = 0.0
     for number, line in enumerate(text.splitlines(), start=1):
         parts = line.split()
         if not parts:
             continue
-        try:
-            name, usd = parts
-            amount = float(usd)
-        except ValueError:
-            raise error(f"{LEDGER_ENV} file {path} has a bad line {number}: {line!r}") from None
-        if name == kind:
+        amount = _charge(parts)
+        if amount is None:
+            raise error(f"{LEDGER_ENV} file {path} has a bad line {number}: {line!r}")
+        if parts[0] == kind:
             total += amount
     return total
 
 
-def ledger_add(path: Path, kind: Kind, usd: float) -> None:
+def _charge(parts: list[str]) -> float | None:
+    """The USD of a ``<kind> <usd>`` line, or ``None`` unless it's finite and >= 0."""
+    if len(parts) != 2:
+        return None
+    try:
+        amount = float(parts[1])
+    except ValueError:
+        return None
+    return amount if math.isfinite(amount) and amount >= 0 else None
+
+
+def ledger_add(path: Path, kind: Kind, usd: float, error: type[Exception]) -> None:
     """Append one charge to the ledger."""
-    with path.open("a", encoding="utf-8") as f:
-        f.write(f"{kind} {usd:.9f}\n")
+    try:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"{kind} {usd:.9f}\n")
+    except OSError as exc:
+        raise error(f"can't write to the {LEDGER_ENV} file {path}: {exc}") from exc

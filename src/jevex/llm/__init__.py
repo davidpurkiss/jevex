@@ -130,7 +130,9 @@ def check_budget() -> None:
     except ValueError:
         raise LLMError(f"{MAX_COST_ENV} must be a number of US dollars, got {raw!r}") from None
     ledger = ledger_path()
-    spent = _process_cost if ledger is None else ledger_total(ledger, "llm", LLMError)
+    spent = _process_cost
+    if ledger is not None:  # the ledger can only tighten the cap
+        spent = max(spent, ledger_total(ledger, "llm", LLMError))
     if spent >= cap:
         raise LLMBudgetExceededError(
             f"LLM spend cap reached: ${spent:.4f} of ${cap:.2f} ({MAX_COST_ENV})"
@@ -142,7 +144,7 @@ def record(usage: LLMUsage) -> None:
     _process_cost += usage.cost or 0.0
     ledger = ledger_path()
     if ledger is not None and usage.cost:
-        ledger_add(ledger, "llm", usage.cost)
+        ledger_add(ledger, "llm", usage.cost, LLMError)
 
 
 def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:
