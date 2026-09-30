@@ -18,9 +18,9 @@ about 500 MB of layout and table models from Hugging Face the first time it runs
 Without it, PDFs skip layout, with a `layout_skipped` event saying so.
 
 The document gate reads a PDF's text layer page by page, without Docling's models. A
-schema with `SchemaConfig(gate_unit="page")` is asked about each page, and layout then
-converts only the pages some schema passed (plus any page with no text layer, such as a
-scan), so a 40-page brochure only lays out its spec pages:
+schema with `SchemaConfig(gate_unit="page")` is asked about each page. When every active
+schema is gated by page, layout converts only the pages some schema passed (plus any page
+with no text layer, such as a scan), so a 40-page brochure only lays out its spec pages:
 
 ```python
 class VehicleSpec(BaseModel):
