@@ -239,7 +239,8 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool) -> list[_Group]:
         axes = [[(sid, ref.col_headers) for sid, ref in both]]
         if rows:
             # A row's headers are levels ("Kestrova" spanning "SE" and "SE L"), joined into
-            # one label as stacked column headers are; a column label per covered column.
+            # one label as stacked column headers are. A data cell spanning rows gets its
+            # rows' headers joined too (TableCellRef keeps no per-row split; #150).
             axes.append([(sid, [" ".join(ref.row_headers)]) for sid, ref in both])
         for axis in axes:
             claims: dict[str, set[str]] = {}
