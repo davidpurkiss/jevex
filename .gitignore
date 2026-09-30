@@ -4,3 +4,6 @@ __pycache__/
 *.egg-info/
 .env
 testsite/build/
+
+# Real documents kept for local testing only (never committed; see #55, #61)
+benchmarks/corpora/local/
