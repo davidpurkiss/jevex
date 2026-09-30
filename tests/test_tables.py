@@ -232,3 +232,32 @@ def test_a_data_cell_spanning_rows_takes_each_rows_header() -> None:
 def test_a_table_of_only_headers_keeps_its_content_as_rows() -> None:
     t = html_table("<tr><th>Engine</th><th>1.5 TSI</th></tr><tr><th>Power</th><th>150 PS</th></tr>")
     assert texts(t) == ["Engine | 1.5 TSI", "Power | 150 PS"]
+
+
+def test_bands_without_colspan_next_to_the_header_row_are_groups() -> None:
+    t = html_table(
+        "<thead><tr><th></th><th>SE</th><th>GT</th></tr></thead>"
+        "<tr><th>Performance</th></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td></tr>"
+        "<tr><th>Economy</th></tr>"
+        "<tr><th>MPG</th><td>50</td><td>45</td></tr>"
+    )
+    assert texts(t) == [
+        "Performance › Power · SE: 150",
+        "Performance › Power · GT: 200",
+        "Economy › MPG · SE: 50",
+        "Economy › MPG · GT: 45",
+    ]
+    above = html_table(
+        "<tr><th>Technical data</th></tr><tr><th></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td></tr>"
+    )
+    assert texts(above) == ["Technical data › Power · SE: 150", "Technical data › Power · GT: 200"]
+
+
+def test_a_one_trim_tables_repeated_header_row_stays_a_header() -> None:
+    t = html_table(
+        "<tr><th></th><th>SE</th></tr><tr><th>Power</th><td>150</td></tr>"
+        "<tr><th></th><th>SE</th></tr><tr><th>Torque</th><td>250</td></tr>"
+    )
+    assert texts(t) == ["Power · SE: 150", "Torque · SE: 250"]

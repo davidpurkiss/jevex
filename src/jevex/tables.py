@@ -74,8 +74,9 @@ def table_statements(table: Component) -> list[Statement]:
                     out.setdefault(col, []).append(_clean(c.text))
         return out
 
-    # Header rows: the leading rows made only of header cells. A full-width band among
-    # them ("Technical data") is a group for the body, not a column header.
+    # Header rows: the leading rows made only of header cells. A band among them
+    # ("Technical data" above the header row, "Performance" just below it) is a group for
+    # the body, not a column header.
     group: str | None = None
     leading: list[int] = []
     header_rows: list[int] = []
@@ -112,7 +113,7 @@ def table_statements(table: Component) -> list[Statement]:
     for r in body:
         row = sorted(rows[r], key=lambda c: c.col)
         if header_only(r):
-            if len(row) == 1:
+            if _is_band(row, width):
                 group = _clean(row[0].text)  # a band ("Performance")
             else:
                 col_headers = headers_of([r])  # a header row repeated mid-table
@@ -153,8 +154,10 @@ def table_statements(table: Component) -> list[Statement]:
 
 
 def _is_band(row: list[TableCell], width: int) -> bool:
-    """A group header: one header cell spanning the whole table ("Performance")."""
-    return len(row) == 1 and row[0].header and row[0].col == 0 and row[0].col_span >= width > 1
+    """A group header: one header cell alone at the start of its row ("Performance"),
+    spanning the table or not. A lone cell further right is a column header instead (a
+    one-trim table's repeated header row, whose empty corner cell was dropped)."""
+    return len(row) == 1 and row[0].header and row[0].col == 0 and width > 1
 
 
 def _render(group: str | None, rows: list[str], cols: list[str], value: str) -> str:
