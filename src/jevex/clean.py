@@ -69,7 +69,7 @@ STATE_PATTERN = re.compile(
 """Marks a plain ``<script>`` that embeds app state, which the structured-data stage reads."""
 
 PROTECTED_TAGS = frozenset({"html", "head", "body", "main", "article"})
-"""Never removed by role or pattern: sites put consent flags on ``<body class=...>``."""
+"""Never removed by role, class or pattern: sites put consent flags on ``<body class=...>``."""
 
 # Elements with no end tag; they never go on the open-element stack.
 _VOID_TAGS = frozenset(
