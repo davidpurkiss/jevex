@@ -17,10 +17,10 @@ field missing from it wasn't offered.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from jevex._tasks import gather
 from jevex.jev import Choice, ChoiceAnswer, UnexpectedAnswerError
 from jevex.select import statement_state
 
@@ -78,7 +78,7 @@ class JevStatementClassifier:
                     )
                 out.setdefault(name, {})[item.statement.id] = answer
 
-        await asyncio.gather(*(one(item) for item in items))
+        await gather(one(item) for item in items)
         return out
 
 

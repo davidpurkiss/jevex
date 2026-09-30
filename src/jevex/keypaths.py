@@ -211,8 +211,15 @@ class KeyPathMapper:
         self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
 
     async def extract(
-        self, document: Document, schemas: list[SchemaSpec], jev: JevClient
+        self,
+        document: Document,
+        schemas: list[SchemaSpec],
+        jev: JevClient,
+        *,
+        store: Store | None = None,
     ) -> StructuredResult:
+        """``store`` (the extractor's) is used when the mapper wasn't given one."""
+        store = self.store if self.store is not None else store
         data = self.reader.read(document)
         events: list[tuple[str, str]] = []
         blobs = data.blobs
@@ -230,7 +237,7 @@ class KeyPathMapper:
         for flat in flats:
             first.setdefault(flat.fingerprint, flat)
         resolved = await asyncio.gather(
-            *(self._mappings(flat, schemas, jev, events) for flat in first.values())
+            *(self._mappings(flat, schemas, jev, events, store) for flat in first.values())
         )
         mappings = dict(zip(first, resolved, strict=True))
         per_blob = await asyncio.gather(
@@ -289,6 +296,7 @@ class KeyPathMapper:
         schemas: list[SchemaSpec],
         jev: JevClient,
         events: list[tuple[str, str]],
+        store: Store | None,
     ) -> dict[str, dict[str, str | None]]:
         """Per schema: collapsed path → field name (or None) for every path known."""
         fingerprint = flat.fingerprint
@@ -300,7 +308,7 @@ class KeyPathMapper:
             # A mapping to a field the schema no longer has counts as unknown: re-ask it.
             mine = {
                 path: name
-                for path, name in (await self._known(fingerprint, schema.name)).items()
+                for path, name in (await self._known(fingerprint, schema.name, store)).items()
                 if name is None or name in fields
             }
             known[schema.name] = mine
@@ -328,24 +336,30 @@ class KeyPathMapper:
                 if answer.confidence < self.accept_at:
                     continue
                 learned[shape] = None if answer.choice == NONE_OPTION else answer.choice
-            await self._remember(fingerprint, schema_name, learned)
+            await self._remember(fingerprint, schema_name, learned, store)
             known[schema_name] |= learned
         return known
 
-    async def _known(self, fingerprint: str, schema: str) -> dict[str, str | None]:
-        if self.store is None:
+    async def _known(
+        self, fingerprint: str, schema: str, store: Store | None
+    ) -> dict[str, str | None]:
+        if store is None:
             key = (fingerprint, schema)
             if key in self._memory:
                 self._memory.move_to_end(key)
             return dict(self._memory.get(key, {}))
-        return {m.path: m.field for m in await self.store.key_mappings(fingerprint, schema=schema)}
+        return {m.path: m.field for m in await store.key_mappings(fingerprint, schema=schema)}
 
     async def _remember(
-        self, fingerprint: str, schema: str, learned: dict[str, str | None]
+        self,
+        fingerprint: str,
+        schema: str,
+        learned: dict[str, str | None],
+        store: Store | None,
     ) -> None:
         if not learned:
             return
-        if self.store is None:
+        if store is None:
             key = (fingerprint, schema)
             self._memory.setdefault(key, {}).update(learned)
             self._memory.move_to_end(key)
@@ -353,7 +367,7 @@ class KeyPathMapper:
                 self._memory.popitem(last=False)
             return
         for path, name in learned.items():
-            await self.store.put_key_mapping(
+            await store.put_key_mapping(
                 KeyMapping(fingerprint=fingerprint, schema=schema, path=path, field=name)
             )
 
@@ -585,7 +599,9 @@ class StructuredStage:
         runs = ctx.active
         if not runs:
             return
-        result = await self.extractor.extract(ctx.document, [r.spec for r in runs], ctx.jev)
+        result = await self.extractor.extract(
+            ctx.document, [r.spec for r in runs], ctx.jev, store=ctx.store
+        )
         ctx.structured.extend(result.statements)
         for kind, message in result.events:
             ctx.event(self.name, kind, message)

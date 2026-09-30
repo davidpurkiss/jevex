@@ -11,14 +11,16 @@ questions go out together.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from jevex._tasks import gather
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Sequence
 
+    from jevex.budgets import DocumentBudget
     from jevex.document import Document
     from jevex.entities import EntityScope
     from jevex.interfaces import GateDecision, ParsedDocument, Selection
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from jevex.results import FieldMeta
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Statement
+    from jevex.store import Store
 
 
 @runtime_checkable
@@ -117,6 +120,12 @@ class Context:
     timings: dict[str, float] = field(default_factory=dict[str, float])
     events: list[Event] = field(default_factory=list[Event])
     stopped: bool = False
+    budget: DocumentBudget | None = None
+    store: Store | None = None
+    """The extractor's store (learned state: key mappings, generators...), ``None`` without
+    one. Stages that learn read and write it here."""
+    """The document's budgets; LLM calls go through ``budget.call_llm`` (see
+    :mod:`jevex.budgets`). ``None`` outside an extractor, meaning unlimited."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
@@ -142,13 +151,16 @@ class Context:
 async def for_each_scope[T](
     ctx: Context, fn: Callable[[SchemaRun, EntityScope], Awaitable[T]]
 ) -> list[T]:
-    """Run ``fn`` for every entity scope of every active schema, concurrently."""
-    return await asyncio.gather(*(fn(run, scope) for run in ctx.active for scope in run.scopes))
+    """Run ``fn`` for every entity scope of every active schema, concurrently.
+
+    The first failure cancels the other calls before it propagates.
+    """
+    return await gather(fn(run, scope) for run in ctx.active for scope in run.scopes)
 
 
 async def for_each_schema[T](ctx: Context, fn: Callable[[SchemaRun], Awaitable[T]]) -> list[T]:
-    """Run ``fn`` for every active schema, concurrently."""
-    return await asyncio.gather(*(fn(run) for run in ctx.active))
+    """Run ``fn`` for every active schema, concurrently (a failure cancels the rest)."""
+    return await gather(fn(run) for run in ctx.active)
 
 
 class Pipeline:

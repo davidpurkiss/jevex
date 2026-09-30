@@ -292,6 +292,21 @@ async def test_try_spend_max_count_is_a_rate_limit(store: Store) -> None:
     assert await store.try_spend(charge(0.0, at=later), max_count=3, since=later, kind="llm")
 
 
+async def test_llm_call_entries_count_calls_but_add_no_spend(store: Store) -> None:
+    await store.record_spend(charge(1.25, kind="llm", at=T0))
+    for _ in range(2):
+        assert await store.try_spend(
+            SpendEntry(amount_usd=0, kind="llm_call", at=T0), max_count=2, since=T0, kind="llm_call"
+        )
+    assert not await store.try_spend(
+        SpendEntry(amount_usd=0, kind="llm_call", at=T0), max_count=2, since=T0, kind="llm_call"
+    )
+    assert await store.spend() == pytest.approx(1.25)
+    assert await store.spend(kind="llm_call") == 0.0
+    # llm_call rows don't count against an llm rate or spend limit.
+    assert await store.try_spend(charge(0.0, kind="llm", at=T0), max_count=2, since=T0, kind="llm")
+
+
 async def test_try_spend_rejects_bad_limits(store: Store) -> None:
     for cap in (-1.0, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="cap_usd"):

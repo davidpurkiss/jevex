@@ -30,6 +30,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 
 | Module | What lives there |
 | --- | --- |
+| `budgets.py` | `Budgets`/`DocBudget`/`RunBudget`; `RunLedger` (run budget + the store's spend ledger, owned by the `Extractor`, usable without a document); `DocumentBudget` on `ctx.budget`: every LLM call in a stage goes through `ctx.budget.call_llm(...)` (returns `None` when a budget says no). `Extractor(budgets=, store=, run_id=)` |
 | `categorise.py` | Statement categorisation (stage 10): `JevStatementClassifier` (one request per statement with one Choice per schema, options limited to the fields the component gate passed; items are `ToClassify`), `CategoriseStage` (answers with full distributions on `SchemaRun.categories`). `select.field_statements` routes the top field plus any other at p ≥ `ALSO_CATEGORY_P` |
 | `document.py` | `Document` (bytes + content type; base64 in JSON), content sniffing |
 | `keypaths.py` | Structured-data stage (stage 4): `flatten` (key paths, collapsed shapes, entity candidates), fingerprints, `KeyPathMapper` (store lookup; one batched Choice per blob and schema on a miss; stores confident answers incl. "none"; enum/bool values Jev can't read directly are asked as the field's own question), `StructuredStage` (values on the default entity, `method="structured"`) |
@@ -56,7 +57,9 @@ How the parts fit together:
 - A pluggable part (for example a `Cleaner`) is a narrow protocol. A stage adapter wraps
   it, and the default adapter gets added to `DEFAULT_STAGES` in spec order.
 - Within a stage, fan out with `for_each_scope`/`for_each_schema`, and put every question
-  about one state into a single `ctx.jev.ask(...)` call.
+  about one state into a single `ctx.jev.ask(...)` call. For other fan-outs use
+  `jevex._tasks.gather`, not `asyncio.gather`: a failure cancels the siblings, so no
+  branch is still running (and spending) after the document's result is built.
 - A default stage's `name` must be one of `extractor.STAGE_ORDER` (the spec's order). Add
   it to `DEFAULT_STAGES` in any position; `default_pipeline()` sorts it into place.
 - Stages record what they find with `run.set_field(scope, field, FieldMeta(...))`

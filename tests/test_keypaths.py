@@ -500,3 +500,22 @@ async def test_list_enums_are_asked_one_noul_per_option_and_prefixes_are_strippe
     assert members.questions == {
         f"member{i}": spec.member_question(o) for i, o in enumerate(["petrol", "diesel", "ev"])
     }
+
+
+async def test_the_extractors_store_keeps_mappings_across_extractors(tmp_path: Path) -> None:
+    from jevex import Extractor, Pipeline
+
+    url = f"sqlite:///{tmp_path / 'jevex.db'}"
+    async with Extractor(
+        [Car], jev=mapping_jev().client(), pipeline=Pipeline([StructuredStage()]), store=url
+    ) as first:
+        result = await first.extract(page(CAR))
+    assert result.values["Car"]["document"]["model"] == "Golf"
+
+    fresh = FakeJev(strict=True)  # a new process: only the store remembers
+    async with Extractor(
+        [Car], jev=fresh.client(), pipeline=Pipeline([StructuredStage()]), store=url
+    ) as second:
+        result = await second.extract(page({**CAR, "model": "Polo"}))
+    assert fresh.calls == []
+    assert result.values["Car"]["document"]["model"] == "Polo"

@@ -19,11 +19,11 @@ classifier which fields a component can state.
 
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 
 if TYPE_CHECKING:
@@ -278,7 +278,7 @@ class NoulComponentGate:
                     schema, group, _ = questions[key]
                     out[schema][group].extend(unit.component_ids)
 
-        await asyncio.gather(*(ask(u) for u in units))
+        await gather(ask(u) for u in units)
         order = {c.id: i for i, c in enumerate(parsed.root.walk())}
         for groups in out.values():
             for group, ids in groups.items():

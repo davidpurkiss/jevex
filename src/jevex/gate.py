@@ -17,12 +17,12 @@ stay active, with a ``gate_skipped`` event.
 
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from jevex._tasks import gather
 from jevex.clean import html_text_of
 from jevex.interfaces import GateDecision
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
@@ -103,9 +103,9 @@ class NoulDocumentGate:
         by_page = [s for s in schemas if s.config.gate_unit == "page" and text.pages is not None]
         whole = [s for s in schemas if s not in by_page]
         pages = {i: page for i, page in enumerate(text.pages or (), start=1) if page.strip()}
-        whole_p, page_ps = await asyncio.gather(
-            self._ask(text.text, whole, jev),
-            asyncio.gather(*(self._ask(page, by_page, jev) for page in pages.values())),
+        whole_p, *page_ps = await gather(
+            [self._ask(text.text, whole, jev)]
+            + [self._ask(page, by_page, jev) for page in pages.values()]
         )
         decisions = {
             name: GateDecision(p=p, passed=p >= self.threshold) for name, p in whole_p.items()

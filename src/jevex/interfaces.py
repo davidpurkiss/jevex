@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
     from jevex.keypaths import StructuredResult
     from jevex.schema import FieldSpec, SchemaSpec
+    from jevex.store import Store
 
 
 class ParsedDocument(BaseModel):
@@ -171,8 +172,15 @@ class StructuredExtractor(Protocol):
     """Reads embedded data: ``structured`` statements plus the field values they give."""
 
     async def extract(
-        self, document: Document, schemas: list[SchemaSpec], jev: JevClient
-    ) -> StructuredResult: ...
+        self,
+        document: Document,
+        schemas: list[SchemaSpec],
+        jev: JevClient,
+        *,
+        store: Store | None = None,
+    ) -> StructuredResult:
+        """``store`` is the extractor's learned state (``None`` without one)."""
+        ...
 
 
 @runtime_checkable
