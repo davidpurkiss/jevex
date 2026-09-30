@@ -789,8 +789,9 @@ def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[Ta
 
     Many sites build tables from ``td`` alone and set their labels in bold. A bold cell
     counts as a header in the leading rows made only of headers and bold cells (unless
-    every row is, as in a table set all in bold), or in the first column when that
-    column's cells below the header rows all are. A bold value elsewhere (a total, a
+    every row is, as in a table set all in bold, or the table is two columns of labels
+    and values), or in the first column when that column's cells below the header rows
+    all are. A bold value elsewhere (a total, a
     highlighted price) stays data.
     """
 
@@ -806,6 +807,10 @@ def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[Ta
             break
         header_rows.add(r)
     else:
+        header_rows = set()
+    width = max(c.col + c.col_span for c in cells)
+    if width == 2 and all(labelled(c) for c in cells if c.col == 0):
+        # Labels and values: a bold first value ("Engine | 1.5 TSI") isn't a column header.
         header_rows = set()
     first_column = [c for c in cells if c.col == 0 and c.row not in header_rows]
     column = bool(first_column) and all(labelled(c) for c in first_column)

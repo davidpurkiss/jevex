@@ -407,6 +407,13 @@ def test_bold_labels_need_a_consistent_first_column() -> None:
     ) == {(0, 0): True, (0, 1): True, (1, 0): False, (1, 1): False, (2, 0): True, (2, 1): False}
 
 
+def test_a_bold_first_value_in_a_label_value_table_is_data() -> None:
+    assert headers(
+        "<tr><td><b>Engine</b></td><td><b>1.5 TSI</b></td></tr>"
+        "<tr><td><b>Power</b></td><td>150</td></tr>"
+    ) == {(0, 0): True, (0, 1): False, (1, 0): True, (1, 1): False}
+
+
 def test_a_table_set_all_in_bold_keeps_its_values_as_data() -> None:
     assert headers(
         "<tr><td><b>Engine</b></td><td><b>1.5 TSI</b></td></tr>"
