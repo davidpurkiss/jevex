@@ -71,8 +71,8 @@ class _Group:
     """Entities one structural rule proposes: a table's columns, or a run of siblings.
 
     ``rule`` is its priority (0 table headers, 1 repeated siblings, 2 headed sections)
-    and ``depth`` how deep it sits, so a statement two groups claim goes to the table
-    first, then to the outermost group.
+    and ``depth`` how deep it sits: a statement two groups claim goes to the innermost,
+    then to the higher priority.
     """
 
     rule: int
@@ -100,9 +100,9 @@ class MultiEntity:
 
     Boundary detection, in the spec's priority order:
 
-    1. **Table headers:** in a table whose cells have row headers (what each row states)
-       and two or more column labels, each column label is an entity, holding the cells
-       below it. A cell spanning columns goes to each.
+    1. **Table headers:** in a table whose cells have both row and column headers, each
+       column label is proposed as an entity, holding the cells below it (a cell spanning
+       columns goes to each), and so is each row label, holding its row's cells.
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
        first heading (or first text).
@@ -110,22 +110,28 @@ class MultiEntity:
        "SE L"), each with its subtree.
 
     Structure alone can't tell trims from topics ("Performance" and "Dimensions" sections
-    look just like "SE" and "SE L" ones), so unless ``confirm`` is off, each proposed
-    label is checked with one Noul (:meth:`~jevex.schema.SchemaSpec.boundary_question`),
-    a group's labels in one request. Labels at ``boundary_p`` or above are entities; the
-    same label in two places (the "SE" column of two tables) is one entity. When two
-    groups claim a statement, the table wins, then the outermost group.
+    look just like "SE" and "SE L" ones, and a table's rows are as likely to be trims as
+    its columns), so each proposed label is checked with one Noul
+    (:meth:`~jevex.schema.SchemaSpec.boundary_question`), a group's labels in one
+    request. Labels at ``boundary_p`` or above are entities; the same label in two places
+    (the "SE" column of two tables) is one entity. With ``confirm=False`` nothing is
+    asked and every proposed label is an entity, except table rows (only columns are
+    proposed): use it only for pages whose structure is known to be one entity per
+    group, since otherwise topic sections split the record.
+
+    When accepted groups overlap, a statement goes to the innermost (listing cards under
+    a trim heading are each an entity; a table's columns beat the section around it),
+    then to the higher priority above (a table's columns beat its rows). A label left
+    with nothing but its own heading is dropped.
 
     With two or more entities, every statement no boundary claimed is asked one Choice
     (:meth:`~jevex.schema.SchemaSpec.entity_question`): which entity it applies to, or
     "all of them". Those go on every scope's ``shared_statement_ids``: a value found only
     in them is copied into each record with ``meta.shared`` set. Past 254 entities there
-    are too many options for a Choice, so those statements are left out. With fewer than
-    two entities, the document is one entity labelled ``label``, as with
-    :class:`SingleEntity`, and nothing more is asked.
-
-    A table keyed by rows (a trim per row) isn't split: nothing in its structure says
-    whether its rows or its columns are the entities.
+    are too many options for a Choice, so those statements are left out (the entity stage
+    reports them as ``unassigned_statements``). With fewer than two entities, the
+    document is one entity labelled ``label``, as with :class:`SingleEntity`, and nothing
+    more is asked.
     """
 
     confirm: bool = True
@@ -139,18 +145,19 @@ class MultiEntity:
     async def resolve(
         self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
     ) -> list[EntityScope]:
-        groups = [*_table_groups(parsed), *_component_groups(parsed)]
+        groups = [*_table_groups(parsed, rows=self.confirm), *_component_groups(parsed)]
         accepted = await self._accepted(groups, schema, jev)
-        # Tables first, then the outermost group (a card's own sections don't split it).
-        # A statement goes to every label of the first group claiming it: a table cell
-        # spanning two columns is on both.
-        ranked = sorted(accepted, key=lambda a: (a[0].rule > 0, a[0].depth, a[0].rule))
+        # The innermost group first, then the higher priority. A statement goes to every
+        # label of the first group claiming it: a table cell spanning two columns is on
+        # both.
+        ranked = sorted(accepted, key=lambda a: (-a[0].depth, a[0].rule))
         owners: dict[str, list[str]] = {}
         winner: dict[str, _Group] = {}
         for group, label, ids in ranked:
             for sid in ids:
                 if winner.setdefault(sid, group) is group and label not in owners.get(sid, []):
                     owners.setdefault(sid, []).append(label)
+        _drop_bare_headings(parsed, owners)
         in_tree = {c.id for c in parsed.root.walk()}
         statements = [s for s in parsed.statements.values() if s.component_id in in_tree]
         labels = list(dict.fromkeys(label for s in statements for label in owners.get(s.id, [])))
@@ -206,7 +213,7 @@ class MultiEntity:
             return statement.id, answer.choice
 
         shared: set[str] = set()
-        for sid, choice in await gather(ask(s) for s in ambiguous if s.kind != "structured"):
+        for sid, choice in await gather(ask(s) for s in ambiguous):
             if choice == ALL_OPTION:
                 shared.add(sid)
             else:
@@ -214,8 +221,9 @@ class MultiEntity:
         return shared
 
 
-def _table_groups(parsed: ParsedDocument) -> list[_Group]:
-    """One group per table whose cells have row headers and two or more column labels."""
+def _table_groups(parsed: ParsedDocument, *, rows: bool) -> list[_Group]:
+    """Per table whose cells have row and column headers: its column labels as one group,
+    and (with ``rows``) its row labels as another, each when there are two or more."""
     depths = _depths(parsed.root)
     by_table: dict[str, list[Statement]] = {}
     for s in parsed.statements.values():
@@ -223,20 +231,24 @@ def _table_groups(parsed: ParsedDocument) -> list[_Group]:
             by_table.setdefault(s.component_id, []).append(s)
     groups: list[_Group] = []
     for table_id, cells in by_table.items():
-        claims: dict[str, set[str]] = {}
-        for cell in cells:
-            ref = cell.table
-            assert ref is not None
-            if not ref.row_headers:
+        # Only cells with headers on both axes: a header on one axis alone says what the
+        # cell states (a key/value table), not which entity it's about.
+        refs = [(c.id, c.table) for c in cells if c.table is not None]
+        both = [(sid, ref) for sid, ref in refs if ref.row_headers and ref.col_headers]
+        axes = [[(sid, ref.col_headers) for sid, ref in both]]
+        if rows:
+            axes.append([(sid, ref.row_headers) for sid, ref in both])
+        for axis in axes:
+            claims: dict[str, set[str]] = {}
+            for sid, headers in axis:
+                for header in headers:
+                    if label := _short(header):
+                        claims.setdefault(label, set()).add(sid)
+            if len(claims) < 2:
                 continue
-            for header in ref.col_headers:
-                if label := _short(header):
-                    claims.setdefault(label, set()).add(cell.id)
-        if len(claims) < 2:
-            continue
-        labels = _unique(list(claims))
-        members = [(u, frozenset(ids)) for u, ids in zip(labels, claims.values(), strict=True)]
-        groups.append(_Group(0, depths[table_id], list(cells[0].heading_trail), members))
+            unique = _unique(list(claims))
+            members = [(u, frozenset(ids)) for u, ids in zip(unique, claims.values(), strict=True)]
+            groups.append(_Group(0, depths[table_id], list(cells[0].heading_trail), members))
     return groups
 
 
@@ -260,20 +272,18 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
             groups.append(_Group(rule, depth, list(members[0].heading_trail), members_))
 
     def visit(parent: Component, depth: int) -> None:
-        # Headed sections are one group, whatever their shapes; the other siblings are
-        # grouped by shape, so no label is asked about twice.
-        headed = [c for c in parent.children if _is_headed(c)]
-        if len(headed) < 2:
-            headed = []
-        taken = {c.id for c in headed}
         shapes: dict[tuple[str, tuple[str, ...]], list[Component]] = {}
         for child in parent.children:
-            if child.id not in taken and child.type in _CONTAINERS and len(child.children) >= 2:
+            if child.type in _CONTAINERS and len(child.children) >= 2:
                 shapes.setdefault(_shape(child), []).append(child)
-        for same in shapes.values():
-            if len(same) >= 2:
-                group(1, depth + 1, same)
-        if headed:
+        runs = [same for same in shapes.values() if len(same) >= 2]
+        for same in runs:
+            group(1, depth + 1, same)
+        # Headed sections of different shapes ("SE" with one paragraph, "SE L" with two).
+        # When they're all one shape, the run above already asks about them.
+        headed = [c for c in parent.children if _is_headed(c)]
+        ids = {c.id for c in headed}
+        if len(headed) >= 2 and not any(ids <= {c.id for c in same} for same in runs):
             group(2, depth + 1, headed)
         for child in parent.children:
             visit(child, depth + 1)
@@ -309,6 +319,22 @@ def _scopes(
         )
         for label, ids in by_label.items()
     ]
+
+
+def _drop_bare_headings(parsed: ParsedDocument, owners: dict[str, list[str]]) -> None:
+    """Drop labels that own nothing but headings (a trim heading whose listing cards are
+    entities of their own), leaving those headings unclaimed."""
+    headings = {c.id for c in parsed.root.walk() if c.type == "heading"}
+    kept = {
+        label
+        for sid, labels in owners.items()
+        if parsed.statements[sid].component_id not in headings
+        for label in labels
+    }
+    for sid in list(owners):
+        owners[sid] = [label for label in owners[sid] if label in kept]
+        if not owners[sid]:
+            del owners[sid]
 
 
 def _depths(root: Component) -> dict[str, int]:
@@ -369,6 +395,9 @@ class EntityStage:
     (``ParsedDocument.restricted_to``), and scopes are filtered to them as well, so
     statements from irrelevant parts of the page never reach categorisation.
 
+    Statements the resolver left out of every scope are reported in an
+    ``unassigned_statements`` event.
+
     Without a parsed document (no layout stage ran), every schema gets one empty scope,
     labelled as the resolver would label a single entity, so structured-data-only
     pipelines still produce a record.
@@ -403,5 +432,26 @@ class EntityStage:
                     ]
             if not run.scopes:
                 ctx.event(self.name, "no_entities", f"{run.name}: the resolver found no entities")
+                return
+            if left := _unassigned(view, run.scopes):
+                ctx.event(
+                    self.name,
+                    "unassigned_statements",
+                    f"{run.name}: {len(left)} statement(s) belong to no entity",
+                    statement_ids=left,
+                )
 
         await for_each_schema(ctx, resolve)
+
+
+def _unassigned(parsed: ParsedDocument, scopes: list[EntityScope]) -> list[str]:
+    """Ids of statements in the tree that no scope holds (e.g. ``MultiEntity`` past the
+    Choice option limit)."""
+    components = {cid for scope in scopes for cid in scope.component_ids}
+    ids = {sid for s in scopes for sid in [*s.statement_ids, *s.shared_statement_ids]}
+    in_tree = {c.id for c in parsed.root.walk()}
+    return [
+        s.id
+        for s in parsed.statements.values()
+        if s.component_id in in_tree and s.component_id not in components and s.id not in ids
+    ]

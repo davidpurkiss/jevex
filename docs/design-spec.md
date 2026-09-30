@@ -129,7 +129,7 @@ One document can yield one record, many records, or a parent with children. The 
 | Resolver | Use when | How entities are found | Cost |
 | --- | --- | --- | --- |
 | `SingleEntity` | You know the page holds one record (a listing detail page) | The whole document is one entity | Lowest: no entity questions |
-| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Choice per ambiguous statement |
+| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, then one Choice per ambiguous statement |
 | `ParentChild` | You know the shape: a model page with variant children | Caller declares where children live (e.g. "table columns", a component type) | Low: statements go to parent or child |
 
 **MultiEntity boundary detection**, in priority order:
@@ -516,7 +516,7 @@ The project is `jevex`: Apache 2.0, Python 3.12+, Pydantic v2, fully typed (`py.
 | Evaluation | Harness with learning curves and a CI gate; synthetic test site |
 | Budgets | Per document and per run |
 | Name and license | jevex, Apache 2.0 |
-| Entity stage order (decided in #27) | Statements are split (stage 8) before entities are resolved (stage 9), so a resolver can assign single statements: a table's cells by column, or a sentence Jev says is about one trim. Splitting is CPU-only and already covered every component, so the swap costs nothing. `MultiEntity` also asks one Noul per proposed label ("Does "SE" name a separate vehicle spec?"), because structure alone can't tell trim sections from topic sections. |
+| Entity stage order (decided in #27) | Statements are split (stage 8) before entities are resolved (stage 9), so a resolver can assign single statements: a table's cells by column, or a sentence Jev says is about one trim. Splitting is CPU-only and already covered every component, so the swap costs nothing. `MultiEntity` also asks one Noul per proposed label ("Does "SE" name a separate vehicle spec?"), because structure alone can't tell trim sections from topic sections, or a table's trim columns from its trim rows. When accepted boundaries nest, the innermost wins (listing cards under a trim heading), and the priority order breaks ties at one level. |
 | Required fields (decided in #20) | Records are instances of a generated partial model: the same fields, all optional, keeping each field's constraints, `Annotated` validators and alias, but not model-level validators, computed fields or serializers, so a missing value never raises. It's a separate class with only the fields: `isinstance` against the user's model is false and the model's methods and properties aren't on it. `strict()` returns the real model, validating every found value, including any the type rejected. |
 
 ## Open questions

@@ -205,6 +205,7 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     fake = (
         FakeJev(strict=True)
         .noul(BOUNDARY, p=0.9)
+        .noul(BOUNDARY, p=0.1, state="Warranty")  # the row labels are rejected
         .choice(WHICH, ALL_OPTION)
         .choice(WHICH, "SE L", state="The SE L")
     )
@@ -224,12 +225,14 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     assert se.component_ids == []
     assert se_l.component_ids == [parsed.statements[se_l.statement_ids[0]].component_id]
 
-    boundary, *assigned = fake.calls
-    assert boundary.state == {"names": ["SE", "SE L"], "section": "Kestrova"}
-    assert boundary.questions == {
+    columns, rows, *assigned = fake.calls
+    assert columns.state == {"names": ["SE", "SE L"], "section": "Kestrova"}
+    assert columns.questions == {
         "label0": Noul(instructions='Does "SE" name a separate vehicle spec?'),
         "label1": Noul(instructions='Does "SE L" name a separate vehicle spec?'),
     }
+    # The rows could be the entities just as well; Jev decides.
+    assert rows.state == {"names": ["Power", "Warranty"], "section": "Kestrova"}
     # Every statement no boundary claimed is asked which entity it's about.
     assert [c.state for c in assigned] == [
         {"statement": "Kestrova"},
@@ -319,7 +322,7 @@ async def test_multi_entity_keeps_only_the_labels_jev_accepts() -> None:
     assert texts(parsed, se.shared_statement_ids) == ["Warranty", "3 years."]
 
 
-async def test_multi_entity_gives_nested_groups_to_the_table_then_the_outermost() -> None:
+async def test_multi_entity_gives_nested_groups_to_the_innermost() -> None:
     parsed = await parse(
         "<h2>SE</h2><h3>Engine</h3><p>150PS.</p><h3>Price</h3><p>£20,000.</p>"
         "<h2>SE L</h2><h3>Engine</h3><p>180PS.</p>"
@@ -327,17 +330,76 @@ async def test_multi_entity_gives_nested_groups_to_the_table_then_the_outermost(
         "<tr><th>0-62 mph</th><td>8.9 s</td><td>9.2 s</td></tr></table>"
         "<h3>Price</h3><p>£24,000.</p>"
     )
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9)
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .noul(BOUNDARY, p=0.1, state='"Engine"')  # topics, not trims
+    )
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     by_label = {s.label: texts(parsed, s.statement_ids) for s in scopes}
     assert by_label == {
-        # The inner "Engine" and "Price" sections were accepted too, but the outer won.
         "SE": ["SE", "Engine", "150PS.", "Price", "£20,000."],
         "SE L": ["SE L", "Engine", "180PS.", "Price", "£24,000."],
         # A table's columns win over the section around it.
         "Manual": ["0-62 mph · Manual: 8.9 s"],
         "Automatic": ["0-62 mph · Automatic: 9.2 s"],
     }
+
+
+async def test_multi_entity_splits_listing_cards_under_trim_headings() -> None:
+    card = "<article><h3>{}</h3><p>{}</p></article>"
+    parsed = await parse(
+        "<h2>SE</h2>"
+        + card.format("2019 SE, 40k miles", "£18,000")
+        + card.format("2021 SE, 12k miles", "£21,000")
+        + "<h2>SE L</h2>"
+        + card.format("2020 SE L, 30k miles", "£22,000")
+        + card.format("2022 SE L, 8k miles", "£26,000")
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Each card is a listing; "SE" and "SE L" are left with only their headings, so they
+    # aren't entities, and their headings are asked about like any other statement.
+    assert [s.label for s in scopes] == [
+        "2019 SE, 40k miles",
+        "2021 SE, 12k miles",
+        "2020 SE L, 30k miles",
+        "2022 SE L, 8k miles",
+    ]
+    assert [texts(parsed, s.statement_ids)[1] for s in scopes] == [
+        "£18,000",
+        "£21,000",
+        "£22,000",
+        "£26,000",
+    ]
+    assert texts(parsed, scopes[0].shared_statement_ids) == ["SE", "SE L"]
+
+
+ROW_KEYED = (
+    "<table><tr><th>Trim</th><th>Power</th><th>Price</th></tr>"
+    "<tr><th>SE</th><td>150PS</td><td>£20,000</td></tr>"
+    "<tr><th>SE L</th><td>180PS</td><td>£24,000</td></tr></table>"
+)
+
+
+async def test_multi_entity_lets_jev_pick_a_tables_rows_as_the_entities() -> None:
+    parsed = await parse(ROW_KEYED)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (se.label, se_l.label) == ("SE", "SE L")
+    assert texts(parsed, se_l.statement_ids) == [
+        "SE L · Power: 180PS",
+        "SE L · Price: £24,000",
+    ]
+
+
+async def test_multi_entity_without_confirm_splits_tables_by_column_only() -> None:
+    parsed = await parse(ROW_KEYED)
+    scopes = await MultiEntity(confirm=False).resolve(
+        parsed, VEHICLE, FakeJev(strict=True).client()
+    )
+    # Nothing tells a trim per row from a trim per column without asking.
+    assert [s.label for s in scopes] == ["Power", "Price"]
 
 
 async def test_multi_entity_without_confirm_asks_no_boundary_questions() -> None:
@@ -399,12 +461,14 @@ async def test_multi_entity_uses_the_schemas_entity_questions() -> None:
         FakeJev(strict=True)
         .noul("Is SE", p=0.9)
         .noul("Is SE L", p=0.9)
+        .noul("Is Power", p=0.1)
+        .noul("Is Warranty", p=0.1)
         .choice("Which trim is this about?", ALL_OPTION)
     )
     scopes = await MultiEntity().resolve(parsed, SchemaSpec.from_model(Trim), fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
     assert fake.calls[0].questions["label1"] == Noul(instructions="Is SE L a trim?")
-    options = fake.calls[1].questions["entity"]
+    options = fake.calls[2].questions["entity"]
     assert isinstance(options, Choice)
     assert options.options[ALL_OPTION] == "It applies to every trim"
 
@@ -415,12 +479,12 @@ async def test_entity_stage_gives_multi_entity_only_what_passed_the_component_ga
     c.parsed = parsed
     table = next(comp.id for comp in parsed.root.walk() if comp.type == "table")
     c.schemas["VehicleSpec"].component_ids = {"power_ps": [parsed.root.id, table]}
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
     c.jev = fake.client()
     await EntityStage(resolver=MultiEntity()).run(c)
     se, se_l = c.schemas["VehicleSpec"].scopes
     # The paragraphs were gated out, so no entity question is asked about them.
-    assert len(fake.calls) == 1
+    assert len(fake.calls) == 2  # the columns and the rows
     assert texts(parsed, se_l.statement_ids) == [
         "Power · SE L: 180PS",
         "Warranty · SE / SE L: 3 years",
@@ -489,3 +553,18 @@ async def test_shared_values_are_copied_into_each_record_and_own_values_win() ->
     assert not se.meta.automatic.shared
     assert not se_l.meta.doors.shared
     assert not se.meta.power_ps.shared
+
+
+async def test_entity_stage_reports_statements_no_scope_holds() -> None:
+    @dataclass
+    class OnlyPrice:
+        async def resolve(
+            self, parsed: ParsedDocument, schema: SchemaSpec, jev: object
+        ) -> list[EntityScope]:
+            return [EntityScope(label="price", component_ids=["c1"])]
+
+    c = ctx(Listing)
+    await EntityStage(resolver=OnlyPrice()).run(c)
+    [event] = c.events
+    assert (event.kind, event.data) == ("unassigned_statements", {"statement_ids": ["s2"]})
+    assert event.message == "Listing: 1 statement(s) belong to no entity"
