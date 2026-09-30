@@ -106,7 +106,9 @@ class Component(BaseModel):
     ``text`` is the component's own text: containers (sections, breakouts, lists) leave
     it empty and hold their content in ``children``. A table's text is its rows, one per
     line with cells joined by ``" | "``, and its cells are also given structured in
-    ``cells``.
+    ``cells``. An image's text is its alt text, and ``src`` its URL when it has one (for
+    HTML, resolved against the document's URL); the image stage adds the text found in it
+    as children.
     """
 
     id: str
@@ -116,6 +118,7 @@ class Component(BaseModel):
     heading_trail: list[str] = Field(default_factory=list[str])
     location: Location
     cells: list[TableCell] = Field(default_factory=list[TableCell])
+    src: str | None = None
 
     def walk(self) -> Iterator[Component]:
         """Yield this component and all descendants, depth first, in reading order."""

@@ -557,6 +557,33 @@ def test_images_carry_alt_text_and_tracking_pixels_are_dropped() -> None:
     assert path(root.children[1]) == "/html/body/p[2]/img"
 
 
+def test_images_carry_their_url_resolved_against_the_document() -> None:
+    root = parse_html(
+        "<img src=a.png alt=A>"
+        "<img src='data:image/gif;base64,R0lGOD' data-src='/img/lazy.jpg' alt=B>"
+        "<img srcset='wide.jpg 2x, narrow.jpg 1x' alt=C>"
+        "<img src='data:image/png;base64,iVBOR' alt=D>"
+        "<img src='https://cdn.example.net/e.png' alt=E>"
+        "<img alt=F>",
+        base_url="https://example.com/cars/golf.html",
+    )
+    assert [(c.text, c.src) for c in only(root, "image")] == [
+        ("A", "https://example.com/cars/a.png"),
+        ("B", "https://example.com/img/lazy.jpg"),
+        ("C", "https://example.com/cars/wide.jpg"),
+        ("D", "data:image/png;base64,iVBOR"),
+        ("E", "https://cdn.example.net/e.png"),
+        ("F", None),
+    ]
+    assert only(parse_html("<img src=a.png>"), "image")[0].src == "a.png"
+
+
+async def test_parser_resolves_image_urls_against_the_documents_url() -> None:
+    document = html("<img src=a.png>").model_copy(update={"url": "https://example.com/x/"})
+    root = await HtmlLayoutParser().parse(document)
+    assert [c.src for c in only(root, "image")] == ["https://example.com/x/a.png"]
+
+
 # --- DOM paths and recovery --------------------------------------------------------------
 
 

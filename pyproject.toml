@@ -45,8 +45,17 @@ openai = [
 litellm = [
     "litellm>=1.83.0",
 ]
+ocr = [
+    # RapidOCR ships its detection and recognition models in the wheel, so OCR works
+    # offline with nothing to download.
+    "onnxruntime>=1.20",
+    "pillow>=10.0",
+    "rapidocr>=3.9.2",
+]
 pdf = [
     "docling>=2.131.0",
+    # Renders pictures and scanned pages for the image stage (Docling uses it too).
+    "pypdfium2>=4.30",
     # Listed so uv can take them from the CPU index on Linux (see [tool.uv.sources]).
     "torch>=2.2.2",
     "torchvision>=0.17",
