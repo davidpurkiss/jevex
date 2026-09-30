@@ -2,31 +2,45 @@
 
 1. **Flatten** each blob (:class:`~jevex.structured.StructuredBlob`) into key-path
    statements, ``vehicle.engine.displacement: 1498``. Array indices appear in the path
-   (``offers[1].price``); arrays of objects are the blob's **entity candidates**
+   (``offers[1].price``), and keys holding ``.``, ``[`` or ``]`` are quoted
+   (``messages["cta.buy"]``). Arrays of objects are the blob's **entity candidates**
    (:attr:`FlatBlob.entities`).
-2. **Fingerprint** the blob's shape: a hash of its sorted key paths with indices collapsed
-   (``offers[].price``), so two pages from the same template share a fingerprint.
+2. **Fingerprint** the blob's shape: a hash of its source, its schema.org types and its
+   sorted key paths with indices collapsed (``offers[].price``), so two pages from the
+   same template share a fingerprint but a ``Brand`` and a ``Person`` node don't.
 3. **Look up** learned mappings for the fingerprint in the store. A hit is a pure lookup:
    no Jev call.
-4. **On a miss**, ask Jev one batched request per blob and schema: one Choice per unmapped
-   key path over the schema's fields plus "none", with the flattened blob as the state.
+4. **On a miss**, ask Jev about the unmapped key paths: one Choice per path and schema,
+   over the schema's fields plus "none", every schema's questions in one request. The
+   state shows a few example values per path (never the whole blob), chunked so each
+   state fits Jev's budget.
 5. **Store** confident answers (including "none", so a later hit needs no call) as
    :class:`~jevex.store.KeyMapping` records.
 
-Mapped values are normalised like any candidate (the chain comes from the built-in
-generators, which read "1,498 cc" or "£24,995" as they would in text) and recorded on the
-default entity with ``method="structured"``. Later stages don't overwrite them; whether
-the layout route runs at all is the structured mode's call (#31).
+Mapped values are normalised like any candidate: numbers, money and dates take the chain
+the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
+bool values that don't read directly are asked of Jev as the field's own question. They
+are recorded on the default entity with ``method="structured"``. Later stages don't
+overwrite them; whether the layout route runs at all is the structured mode's call (#31).
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from jevex.generators import GeneratorRegistry, default_registry
-from jevex.jev import Choice, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
+from jevex.jev import (
+    MAX_STATE_TOKENS,
+    ChoiceAnswer,
+    NoulAnswer,
+    UnexpectedAnswerError,
+    estimate_tokens,
+)
 from jevex.layout import DomLocation
 from jevex.normalise import NormaliseError, normalise
 from jevex.resolve import SINGLE_ENTITY_LABEL
@@ -34,12 +48,12 @@ from jevex.results import FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 from jevex.statements import Statement
 from jevex.store import KeyMapping
-from jevex.structured import EmbeddedDataReader, StructuredBlob
+from jevex.structured import EmbeddedDataReader, StructuredBlob, schema_type
 
 if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.interfaces import StructuredExtractor
-    from jevex.jev import JevClient
+    from jevex.jev import JevClient, Question
     from jevex.pipeline import Context
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.store import Store
@@ -51,17 +65,32 @@ MAX_PATHS = 300
 """Key paths asked about per blob; the rest are skipped (with an event)."""
 
 MAX_BLOBS = 20
-"""Blobs mapped per document, in reading order (JSON-LD first); a miss costs one Jev
-request per blob and schema, and pages can carry hundreds of ``data-*`` blobs."""
+"""Blobs mapped per document, in reading order (JSON-LD first); a miss costs Jev requests
+per blob, and pages can carry hundreds of ``data-*`` blobs."""
 
 MAX_VALUE_CHARS = 200
 """Values longer than this are cut in the state Jev sees (never in what is extracted)."""
 
+EXAMPLES_PER_PATH = 3
+"""Example values shown per key path in the state."""
+
+STATE_TOKEN_BUDGET = MAX_STATE_TOKENS // 4
+"""Estimated tokens per state; unknown paths beyond it go in further states. Kept well
+under Jev's limit because the longest question counts against it too."""
+
+MEMORY_SIZE = 1024
+"""Fingerprint × schema entries a store-less mapper remembers (least recently used go)."""
+
 _SKIP_KEYS = frozenset({"@context", "@id"})
+_QUOTE = frozenset(".[]")
 
 
 @dataclass(frozen=True)
 class Leaf:
+    """One scalar in a blob: where it sits and its value."""
+
+    index: int
+    """Position among the blob's leaves; statement ids are built from it."""
     path: str
     """With indices: ``offers[1].price``."""
     shape: str
@@ -71,6 +100,8 @@ class Leaf:
 
 @dataclass(frozen=True)
 class FlatBlob:
+    """A blob flattened into leaves, with its shape fingerprint and entity candidates."""
+
     blob: StructuredBlob
     index: int
     leaves: tuple[Leaf, ...]
@@ -80,7 +111,8 @@ class FlatBlob:
     @property
     def fingerprint(self) -> str:
         shapes = sorted({leaf.shape for leaf in self.leaves})
-        return hashlib.sha256("\n".join(shapes).encode()).hexdigest()[:16]
+        key = "\n".join([self.blob.source, ",".join(sorted(self.blob.types)), *shapes])
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def shapes(self) -> dict[str, list[Leaf]]:
         """Leaves grouped by collapsed path, in document order."""
@@ -88,6 +120,15 @@ class FlatBlob:
         for leaf in self.leaves:
             out.setdefault(leaf.shape, []).append(leaf)
         return out
+
+    def statement_id(self, leaf: Leaf) -> str:
+        return f"structured.{self.index}.{leaf.index}"
+
+
+def _key(parent: str, key: str) -> str:
+    if _QUOTE.intersection(key):
+        return f"{parent}[{json.dumps(key, ensure_ascii=False)}]"
+    return f"{parent}.{key}" if parent else key
 
 
 def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
@@ -101,9 +142,7 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
                 if key in _SKIP_KEYS:
                     continue
                 name = str(key)  # pyright: ignore[reportUnknownArgumentType]
-                walk(
-                    child, f"{path}.{name}" if path else name, f"{shape}.{name}" if shape else name
-                )
+                walk(child, _key(path, name), _key(shape, name))
         elif isinstance(value, list):
             items: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
             if any(isinstance(item, dict) for item in items) and f"{shape}[]" not in entities:
@@ -113,7 +152,7 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
         elif isinstance(value, str | int | float | bool) and not (
             isinstance(value, str) and not value.strip()
         ):
-            leaves.append(Leaf(path or "$", shape or "$", value))
+            leaves.append(Leaf(len(leaves), path or "$", shape or "$", value))
 
     walk(blob.data, "", "")
     return FlatBlob(blob, index, tuple(leaves), tuple(entities))
@@ -136,12 +175,16 @@ class StructuredResult:
     """``(kind, message)`` pairs for document meta."""
 
 
+def _mappable(schema: SchemaSpec) -> set[str]:
+    return {f.name for f in schema.fields if f.kind != "model"}
+
+
 class KeyPathMapper:
     """The default :class:`~jevex.interfaces.StructuredExtractor`.
 
     ``store`` persists mappings across documents and processes; without one, mappings
-    are remembered by this mapper for its lifetime only. ``registry`` supplies the
-    normaliser chains for values.
+    are remembered by this mapper (the :data:`MEMORY_SIZE` most recent fingerprints) for
+    its lifetime only. ``registry`` supplies the normaliser chains for values.
     """
 
     def __init__(
@@ -153,6 +196,8 @@ class KeyPathMapper:
         accept_at: float = ACCEPT_AT,
         max_paths: int = MAX_PATHS,
         max_blobs: int = MAX_BLOBS,
+        state_tokens: int = STATE_TOKEN_BUDGET,
+        memory_size: int = MEMORY_SIZE,
     ) -> None:
         self.store = store
         self.reader = reader or EmbeddedDataReader()
@@ -160,15 +205,15 @@ class KeyPathMapper:
         self.accept_at = accept_at
         self.max_paths = max_paths
         self.max_blobs = max_blobs
+        self.state_tokens = state_tokens
+        self.memory_size = memory_size
         # (fingerprint, schema) → path → field (None: no field). Used without a store.
-        self._memory: dict[tuple[str, str], dict[str, str | None]] = {}
+        self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
 
     async def extract(
         self, document: Document, schemas: list[SchemaSpec], jev: JevClient
     ) -> StructuredResult:
         data = self.reader.read(document)
-        statements: list[Statement] = []
-        fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
         events: list[tuple[str, str]] = []
         blobs = data.blobs
         if len(blobs) > self.max_blobs:
@@ -179,70 +224,120 @@ class KeyPathMapper:
                 )
             )
             blobs = blobs[: self.max_blobs]
-        for i, blob in enumerate(blobs):
-            flat = flatten(blob, i)
-            if not flat.leaves:
-                continue
-            ids = {leaf.path: f"structured.{i}.{n}" for n, leaf in enumerate(flat.leaves)}
+        flats = [f for i, b in enumerate(blobs) if (f := flatten(b, i)).leaves]
+        # Blobs from one template share a fingerprint: ask about it once per document.
+        first: dict[str, FlatBlob] = {}
+        for flat in flats:
+            first.setdefault(flat.fingerprint, flat)
+        resolved = await asyncio.gather(
+            *(self._mappings(flat, schemas, jev, events) for flat in first.values())
+        )
+        mappings = dict(zip(first, resolved, strict=True))
+        per_blob = await asyncio.gather(
+            *(
+                self._blob(flat, schemas, mappings[flat.fingerprint], document, jev)
+                for flat in flats
+            )
+        )
+        statements: list[Statement] = []
+        fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
+        for flat, found in zip(flats, per_blob, strict=True):
             statements.extend(
                 Statement(
-                    id=ids[leaf.path],
+                    id=flat.statement_id(leaf),
                     text=f"{leaf.path}: {_text(leaf.value)}",
                     kind="structured",
-                    component_id=f"structured.{i}",
-                    location=blob.location,
+                    component_id=f"structured.{flat.index}",
+                    location=flat.blob.location,
                 )
                 for leaf in flat.leaves
             )
-            for schema in schemas:
-                mapping = await self._mapping(flat, schema, jev, events)
-                for shape, leaves in flat.shapes().items():
-                    name = mapping.get(shape)
-                    if name is None or name in fields[schema.name]:
-                        continue
-                    meta = await self._meta(schema.field(name), leaves, ids, document, jev)
-                    if meta is not None:
-                        fields[schema.name][name] = meta
+            for schema_name, metas in found.items():
+                for name, meta in metas.items():
+                    _keep_best(fields[schema_name], name, meta)
         return StructuredResult(statements, fields, events)
 
-    async def _mapping(
+    async def _blob(
         self,
         flat: FlatBlob,
-        schema: SchemaSpec,
+        schemas: list[SchemaSpec],
+        mappings: dict[str, dict[str, str | None]],
+        document: Document,
         jev: JevClient,
-        events: list[tuple[str, str]],
-    ) -> dict[str, str | None]:
-        """Collapsed path → field name (or None) for every path Jev or the store knows."""
-        fingerprint = flat.fingerprint
-        known = await self._known(fingerprint, schema.name)
+    ) -> dict[str, dict[str, FieldMeta]]:
+        """One blob's values per schema, given its mappings."""
         shapes = flat.shapes()
-        unknown = [s for s in shapes if s not in known]
-        if len(unknown) > self.max_paths:
-            events.append(
-                (
-                    "structured_paths_skipped",
-                    f"{schema.name}: asked about {self.max_paths} of {len(unknown)} key paths "
-                    f"in {flat.blob.source} blob {flat.index}",
+        found: dict[str, dict[str, FieldMeta]] = {}
+        for schema in schemas:
+            mapping = mappings[schema.name]
+            wanted = [(shape, name) for shape, name in mapping.items() if name and shape in shapes]
+            metas = await asyncio.gather(
+                *(
+                    self._meta(schema.field(name), flat, shapes[shape], document, jev)
+                    for shape, name in wanted
                 )
             )
-            unknown = unknown[: self.max_paths]
+            mine: dict[str, FieldMeta] = {}
+            for (_, name), meta in zip(wanted, metas, strict=True):
+                _keep_best(mine, name, meta)
+            found[schema.name] = mine
+        return found
+
+    async def _mappings(
+        self,
+        flat: FlatBlob,
+        schemas: list[SchemaSpec],
+        jev: JevClient,
+        events: list[tuple[str, str]],
+    ) -> dict[str, dict[str, str | None]]:
+        """Per schema: collapsed path → field name (or None) for every path known."""
+        fingerprint = flat.fingerprint
+        shapes = flat.shapes()
+        known: dict[str, dict[str, str | None]] = {}
+        unknown: dict[str, list[str]] = {}
+        for schema in schemas:
+            fields = _mappable(schema)
+            # A mapping to a field the schema no longer has counts as unknown: re-ask it.
+            mine = {
+                path: name
+                for path, name in (await self._known(fingerprint, schema.name)).items()
+                if name is None or name in fields
+            }
+            known[schema.name] = mine
+            if not fields:
+                continue
+            todo = [s for s in shapes if s not in mine]
+            if len(todo) > self.max_paths:
+                events.append(
+                    (
+                        "structured_paths_skipped",
+                        f"{schema.name}: asked about {self.max_paths} of {len(todo)} key "
+                        f"paths in {flat.blob.source} blob {flat.index}",
+                    )
+                )
+                todo = todo[: self.max_paths]
+            if todo:
+                unknown[schema.name] = todo
         if not unknown:
             return known
-        fieldable = [f for f in schema.fields if f.kind != "model"]
-        if not fieldable:
-            return known
-        answers = await self._ask(flat, schema, unknown, jev)
-        learned: dict[str, str | None] = {}
-        for shape, answer in answers.items():
-            if answer.confidence < self.accept_at:
-                continue
-            learned[shape] = None if answer.choice == NONE_OPTION else answer.choice
-        await self._remember(fingerprint, schema.name, learned)
-        return known | learned
+        by_name = {s.name: s for s in schemas}
+        answers = await self._ask(flat, by_name, unknown, jev, events)
+        for schema_name, paths in answers.items():
+            learned: dict[str, str | None] = {}
+            for shape, answer in paths.items():
+                if answer.confidence < self.accept_at:
+                    continue
+                learned[shape] = None if answer.choice == NONE_OPTION else answer.choice
+            await self._remember(fingerprint, schema_name, learned)
+            known[schema_name] |= learned
+        return known
 
     async def _known(self, fingerprint: str, schema: str) -> dict[str, str | None]:
         if self.store is None:
-            return dict(self._memory.get((fingerprint, schema), {}))
+            key = (fingerprint, schema)
+            if key in self._memory:
+                self._memory.move_to_end(key)
+            return dict(self._memory.get(key, {}))
         return {m.path: m.field for m in await self.store.key_mappings(fingerprint, schema=schema)}
 
     async def _remember(
@@ -251,7 +346,11 @@ class KeyPathMapper:
         if not learned:
             return
         if self.store is None:
-            self._memory.setdefault((fingerprint, schema), {}).update(learned)
+            key = (fingerprint, schema)
+            self._memory.setdefault(key, {}).update(learned)
+            self._memory.move_to_end(key)
+            while len(self._memory) > self.memory_size:
+                self._memory.popitem(last=False)
             return
         for path, name in learned.items():
             await self.store.put_key_mapping(
@@ -259,41 +358,78 @@ class KeyPathMapper:
             )
 
     async def _ask(
-        self, flat: FlatBlob, schema: SchemaSpec, shapes: list[str], jev: JevClient
-    ) -> dict[str, ChoiceAnswer]:
+        self,
+        flat: FlatBlob,
+        schemas: dict[str, SchemaSpec],
+        unknown: dict[str, list[str]],
+        jev: JevClient,
+        events: list[tuple[str, str]],
+    ) -> dict[str, dict[str, ChoiceAnswer]]:
+        """Every schema's questions about the blob's unknown paths, as few states as fit.
+
+        Each state lists example values for its paths only (not the whole blob), so a
+        large ``__NEXT_DATA__`` with thousands of leaves but few shapes stays small.
+        """
         by_shape = flat.shapes()
-        lines = [f"{leaf.path}: {_text(leaf.value)[:MAX_VALUE_CHARS]}" for leaf in flat.leaves]
-        state: dict[str, Any] = {"data": "\n".join(lines)}
-        if flat.blob.types:
-            state["type"] = ", ".join(flat.blob.types)
-        options = schema.categorise_question().options
-        questions = {
-            f"path{i}": Choice(
-                instructions=(
-                    f'Which detail does the key path "{shape}" hold '
-                    f"(e.g. {_text(by_shape[shape][0].value)[:MAX_VALUE_CHARS]!r})?"
-                ),
-                options=options,
-            )
-            for i, shape in enumerate(shapes)
-        }
-        answers = await jev.ask(state, questions)
-        out: dict[str, ChoiceAnswer] = {}
-        for i, shape in enumerate(shapes):
-            answer = answers[f"path{i}"]
-            if not isinstance(answer, ChoiceAnswer):
-                raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-            out[shape] = answer
-        return out
+        paths = list(dict.fromkeys(p for todo in unknown.values() for p in todo))
+        chunks: list[list[tuple[str, list[str]]]] = [[]]
+        used = 0
+        for path in paths:
+            lines = [
+                f"{leaf.path}: {_text(leaf.value)[:MAX_VALUE_CHARS]}"
+                for leaf in by_shape[path][:EXAMPLES_PER_PATH]
+            ]
+            cost = estimate_tokens("\n".join(lines))
+            if cost > self.state_tokens:
+                events.append(("structured_path_too_large", f"skipped key path {path!r}"))
+                continue
+            if chunks[-1] and used + cost > self.state_tokens:
+                chunks.append([])
+                used = 0
+            chunks[-1].append((path, lines))
+            used += cost
+
+        async def ask(chunk: list[tuple[str, list[str]]]) -> dict[str, dict[str, ChoiceAnswer]]:
+            state: dict[str, Any] = {
+                "data": "\n".join(line for _, lines in chunk for line in lines)
+            }
+            if flat.blob.types:
+                state["type"] = ", ".join(flat.blob.types)
+            questions: dict[str, Question] = {}
+            keys: dict[str, tuple[str, str]] = {}
+            in_chunk = {path for path, _ in chunk}
+            for schema_name, todo in unknown.items():
+                for path in todo:
+                    if path not in in_chunk:
+                        continue
+                    key = f"{schema_name}:{len(keys)}"
+                    example = _text(by_shape[path][0].value)[:MAX_VALUE_CHARS]
+                    questions[key] = schemas[schema_name].key_path_question(path, example)
+                    keys[key] = (schema_name, path)
+            answers = await jev.ask(state, questions)
+            out: dict[str, dict[str, ChoiceAnswer]] = {}
+            for key, (schema_name, path) in keys.items():
+                answer = answers[key]
+                if not isinstance(answer, ChoiceAnswer):
+                    raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+                out.setdefault(schema_name, {})[path] = answer
+            return out
+
+        results = await asyncio.gather(*(ask(c) for c in chunks if c))
+        merged: dict[str, dict[str, ChoiceAnswer]] = {}
+        for result in results:
+            for schema_name, answers in result.items():
+                merged.setdefault(schema_name, {}).update(answers)
+        return merged
 
     async def _meta(
         self,
         spec: FieldSpec,
+        flat: FlatBlob,
         leaves: list[Leaf],
-        ids: dict[str, str],
         document: Document,
         jev: JevClient,
-    ) -> FieldMeta | None:
+    ) -> FieldMeta:
         """The field's value from its leaves: the first that normalises (every one, for a
         list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
         "Automatic") is asked of Jev as the field's own question about the key-path
@@ -306,7 +442,7 @@ class KeyPathMapper:
             try:
                 value = self._value(spec, leaf.value)
             except NormaliseError as exc:
-                asked = await self._ask_value(spec, leaf, jev) if not spec.many else None
+                asked = await self._ask_value(spec, leaf, jev)
                 if asked is None:
                     errors.append(f"{leaf.path}: {exc}")
                     continue
@@ -321,12 +457,12 @@ class KeyPathMapper:
         leaf = first or leaves[0]
         source = Source(
             url=document.url,
-            component_id=ids[leaf.path].rsplit(".", 1)[0],
-            statement_id=ids[leaf.path],
+            component_id=f"structured.{flat.index}",
+            statement_id=flat.statement_id(leaf),
             statement=f"{leaf.path}: {_text(leaf.value)}",
         )
-        if first is None:
-            return FieldMeta(method="structured", source=source, error="; ".join(errors))
+        if first is None or not values:
+            return FieldMeta(method="structured", source=source, error="; ".join(errors) or None)
         return FieldMeta(
             value=values if spec.many else values[0],
             confidence=confidence,
@@ -337,8 +473,31 @@ class KeyPathMapper:
     async def _ask_value(
         self, spec: FieldSpec, leaf: Leaf, jev: JevClient
     ) -> tuple[Any, float] | None:
-        """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated"."""
+        """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated".
+
+        A list enum asks one Noul per option (as the selector does) and keeps those at
+        p ≥ 0.5; its confidence is the lowest accepted p.
+        """
         state = {"statement": f"{leaf.path}: {_text(leaf.value)}"}
+        if spec.kind == "enum" and spec.many:
+            options = [str(o) for o in spec.options]
+            questions: dict[str, Question] = {
+                f"member{i}": spec.member_question(o) for i, o in enumerate(options)
+            }
+            answers = await jev.ask(state, questions)
+            accepted: list[tuple[str, float]] = []
+            for i, option in enumerate(options):
+                answer = answers[f"member{i}"]
+                if not isinstance(answer, NoulAnswer):
+                    raise UnexpectedAnswerError(f"expected a Noul answer, got {answer.type}")
+                if answer.p >= 0.5:
+                    accepted.append((option, answer.p))
+            if not accepted:
+                return None
+            return (
+                [normalise(o, [], spec) for o, _ in accepted],
+                min(p for _, p in accepted),
+            )
         if spec.kind == "enum":
             answer = (await jev.ask(state, {"enum": spec.enum_question()}))["enum"]
             if not isinstance(answer, ChoiceAnswer):
@@ -355,6 +514,10 @@ class KeyPathMapper:
         return None
 
     def _value(self, spec: FieldSpec, raw: str | int | float | bool) -> Any:
+        if spec.kind == "str":
+            # A key path holds one value: take it whole ("Red, Blue" is one colour string;
+            # a model called 3008 is text, not a number).
+            return normalise(_text(raw).strip(), [], spec)
         if spec.kind == "enum" and isinstance(raw, str):
             return normalise(_enum_option(spec, raw), [], spec)
         if not isinstance(raw, str) or spec.kind == "bool":
@@ -389,10 +552,18 @@ class KeyPathMapper:
 _NOWHERE = DomLocation(dom_path="/")
 
 
+def _keep_best(metas: dict[str, FieldMeta], name: str, meta: FieldMeta) -> None:
+    """Keep the first found value; an unfound meta (an error) is kept only until one is."""
+    existing = metas.get(name)
+    if existing is None or (not existing.found and meta.found):
+        metas[name] = meta
+
+
 def _enum_option(spec: FieldSpec, raw: str) -> str:
-    """The option ``raw`` names, ignoring case and a schema.org URL prefix
-    (``"https://schema.org/InStock"`` → ``InStock``); ``raw`` itself if none matches."""
-    text = raw.strip().rstrip("/").rsplit("/", 1)[-1].strip()
+    """The option ``raw`` names, ignoring case and a schema.org prefix
+    (``"https://schema.org/InStock"``, ``"schema:InStock"`` → ``InStock``) or any other URL
+    path; ``raw`` itself if none matches."""
+    text = schema_type(raw).rstrip("/").rsplit("/", 1)[-1].strip()
     by_lower = {str(o).lower(): str(o) for o in spec.options}
     return by_lower.get(text.lower(), raw)
 
@@ -403,6 +574,8 @@ class StructuredStage:
 
     Values are recorded on the default entity of each active schema, and statements on
     ``ctx.structured``. Fields later routes fill are left alone where this one found them.
+    :func:`~jevex.extractor.default_pipeline` builds a fresh stage each time, so the
+    mapper's in-memory mappings belong to one pipeline.
     """
 
     extractor: StructuredExtractor = field(default_factory=KeyPathMapper)

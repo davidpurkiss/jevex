@@ -26,7 +26,14 @@ from jevex.generators import (
     default_registry,
     generator_spec_json_schema,
 )
-from jevex.keypaths import KeyPathMapper, StructuredResult, StructuredStage, flatten
+from jevex.keypaths import (
+    FlatBlob,
+    KeyPathMapper,
+    Leaf,
+    StructuredResult,
+    StructuredStage,
+    flatten,
+)
 from jevex.layout import (
     BBox,
     Component,
@@ -107,6 +114,7 @@ __all__ = [
     "Field",
     "FieldMeta",
     "FieldSpec",
+    "FlatBlob",
     "FunctionNormaliser",
     "GateUnit",
     "GeneratorRecord",
@@ -122,6 +130,7 @@ __all__ = [
     "KeyMapping",
     "KeyPathMapper",
     "LayoutStage",
+    "Leaf",
     "Location",
     "MatchSpec",
     "NormaliseError",

@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -14,6 +14,7 @@ from jevex import (
     DomLocation,
     Field,
     KeyPathMapper,
+    SchemaConfig,
     SchemaSpec,
     StructuredStage,
     flatten,
@@ -24,7 +25,7 @@ from jevex.jev import Choice
 from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.results import FieldMeta
 from jevex.store import KeyMapping, SQLiteStore
-from jevex.structured import StructuredBlob
+from jevex.structured import EmbeddedDataReader, StructuredBlob
 from jevex.testing import FakeJev
 from jevex.testsite import VehicleSpec, generate, render
 
@@ -43,6 +44,12 @@ class Car(BaseModel):
     engine_size_cc: int = Field(description="Engine size", unit="cc")
     fuel: Literal["petrol", "diesel", "ev"] = Field(description="Fuel type")
     colours: list[str] = Field(default_factory=list, description="Colours offered")
+
+
+def page_blob(data: object) -> StructuredBlob:
+    """The blob as the reader finds it on a page (with its declared types)."""
+    [found] = EmbeddedDataReader().read(page(data)).blobs
+    return found
 
 
 def page(data: object) -> Document:
@@ -76,8 +83,13 @@ MAPPING = {
 def mapping_jev(mapping: dict[str, str] = MAPPING, confidence: float = 0.9) -> FakeJev:
     fake = FakeJev()
     for path, field_name in mapping.items():
-        fake.choice(f'key path "{path}"', field_name, confidence=confidence)
+        fake.choice(f'key path "{path}"', _pick(field_name), confidence=confidence)
     return fake
+
+
+def _pick(name: str) -> Callable[[Choice], str]:
+    """The field if this schema's question offers it, else "none"."""
+    return lambda q: name if name in q.options else "none"
 
 
 # --- flattening and fingerprints -----------------------------------------------------
@@ -132,14 +144,15 @@ async def test_a_miss_asks_one_batched_request_and_maps_the_values() -> None:
         "colours": ["Red", "Moonstone Grey"],  # a list field takes every value
     }
     [call] = fake.calls
-    assert set(call.questions) == {f"path{i}" for i in range(7)}  # one per collapsed path
+    assert set(call.questions) == {f"Car:{i}" for i in range(7)}  # one per collapsed path
     state = call.state
     assert isinstance(state, dict)
     assert "offers[1].price: 26995" in state["data"]
     assert state["type"] == "Car"
-    question = call.questions["path1"]
+    question = call.questions["Car:1"]
     assert isinstance(question, Choice)
     assert question.instructions == "Which detail does the key path \"model\" hold (e.g. 'Golf')?"
+    assert question == SchemaSpec.from_model(Car).key_path_question("model", "Golf")
     assert "none" in question.options
     meta = fields["price"]
     assert meta.method == "structured"
@@ -158,7 +171,7 @@ async def test_a_hit_is_a_pure_lookup(tmp_path: Path) -> None:
     assert fresh.calls == []
     assert fields["model"].value == "Polo"
     assert fields["price"].value == Decimal("18000")
-    stored = await store.key_mappings(flatten(blob(CAR)).fingerprint, schema="Car")
+    stored = await store.key_mappings(flatten(page_blob(CAR)).fingerprint, schema="Car")
     assert {m.path: m.field for m in stored}["@type"] is None  # "none" is remembered too
     await store.aclose()
 
@@ -187,6 +200,9 @@ async def test_enum_values_that_dont_read_directly_are_asked_of_jev() -> None:
     fields = await extract(KeyPathMapper(), fake, {**CAR, "fuelType": "Fully electric"})
     assert fields["fuel"].value == "ev"
     assert fields["fuel"].confidence == 0.8
+    [asked] = [c for c in fake.calls if "enum" in c.questions]
+    assert asked.state == {"statement": "fuelType: Fully electric"}
+    assert asked.questions == {"enum": SchemaSpec.from_model(Car).field("fuel").enum_question()}
 
 
 async def test_a_value_that_wont_normalise_keeps_the_error() -> None:
@@ -253,7 +269,7 @@ async def test_stage_doesnt_overwrite_a_found_field() -> None:
 
 
 async def test_a_mapping_from_the_store_can_say_none(store: SQLiteStore) -> None:
-    fp = flatten(blob(CAR)).fingerprint
+    fp = flatten(page_blob(CAR)).fingerprint
     for path in ["@type", "model", "vehicleEngine.engineDisplacement", "fuelType"]:
         await store.put_key_mapping(KeyMapping(fingerprint=fp, schema="Car", path=path, field=None))
     for path, name in [("offers[].price", "price"), ("offers[].@type", None), ("color[]", None)]:
@@ -310,7 +326,7 @@ def site_jev() -> FakeJev:
 
 async def test_the_test_sites_json_ld_maps_to_the_truth() -> None:
     pages = [p for p in render(generate(42)) if p.json_ld]
-    assert len(pages) >= 5
+    assert len(pages) == 15
     mapper = KeyPathMapper()
     fake = site_jev()
     for p in pages:
@@ -324,4 +340,163 @@ async def test_the_test_sites_json_ld_maps_to_the_truth() -> None:
     # Every page shares the template, so only the first asked about key paths (EVs add
     # no displacement or CO2, so they have their own fingerprint).
     mapping_requests = [c for c in fake.calls if isinstance(c.state, dict) and "data" in c.state]
-    assert len(mapping_requests) <= 3
+    assert len(mapping_requests) == 2
+
+
+# --- review round 1 ------------------------------------------------------------------
+
+
+class Book(BaseModel):
+    """A book."""
+
+    title: str = Field(description="Title")
+
+
+async def test_every_schemas_questions_about_a_blob_go_in_one_request() -> None:
+    fake = mapping_jev().choice(
+        'key path "model"', lambda q: "title" if "title" in q.options else "model"
+    )
+    result = await KeyPathMapper().extract(
+        page(CAR), [SchemaSpec.from_model(Car), SchemaSpec.from_model(Book)], fake.client()
+    )
+    [call] = fake.calls
+    assert {k.split(":")[0] for k in call.questions} == {"Car", "Book"}
+    assert result.fields["Book"]["title"].value == "Golf"
+    assert result.fields["Car"]["model"].value == "Golf"
+
+
+def test_the_key_path_question_can_be_overridden() -> None:
+    class Custom(BaseModel):
+        """A car."""
+
+        __jevex__ = SchemaConfig(key_path_question="What is {path}? It holds {example}.")
+        model: str = Field(description="Model name")
+
+    question = SchemaSpec.from_model(Custom).key_path_question("model", "Golf")
+    assert question.instructions == "What is model? It holds 'Golf'."
+
+
+async def test_a_stale_mapping_to_a_missing_field_is_asked_again(store: SQLiteStore) -> None:
+    fp = flatten(page_blob(CAR)).fingerprint
+    await store.put_key_mapping(
+        KeyMapping(fingerprint=fp, schema="Car", path="model", field="trim")
+    )
+    fake = mapping_jev()
+    fields = await extract(KeyPathMapper(store=store), fake)
+    assert fields["model"].value == "Golf"
+    [call] = fake.calls
+    asked = [q.instructions for q in call.questions.values()]
+    assert "Which detail does the key path \"model\" hold (e.g. 'Golf')?" in asked
+
+
+async def test_a_huge_blob_with_few_shapes_fits_one_small_state() -> None:
+    listings = [{"title": f"Car {i}", "price": 1000 + i, "url": f"/cars/{i}"} for i in range(3000)]
+    fake = FakeJev()
+    await KeyPathMapper().extract(
+        page({"props": {"listings": listings}}), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    [call] = fake.calls
+    assert isinstance(call.state, dict)
+    assert len(call.state["data"]) < 2000  # 3 examples per shape, not 9000 leaves
+    assert len(call.questions) == 3
+
+
+async def test_many_shapes_are_chunked_across_states() -> None:
+    wide = {f"key{i}": "x" * 150 for i in range(60)}
+    fake = FakeJev()
+    result = await KeyPathMapper(state_tokens=500).extract(
+        page(wide), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    assert len(fake.calls) > 1
+    asked = sum(len(c.questions) for c in fake.calls)
+    assert asked == 60
+    assert result.events == []
+
+
+def test_dotted_and_bracketed_keys_are_quoted_so_paths_dont_collide() -> None:
+    flat = flatten(blob({"a.b": 1, "a": {"b": 2}, "x[0]": 3, "x": [4]}))
+    assert [leaf.path for leaf in flat.leaves] == ['["a.b"]', "a.b", '["x[0]"]', "x[0]"]
+    ids = [flat.statement_id(leaf) for leaf in flat.leaves]
+    assert len(set(ids)) == 4
+
+
+def test_fingerprint_includes_the_schema_org_type_and_source() -> None:
+    brand = flatten(
+        StructuredBlob(source="json_ld", data={"name": "x"}, types=["Brand"], location=LOC)
+    )
+    person = flatten(
+        StructuredBlob(source="json_ld", data={"name": "x"}, types=["Person"], location=LOC)
+    )
+    micro = flatten(
+        StructuredBlob(source="microdata", data={"name": "x"}, types=["Brand"], location=LOC)
+    )
+    assert len({brand.fingerprint, person.fingerprint, micro.fingerprint}) == 3
+
+
+async def test_a_later_shape_or_blob_fills_a_field_an_earlier_one_failed() -> None:
+    both = {"engine": "big", "engineSize": "1,498 cc"}
+    fake = mapping_jev({"engine": "engine_size_cc", "engineSize": "engine_size_cc"})
+    fields = await extract(KeyPathMapper(), fake, both)
+    assert fields["engine_size_cc"].value == 1498
+    scripts = "".join(
+        f'<script type="application/ld+json">{json.dumps({"engine": v})}</script>'
+        for v in ["big", "1,498 cc"]
+    )
+    doc = Document.from_bytes(f"<html><head>{scripts}</head></html>".encode())
+    result = await KeyPathMapper().extract(
+        doc, [SchemaSpec.from_model(Car)], mapping_jev({"engine": "engine_size_cc"}).client()
+    )
+    assert result.fields["Car"]["engine_size_cc"].value == 1498
+
+
+async def test_str_fields_take_the_whole_value_and_numbers_as_text() -> None:
+    data = {"name": "2021 Volkswagen Golf 1.5 TSI Life 5dr, 32,000 miles, £18,995", "sku": 3008}
+    fields = await extract(KeyPathMapper(), mapping_jev({"name": "model"}), data)
+    assert fields["model"].value == data["name"]
+    fields = await extract(KeyPathMapper(), mapping_jev({"sku": "model"}), {"sku": 3008})
+    assert fields["model"].value == "3008"
+
+
+async def test_memory_forgets_the_least_recently_used_fingerprint() -> None:
+    mapper = KeyPathMapper(memory_size=1)
+    await extract(mapper, mapping_jev(), CAR)
+    await extract(mapper, mapping_jev(), {"other": "shape"})
+    again = mapping_jev()
+    await extract(mapper, again, CAR)
+    assert len(again.calls) == 1
+
+
+def test_each_default_pipeline_gets_its_own_structured_stage() -> None:
+    def stage() -> object:
+        [s] = [s for s in default_pipeline().stages if s.name == "structured"]
+        assert isinstance(s, StructuredStage)
+        return s.extractor
+
+    assert stage() is not stage()
+
+
+class Car2(BaseModel):
+    """A car."""
+
+    fuels: list[Literal["petrol", "diesel", "ev"]] = Field(
+        default_factory=list, description="Fuel types"
+    )
+    stock: Literal["InStock", "OutOfStock"] = Field(description="Availability")
+
+
+async def test_list_enums_are_asked_one_noul_per_option_and_prefixes_are_stripped() -> None:
+    fake = mapping_jev({"fuels": "fuels", "availability": "stock"})
+    fake.noul(re.compile('"(petrol|ev)"'), p=0.9, state="Petrol or electric")
+    result = await KeyPathMapper().extract(
+        page({"fuels": "Petrol or electric", "availability": "schema:InStock"}),
+        [SchemaSpec.from_model(Car2)],
+        fake.client(),
+    )
+    fields = result.fields["Car2"]
+    assert fields["fuels"].value == ["petrol", "ev"]
+    assert fields["stock"].value == "InStock"
+    [members] = [c for c in fake.calls if "member0" in c.questions]
+    spec = SchemaSpec.from_model(Car2).field("fuels")
+    assert members.questions == {
+        f"member{i}": spec.member_question(o) for i, o in enumerate(["petrol", "diesel", "ev"])
+    }

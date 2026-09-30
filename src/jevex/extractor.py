@@ -69,11 +69,16 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
 
 
 def default_pipeline() -> Pipeline:
-    """The pipeline ``Extractor`` builds when none is given, in :data:`STAGE_ORDER`."""
+    """The pipeline ``Extractor`` builds when none is given, in :data:`STAGE_ORDER`.
+
+    Stateful stages (the structured stage's in-memory mappings) are new in each call.
+    """
     unknown = [s.name for s in DEFAULT_STAGES if s.name not in STAGE_ORDER]
     if unknown:
         raise ValueError(f"default stages {unknown} are not in STAGE_ORDER {STAGE_ORDER}")
-    return Pipeline(sorted(DEFAULT_STAGES, key=lambda s: STAGE_ORDER.index(s.name)))
+    # The structured stage's mapper remembers mappings; each pipeline gets its own.
+    stages = [StructuredStage() if isinstance(s, StructuredStage) else s for s in DEFAULT_STAGES]
+    return Pipeline(sorted(stages, key=lambda s: STAGE_ORDER.index(s.name)))
 
 
 class JevUsageSummary(BaseModel):
