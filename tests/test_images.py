@@ -384,18 +384,21 @@ async def test_scanned_pages_are_read_whole_instead_of_their_pictures() -> None:
     pdf.save(out)
     document = Document.from_bytes(out.getvalue())
     ctx = Context.create(document, [], FakeJev().client())
-    ctx.parsed = ParsedDocument(document=document, root=pdf_tree())
+    root = pdf_tree()
+    # Docling gives a picture it can't place page 1 and no bbox: not rendered.
+    root.children.append(Component(id="c5", type="image", location=PageLocation(page=1)))
+    ctx.parsed = ParsedDocument(document=document, root=root)
     images, ocr = stage(line("Boot: 380 litres", 30, 60, 330, 90))
     images.loader = DefaultImageLoader(scale=1.5)
     await images.run(ctx)
 
-    root = ctx.parsed.root
     assert [(c.id, c.type) for c in root.children] == [
         ("c1", "paragraph"),
         ("c2", "image"),
         ("c3", "image"),
         ("page3", "image"),
         ("c4", "paragraph"),
+        ("c5", "image"),
     ]
     assert len(ocr.seen) == 2  # c2 and the page, not the picture on it
     page = root.children[3]
@@ -406,7 +409,7 @@ async def test_scanned_pages_are_read_whole_instead_of_their_pictures() -> None:
     assert text.location == ImageLocation(page=3, bbox=BBox(x0=20, y0=40, x1=220, y1=60))
     [picture] = root.children[1].children
     assert picture.location == ImageLocation(page=2, bbox=BBox(x0=92, y0=112, x1=292, y1=132))
-    assert root.children[2].children == []
+    assert root.children[2].children == root.children[5].children == []
     assert ctx.events == []
 
 

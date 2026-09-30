@@ -7,7 +7,8 @@ like any other.
 
 - **Which images.** Every ``image`` component in the layout tree (HTML ``img``, PDF
   pictures). In a PDF, each page with no text layer (a scan) is read whole, as a new
-  ``image`` component for the page, instead of the pictures on it. An image document
+  ``image`` component for the page, instead of the pictures on it; a picture with no
+  bbox is skipped, since rendering it would mean the whole page. An image document
   (``image/png``...), which no layout parser reads, becomes a tree holding one image.
 - **Loading.** An :class:`ImageLoader` gets each image's bytes. The default,
   :class:`DefaultImageLoader`, decodes ``data:`` URIs, renders PDF pictures and pages with
@@ -145,6 +146,8 @@ class ImageReading(BaseModel):
 
 @runtime_checkable
 class ImageLoader(Protocol):
+    """Gets an image component's bytes for the processors (see :class:`DefaultImageLoader`)."""
+
     async def load(self, image: Component, document: Document) -> ImageData | None:
         """The image's bytes, or ``None`` when it has nothing to load (no URL, or a remote
         one this loader can't fetch). Raise :class:`UnreadableImageError` when loading
@@ -154,6 +157,8 @@ class ImageLoader(Protocol):
 
 @runtime_checkable
 class OcrEngine(Protocol):
+    """Finds the text lines in an image, for :class:`OcrProcessor`."""
+
     def read(self, image: bytes) -> list[ImageText]:
         """The text lines in an encoded image (PNG, JPEG...), boxes in pixels.
 
@@ -658,7 +663,8 @@ class ImageStage:
         if ctx.parsed is None:
             ctx.parsed = ParsedDocument(document=document, root=_image_document_root(document))
         parsed = ctx.parsed
-        images = self._images(parsed.root, document)
+        scanned = await asyncio.to_thread(pages_without_text, document) if document.is_pdf else []
+        images = self._images(parsed.root, scanned)
         if len(images) > self.max_images:
             ctx.event(
                 self.name,
@@ -690,10 +696,10 @@ class ImageStage:
             if read.data is not None:
                 self._attach(parsed, read.image, read.data, read.readings)
 
-    def _images(self, root: Component, document: Document) -> list[Component]:
-        """The images to read, in reading order. For a PDF, each page without a text
-        layer is added to the tree as an image, and the pictures on it are left out."""
-        scanned = pages_without_text(document) if document.is_pdf else []
+    def _images(self, root: Component, scanned: list[int]) -> list[Component]:
+        """The images to read, in reading order. Each ``scanned`` PDF page (no text layer)
+        is added to the tree as an image, and the pictures on it are left out. So is a PDF
+        picture with no bbox: rendering it would mean OCR-ing a page that has text."""
         pages: set[str] = set()
         for page in scanned:
             index = next(
@@ -706,7 +712,12 @@ class ImageStage:
         return [
             c
             for c in root.walk()
-            if c.type == "image" and (c.id in pages or _first_page(c) not in scanned)
+            if c.type == "image"
+            and (
+                c.id in pages
+                or not isinstance(c.location, PageLocation)
+                or (c.location.page not in scanned and c.location.bbox is not None)
+            )
         ]
 
     async def _read(self, image: Component, document: Document) -> _Read:
