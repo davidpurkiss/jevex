@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 pytest.importorskip("docling")
 
@@ -33,15 +34,23 @@ from jevex import (
     Component,
     DoclingConverter,
     Document,
+    DocumentGateStage,
+    Extractor,
+    Field,
+    LayoutStage,
     PageLocation,
     PdfLayoutError,
     PdfLayoutParser,
+    Pipeline,
+    SchemaConfig,
     TableCell,
     UnsupportedDocumentError,
+    _pdfium,
     table_statements,
 )
-from jevex.interfaces import LayoutParser
+from jevex.interfaces import LayoutParser, PagedLayoutParser
 from jevex.layout_pdf import from_docling
+from jevex.testing import FakeJev
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pdf"
 
@@ -569,6 +578,115 @@ async def test_parser_does_not_swallow_converter_errors() -> None:
 
     with pytest.raises(PdfLayoutError, match="broken xref"):
         await PdfLayoutParser(convert=convert).parse(pdf_document())
+
+
+# --- Leaving pages out -------------------------------------------------------------------
+
+
+def test_parser_can_leave_pages_out() -> None:
+    assert isinstance(PdfLayoutParser(convert=lambda _: new_doc()), PagedLayoutParser)
+
+
+async def test_parser_converts_only_the_pages_kept_and_numbers_them_as_the_original() -> None:
+    seen: list[Document] = []
+
+    def convert(document: Document) -> DoclingDocument:
+        seen.append(document)
+        doc = new_doc(1)
+        doc.add_text(DocItemLabel.TEXT, "Boot", prov=prov(1))
+        doc.add_text(DocItemLabel.TEXT, "Unplaced")
+        return doc
+
+    document = pdf_document().model_copy(update={"url": "https://example.com/spec.pdf"})
+    root = await PdfLayoutParser(convert=convert).parse_pages(document, frozenset({1}))
+
+    (part,) = seen
+    assert part.url == document.url
+    assert part.content_type == "application/pdf"
+    assert _pdfium.page_texts(part.content) == _pdfium.page_texts(document.content)[1:]
+    assert [(c.text, where(c)) for c in root.children] == [
+        ("Boot", (2, (10, 10, 100, 20))),
+        ("Unplaced", (2, None)),
+    ]
+    assert where(root) == (2, (10, 10, 100, 20))
+
+
+async def test_parser_converts_the_whole_pdf_when_no_page_is_left_out() -> None:
+    seen: list[Document] = []
+
+    def convert(document: Document) -> DoclingDocument:
+        seen.append(document)
+        return spec_document()
+
+    document = pdf_document()
+    parser = PdfLayoutParser(convert=convert)
+    assert await parser.parse_pages(document, frozenset()) == from_docling(spec_document())
+    # Numbers that aren't pages of the PDF are ignored.
+    assert await parser.parse_pages(document, frozenset({0, 3})) == from_docling(spec_document())
+    assert seen == [document, document]
+
+
+async def test_parser_leaving_every_page_out_gives_an_empty_section() -> None:
+    def convert(document: Document) -> DoclingDocument:
+        raise AssertionError("nothing to convert")
+
+    root = await PdfLayoutParser(convert=convert).parse_pages(pdf_document(), frozenset({1, 2}))
+    assert root == Component(id="c0", type="section", location=PageLocation(page=1))
+
+
+async def test_parser_rejects_other_documents_when_leaving_pages_out() -> None:
+    parser = PdfLayoutParser(convert=lambda _: new_doc())
+    with pytest.raises(UnsupportedDocumentError, match="reads PDFs, not text/html"):
+        await parser.parse_pages(
+            Document.from_bytes(b"<p>x</p>", content_type="text/html"), frozenset({1})
+        )
+
+
+def test_from_docling_numbers_pages_as_the_original() -> None:
+    doc = new_doc(1, 2)
+    doc.add_text(DocItemLabel.TEXT, "First kept", prov=prov(1))
+    doc.add_text(DocItemLabel.TEXT, "Second kept", prov=prov(2))
+    root = from_docling(doc, pages=[3, 7])
+    assert [where(c)[0] for c in root.children] == [3, 7]
+    assert where(root) == (3, None)
+
+
+def test_from_docling_rejects_a_page_outside_the_pages_converted() -> None:
+    doc = new_doc(1)
+    doc.add_text(DocItemLabel.TEXT, "Stray", prov=prov(2))
+    with pytest.raises(PdfLayoutError, match="Docling placed an item on page 2 of a 1-page PDF"):
+        from_docling(doc, pages=[4])
+
+
+async def test_extractor_lays_out_only_the_pdf_pages_the_gate_passed() -> None:
+    class Brochure(BaseModel):
+        """A car brochure page."""
+
+        __jevex__ = SchemaConfig(gate_unit="page")
+
+        model: str = Field(description="Model name")
+
+    converted: list[list[str]] = []
+
+    def convert(document: Document) -> DoclingDocument:
+        converted.append([t.split("\r\n")[0] for t in _pdfium.page_texts(document.content)])
+        doc = new_doc(1)
+        doc.add_text(DocItemLabel.TEXT, "Performance", prov=prov(1))
+        return doc
+
+    question = "Does this document describe a car brochure page?"
+    fake = (
+        FakeJev(strict=True)
+        .noul(question, p=0.9, state="Skoda Octavia Estate")
+        .noul(question, p=0.1, state="Dimensions")
+    )
+    pipeline = Pipeline([DocumentGateStage(), LayoutStage([PdfLayoutParser(convert=convert)])])
+    async with Extractor([Brochure], jev=fake.client(), pipeline=pipeline) as ex:
+        result = await ex.extract(pdf_document())
+
+    assert converted == [["Skoda Octavia Estate"]]
+    assert result.meta.gates["Brochure"].passed_pages == [1]
+    assert [(e.kind, e.data) for e in result.meta.events] == [("pages_skipped", {"pages": [2]})]
 
 
 # --- Default converter -------------------------------------------------------------------

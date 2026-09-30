@@ -23,6 +23,10 @@ parser builds, so every later stage is format-agnostic:
 - Page headers and footers, and anything outside Docling's body layer, are left out, as
   the HTML cleaner strips navigation and footers.
 
+:meth:`PdfLayoutParser.parse_pages` lays out only some pages (those the document gate
+passed), converting a copy of the PDF cut down to them and numbering components' pages as in
+the original.
+
 Every component's location is a :class:`~jevex.layout.PageLocation`: the page it starts on
 and its bbox there in top-left page coordinates (PDF points). A container gets the union of
 its children's boxes when they all sit on one page, and no bbox when it spans pages.
@@ -41,6 +45,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import TYPE_CHECKING
 
+from jevex import _pdfium
 from jevex.layout import BBox, Component, PageLocation, TableCell, UnsupportedDocumentError
 
 if TYPE_CHECKING:
@@ -126,24 +131,47 @@ class PdfLayoutParser:
         return document.is_pdf
 
     async def parse(self, document: Document) -> Component:
+        return await self.parse_pages(document, frozenset())
+
+    async def parse_pages(self, document: Document, skip: frozenset[int]) -> Component:
+        """Lay out the PDF without its 1-based pages in ``skip``.
+
+        ``convert`` is given a copy of the PDF holding only the other pages (made with
+        pypdfium2), and components are numbered with the original pages. The copy loses the
+        PDF's bookmarks, so heading levels come from numbering and font style. Numbers in
+        ``skip`` that aren't pages are ignored; skipping every page gives an empty section.
+        """
         if not document.is_pdf:
             raise UnsupportedDocumentError(
                 f"PdfLayoutParser reads PDFs, not {document.content_type}"
             )
-        return from_docling(await asyncio.to_thread(self.convert, document))
+        return await asyncio.to_thread(self._parse_pages, document, skip)
+
+    def _parse_pages(self, document: Document, skip: frozenset[int]) -> Component:
+        if not skip:
+            return from_docling(self.convert(document))
+        count = _pdfium.page_count(document.content)
+        kept = [page for page in range(1, count + 1) if page not in skip]
+        if len(kept) == count:
+            return from_docling(self.convert(document))
+        if not kept:
+            return _Converter().convert(_container("section", []))
+        part = document.model_copy(update={"content": _pdfium.keep_pages(document.content, kept)})
+        return from_docling(self.convert(part), pages=kept)
 
 
-def from_docling(doc: DoclingDocument) -> Component:
+def from_docling(doc: DoclingDocument, *, pages: Sequence[int] | None = None) -> Component:
     """Map a ``DoclingDocument`` to a component tree rooted at a ``section``.
 
     Component ids are ``c0``, ``c1``... in reading order, so they are stable for the same
-    document.
+    document. When ``doc`` was converted from some of a PDF's pages, ``pages`` gives the
+    original number of each of its pages in order, and locations use those.
     """
     blocks = _Mapper(doc).contents(doc.body)
     if len(blocks) == 1 and blocks[0].type == "section":
         # A document that starts with its own heading needs no extra level.
         blocks = blocks[0].children
-    return _Converter().convert(_container("section", blocks))
+    return _Converter(pages).convert(_container("section", blocks))
 
 
 # --- Docling items -----------------------------------------------------------------------
@@ -419,7 +447,9 @@ def _box(doc: DoclingDocument, prov: ProvenanceItem) -> BBox | None:
 class _Converter:
     """Turns blocks into components, numbering ids and tracking the heading trail."""
 
-    def __init__(self) -> None:
+    def __init__(self, pages: Sequence[int] | None = None) -> None:
+        self._pages = pages
+        """The original page number of each converted page, when not all were converted."""
         self._next = 0
         self._headings: list[tuple[int, str]] = []
         self._floor = 0
@@ -442,12 +472,19 @@ class _Converter:
         self._headings, self._floor = outer, outer_floor
         if block.type == "heading":
             self._headings.append((block.level, block.text))
+        page = block.page or 1
+        if self._pages is not None:
+            if not 1 <= page <= len(self._pages):
+                raise PdfLayoutError(
+                    f"Docling placed an item on page {page} of a {len(self._pages)}-page PDF"
+                )
+            page = self._pages[page - 1]
         return Component(
             id=component_id,
             type=block.type,
             text=block.text,
             children=children,
             heading_trail=trail,
-            location=PageLocation(page=block.page or 1, bbox=block.bbox),
+            location=PageLocation(page=page, bbox=block.bbox),
             cells=block.cells,
         )

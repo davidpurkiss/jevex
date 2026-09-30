@@ -17,6 +17,18 @@ PDF layout uses [Docling](https://github.com/docling-project/docling), an option
 about 500 MB of layout and table models from Hugging Face the first time it runs).
 Without it, PDFs skip layout, with a `layout_skipped` event saying so.
 
+The document gate reads a PDF's text layer page by page, without Docling's models. A
+schema with `SchemaConfig(gate_unit="page")` is asked about each page, and layout then
+converts only the pages some schema passed (plus any page with no text layer, such as a
+scan), so a 40-page brochure only lays out its spec pages:
+
+```python
+class VehicleSpec(BaseModel):
+    """A car's technical specification."""
+
+    __jevex__ = SchemaConfig(gate_unit="page")
+```
+
 ## Images
 
 Text in pictures (infographics, scanned PDF pages, image documents) is read with OCR
