@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
     from jevex.interfaces import Selection
     from jevex.pipeline import Context, SchemaRun
+    from jevex.results import Method
     from jevex.schema import FieldSpec
     from jevex.statements import Candidate, NormaliserStep
 
@@ -447,7 +448,9 @@ class NormaliseStage:
     Per scope and field, the most confident candidate that normalises and validates wins,
     and the rest become alternatives. List fields keep every accepted value, deduplicated
     in document order. If nothing normalises, the field's meta carries the error. A field
-    another route already filled (e.g. structured data) isn't overwritten.
+    another route already filled (e.g. structured data) isn't overwritten. Values are
+    recorded with ``method="generator"``, or ``"vision"`` when the statement came from a
+    vision model.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -499,7 +502,7 @@ class NormaliseStage:
             statement_id, selection = ranked[0]
             return FieldMeta(
                 confidence=selection.confidence,
-                method="generator",
+                method=_method(ctx, statement_id),
                 generator_id=selection.candidate.generator_id if selection.candidate else None,
                 source=_source(ctx, statement_id, selection),
                 alternatives=_alternatives(ranked, []),
@@ -518,7 +521,7 @@ class NormaliseStage:
         return FieldMeta(
             value=best_value,
             confidence=best.confidence,
-            method="generator",
+            method=_method(ctx, best_id),
             generator_id=best.candidate.generator_id if best.candidate else None,
             source=_source(ctx, best_id, best),
             alternatives=_alternatives(
@@ -527,6 +530,12 @@ class NormaliseStage:
                 accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
             ),
         )
+
+
+def _method(ctx: Context, statement_id: str) -> Method:
+    """``vision`` for a value a vision model stated, else ``generator``."""
+    statement = ctx.parsed.statements.get(statement_id) if ctx.parsed else None
+    return "vision" if statement is not None and statement.kind == "vision" else "generator"
 
 
 def _source(ctx: Context, statement_id: str, selection: Selection) -> Source:

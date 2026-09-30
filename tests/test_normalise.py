@@ -534,3 +534,13 @@ async def test_scalar_fields_ignore_accepted() -> None:
     run.selections[("doc", "front_wheel", "s1")] = sel
     await NormaliseStage().run(ctx)
     assert run.fields["doc"]["front_wheel"].value == 18.0
+
+
+async def test_values_from_a_vision_statement_are_tagged_vision() -> None:
+    said = statement("s1", "The dial tops out at 9.1 s").model_copy(update={"kind": "vision"})
+    ctx = context(said)
+    run = ctx.schemas["Car"]
+    run.selections[("doc", "zero_to_62_s", "s1")] = pick(said, "9.1 s", 0.8, "parse_number")
+    await NormaliseStage().run(ctx)
+    meta = run.fields["doc"]["zero_to_62_s"]
+    assert (meta.value, meta.method) == (9.1, "vision")

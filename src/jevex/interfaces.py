@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from jevex.categorise import ToClassify
     from jevex.entities import EntityScope
+    from jevex.images import ImageData, ImageReading
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
     from jevex.keypaths import StructuredResult
     from jevex.schema import FieldSpec, SchemaSpec
@@ -192,9 +193,16 @@ class LayoutParser(Protocol):
 
 @runtime_checkable
 class ImageProcessor(Protocol):
-    """Turns an image component into child components (OCR lines, vision statements)."""
+    """Reads one image: OCR, or a vision model (spec: *Image stage*).
 
-    async def process(self, image: Component, document: Document) -> list[Component]: ...
+    ``data`` holds the image's bytes, loaded by the image stage. The reading's ``text`` is
+    text seen in the image (OCR lines), which the stage parses into child components of
+    ``image``; its ``statements`` are statements about the image (a vision model's), which
+    become ``vision`` statements as they are. Raise
+    :class:`~jevex.images.UnreadableImageError` for bytes that aren't an image you can read.
+    """
+
+    async def process(self, image: Component, data: ImageData) -> ImageReading: ...
 
 
 @runtime_checkable

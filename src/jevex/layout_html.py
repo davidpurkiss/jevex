@@ -18,7 +18,9 @@ it was given. It then walks the DOM and maps it to components:
 - A ``figure`` holding one image or table attaches its ``figcaption`` to it.
 - Any other text becomes paragraphs: one per block element (``p``, ``div``, ``li``...),
   and one per run of loose text between blocks. Wrapper ``div`` elements add no level.
-- ``img`` becomes an image component whose text is its alt text.
+- ``img`` becomes an image component whose text is its alt text and whose ``src`` is its
+  URL (a lazy loader's ``data-src`` first, then ``src``, then the first ``srcset``
+  candidate), resolved against the document's URL.
 
 Hidden content (``hidden``, inline ``display:none``) and
 non-rendered elements (scripts, styles, forms' option lists, SVG...) are skipped. A
@@ -37,6 +39,7 @@ import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 from jevex.clean import html_text_of, readable
 from jevex.layout import Component, DomLocation, TableCell, UnsupportedDocumentError
@@ -204,19 +207,19 @@ class HtmlLayoutParser:
             raise UnsupportedDocumentError(
                 f"HtmlLayoutParser reads HTML, not {document.content_type}"
             )
-        return parse_html(html_text_of(document.content))
+        return parse_html(html_text_of(document.content), base_url=document.url)
 
 
-def parse_html(markup: str) -> Component:
+def parse_html(markup: str, *, base_url: str | None = None) -> Component:
     """Segment HTML markup into a component tree rooted at a ``section`` for ``<body>``.
 
     Component ids are ``c0``, ``c1``... in reading order, so they are stable for the same
-    markup.
+    markup. Image URLs are resolved against ``base_url`` when it's given.
     """
     builder = _TreeBuilder()
     builder.feed(readable(markup))  # markup passed in may still hold escaped bytes
     builder.close()
-    segmenter = _Segmenter()
+    segmenter = _Segmenter(base_url)
     body = builder.ensure_body()
     root = _Block("section", segmenter.path(body), children=segmenter.contents(body))
     return _Converter().convert(root)
@@ -484,6 +487,7 @@ class _Block:
     """A heading's rank (1-6). On a section, non-zero marks it as implicit: opened by a
     heading of that rank rather than a sectioning element."""
     cells: list[TableCell] = field(default_factory=list[TableCell])
+    src: str | None = None
 
 
 @dataclass
@@ -498,8 +502,9 @@ class _Inline:
 
 
 class _Segmenter:
-    def __init__(self) -> None:
+    def __init__(self, base_url: str | None = None) -> None:
         self._paths: dict[int, str] = {}
+        self._base_url = base_url
 
     def path(self, node: _Node) -> str:
         """The element's absolute path, XPath style: ``/html/body/div[2]/p``.
@@ -611,9 +616,12 @@ class _Segmenter:
         if any(_int_attr(node, name, 2) <= 1 for name in ("width", "height")):
             return None  # tracking pixel or spacer
         alt = _WHITESPACE.sub(" ", node.attrs.get("alt", "")).strip()
-        if not alt and not any(node.attrs.get(a) for a in ("src", "srcset", "data-src")):
+        src = _image_src(node)
+        if not alt and src is None:
             return None
-        return _Block("image", self.path(node), alt)
+        if src is not None and self._base_url and not src.startswith("data:"):
+            src = urljoin(self._base_url, src)
+        return _Block("image", self.path(node), alt, src=src)
 
     def _list(self, node: _Node) -> list[_Block]:
         items = [item for child in node.elements() if (item := self._item(child)) is not None]
@@ -766,6 +774,17 @@ def _int_attr(node: _Node, name: str, default: int) -> int:
     return int(match.group(1)) if match else default
 
 
+def _image_src(node: _Node) -> str | None:
+    """An ``img``'s URL: ``data-src`` first (lazy loaders keep the real image there and a
+    placeholder in ``src``), then ``src``, then the first ``srcset`` candidate."""
+    for name in ("data-src", "src"):
+        if value := node.attrs.get(name, "").strip():
+            return value
+    # "a.jpg 1x, b.jpg 2x" or "a.jpg, b.jpg": the URL runs to the first space or comma.
+    words = node.attrs.get("srcset", "").split()
+    return (words[0].rstrip(",") or None) if words else None
+
+
 def _finish(pieces: list[str], *, pre: bool) -> str:
     """Join inline pieces into text: one line per ``<br>``, blank lines dropped.
 
@@ -851,6 +870,7 @@ class _Converter:
             heading_trail=trail,
             location=DomLocation(dom_path=block.path),
             cells=block.cells,
+            src=block.src,
         )
 
 
@@ -861,6 +881,6 @@ def _flattened(block: _Block) -> list[_Block]:
     while pending:
         b = pending.pop()
         if b.text or b.cells or b.type == "image":
-            out.append(_Block(b.type, b.path, b.text, level=b.level, cells=b.cells))
+            out.append(_Block(b.type, b.path, b.text, level=b.level, cells=b.cells, src=b.src))
         pending.extend(reversed(b.children))
     return out

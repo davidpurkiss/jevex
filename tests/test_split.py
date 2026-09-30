@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from jevex import (
+    BBox,
     BoilerplateCleaner,
     Component,
     Context,
@@ -15,6 +16,7 @@ from jevex import (
     DomLocation,
     Extractor,
     Field,
+    ImageLocation,
     SchemaSpec,
     Statement,
     StatementStage,
@@ -249,6 +251,20 @@ def test_headings_captions_and_alt_text() -> None:
     assert split(comp("image", "Four stars")) == [("Four stars", "alt_text")]
 
 
+def test_text_read_from_an_image_is_ocr() -> None:
+    in_image = ImageLocation(src="https://example.com/spec.png", bbox=BBox(x0=0, y0=0, x1=9, y1=9))
+    paragraph = comp("paragraph", "Quiet and quick. Power: 150 PS").model_copy(
+        update={"location": in_image}
+    )
+    heading = comp("heading", "Performance").model_copy(update={"location": in_image})
+    assert split(paragraph) == [("Quiet and quick.", "ocr"), ("Power: 150 PS", "ocr")]
+    assert split(heading) == [("Performance", "ocr")]
+    pair = comp("paragraph", "Power: 150 PS").model_copy(update={"location": in_image})
+    assert [(s.kind, s.location) for s in DefaultSplitter().split(pair)] == [
+        ("key_value", in_image)
+    ]
+
+
 @pytest.mark.parametrize("type_", ["section", "column", "list", "breakout", "table"])
 def test_containers_and_tables_give_no_statements(type_: str) -> None:
     child = comp("paragraph", "Inside.", cid="c2")
@@ -434,6 +450,33 @@ async def test_stage_splits_every_component_in_reading_order() -> None:
     await StatementStage().run(ctx)
     assert ctx.parsed is not None
     assert list(ctx.parsed.statements) == ["ld.0", "h.0", "p.0", "p.1", "l1.0", "l2.0", "l4.0"]
+
+
+async def test_stage_keeps_statements_already_on_a_component_in_reading_order() -> None:
+    root = comp(
+        "section",
+        cid="root",
+        children=[
+            comp("paragraph", "First.", cid="p1"),
+            comp("paragraph", "A red hatchback.", cid="v"),
+            comp("paragraph", "Last.", cid="p2"),
+        ],
+    )
+    vision = Statement(
+        id="v.0", text="A red hatchback", kind="vision", component_id="v", location=LOC
+    )
+    structured = Statement(
+        id="ld.0", text="name: Delmaro", kind="structured", component_id="ld", location=LOC
+    )
+    ctx = context(root, [vision, structured])
+    await StatementStage().run(ctx)
+    assert ctx.parsed is not None
+    assert [(sid, s.kind) for sid, s in ctx.parsed.statements.items()] == [
+        ("ld.0", "structured"),
+        ("p1.0", "sentence"),
+        ("v.0", "vision"),
+        ("p2.0", "sentence"),
+    ]
 
 
 async def test_stage_refuses_duplicate_statement_ids() -> None:

@@ -16,6 +16,7 @@ from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
 from jevex.gate import DocumentGateStage
+from jevex.images import ImageStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient, JevRequestCapError
 from jevex.keypaths import StructuredStage
@@ -63,6 +64,7 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     DocumentGateStage(),
     StructuredStage(),
     LayoutStage(),
+    ImageStage(),
     ComponentGateStage(),
     StatementStage(),
     EntityStage(),

@@ -37,6 +37,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `layout.py` | `Component` tree, `Location` union (`DomLocation`, `PageLocation`, `ImageLocation`), `BBox`; `section_text` (the capped heading trail every gate and statement state sends as `section`) |
 | `statements.py` | `Statement`, `Span`, `Candidate`, `NormaliserStep` (compact YAML form) |
 | `split.py` | Statement splitting (stage 9): `DefaultSplitter` (pysbd sentences, list items, `Label: value` pairs, headings, captions, alt text; tables are #25), `StatementStage` (cuts statements over `MAX_STATEMENT_CHARS` with `cut_statement`, repeating a cell's headers or a pair's label) |
+| `images.py` | Image stage (stage 6): `ImageStage` (image components, scanned PDF pages found with pypdfium2, image documents), `DefaultImageLoader` (`data:` URIs, PDF renders, a fetcher for remote images), `OcrProcessor`/`RapidOcrEngine` (`ocr` extra), `text_components` (OCR lines → paragraphs and headed sections with `ImageLocation`s); vision processors' statements become `vision` statements |
 | `entities.py` | `EntityScope` |
 | `jev.py` | The only code that talks to Jev: `Noul`/`Choice`/`Score` questions, answers, `JevClient` (batching, splitting, metering), `JevBackend` protocol, `TypeSafeBackend` |
 | `schema.py` | `jevex.Field`, `Questions`, `SchemaConfig`, `SchemaSpec`/`FieldSpec` and every generated question |

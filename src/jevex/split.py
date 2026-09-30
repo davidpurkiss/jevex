@@ -16,6 +16,11 @@ table                  one per cell, with its row and column         ``table_cel
 containers             none; their children are split instead
 =====================  ===========================================  ===============
 
+Text the image stage read from an image (a paragraph or heading with an
+:class:`~jevex.layout.ImageLocation`) is split the same way, but its sentences are ``ocr``
+statements. Components that already have statements (the image stage's ``vision``
+statements) aren't split again.
+
 Each statement carries its component's ``heading_trail`` and ``location``. Ids are
 ``<component id>.<n>`` (table cells: ``<table id>.r<row>c<col>``), so they're unique
 and stable for a given tree.
@@ -34,7 +39,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Protocol, cast
 
-from jevex.layout import DomLocation
+from jevex.layout import DomLocation, ImageLocation
 from jevex.statements import Statement
 from jevex.tables import header_prefix, table_statements
 
@@ -210,6 +215,8 @@ class DefaultSplitter:
             return table_statements(component)
         else:  # containers: their children are split instead
             return []
+        if isinstance(component.location, ImageLocation):
+            pieces = [(p, "ocr" if k == "sentence" else k) for p, k in pieces]
         return [
             Statement(
                 id=f"{component.id}.{i}",
@@ -327,9 +334,11 @@ class DuplicateStatementError(ValueError):
 class StatementStage:
     """Splits every component of ``ctx.parsed`` into statements (stage 9).
 
-    Statements already on the document (from the structured-data stage) are kept; new
-    ones are added in reading order, and an id clash raises
-    :class:`DuplicateStatementError` rather than replacing one. A statement longer than
+    Statements already on the document are kept: those of components outside the tree
+    (the structured-data stage's) first, then the rest in reading order, with a
+    component that already has statements (the image stage's ``vision`` statements) not
+    split again. An id clash raises :class:`DuplicateStatementError` rather than
+    replacing one. A statement longer than
     ``max_chars`` is cut (:func:`cut_statement`) and a ``statements_cut`` event lists
     which. Without a parsed document the stage does nothing.
     """
@@ -346,19 +355,31 @@ class StatementStage:
         parsed = ctx.parsed
         if parsed is None:
             return
+        in_tree = {c.id for c in parsed.root.walk()}
+        existing: dict[str, list[Statement]] = {}
+        statements: dict[str, Statement] = {}
+        for statement in parsed.statements.values():
+            if statement.component_id in in_tree:
+                existing.setdefault(statement.component_id, []).append(statement)
+            else:
+                statements[statement.id] = statement
         cut: dict[str, int] = {}
         for component in parsed.root.walk():
+            if component.id in existing:
+                statements.update((s.id, s) for s in existing[component.id])
+                continue
             for whole in self.splitter.split(component):
                 pieces = cut_statement(whole, self.max_chars)
                 if len(pieces) > 1:
                     cut[whole.id] = len(pieces)
                 for statement in pieces:
-                    if statement.id in parsed.statements:
+                    if statement.id in statements or statement.id in parsed.statements:
                         raise DuplicateStatementError(
                             f"statement id {statement.id!r} (component {component.id!r}) is "
                             "already on the document"
                         )
-                    parsed.statements[statement.id] = statement
+                    statements[statement.id] = statement
+        parsed.statements = statements
         if cut:
             ctx.event(
                 self.name,
