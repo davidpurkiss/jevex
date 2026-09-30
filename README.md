@@ -17,6 +17,26 @@ PDF layout uses [Docling](https://github.com/docling-project/docling), an option
 about 500 MB of layout and table models from Hugging Face the first time it runs).
 Without it, PDFs skip layout, with a `layout_skipped` event saying so.
 
+## Images
+
+Text in pictures (infographics, scanned PDF pages, image documents) is read with OCR
+when the `ocr` extra is installed: `pip install "jevex[ocr]"`. It uses
+[RapidOCR](https://github.com/RapidAI/RapidOCR), whose models ship with it, so nothing is
+downloaded. jevex makes no requests of its own, so images on a web page are read only
+when they're inline (`data:` URIs) unless you give the loader a fetcher:
+
+```python
+from jevex import DefaultImageLoader, ImageStage, SimpleFetcher
+from jevex.extractor import default_pipeline
+
+pipeline = default_pipeline().replace(
+    "images", ImageStage(loader=DefaultImageLoader(fetcher=SimpleFetcher()))
+)
+```
+
+A vision model plugs in as another `ImageProcessor` passed to `ImageStage(processors=[...])`;
+the statements it returns are tagged `vision`, and so are the values taken from them.
+
 ## Development
 
 ```sh

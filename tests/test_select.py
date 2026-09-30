@@ -414,3 +414,14 @@ async def test_list_enum_options_follow_the_text_order_within_a_statement() -> N
     ctx = context(fake, [st("s1", "Grey or red")], {"s1": "colours"})
     await run_both(ctx)
     assert ctx.schemas["Car"].fields["doc"]["colours"].value == ["grey", "red"]
+
+
+async def test_answers_from_a_vision_statement_are_tagged_vision() -> None:
+    fake = FakeJev().choice("What is the fuel type", "diesel", confidence=0.93)
+    said = st("s1", "The badge on the boot reads TDI, a diesel").model_copy(
+        update={"kind": "vision"}
+    )
+    ctx = context(fake, [said], {"s1": "fuel_type"})
+    await run_both(ctx)
+    meta = ctx.schemas["Car"].fields["doc"]["fuel_type"]
+    assert (meta.value, meta.method) == ("diesel", "vision")

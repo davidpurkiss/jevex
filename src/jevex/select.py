@@ -16,7 +16,8 @@ After categorising, each statement is assigned to a field (or none). Then:
   - bool fields: a Noul.
 
   Enum and bool answers are already values, so they're recorded as
-  :class:`~jevex.results.FieldMeta` (``method="jev"``). That happens once every answer is
+  :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
+  came from a vision model). That happens once every answer is
   in, combining statements in document order, so the result never depends on which Jev
   reply arrived first. Fields another route already filled (e.g. structured data) are
   left alone.
@@ -382,7 +383,7 @@ def _record_direct(
         FieldMeta(
             value=value,
             confidence=best.confidence,
-            method="jev",
+            method="vision" if best.statement.kind == "vision" else "jev",
             source=Source(
                 url=ctx.document.url,
                 component_id=best.statement.component_id,
