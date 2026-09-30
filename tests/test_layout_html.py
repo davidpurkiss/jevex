@@ -370,6 +370,70 @@ def test_row_and_column_spans_shift_later_cells() -> None:
     }
 
 
+def headers(markup: str) -> dict[tuple[int, int], bool]:
+    (table,) = parse_html(f"<table>{markup}</table>").children
+    return {(c.row, c.col): c.header for c in table.cells}
+
+
+def test_bold_td_labels_in_the_header_row_and_first_column_are_headers() -> None:
+    assert headers(
+        "<tr><td></td><td><b>SE</b></td><td><strong>GT</strong></td></tr>"
+        "<tr><td><b>Power</b></td><td>150</td><td><b>200</b></td></tr>"
+        "<tr><td colspan=3><b><span>Economy</span></b></td></tr>"
+        "<tr><td><strong>MPG:</strong> </td><td>50</td><td>45</td></tr>"
+    ) == {
+        (0, 1): True,
+        (0, 2): True,
+        (1, 0): True,
+        (1, 1): False,
+        (1, 2): False,  # a bold value outside the header row and first column
+        (2, 0): True,
+        (3, 0): True,  # a colon after the bold label is still a label
+        (3, 1): False,
+        (3, 2): False,
+    }
+
+
+def test_bold_labels_need_a_consistent_first_column() -> None:
+    # One label in bold isn't a label column: a bold total stays data.
+    assert headers(
+        "<tr><td>Engine</td><td>1.5 TSI</td></tr><tr><td><b>Total</b></td><td>£25,000</td></tr>"
+    ) == {(0, 0): False, (0, 1): False, (1, 0): False, (1, 1): False}
+    # A bold header row counts without a label column, and th cells count as labels.
+    assert headers(
+        "<tr><td><b>Spec</b></td><td><b>SE</b></td></tr>"
+        "<tr><td>Power</td><td>150</td></tr>"
+        "<tr><th>Torque</th><td><b>250</b></td></tr>"
+    ) == {(0, 0): True, (0, 1): True, (1, 0): False, (1, 1): False, (2, 0): True, (2, 1): False}
+
+
+def test_a_table_set_all_in_bold_keeps_its_values_as_data() -> None:
+    assert headers(
+        "<tr><td><b>Engine</b></td><td><b>1.5 TSI</b></td></tr>"
+        "<tr><td><b>Power</b></td><td><b>150 PS</b></td></tr>"
+    ) == {(0, 0): True, (0, 1): False, (1, 0): True, (1, 1): False}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "<b>Engine</b> size",
+        "Engine <strong>size</strong>",
+        "<b>Engine</b><img src='i.png' alt='size'>",
+        "<em>Engine</em>",
+    ],
+)
+def test_cells_only_partly_bold_are_data(content: str) -> None:
+    assert headers(
+        f"<tr><td>{content}</td><td>1.5 TSI</td></tr><tr><td><b>Power</b></td><td>150</td></tr>"
+    ) == {
+        (0, 0): False,
+        (0, 1): False,
+        (1, 0): False,
+        (1, 1): False,
+    }
+
+
 def test_spans_are_clamped() -> None:
     root = parse_html(
         "<table><tr><td rowspan=99 colspan=100000>a</td><td>b</td></tr><tr><td>c</td></tr></table>"

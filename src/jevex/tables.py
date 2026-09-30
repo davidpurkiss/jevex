@@ -16,9 +16,10 @@ A spec table's cell "9.1" means nothing alone; rendered as
   replaces the column headers from there on:
   ``Performance › 0-62 mph (s) · 1.5 TSI SE: 9.1``.
 
-The text is ``[group › ][row headers · ][column headers: ]value``. A table without any
-header (or made only of headers) gives one statement per row, its cells joined with
-``" | "``. The headers also
+The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
+trailing colon dropped. A table without any header (or made only of headers) gives one
+statement per row, its cells joined with ``" | "``; a two-column one without headers whose
+first column holds labels (not numbers) reads as ``label: value`` instead. The headers also
 travel structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
 entity resolver can split a comparison table by column (one trim per column).
 
@@ -43,6 +44,11 @@ def _clean(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
 
 
+def _label(text: str) -> str:
+    """A header's text without the colon labels often end with ("Engine:")."""
+    return _clean(text).rstrip(":").rstrip()
+
+
 def table_statements(table: Component) -> list[Statement]:
     """One statement per non-empty data cell of ``table`` (or per row, without headers)."""
     cells = [c for c in table.cells if _clean(c.text)]
@@ -55,23 +61,27 @@ def table_statements(table: Component) -> list[Statement]:
     ordered = sorted(rows)
 
     if all(c.header for c in cells) or not any(c.header for c in cells):
-        # No headers, or nothing but headers: nothing to attach, so one statement per row.
-        return [
-            _statement(
-                table,
-                f"r{r}",
-                " | ".join(_clean(c.text) for c in sorted(rows[r], key=lambda c: c.col)),
-                TableCellRef(row=r, col=0),
-            )
-            for r in ordered
-        ]
+        # No headers, or nothing but headers: nothing to attach, so one statement per row,
+        # except that a two-column table without headers is read as labels and values.
+        pairs = not any(c.header for c in cells) and _label_value(cells, width)
+        out: list[Statement] = []
+        for r in ordered:
+            row = sorted(rows[r], key=lambda c: c.col)
+            if pairs and len(row) == 2:
+                label, value = _label(row[0].text), _clean(row[1].text)
+                ref = TableCellRef(row=r, col=1, row_headers=[label])
+                out.append(_statement(table, f"r{r}c1", _render(None, [label], [], value), ref))
+            else:
+                text = " | ".join(_clean(c.text) for c in row)
+                out.append(_statement(table, f"r{r}", text, TableCellRef(row=r, col=0)))
+        return out
 
     def headers_of(header_rows: list[int]) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for r in header_rows:
             for c in rows[r]:
                 for col in range(c.col, c.col + c.col_span):
-                    out.setdefault(col, []).append(_clean(c.text))
+                    out.setdefault(col, []).append(_label(c.text))
         return out
 
     # Header rows: the leading rows made only of header cells. A band among them
@@ -85,7 +95,7 @@ def table_statements(table: Component) -> list[Statement]:
             break
         leading.append(r)
         if _is_band(rows[r], width):
-            group = _clean(rows[r][0].text)
+            group = _label(rows[r][0].text)
         else:
             header_rows.append(r)
     col_headers = headers_of(header_rows)
@@ -109,12 +119,12 @@ def table_statements(table: Component) -> list[Statement]:
                 for covered in range(c.row, c.row + c.row_span):
                     row_header_cells.setdefault(covered, []).append(c)
 
-    out: list[Statement] = []
+    out = []
     for r in body:
         row = sorted(rows[r], key=lambda c: c.col)
         if header_only(r):
             if _is_band(row, width):
-                group = _clean(row[0].text)  # a band ("Performance")
+                group = _label(row[0].text)  # a band ("Performance")
             else:
                 col_headers = headers_of([r])  # a header row repeated mid-table
             continue
@@ -124,7 +134,7 @@ def table_statements(table: Component) -> list[Statement]:
             # A data cell spanning rows takes every covered row's headers.
             row_headers = list(
                 dict.fromkeys(
-                    _clean(h.text)
+                    _label(h.text)
                     for covered in range(c.row, c.row + c.row_span)
                     for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)
                 )
@@ -151,6 +161,16 @@ def table_statements(table: Component) -> list[Statement]:
                 )
             )
     return out
+
+
+def _label_value(cells: list[TableCell], width: int) -> bool:
+    """Whether a table without headers reads as ``label | value`` rows: two columns, no
+    spans, and a label (some letter, not just a number) in every first-column cell."""
+    return (
+        width == 2
+        and all(c.row_span == 1 and c.col_span == 1 for c in cells)
+        and all(any(ch.isalpha() for ch in c.text) for c in cells if c.col == 0)
+    )
 
 
 def _is_band(row: list[TableCell], width: int) -> bool:
