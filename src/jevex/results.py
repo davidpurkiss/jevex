@@ -147,7 +147,8 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
 
     Each field keeps its constraints, ``Annotated`` validators, alias and description;
     only the default and optionality change, and a nested model (``Variant``,
-    ``list[Variant]``) becomes its partial too, so a child record missing a field fits.
+    ``list[Variant]``) becomes its partial too, so a child record missing a field fits
+    (except in a discriminated union, and in a model nested in itself).
     Model-level behaviour (model and field validators, computed fields, serializers,
     ``extra="forbid"``) is left behind so a partial record can always be built. It's
     typed as ``type[M]`` for convenient attribute access, but it isn't a subclass.
@@ -163,7 +164,13 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
             optional.default = None
             optional.default_factory = None
             optional.validate_default = False  # a None default must never be validated
-            annotation = _partial_annotation(info.annotation)
+            # A discriminated union's members keep their real type: pydantic needs each
+            # one's discriminator to stay a required Literal.
+            annotation = (
+                info.annotation
+                if info.discriminator is not None
+                else _partial_annotation(info.annotation)
+            )
             fields[name] = (Optional[annotation], optional)  # noqa: UP045 - built at runtime
     finally:
         _BUILDING.discard(model)

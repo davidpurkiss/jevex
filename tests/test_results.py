@@ -266,6 +266,35 @@ def test_partial_models_make_models_in_lists_and_unions_partial() -> None:
     assert record.spare.power is None
 
 
+class Petrol(BaseModel):
+    kind: Literal["petrol"]
+    cc: int
+
+
+class Electric(BaseModel):
+    kind: Literal["electric"]
+    kwh: int
+
+
+class Powered(BaseModel):
+    engine: Annotated[Petrol | Electric, Field(discriminator="kind", description="Engine")]
+    size: int
+
+
+class PoweredFleet(BaseModel):
+    cars: list[Powered] = Field(description="Cars")
+
+
+def test_discriminated_unions_keep_their_real_members() -> None:
+    record = partial_model(PoweredFleet).model_validate(
+        {"cars": [{"engine": {"kind": "electric", "kwh": 60}}]}
+    )
+    [car] = record.cars
+    assert type(car) is partial_model(Powered)
+    assert car.engine == Electric(kind="electric", kwh=60)
+    assert car.size is None
+
+
 def test_a_model_nested_in_itself_keeps_its_real_type() -> None:
     record = partial_model(Node).model_validate({"children": [{"name": "leaf"}]})
     assert record.name is None
@@ -519,6 +548,21 @@ def test_unknown_threshold_keys_are_rejected() -> None:
     with pytest.raises(ValueError, match="feul"):
         extractor(thresholds={"feul": 0.9})
     extractor(thresholds={"VehicleSpec.model": 0.9, "title": 0.5})
+
+
+class Extra(BaseModel):
+    tags: dict[str, str]
+
+
+class PageWithExtra(BaseModel):
+    title: str = Field(description="Title")
+    extra: Extra | None = Field(default=None, description="Extra")
+
+
+def test_nested_models_jevex_cannot_extract_dont_stop_an_extractor() -> None:
+    Extractor([PageWithExtra], thresholds={"title": 0.5})
+    with pytest.raises(ValueError, match=r"PageWithExtra\.extra\.tags"):
+        Extractor([PageWithExtra], thresholds={"PageWithExtra.extra.tags": 0.5})
 
 
 def test_thresholds_can_name_a_nested_models_fields() -> None:

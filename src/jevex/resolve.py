@@ -249,9 +249,10 @@ class ParentChild:
       each); ``"table_rows"`` does the same for each row's label (its headers joined).
     - A component type (``"section"``, ``"list_item"``, ``"column"``, ``"breakout"``,
       ``"table"``): each outermost component of that type is a child, labelled by its
-      first heading (or first text), with its subtree. One that holds the others (a
-      page-wide section around the trim sections) is a wrapper, so the ones inside it are
-      the children instead.
+      first heading (or first text), with its subtree. A lone one holding others of its
+      type, without a heading of its own (a page-wide section around the trim sections),
+      is a wrapper, so the ones inside it are the children instead; with a heading, it's
+      the only child ("SE", with "Performance" and "Dimensions" sections inside).
 
     Every other statement is the parent's (labelled ``label``). Children inherit what it
     states: a child field found only in the parent's statements ("Every Kestrova has 5
@@ -338,7 +339,9 @@ def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozense
         return found
 
     found = outermost(parsed.root)
-    while len(found) == 1 and (inner := outermost(found[0])):
+    # A lone headed one is a child with sub-parts ("SE" with "Performance" inside), not a
+    # wrapper.
+    while len(found) == 1 and not _starts_with_heading(found[0]) and (inner := outermost(found[0])):
         found = inner
     members: list[tuple[str, frozenset[str]]] = []
     for component in found:
@@ -483,6 +486,10 @@ def _depths(root: Component) -> dict[str, int]:
 
 def _shape(component: Component) -> tuple[str, tuple[str, ...]]:
     return component.type, tuple(c.type for c in component.children)
+
+
+def _starts_with_heading(component: Component) -> bool:
+    return bool(component.children) and component.children[0].type == "heading"
 
 
 def _is_headed(component: Component) -> bool:

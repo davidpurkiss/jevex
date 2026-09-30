@@ -25,7 +25,7 @@ from jevex.normalise import NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
-from jevex.schema import SchemaSpec
+from jevex.schema import ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
 from jevex.select import CandidateStage, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
@@ -233,6 +233,25 @@ class ExtractionResult:
         )
 
 
+def _threshold_keys(specs: Sequence[SchemaSpec]) -> set[str]:
+    return {f.name for s in specs for f in s.fields} | {
+        f"{s.name}.{f.name}" for s in specs for f in s.fields
+    }
+
+
+def _child_specs(specs: Sequence[SchemaSpec]) -> list[SchemaSpec]:
+    """Specs of the nested models jevex can extract (a nested model it can't is only an
+    error if ``ParentChild`` is asked to fill it)."""
+    out: list[SchemaSpec] = []
+    for spec in specs:
+        for f in spec.child_fields:
+            try:
+                out.append(spec.child(f.name))
+            except (UnsupportedFieldError, ReservedFieldNameError):
+                continue
+    return out
+
+
 def _records(
     ctx: Context, run: SchemaRun, threshold: float, thresholds: Mapping[str, float] | None
 ) -> list[Extracted[BaseModel]]:
@@ -337,12 +356,10 @@ class Extractor:
         self.pipeline = pipeline if pipeline is not None else default_pipeline()
         self.threshold = threshold
         self.thresholds = dict(thresholds or {})
-        # Nested models' fields too ("CarModel.trims.power_ps"): ParentChild's children.
-        specs = [*self.schemas, *(s.child(f.name) for s in self.schemas for f in s.child_fields)]
-        known = {f.name for s in specs for f in s.fields} | {
-            f"{s.name}.{f.name}" for s in specs for f in s.fields
-        }
-        unknown = sorted(set(self.thresholds) - known)
+        unknown = sorted(set(self.thresholds) - _threshold_keys(self.schemas))
+        if unknown:
+            # Nested models' fields too ("CarModel.trims.power_ps"): ParentChild's children.
+            unknown = sorted(set(unknown) - _threshold_keys(_child_specs(self.schemas)))
         if unknown:
             raise ValueError(f"thresholds for unknown fields: {unknown}")
         self._jev = jev
