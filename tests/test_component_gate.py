@@ -257,6 +257,125 @@ def test_empty_blocks_make_no_unit_and_a_bare_root_is_one_unit() -> None:
     assert unit.component_ids == ("p",)
 
 
+def scanned_page(alt: str = "") -> Component:
+    """An image as the image stage leaves it: OCR paragraphs and headed sections below it."""
+    return comp(
+        "image",
+        alt,
+        "img",
+        comp("paragraph", "Delmaro Kestrova brochure", "img-t0", trail=["Brochure"]),
+        comp(
+            "section",
+            "",
+            "img-t1",
+            comp("heading", "Performance", "img-t2", trail=["Brochure"]),
+            comp("paragraph", "0-62 mph: 9.1 s", "img-t3", trail=["Brochure", "Performance"]),
+            comp("paragraph", "Power: 110 kW", "img-t4", trail=["Brochure", "Performance"]),
+            trail=["Brochure"],
+        ),
+        comp(
+            "section",
+            "",
+            "img-t5",
+            comp("heading", "Price", "img-t6", trail=["Brochure"]),
+            comp("paragraph", "From £24,995 on the road.", "img-t7", trail=["Brochure", "Price"]),
+            trail=["Brochure"],
+        ),
+        trail=["Brochure"],
+    )
+
+
+def test_an_image_with_text_read_from_it_is_cut_like_a_section() -> None:
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "Download the brochure.", "p1"),
+        scanned_page(alt="Brochure page 1"),
+        comp("paragraph", "Book a test drive today.", "p2"),
+    )
+    units = gate_units(root)
+    assert [(u.id, u.component_ids) for u in units] == [
+        ("root#0", ("p1",)),
+        ("img#0", ("img", "img-t0")),
+        ("img-t1#0", ("img-t2", "img-t3", "img-t4")),
+        ("img-t5#0", ("img-t6", "img-t7")),
+        ("root#1", ("p2",)),
+    ]
+    assert units[1].text == "Brochure page 1\nDelmaro Kestrova brochure"
+    assert units[2].state() == {
+        "content": "Performance\n0-62 mph: 9.1 s\nPower: 110 kW",
+        "section": "Brochure",
+    }
+
+
+def test_an_images_ocr_headings_reach_the_section_of_units_below_them() -> None:
+    units = gate_units(comp("section", "", "root", scanned_page()), max_chars=30)
+    perf = [u for u in units if "img-t3" in u.component_ids or "img-t4" in u.component_ids]
+    assert [(u.component_ids, u.state()) for u in perf] == [
+        (("img-t2", "img-t3"), {"content": "Performance\n0-62 mph: 9.1 s", "section": "Brochure"}),
+        (("img-t4",), {"content": "Power: 110 kW", "section": "Brochure › Performance"}),
+    ]
+    assert all(len(u.text) <= 30 for u in units)
+
+
+def test_a_heading_before_a_read_image_opens_its_first_unit() -> None:
+    root = comp("section", "", "root", comp("heading", "Specifications", "h"), scanned_page())
+    first = gate_units(root)[0]
+    assert (first.id, first.component_ids) == ("img#0", ("h", "img-t0"))
+    assert first.text == "Specifications\nDelmaro Kestrova brochure"
+
+
+def test_an_image_alone_at_the_root_is_cut_like_a_section() -> None:
+    units = gate_units(scanned_page())
+    assert [u.component_ids for u in units] == [
+        ("img-t0",),
+        ("img-t2", "img-t3", "img-t4"),
+        ("img-t6", "img-t7"),
+    ]
+
+
+def test_an_image_without_text_read_from_it_is_one_block_as_before() -> None:
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "The Kestrova.", "p1"),
+        comp("image", "Side view", "img1"),
+        comp("image", "Front view", "img2", comp("caption", "Figure 2: the grille", "cap")),
+        comp("image", "", "img3"),
+        comp("paragraph", "Book a test drive.", "p2"),
+    )
+    [unit] = gate_units(root)
+    assert unit.component_ids == ("p1", "img1", "img2", "cap", "img3", "p2")
+    assert unit.text == (
+        "The Kestrova.\nSide view\nFront view\nFigure 2: the grille\nBook a test drive."
+    )
+
+
+def test_a_pdf_figure_with_text_found_in_it_is_cut_like_a_section() -> None:
+    figure = comp(
+        "image",
+        "",
+        "f",
+        comp("caption", "Figure 3: prices", "cap"),
+        comp("paragraph", "Prices exclude VAT.", "fn"),
+    )
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "The Kestrova.", "p1"),
+        figure,
+        comp("paragraph", "Book a test drive.", "p2"),
+    )
+    assert [(u.id, u.component_ids) for u in gate_units(root)] == [
+        ("root#0", ("p1",)),
+        ("f#0", ("cap", "fn")),
+        ("root#1", ("p2",)),
+    ]
+
+
 # --- the gate ------------------------------------------------------------------------
 
 
@@ -292,6 +411,17 @@ async def test_a_value_past_max_chars_still_passes_its_component() -> None:
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
     assert result["Car"]["price"] == ["root", "p"]
+
+
+async def test_a_scanned_page_passes_only_the_ocr_text_jev_says_contains_the_field() -> None:
+    fake = FakeJev().noul("contain the price (GBP)?", p=0.9, state="24,995")
+    root = comp("section", "", "root", scanned_page(alt="Brochure page 1"))
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    # The image passes as the price section's ancestor; the rest of the page doesn't.
+    assert result["Car"]["price"] == ["root", "img", "img-t5", "img-t6", "img-t7"]
+    assert result["Car"]["performance"] == []
 
 
 async def test_non_noul_answers_are_an_error() -> None:

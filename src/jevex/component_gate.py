@@ -3,11 +3,13 @@
 
 The layout tree is cut into **gate units**: each container's run of direct content
 blocks (headings, paragraphs, lists, captions, images), chunked to at most ``max_chars``,
-plus each table on its own. A block longer than ``max_chars`` is split across several
-units (tables by row groups with their headers repeated) rather than cut, and headings
-with nothing after them join the table or section they introduce. Jev is asked one Noul
-per unit × field group ("Does this section contain the price?"), with every schema's
-questions about a unit in one request.
+plus each table on its own. An image with text found in it (OCR from the image stage, or
+text Docling found in a PDF picture) is cut like a section: its alt text, then the
+paragraphs and headed sections found in it. A block longer than ``max_chars`` is split
+across several units (tables by row groups with their headers repeated) rather than cut,
+and headings with nothing after them join the table or section they introduce. Jev is
+asked one Noul per unit × field group ("Does this section contain the price?"), with every
+schema's questions about a unit in one request.
 
 A unit that passes for a group passes all its components and their descendants (and
 their ancestors, so the tree stays connected). The result lands on
@@ -42,6 +44,25 @@ wrongly failed one loses its values. Tuned from eval runs in #49."""
 DEFAULT_MAX_CHARS = 2000
 
 _CONTAINERS = frozenset({"section", "column", "breakout"})
+
+
+def _opens(component: Component) -> bool:
+    """Whether the gate cuts ``component``'s children into units rather than reading it as
+    one block: containers, and images with text found in them (a scanned page's OCR has its
+    own paragraphs and headings; a PDF picture can hold text and footnotes). An image with
+    only its caption is one block, so a figure still shares a unit with the text around
+    it."""
+    if component.type == "image":
+        return any(c.type != "caption" for c in component.children)
+    return component.type in _CONTAINERS
+
+
+def _blocks(container: Component) -> list[Component]:
+    """What ``container`` is cut into: its children, after an image's own alt text (as a
+    block without children, so its unit carries only the image's id)."""
+    if container.type == "image" and container.text.strip():
+        return [container.model_copy(update={"children": []}), *container.children]
+    return container.children
 
 
 @dataclass(frozen=True)
@@ -188,10 +209,10 @@ def gate_units(root: Component, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[G
                 part += 1
             chunk, size = [], 0
 
-        for child in container.children:
+        for child in _blocks(container):
             is_table = child.type == "table"
             length = len(_text(child)) + 1
-            if child.type in _CONTAINERS:
+            if _opens(child):
                 lead = chunk if only_headings(chunk) else []
                 if not lead:
                     close()
@@ -226,7 +247,7 @@ def gate_units(root: Component, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[G
         close()
         return []
 
-    if root.type in _CONTAINERS:
+    if _opens(root):
         leftover = visit(root, [])
         if leftover:
             emit(f"{root.id}#end", leftover)
