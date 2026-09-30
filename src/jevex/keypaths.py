@@ -26,13 +26,13 @@ overwrite them; whether the layout route runs at all is the structured mode's ca
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
 from jevex.jev import (
     MAX_STATE_TOKENS,
@@ -63,6 +63,10 @@ ACCEPT_AT = 0.5
 
 MAX_PATHS = 300
 """Key paths asked about per blob; the rest are skipped (with an event)."""
+
+MAX_FALLBACK_VALUES = 3
+"""Distinct values of a single-value enum/bool field asked of Jev per document when none
+reads directly; the first Jev can read wins."""
 
 MAX_BLOBS = 20
 """Blobs mapped per document, in reading order (JSON-LD first); a miss costs Jev requests
@@ -209,6 +213,10 @@ class KeyPathMapper:
         self.memory_size = memory_size
         # (fingerprint, schema) → path → field (None: no field). Used without a store.
         self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
+        # (field, question, options, many, raw value) → Jev's reading of an enum/bool value.
+        self._values: OrderedDict[tuple[str, str, str, bool, str], tuple[Any, float] | None] = (
+            OrderedDict()
+        )
 
     async def extract(
         self,
@@ -236,15 +244,12 @@ class KeyPathMapper:
         first: dict[str, FlatBlob] = {}
         for flat in flats:
             first.setdefault(flat.fingerprint, flat)
-        resolved = await asyncio.gather(
-            *(self._mappings(flat, schemas, jev, events, store) for flat in first.values())
+        resolved = await gather(
+            self._mappings(flat, schemas, jev, events, store) for flat in first.values()
         )
         mappings = dict(zip(first, resolved, strict=True))
-        per_blob = await asyncio.gather(
-            *(
-                self._blob(flat, schemas, mappings[flat.fingerprint], document, jev)
-                for flat in flats
-            )
+        per_blob = await gather(
+            self._blob(flat, schemas, mappings[flat.fingerprint], document, jev) for flat in flats
         )
         statements: list[Statement] = []
         fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
@@ -278,11 +283,9 @@ class KeyPathMapper:
         for schema in schemas:
             mapping = mappings[schema.name]
             wanted = [(shape, name) for shape, name in mapping.items() if name and shape in shapes]
-            metas = await asyncio.gather(
-                *(
-                    self._meta(schema.field(name), flat, shapes[shape], document, jev)
-                    for shape, name in wanted
-                )
+            metas = await gather(
+                self._meta(schema.field(name), flat, shapes[shape], document, jev)
+                for shape, name in wanted
             )
             mine: dict[str, FieldMeta] = {}
             for (_, name), meta in zip(wanted, metas, strict=True):
@@ -429,7 +432,7 @@ class KeyPathMapper:
                 out.setdefault(schema_name, {})[path] = answer
             return out
 
-        results = await asyncio.gather(*(ask(c) for c in chunks if c))
+        results = await gather(ask(c) for c in chunks if c)
         merged: dict[str, dict[str, ChoiceAnswer]] = {}
         for result in results:
             for schema_name, answers in result.items():
@@ -444,23 +447,39 @@ class KeyPathMapper:
         document: Document,
         jev: JevClient,
     ) -> FieldMeta:
-        """The field's value from its leaves: the first that normalises (every one, for a
-        list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
+        """The field's value from its leaves: the first that reads directly (every one, for
+        a list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
         "Automatic") is asked of Jev as the field's own question about the key-path
-        statement. When nothing works, the error is kept on the meta."""
+        statement: once per distinct value (remembered by the mapper), concurrently, and
+        for a single-value field only when no leaf reads directly, for at most
+        :data:`MAX_FALLBACK_VALUES` values. When nothing works, the error is kept."""
+        direct: dict[int, Any] = {}
+        errors: dict[int, str] = {}
+        for i, leaf in enumerate(leaves):
+            try:
+                direct[i] = self._value(spec, leaf.value)
+            except NormaliseError as exc:
+                errors[i] = f"{leaf.path}: {exc}"
+        asked: dict[str, tuple[Any, float] | None] = {}
+        if errors and spec.kind in ("enum", "bool") and (spec.many or not direct):
+            limit = MAX_FALLBACK_VALUES if not spec.many else len(leaves)
+            raws = list(dict.fromkeys(_text(leaves[i].value) for i in errors))[:limit]
+            by_raw = {_text(leaves[i].value): leaves[i] for i in reversed(list(errors))}
+            results = await gather(self._ask_value_cached(spec, by_raw[r], jev) for r in raws)
+            asked = dict(zip(raws, results, strict=True))
+
         values: list[Any] = []
-        errors: list[str] = []
         first: Leaf | None = None
         confidence: float | None = None
-        for leaf in leaves:
-            try:
-                value = self._value(spec, leaf.value)
-            except NormaliseError as exc:
-                asked = await self._ask_value(spec, leaf, jev)
-                if asked is None:
-                    errors.append(f"{leaf.path}: {exc}")
+        for i, leaf in enumerate(leaves):
+            if i in direct:
+                value = direct[i]
+            else:
+                answer = asked.get(_text(leaf.value))
+                if answer is None:
                     continue
-                value, confidence = asked
+                value, p = answer
+                confidence = p if confidence is None else min(confidence, p)
             if first is None:
                 first = leaf
             for item in value if isinstance(value, list) and spec.many else [value]:  # pyright: ignore[reportUnknownVariableType]
@@ -476,13 +495,36 @@ class KeyPathMapper:
             statement=f"{leaf.path}: {_text(leaf.value)}",
         )
         if first is None or not values:
-            return FieldMeta(method="structured", source=source, error="; ".join(errors) or None)
+            error = "; ".join(errors.values()) or None
+            return FieldMeta(method="structured", source=source, error=error)
         return FieldMeta(
             value=values if spec.many else values[0],
             confidence=confidence,
             method="structured",
             source=source,
         )
+
+    async def _ask_value_cached(
+        self, spec: FieldSpec, leaf: Leaf, jev: JevClient
+    ) -> tuple[Any, float] | None:
+        """:meth:`_ask_value`, remembered per field question and raw value, so a value the
+        template repeats on every page is asked once for the mapper's lifetime."""
+        question = (
+            spec.enum_question().instructions
+            if spec.kind == "enum"
+            else spec.bool_question().instructions
+            if spec.kind == "bool"
+            else ""
+        )
+        key = (spec.name, str(question), repr(spec.options), spec.many, _text(leaf.value))
+        if key in self._values:
+            self._values.move_to_end(key)
+            return self._values[key]
+        result = await self._ask_value(spec, leaf, jev)
+        self._values[key] = result
+        while len(self._values) > self.memory_size * 4:
+            self._values.popitem(last=False)
+        return result
 
     async def _ask_value(
         self, spec: FieldSpec, leaf: Leaf, jev: JevClient

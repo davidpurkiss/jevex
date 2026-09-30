@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from collections.abc import AsyncIterator, Callable
@@ -21,7 +22,7 @@ from jevex import (
 )
 from jevex.extractor import default_pipeline
 from jevex.interfaces import StructuredExtractor
-from jevex.jev import Choice
+from jevex.jev import Choice, JevClient
 from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.results import FieldMeta
 from jevex.store import KeyMapping, SQLiteStore
@@ -519,3 +520,50 @@ async def test_the_extractors_store_keeps_mappings_across_extractors(tmp_path: P
         result = await second.extract(page({**CAR, "model": "Polo"}))
     assert fresh.calls == []
     assert result.values["Car"]["document"]["model"] == "Polo"
+
+
+async def test_an_enum_value_is_asked_once_per_distinct_value_and_remembered() -> None:
+    data = {"items": [{"fuel": "Fully electric", "model": f"M{i}"} for i in range(40)]}
+    fake = mapping_jev({"items[].fuel": "fuel"}).choice(
+        re.compile("(?i)what is the fuel type"), "ev", state="Fully electric"
+    )
+    mapper = KeyPathMapper()
+    fields = await extract(mapper, fake, data)
+    assert fields["fuel"].value == "ev"
+    enum_asks = [c for c in fake.calls if "enum" in c.questions]
+    assert len(enum_asks) == 1  # 40 leaves, one distinct value
+    before = len(fake.calls)
+    await extract(mapper, fake, data)  # the next page from the template
+    assert len(fake.calls) == before  # mapping and value both remembered: no calls
+
+
+async def test_a_capped_request_cancels_the_other_blobs_before_extract_returns() -> None:
+    from jevex import Budgets, DocBudget, Extractor, Pipeline
+    from jevex.jev import JevResponse
+
+    finished: list[str] = []
+
+    class SlowFirst:
+        async def system_one(self, state: object, questions: object) -> JevResponse:
+            text = json.dumps(state)
+            if "slow" in text:
+                await asyncio.sleep(0.2)
+            finished.append(text)
+            return JevResponse(answers={}, input_tokens=1, model="fake")
+
+    scripts = "".join(
+        f'<script type="application/ld+json">{json.dumps(d)}</script>'
+        for d in ({"name": "slow", "a": 1}, {"title": "fast", "b": 2})
+    )
+    doc = Document.from_bytes(f"<html><head>{scripts}</head></html>".encode())
+    ex = Extractor(
+        [Car],
+        jev=JevClient(SlowFirst()),
+        pipeline=Pipeline([StructuredStage()]),
+        budgets=Budgets(per_document=DocBudget(max_jev_requests=1)),
+    )
+    result = await ex.extract(doc)
+    assert result.meta.stopped
+    seen = len(finished)
+    await asyncio.sleep(0.3)
+    assert len(finished) == seen  # nothing finished after the result was built

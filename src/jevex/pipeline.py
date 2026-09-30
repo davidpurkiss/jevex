@@ -121,11 +121,11 @@ class Context:
     events: list[Event] = field(default_factory=list[Event])
     stopped: bool = False
     budget: DocumentBudget | None = None
+    """The document's budgets; LLM calls go through ``budget.call_llm`` (see
+    :mod:`jevex.budgets`). ``None`` outside an extractor, meaning unlimited."""
     store: Store | None = None
     """The extractor's store (learned state: key mappings, generators...), ``None`` without
     one. Stages that learn read and write it here."""
-    """The document's budgets; LLM calls go through ``budget.call_llm`` (see
-    :mod:`jevex.budgets`). ``None`` outside an extractor, meaning unlimited."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
