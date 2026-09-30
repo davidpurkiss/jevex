@@ -814,6 +814,22 @@ async def test_parent_child_takes_a_lone_headed_component_as_the_only_child() ->
     ]
 
 
+async def test_parent_child_keeps_a_lone_headed_child_when_the_title_was_gated_out() -> None:
+    parsed = await parse(
+        "<h1>Kestrova</h1><p>A family car.</p>"
+        "<section><h2>SE</h2><p>The SE.</p>"
+        "<section><h3>Performance</h3><p>150PS.</p></section>"
+        "<section><h3>Dimensions</h3><p>4.2 m.</p></section></section>"
+    )
+    title = [c.id for c in parsed.root.children[:2]]
+    view = parsed.restricted_to(c.id for c in parsed.root.walk() if c.id not in title)
+    [parent, se] = await ParentChild(children="section").resolve(
+        view, CAR, FakeJev(strict=True).client()
+    )
+    assert parent.statement_ids == []
+    assert se.label == "SE"
+
+
 async def test_parent_child_without_children_is_the_parent_alone() -> None:
     parsed = await parse("<h1>Kestrova</h1><p>Every Kestrova has 5 doors.</p>")
     [parent] = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())

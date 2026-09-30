@@ -351,12 +351,12 @@ def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozense
         return found
 
     found = outermost(parsed.root)
-    # A lone one after the page's title is a child with sub-parts ("SE" with "Performance"
-    # inside); one that holds the title (or has no heading) wraps the children.
-    title = next((c.id for c in parsed.root.walk() if c.type == "heading"), None)
+    # A lone one under the page's title is a child with sub-parts ("SE" with "Performance"
+    # inside); one that holds the title (or has no heading) wraps the children. The
+    # heading trail is the layout's, so a gated-out title still counts.
     while len(found) == 1 and (inner := outermost(found[0])):
         lone = found[0]
-        if _starts_with_heading(lone) and lone.children[0].id != title:
+        if _starts_with_heading(lone) and lone.children[0].heading_trail:
             break
         found = inner
     members: list[tuple[str, frozenset[str]]] = []
