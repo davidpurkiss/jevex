@@ -22,8 +22,8 @@ header (or made only of headers) gives one statement per row, its cells joined w
 travel structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
 entity resolver can split a comparison table by column (one trim per column).
 
-This works on :class:`~jevex.layout.TableCell` grids from any layout parser (HTML now,
-PDF with #24).
+This works on :class:`~jevex.layout.TableCell` grids from any layout parser (HTML and
+PDF).
 """
 
 from __future__ import annotations

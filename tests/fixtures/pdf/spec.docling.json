@@ -1,0 +1,1051 @@
+{
+ "schema_name": "DoclingDocument",
+ "version": "1.10.0",
+ "name": "document",
+ "origin": {
+  "mimetype": "application/pdf",
+  "binary_hash": 1607194610107485393,
+  "filename": "document.pdf",
+  "uri": null
+ },
+ "furniture": {
+  "self_ref": "#/furniture",
+  "parent": null,
+  "children": [],
+  "content_layer": "furniture",
+  "meta": null,
+  "name": "_root_",
+  "label": "unspecified"
+ },
+ "body": {
+  "self_ref": "#/body",
+  "parent": null,
+  "children": [
+   {
+    "cref": "#/texts/0"
+   },
+   {
+    "cref": "#/texts/1"
+   },
+   {
+    "cref": "#/texts/2"
+   },
+   {
+    "cref": "#/texts/3"
+   },
+   {
+    "cref": "#/groups/0"
+   },
+   {
+    "cref": "#/texts/7"
+   },
+   {
+    "cref": "#/tables/0"
+   },
+   {
+    "cref": "#/texts/8"
+   },
+   {
+    "cref": "#/texts/9"
+   },
+   {
+    "cref": "#/texts/10"
+   },
+   {
+    "cref": "#/texts/11"
+   },
+   {
+    "cref": "#/texts/12"
+   },
+   {
+    "cref": "#/texts/13"
+   }
+  ],
+  "content_layer": "body",
+  "meta": null,
+  "name": "_root_",
+  "label": "unspecified"
+ },
+ "groups": [
+  {
+   "self_ref": "#/groups/0",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [
+    {
+     "cref": "#/texts/4"
+    },
+    {
+     "cref": "#/texts/5"
+    },
+    {
+     "cref": "#/texts/6"
+    }
+   ],
+   "content_layer": "body",
+   "meta": null,
+   "name": "list",
+   "label": "list"
+  }
+ ],
+ "texts": [
+  {
+   "self_ref": "#/texts/0",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 702.5507849770509,
+      "r": 328.546860140547,
+      "b": 684.2695357387696,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      20
+     ]
+    }
+   ],
+   "orig": "Skoda Octavia Estate",
+   "text": "Skoda Octavia Estate",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 1
+  },
+  {
+   "self_ref": "#/texts/1",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "text",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 662.1013016886424,
+      "r": 525.6986126157674,
+      "b": 641.7906288201743,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      101
+     ]
+    }
+   ],
+   "orig": "The Octavia Estate combines a large boot with efficient engines. Prices start at £27,500 on the road.",
+   "text": "The Octavia Estate combines a large boot with efficient engines. Prices start at £27,500 on the road.",
+   "formatting": null,
+   "hyperlink": null
+  },
+  {
+   "self_ref": "#/texts/2",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 617.5841344645937,
+      "r": 146.65819129839176,
+      "b": 602.5161773287534,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      7
+     ]
+    }
+   ],
+   "orig": "Engines",
+   "text": "Engines",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 2
+  },
+  {
+   "self_ref": "#/texts/3",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "text",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 587.6634019607538,
+      "r": 319.7681365045025,
+      "b": 577.3180094665433,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      48
+     ]
+    }
+   ],
+   "orig": "Two petrol engines and one diesel are available.",
+   "text": "Two petrol engines and one diesel are available.",
+   "formatting": null,
+   "hyperlink": null
+  },
+  {
+   "self_ref": "#/texts/4",
+   "parent": {
+    "cref": "#/groups/0"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "list_item",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 114.43358898193358,
+      "t": 564.6013057511423,
+      "r": 224.86663950238116,
+      "b": 556.269157774487,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      20
+     ]
+    }
+   ],
+   "orig": "1.5 TSI 150PS manual",
+   "text": "TSI 150PS manual",
+   "formatting": null,
+   "hyperlink": null,
+   "enumerated": true,
+   "marker": "1.5"
+  },
+  {
+   "self_ref": "#/texts/5",
+   "parent": {
+    "cref": "#/groups/0"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "list_item",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 114.43358898193358,
+      "t": 552.6013062511423,
+      "r": 212.63150451852886,
+      "b": 544.269158274487,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      17
+     ]
+    }
+   ],
+   "orig": "1.5 TSI 150PS DSG",
+   "text": "TSI 150PS DSG",
+   "formatting": null,
+   "hyperlink": null,
+   "enumerated": true,
+   "marker": "1.5"
+  },
+  {
+   "self_ref": "#/texts/6",
+   "parent": {
+    "cref": "#/groups/0"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "list_item",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 114.43358898193358,
+      "t": 540.6013067511424,
+      "r": 224.66263711088124,
+      "b": 532.2691587744871,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      20
+     ]
+    }
+   ],
+   "orig": "2.0 TDI 115PS manual",
+   "text": "TDI 115PS manual",
+   "formatting": null,
+   "hyperlink": null,
+   "enumerated": true,
+   "marker": "2.0"
+  },
+  {
+   "self_ref": "#/texts/7",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 508.13100670092217,
+      "r": 182.23853541587738,
+      "b": 496.20318371158663,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      11
+     ]
+    }
+   ],
+   "orig": "Performance",
+   "text": "Performance",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 3
+  },
+  {
+   "self_ref": "#/texts/8",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "text",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 391.2493085810029,
+      "r": 301.6328452101397,
+      "b": 380.81801765404333,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      46
+     ]
+    }
+   ],
+   "orig": "Figures are for the manufacturer's test cycle.",
+   "text": "Figures are for the manufacturer's test cycle.",
+   "formatting": null,
+   "hyperlink": null
+  },
+  {
+   "self_ref": "#/texts/9",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 2,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 742.0841292770937,
+      "r": 175.10685231303086,
+      "b": 730.2031739615867,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      10
+     ]
+    }
+   ],
+   "orig": "Dimensions",
+   "text": "Dimensions",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 3
+  },
+  {
+   "self_ref": "#/texts/10",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 2,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 711.4117672738589,
+      "r": 133.55494121481055,
+      "b": 701.7588392092673,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      8
+     ]
+    }
+   ],
+   "orig": "Exterior",
+   "text": "Exterior",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 4
+  },
+  {
+   "self_ref": "#/texts/11",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "text",
+   "prov": [
+    {
+     "page_no": 2,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 683.6633979607539,
+      "r": 297.11247494848845,
+      "b": 673.3180054665434,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      41
+     ]
+    }
+   ],
+   "orig": "Length is 4,698 mm and width is 1,829 mm.",
+   "text": "Length is 4,698 mm and width is 1,829 mm.",
+   "formatting": null,
+   "hyperlink": null
+  },
+  {
+   "self_ref": "#/texts/12",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "section_header",
+   "prov": [
+    {
+     "page_no": 2,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 658.1046515750669,
+      "r": 114.0270022593497,
+      "b": 648.5088414280173,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      4
+     ]
+    }
+   ],
+   "orig": "Boot",
+   "text": "Boot",
+   "formatting": null,
+   "hyperlink": null,
+   "level": 4
+  },
+  {
+   "self_ref": "#/texts/13",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "text",
+   "prov": [
+    {
+     "page_no": 2,
+     "bbox": {
+      "l": 84.4335902319336,
+      "t": 631.1634001482538,
+      "r": 293.4617870256004,
+      "b": 620.9575926072605,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      44
+     ]
+    }
+   ],
+   "orig": "The boot holds 640 litres with the seats up.",
+   "text": "The boot holds 640 litres with the seats up.",
+   "formatting": null,
+   "hyperlink": null
+  }
+ ],
+ "pictures": [],
+ "tables": [
+  {
+   "self_ref": "#/tables/0",
+   "parent": {
+    "cref": "#/body"
+   },
+   "children": [],
+   "content_layer": "body",
+   "meta": null,
+   "label": "table",
+   "prov": [
+    {
+     "page_no": 1,
+     "bbox": {
+      "l": 84.0686264038086,
+      "t": 480.5635070800781,
+      "r": 328.01544189453125,
+      "b": 404.2569274902344,
+      "coord_origin": "BOTTOMLEFT"
+     },
+     "charspan": [
+      0,
+      0
+     ]
+    }
+   ],
+   "captions": [],
+   "references": [],
+   "footnotes": [],
+   "image": null,
+   "data": {
+    "table_cells": [
+     {
+      "bbox": {
+       "l": 191.69530451269532,
+       "t": 317.35574128248317,
+       "r": 244.86101555145848,
+       "b": 325.7039952152789,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 0,
+      "end_row_offset_idx": 1,
+      "start_col_offset_idx": 1,
+      "end_col_offset_idx": 2,
+      "text": "1.5 TSI SE",
+      "column_header": true,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 257.6132742661131,
+       "t": 317.35574128248317,
+       "r": 321.15658109264933,
+       "b": 325.7039952152789,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 0,
+      "end_row_offset_idx": 1,
+      "start_col_offset_idx": 2,
+      "end_col_offset_idx": 3,
+      "text": "2.0 TDI SE L",
+      "column_header": true,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 91.1835899506836,
+       "t": 336.2077448901226,
+       "r": 155.9455750232663,
+       "b": 346.5531373843331,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 1,
+      "end_row_offset_idx": 2,
+      "start_col_offset_idx": 0,
+      "end_col_offset_idx": 1,
+      "text": "0-62 mph (s)",
+      "column_header": false,
+      "row_header": true,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 191.69530451269532,
+       "t": 336.54060131702505,
+       "r": 206.97984599571654,
+       "b": 344.4701003901693,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 1,
+      "end_row_offset_idx": 2,
+      "start_col_offset_idx": 1,
+      "end_col_offset_idx": 2,
+      "text": "8.5",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 257.6132742661131,
+       "t": 336.54060131702505,
+       "r": 279.0127027443474,
+       "b": 344.4593630860757,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 1,
+      "end_row_offset_idx": 2,
+      "start_col_offset_idx": 2,
+      "end_col_offset_idx": 3,
+      "text": "10.4",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 91.1835899506836,
+       "t": 354.95774410887265,
+       "r": 178.93952399018502,
+       "b": 365.3031366030831,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 2,
+      "end_row_offset_idx": 3,
+      "start_col_offset_idx": 0,
+      "end_col_offset_idx": 1,
+      "text": "Top speed (mph)",
+      "column_header": false,
+      "row_header": true,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 191.69530451269532,
+       "t": 355.3013378398687,
+       "r": 210.03997314321126,
+       "b": 363.2147309568725,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 2,
+      "end_row_offset_idx": 3,
+      "start_col_offset_idx": 1,
+      "end_col_offset_idx": 2,
+      "text": "139",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 257.6132742661131,
+       "t": 355.2852318837283,
+       "r": 275.95794289662905,
+       "b": 363.2200996089193,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 2,
+      "end_row_offset_idx": 3,
+      "start_col_offset_idx": 2,
+      "end_col_offset_idx": 3,
+      "text": "128",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 91.1835899506836,
+       "t": 373.5950016346395,
+       "r": 149.83069942805278,
+       "b": 384.14440290662895,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 3,
+      "end_row_offset_idx": 4,
+      "start_col_offset_idx": 0,
+      "end_col_offset_idx": 1,
+      "text": "CO2 (g/km)",
+      "column_header": false,
+      "row_header": true,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 191.69530451269532,
+       "t": 374.05133705861874,
+       "r": 210.03997314321126,
+       "b": 381.9593615235757,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 3,
+      "end_row_offset_idx": 4,
+      "start_col_offset_idx": 1,
+      "end_col_offset_idx": 2,
+      "text": "131",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     },
+     {
+      "bbox": {
+       "l": 257.6132742661131,
+       "t": 374.0405997545251,
+       "r": 275.1472777554068,
+       "b": 381.9700988276693,
+       "coord_origin": "TOPLEFT"
+      },
+      "row_span": 1,
+      "col_span": 1,
+      "start_row_offset_idx": 3,
+      "end_row_offset_idx": 4,
+      "start_col_offset_idx": 2,
+      "end_col_offset_idx": 3,
+      "text": "118",
+      "column_header": false,
+      "row_header": false,
+      "row_section": false,
+      "fillable": false
+     }
+    ],
+    "num_rows": 4,
+    "num_cols": 3,
+    "orientation": "rot_0",
+    "grid": [
+     [
+      {
+       "bbox": null,
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 0,
+       "end_row_offset_idx": 1,
+       "start_col_offset_idx": 0,
+       "end_col_offset_idx": 1,
+       "text": "",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 191.69530451269532,
+        "t": 317.35574128248317,
+        "r": 244.86101555145848,
+        "b": 325.7039952152789,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 0,
+       "end_row_offset_idx": 1,
+       "start_col_offset_idx": 1,
+       "end_col_offset_idx": 2,
+       "text": "1.5 TSI SE",
+       "column_header": true,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 257.6132742661131,
+        "t": 317.35574128248317,
+        "r": 321.15658109264933,
+        "b": 325.7039952152789,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 0,
+       "end_row_offset_idx": 1,
+       "start_col_offset_idx": 2,
+       "end_col_offset_idx": 3,
+       "text": "2.0 TDI SE L",
+       "column_header": true,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      }
+     ],
+     [
+      {
+       "bbox": {
+        "l": 91.1835899506836,
+        "t": 336.2077448901226,
+        "r": 155.9455750232663,
+        "b": 346.5531373843331,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 1,
+       "end_row_offset_idx": 2,
+       "start_col_offset_idx": 0,
+       "end_col_offset_idx": 1,
+       "text": "0-62 mph (s)",
+       "column_header": false,
+       "row_header": true,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 191.69530451269532,
+        "t": 336.54060131702505,
+        "r": 206.97984599571654,
+        "b": 344.4701003901693,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 1,
+       "end_row_offset_idx": 2,
+       "start_col_offset_idx": 1,
+       "end_col_offset_idx": 2,
+       "text": "8.5",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 257.6132742661131,
+        "t": 336.54060131702505,
+        "r": 279.0127027443474,
+        "b": 344.4593630860757,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 1,
+       "end_row_offset_idx": 2,
+       "start_col_offset_idx": 2,
+       "end_col_offset_idx": 3,
+       "text": "10.4",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      }
+     ],
+     [
+      {
+       "bbox": {
+        "l": 91.1835899506836,
+        "t": 354.95774410887265,
+        "r": 178.93952399018502,
+        "b": 365.3031366030831,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 2,
+       "end_row_offset_idx": 3,
+       "start_col_offset_idx": 0,
+       "end_col_offset_idx": 1,
+       "text": "Top speed (mph)",
+       "column_header": false,
+       "row_header": true,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 191.69530451269532,
+        "t": 355.3013378398687,
+        "r": 210.03997314321126,
+        "b": 363.2147309568725,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 2,
+       "end_row_offset_idx": 3,
+       "start_col_offset_idx": 1,
+       "end_col_offset_idx": 2,
+       "text": "139",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 257.6132742661131,
+        "t": 355.2852318837283,
+        "r": 275.95794289662905,
+        "b": 363.2200996089193,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 2,
+       "end_row_offset_idx": 3,
+       "start_col_offset_idx": 2,
+       "end_col_offset_idx": 3,
+       "text": "128",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      }
+     ],
+     [
+      {
+       "bbox": {
+        "l": 91.1835899506836,
+        "t": 373.5950016346395,
+        "r": 149.83069942805278,
+        "b": 384.14440290662895,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 3,
+       "end_row_offset_idx": 4,
+       "start_col_offset_idx": 0,
+       "end_col_offset_idx": 1,
+       "text": "CO2 (g/km)",
+       "column_header": false,
+       "row_header": true,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 191.69530451269532,
+        "t": 374.05133705861874,
+        "r": 210.03997314321126,
+        "b": 381.9593615235757,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 3,
+       "end_row_offset_idx": 4,
+       "start_col_offset_idx": 1,
+       "end_col_offset_idx": 2,
+       "text": "131",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      },
+      {
+       "bbox": {
+        "l": 257.6132742661131,
+        "t": 374.0405997545251,
+        "r": 275.1472777554068,
+        "b": 381.9700988276693,
+        "coord_origin": "TOPLEFT"
+       },
+       "row_span": 1,
+       "col_span": 1,
+       "start_row_offset_idx": 3,
+       "end_row_offset_idx": 4,
+       "start_col_offset_idx": 2,
+       "end_col_offset_idx": 3,
+       "text": "118",
+       "column_header": false,
+       "row_header": false,
+       "row_section": false,
+       "fillable": false
+      }
+     ]
+    ]
+   },
+   "annotations": []
+  }
+ ],
+ "key_value_items": [],
+ "form_items": [],
+ "pages": {
+  "1": {
+   "size": {
+    "width": 612.0,
+    "height": 792.0
+   },
+   "image": null,
+   "page_no": 1
+  },
+  "2": {
+   "size": {
+    "width": 612.0,
+    "height": 792.0
+   },
+   "image": null,
+   "page_no": 2
+  }
+ }
+}

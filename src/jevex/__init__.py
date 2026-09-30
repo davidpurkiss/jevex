@@ -49,6 +49,7 @@ from jevex.layout import (
     section_text,
 )
 from jevex.layout_html import HtmlLayoutParser
+from jevex.layout_pdf import DoclingConverter, PdfLayoutError, PdfLayoutParser
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -110,6 +111,7 @@ __all__ = [
     "Context",
     "DefaultSplitter",
     "DocBudget",
+    "DoclingConverter",
     "Document",
     "DocumentBudget",
     "DocumentGateStage",
@@ -154,6 +156,8 @@ __all__ = [
     "NoulComponentGate",
     "NoulDocumentGate",
     "PageLocation",
+    "PdfLayoutError",
+    "PdfLayoutParser",
     "Pipeline",
     "Provenance",
     "Questions",

@@ -15,9 +15,11 @@ from jevex import (
     ImageLocation,
     LayoutStage,
     PageLocation,
+    PdfLayoutParser,
     Pipeline,
     SchemaSpec,
     TableCell,
+    layout,
     section_text,
 )
 from jevex.extractor import default_pipeline
@@ -168,6 +170,29 @@ async def test_stage_records_an_event_when_no_parser_supports_the_document() -> 
         {"content_type": "image/png"},
     )
     assert event.message == "no layout parser supports image/png"
+
+
+def test_default_parsers_read_pdfs_when_the_pdf_extra_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(layout, "_docling_installed", lambda: True)
+    assert [type(p) for p in LayoutStage().parsers] == [HtmlLayoutParser, PdfLayoutParser]
+    monkeypatch.setattr(layout, "_docling_installed", lambda: False)
+    assert [type(p) for p in LayoutStage().parsers] == [HtmlLayoutParser]
+
+
+async def test_stage_suggests_the_pdf_extra_when_a_pdf_cannot_be_laid_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(layout, "_docling_installed", lambda: False)
+    ctx = context(Document.from_bytes(b"%PDF-1.7\n"))
+    await LayoutStage().run(ctx)
+    assert ctx.parsed is None
+    (event,) = ctx.events
+    assert event.kind == "layout_skipped"
+    assert event.message == (
+        "no layout parser supports application/pdf; install jevex[pdf] for the default PDF parser"
+    )
 
 
 async def test_stage_does_not_swallow_parser_errors() -> None:

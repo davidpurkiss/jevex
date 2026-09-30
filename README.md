@@ -10,6 +10,13 @@ jevex narrows each document step by step (document → component → statement �
 > skeleton are in place, and the stages are landing now. The PyPI release (0.0.1) only
 > reserves the name; there is no usable extraction yet.
 
+## PDFs
+
+PDF layout uses [Docling](https://github.com/docling-project/docling), an optional extra:
+`pip install "jevex[pdf]"`. It's heavy (about 1 GB with torch, and Docling downloads
+about 500 MB of layout and table models from Hugging Face the first time it runs).
+Without it, PDFs skip layout, with a `layout_skipped` event saying so.
+
 ## Development
 
 ```sh

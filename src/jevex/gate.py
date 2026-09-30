@@ -10,9 +10,9 @@ only goes on to process its spec pages. The per-page probabilities are kept on t
 :class:`~jevex.interfaces.GateDecision` for later stages to narrow to.
 
 The gate runs before layout, so it reads text through a :class:`TextReader`. The default
-reads HTML with the standard library. No PDF text reader ships yet (the PDF parser is
-chosen in #24), so a PDF is only gated when a reader is passed in; otherwise its schemas
-stay active, with a ``gate_skipped`` event.
+reads HTML with the standard library. No PDF text reader ships yet (#100 adds one on
+Docling, the PDF layout parser), so a PDF is only gated when a reader is passed in;
+otherwise its schemas stay active, with a ``gate_skipped`` event.
 """
 
 from __future__ import annotations
