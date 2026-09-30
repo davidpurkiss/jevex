@@ -753,3 +753,12 @@ def test_blobs_serialise_to_json() -> None:
 )
 def test_schema_type(name: str, short: str) -> None:
     assert schema_type(name) == short
+
+
+def test_embedded_data_on_a_page_without_a_working_charset_encodes() -> None:
+    page = Document.from_bytes(
+        b'<html><head><script type="application/ld+json">{"name": "caf\xe9"}</script></head></html>'
+    )
+    [blob] = EmbeddedDataReader().read(page).blobs
+    assert blob.data == {"name": "café"}
+    blob.model_dump_json()

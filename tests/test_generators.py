@@ -16,6 +16,7 @@ from jevex.generators import (
     NumberWithUnit,
     Range,
     RegexGenerator,
+    WholeStatement,
     Year,
     default_registry,
 )
@@ -386,8 +387,57 @@ def test_default_registry_picks_generators_by_field_kind() -> None:
     string = [g.id for g in reg.for_field(SPEC.field("model"), schema="VehicleSpec")]
     enum = [g.id for g in reg.for_field(SPEC.field("fuel_type"), schema="VehicleSpec")]
     assert number == ["number_with_unit", "money", "year", "range", "key_value"]
-    assert string == ["key_value", "noun_phrase"]
+    assert string == ["key_value", "noun_phrase", "whole_statement"]
     assert enum == []
+
+
+def test_whole_statement_proposes_short_statements_whole() -> None:
+    gen = WholeStatement()
+    assert raws(gen, "A Light in the Attic") == ["A Light in the Attic"]
+    assert raws(gen, "  Tipping the Velvet. ") == ["Tipping the Velvet"]
+    assert raws(gen, "Sapiens: A Brief History of Humankind") == [
+        "Sapiens: A Brief History of Humankind"
+    ]
+    assert raws(gen, " ".join(["word"] * 16)) == [" ".join(["word"] * 16)]
+    assert raws(gen, " ".join(["word"] * 17)) == []
+    assert raws(WholeStatement(max_words=3), "one two three four") == []
+    assert raws(gen, "...") == []
+    assert raws(gen, "Who Moved My Cheese?") == ["Who Moved My Cheese?"]
+    assert raws(gen, "Stop! ") == ["Stop!"]
+    assert raws(gen, "Title\r") == ["Title"]
+    pair = Statement(
+        id="s1",
+        text="Colour: Red",
+        kind="key_value",
+        component_id="c1",
+        location=DomLocation(dom_path="/"),
+    )
+    assert gen.generate(pair) == []
+
+
+def test_key_value_strips_only_its_own_trailing_characters() -> None:
+    assert raws(KeyValue(), "Colour: Red\r") == ["Red"]
+    assert raws(KeyValue(), "Time: 10:30:") == ["10:30:"]
+
+
+def test_whole_statement_skips_list_fields() -> None:
+    class Car(BaseModel):
+        trims: list[str] = Field(default_factory=list, description="Trim names")
+        model: str = Field(description="Model name")
+
+    spec = SchemaSpec.from_model(Car)
+    statement = st("Available in SE, SE L and R-Line trims")
+    assert WholeStatement().generate_for(statement, spec.field("trims")) == []
+    [cand] = WholeStatement().generate_for(statement, spec.field("model"))
+    assert cand.raw == "Available in SE, SE L and R-Line trims"
+
+
+def test_whole_statement_is_linear_on_long_statements() -> None:
+    import time
+
+    start = time.perf_counter()
+    assert raws(WholeStatement(), ". " * 40_000) == []
+    assert time.perf_counter() - start < 0.5
 
 
 def test_registry_generate_dedupes_spans_and_sorts() -> None:
