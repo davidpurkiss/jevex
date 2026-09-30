@@ -12,7 +12,7 @@ import enum
 import inspect
 import re
 import types
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, Union, cast, get_args, get_origin
@@ -257,6 +257,23 @@ class SchemaSpec:
             if f.name == name:
                 return f
         raise KeyError(name)
+
+    @property
+    def child_fields(self) -> tuple[FieldSpec, ...]:
+        """The nested ``BaseModel`` fields: the child entities ``ParentChild`` fills."""
+        return tuple(f for f in self.fields if f.kind == "model")
+
+    def child(self, name: str) -> SchemaSpec:
+        """The spec of nested-model field ``name``, named ``"<Parent>.<field>"``.
+
+        Its questions come from the nested model (its docstring, fields and
+        ``__jevex__``); the name keeps it apart from the same model registered on its own,
+        and gives thresholds a key such as ``"ModelPage.variants.price"``.
+        """
+        spec = self.field(name)
+        if spec.model is None:
+            raise TypeError(f"{self.name}.{name} is not a nested model field")
+        return replace(SchemaSpec.from_model(spec.model), name=f"{self.name}.{name}")
 
     @property
     def groups(self) -> dict[str, tuple[FieldSpec, ...]]:

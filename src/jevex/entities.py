@@ -13,8 +13,10 @@ class EntityScope(BaseModel):
     to this entity) and ``shared_statement_ids``, statements assigned to "all of them",
     which apply to every entity (see
     :meth:`ParsedDocument.scope_statements <jevex.interfaces.ParsedDocument.scope_statements>`).
-    ``parent`` names the parent scope's label when a ``ParentChild`` resolver built this
-    scope.
+    A child entity (from :class:`~jevex.resolve.ParentChild`) names its parent scope's
+    label in ``parent`` and the parent schema's nested-model field it fills in ``field``.
+    It's extracted with the nested model's fields, and inherits whatever its parent scope
+    states about them.
     """
 
     label: str
@@ -22,3 +24,4 @@ class EntityScope(BaseModel):
     statement_ids: list[str] = Field(default_factory=list[str])
     shared_statement_ids: list[str] = Field(default_factory=list[str])
     parent: str | None = None
+    field: str | None = None

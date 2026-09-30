@@ -1,16 +1,23 @@
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
 from jevex import (
+    ChildFieldError,
     Component,
+    ComponentType,
     Context,
     Document,
     DomLocation,
+    ExtractionResult,
     Extractor,
     Field,
+    InvalidScopeError,
     MultiEntity,
+    ParentChild,
     SchemaConfig,
     SchemaSpec,
     Statement,
@@ -588,3 +595,416 @@ async def test_entity_stage_reports_statements_no_scope_holds() -> None:
     [event] = c.events
     assert (event.kind, event.data) == ("unassigned_statements", {"statement_ids": ["s2"]})
     assert event.message == "Listing: 1 statement(s) belong to no entity"
+
+
+# --- ParentChild -----------------------------------------------------------------------
+
+
+class Trim(BaseModel):
+    """One trim of a car."""
+
+    power_ps: int = Field(description="Power", unit="PS")
+    doors: int = Field(description="Number of doors")
+
+
+class CarModel(BaseModel):
+    """A car model page."""
+
+    model: str = Field(description="Model name")
+    trims: list[Trim] = Field(description="Trims")
+
+
+class Engine(BaseModel):
+    size_cc: int = Field(description="Engine size", unit="cc")
+
+
+class OneEngine(BaseModel):
+    model: str = Field(description="Model name")
+    engine: Engine | None = Field(default=None, description="Engine")
+
+
+class TwoNested(BaseModel):
+    trims: list[Trim] = Field(description="Trims")
+    engine: Engine = Field(description="Engine")
+
+
+CAR = SchemaSpec.from_model(CarModel)
+
+MODEL_PAGE = """<h1>Kestrova</h1>
+<p>Every Kestrova has 5 doors.</p>
+<table>
+<thead><tr><th></th><th>SE</th><th>SE L</th></tr></thead>
+<tbody>
+<tr><th>Power</th><td>150PS</td><td>180PS</td></tr>
+<tr><th>Doors</th><td>-</td><td>3</td></tr>
+<tr><th>Warranty</th><td colspan="2">3 years</td></tr>
+</tbody>
+</table>"""
+
+
+async def test_parent_child_splits_table_columns_into_children_asking_nothing() -> None:
+    parsed = await parse(MODEL_PAGE)
+    fake = FakeJev(strict=True)
+    parent, se, se_l = await ParentChild().resolve(parsed, CAR, fake.client())
+    assert fake.calls == []
+
+    assert (parent.label, parent.parent, parent.field) == ("document", None, None)
+    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+    assert parent.shared_statement_ids == []
+    assert (se.label, se.parent, se.field) == ("SE", "document", "trims")
+    assert (se_l.label, se_l.parent, se_l.field) == ("SE L", "document", "trims")
+    assert texts(parsed, se.statement_ids) == [
+        "Power · SE: 150PS",
+        "Doors · SE: -",
+        "Warranty · SE / SE L: 3 years",
+    ]
+    assert texts(parsed, se_l.statement_ids) == [
+        "Power · SE L: 180PS",
+        "Doors · SE L: 3",
+        "Warranty · SE / SE L: 3 years",  # a cell spanning both columns is on both
+    ]
+    # The split table is on no scope; the heading and paragraph are the parent's.
+    assert se.component_ids == se_l.component_ids == []
+    assert len(parent.component_ids) == 2
+
+
+async def test_parent_child_can_take_a_tables_rows_as_the_children() -> None:
+    parsed = await parse(MODEL_PAGE)
+    parent, *children = await ParentChild(children="table_rows").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert [c.label for c in children] == ["Power", "Doors", "Warranty"]
+    assert texts(parsed, children[0].statement_ids) == ["Power · SE: 150PS", "Power · SE L: 180PS"]
+    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+
+
+async def test_parent_child_takes_a_single_column_as_one_child() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th>SE</th></tr><tr><th>Power</th><td>150PS</td></tr></table>"
+    )
+    _, se = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
+    assert texts(parsed, se.statement_ids) == ["Power · SE: 150PS"]
+
+
+async def test_parent_child_joins_the_same_column_label_across_tables() -> None:
+    table = (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        "<tr><th>{0}</th><td>{1}</td><td>{2}</td></tr></table>"
+    )
+    parsed = await parse(table.format("Power", "150PS", "180PS") + table.format("Doors", "5", "3"))
+    _, se, se_l = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
+    assert texts(parsed, se.statement_ids) == ["Power · SE: 150PS", "Doors · SE: 5"]
+    assert texts(parsed, se_l.statement_ids) == ["Power · SE L: 180PS", "Doors · SE L: 3"]
+
+
+async def test_parent_child_takes_components_of_a_type_as_children() -> None:
+    parsed = await parse(
+        "<h1>Kestrova</h1><p>Every Kestrova has 5 doors.</p>"
+        "<h2>SE</h2><p>150PS.</p><h2>SE L</h2><p>180PS.</p><p>3 doors.</p>"
+    )
+    parent, se, se_l = await ParentChild(children="section").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+    assert texts(parsed, se.statement_ids) == ["SE", "150PS."]
+    assert texts(parsed, se_l.statement_ids) == ["SE L", "180PS.", "3 doors."]
+    assert len(se_l.component_ids) == 3  # its heading and two paragraphs
+
+
+async def test_parent_child_numbers_repeated_labels_and_keeps_the_parents_free() -> None:
+    parsed = await parse(
+        "<p>Trims:</p><ul><li>SE: 150PS</li><li>SE: 160PS</li><li>Kestrova: 180PS</li></ul>"
+    )
+    parent, *children = await ParentChild(children="list_item", label="Kestrova").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert parent.label == "Kestrova"
+    assert [c.label for c in children] == ["SE: 150PS", "SE: 160PS", "Kestrova: 180PS"]
+    parsed = await parse("<ul><li>SE</li><li>SE</li><li>Kestrova</li></ul>")
+    _, *children = await ParentChild(children="list_item", label="Kestrova").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert [c.label for c in children] == ["SE", "SE (2)", "Kestrova (2)"]
+
+
+def _component(cid: str, kind: ComponentType, *children: Component, text: str = "") -> Component:
+    return Component(
+        id=cid, type=kind, text=text, children=list(children), location=DomLocation(dom_path="/")
+    )
+
+
+def _statements(root: Component) -> dict[str, Statement]:
+    return {
+        f"s{c.id}": Statement(
+            id=f"s{c.id}", text=c.text, kind="sentence", component_id=c.id, location=c.location
+        )
+        for c in root.walk()
+        if c.text
+    }
+
+
+async def test_parent_child_looks_inside_a_lone_wrapping_component() -> None:
+    def trim(n: int) -> Component:
+        return _component(
+            f"t{n}",
+            "section",
+            _component(f"h{n}", "heading", text=f"Trim {n}"),
+            _component(f"p{n}", "paragraph", text=f"{n}00PS."),
+        )
+
+    root = _component(
+        "root",
+        "section",
+        _component("intro", "paragraph", text="Kestrova."),
+        _component(
+            "main", "section", _component("lead", "paragraph", text="Two trims."), trim(1), trim(2)
+        ),
+    )
+    parsed = ParsedDocument(
+        document=Document.from_bytes(b"<p/>"), root=root, statements=_statements(root)
+    )
+    parent, one, two = await ParentChild(children="section").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert texts(parsed, parent.statement_ids) == ["Kestrova.", "Two trims."]
+    assert (one.label, two.label) == ("Trim 1", "Trim 2")
+    assert texts(parsed, two.statement_ids) == ["Trim 2", "200PS."]
+
+
+async def test_parent_child_without_children_is_the_parent_alone() -> None:
+    parsed = await parse("<h1>Kestrova</h1><p>Every Kestrova has 5 doors.</p>")
+    [parent] = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
+    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+
+
+async def test_parent_child_on_a_schema_without_the_field_is_a_single_entity() -> None:
+    parsed = await parse(MODEL_PAGE)
+    jev = FakeJev(strict=True).client()
+    single = await SingleEntity().resolve(parsed, VEHICLE, jev)
+    assert await ParentChild().resolve(parsed, VEHICLE, jev) == single
+    assert await ParentChild(field="trims").resolve(parsed, VEHICLE, jev) == single
+
+
+async def test_parent_child_fills_the_named_field() -> None:
+    parsed = await parse(MODEL_PAGE)
+    spec = SchemaSpec.from_model(TwoNested)
+    _, se, _ = await ParentChild(field="engine").resolve(parsed, spec, FakeJev().client())
+    assert se.field == "engine"
+
+
+async def test_parent_child_needs_to_know_which_nested_field_holds_the_children() -> None:
+    parsed = await parse(MODEL_PAGE)
+    jev = FakeJev().client()
+    with pytest.raises(ChildFieldError, match="several nested model fields"):
+        await ParentChild().resolve(parsed, SchemaSpec.from_model(TwoNested), jev)
+    with pytest.raises(ChildFieldError, match=r"CarModel\.model is not a nested model field"):
+        await ParentChild(field="model").resolve(parsed, CAR, jev)
+
+
+def test_parent_child_rejects_an_unknown_place_for_children() -> None:
+    with pytest.raises(ValueError, match="children must be one of"):
+        ParentChild(children="paragraph")  # pyright: ignore[reportArgumentType]
+
+
+def test_parent_child_satisfies_the_protocol() -> None:
+    assert isinstance(ParentChild(), EntityResolver)
+
+
+async def entity_ctx(html: str, *models: type[BaseModel]) -> Context:
+    parsed = await parse(html)
+    c = Context.create(
+        parsed.document, [SchemaSpec.from_model(m) for m in models], FakeJev().client()
+    )
+    c.parsed = parsed
+    return c
+
+
+async def test_entity_stage_gives_children_a_run_of_their_own() -> None:
+    c = await entity_ctx(MODEL_PAGE, CarModel)
+    await EntityStage(resolver=ParentChild()).run(c)
+    run, child = c.schemas["CarModel"], c.schemas["CarModel.trims"]
+    assert [s.label for s in run.scopes] == ["document"]
+    assert (child.parent, child.parent_field) == ("CarModel", "trims")
+    assert child.spec.model is Trim
+    assert child.component_ids is None
+    # The parent's scope comes along, so the nested fields are looked for there too.
+    assert [(s.label, s.parent) for s in child.scopes] == [
+        ("document", None),
+        ("SE", "document"),
+        ("SE L", "document"),
+    ]
+    assert child.scopes[0].statement_ids == run.scopes[0].statement_ids
+    assert c.events == []  # every statement is on a scope
+
+
+async def test_entity_stage_keeps_one_child_for_a_field_holding_one_model() -> None:
+    c = await entity_ctx(MODEL_PAGE, OneEngine)
+    await EntityStage(resolver=ParentChild()).run(c)
+    child = c.schemas["OneEngine.engine"]
+    assert [s.label for s in child.scopes] == ["document", "SE"]
+    [event] = c.events
+    assert (event.kind, event.data) == ("extra_children", {"labels": ["SE L"]})
+    assert event.message == "OneEngine.engine holds one record: kept 'SE', left out 1 more"
+
+
+@pytest.mark.parametrize(
+    ("scopes", "message"),
+    [
+        (
+            [EntityScope(label="p"), EntityScope(label="c", parent="p", field="model")],
+            r"CarModel\.model is not a nested model field",
+        ),
+        (
+            [EntityScope(label="p"), EntityScope(label="c", parent="q", field="trims")],
+            "names parent 'q', which isn't one of its scopes",
+        ),
+        (
+            [EntityScope(label="p"), EntityScope(label="p", parent="p", field="trims")],
+            "repeated entity labels",
+        ),
+    ],
+)
+async def test_entity_stage_rejects_children_it_cannot_extract(
+    scopes: list[EntityScope], message: str
+) -> None:
+    @dataclass
+    class Given:
+        async def resolve(
+            self, parsed: ParsedDocument, schema: SchemaSpec, jev: object
+        ) -> list[EntityScope]:
+            return scopes
+
+    c = await entity_ctx(MODEL_PAGE, CarModel)
+    with pytest.raises(InvalidScopeError, match=message):
+        await EntityStage(resolver=Given()).run(c)
+
+
+# --- ParentChild, end to end -----------------------------------------------------------
+
+
+def pick(name: str) -> Callable[[Choice], str]:
+    """Choose ``name`` where it's offered, else "none" (the parent's and the children's
+    categorise Choices go out together)."""
+    return lambda q: name if name in q.options else "none"
+
+
+def car_jev() -> FakeJev:
+    return (
+        FakeJev(strict=True)
+        .noul("Does this document", p=0.95)
+        .noul("Does this section", p=0.9)
+        .choice("Which detail", "none")
+        .choice("Which detail", pick("model"), state="Kestrova")
+        .choice("Which detail", pick("doors"), state="oors")
+        .choice("Which detail", pick("power_ps"), state="Power")
+        .choice("Which of these", first_option, confidence=0.9)
+    )
+
+
+async def extract_car(page: str, fake: FakeJev, **kwargs: Any) -> tuple[ExtractionResult, FakeJev]:
+    pipeline = default_pipeline().replace("entities", EntityStage(resolver=ParentChild()))
+    async with Extractor([CarModel], jev=fake.client(), pipeline=pipeline, **kwargs) as ex:
+        result = await ex.extract(Document.from_bytes(page.encode(), content_type="text/html"))
+    return result, fake
+
+
+async def test_children_inherit_the_parents_values_and_their_own_win() -> None:
+    result, fake = await extract_car(MODEL_PAGE, car_jev())
+
+    car = result.one(CarModel)
+    assert car.entity == "document"
+    assert car.record.model_dump() == {
+        "model": "Kestrova",
+        "trims": [{"power_ps": 150, "doors": 5}, {"power_ps": 180, "doors": 3}],
+    }
+    se, se_l = car.children["trims"]
+    assert (se.entity, se_l.entity) == ("SE", "SE L")
+    assert se.record is car.record.trims[0]
+    # "Every Kestrova has 5 doors." is the parent's: SE has no doors of its own, so it
+    # inherits them; SE L states its own.
+    assert se.meta.doors.shared
+    assert se.meta.doors.value == 5
+    assert not se_l.meta.doors.shared
+    assert not se.meta.power_ps.shared
+    assert car.meta.trims.value == [{"power_ps": 150, "doors": 5}, {"power_ps": 180, "doors": 3}]
+    assert car.strict() == CarModel(
+        model="Kestrova", trims=[Trim(power_ps=150, doors=5), Trim(power_ps=180, doors=3)]
+    )
+    assert result.meta.active_schemas == ["CarModel"]
+
+    # The parent's and the children's categorise Choices share a request; table cells are
+    # asked only about the nested model's fields.
+    categorised = {
+        str(call.state): sorted(call.questions)
+        for call in fake.calls
+        if "CarModel.trims" in call.questions
+    }
+    assert categorised["{'statement': 'Kestrova'}"] == ["CarModel", "CarModel.trims"]
+    assert categorised["{'statement': 'Power · SE: 150PS', 'section': 'Kestrova'}"] == [
+        "CarModel.trims"
+    ]
+    [child_choice] = [
+        q
+        for call in fake.calls
+        for key, q in call.questions.items()
+        if key == "CarModel.trims" and call.state == {"statement": "Kestrova"}
+    ]
+    assert child_choice == Choice(
+        instructions="Which detail does this statement state?",
+        options={
+            "power_ps": "Power (PS)",
+            "doors": "Number of doors",
+            "none": "None of these details",
+        },
+    )
+
+
+async def test_child_records_are_partial_until_complete() -> None:
+    page = MODEL_PAGE.replace("<p>Every Kestrova has 5 doors.</p>", "")
+    result, _ = await extract_car(page, car_jev())
+    car = result.one(CarModel)
+    se, se_l = car.children["trims"]
+    assert se.record.model_dump() == {"power_ps": 150, "doors": None}
+    assert not se.complete
+    assert se_l.complete
+    assert not car.complete
+    assert car.to_dict()["children"]["trims"][1] == se_l.to_dict()
+    assert se_l.to_dict()["children"] == {}
+
+
+async def test_child_thresholds_are_keyed_by_the_nested_schema_name() -> None:
+    fake = car_jev().choice("Which of these", first_option, confidence=0.5, state="Power")
+    result, _ = await extract_car(MODEL_PAGE, fake, thresholds={"CarModel.trims.power_ps": 0.8})
+    car = result.one(CarModel)
+    se, _ = car.children["trims"]
+    assert se.meta.power_ps.filtered
+    assert car.record.trims is not None
+    assert car.record.trims[0].power_ps is None
+    assert car.meta.trims.value[0] == {"doors": 5}
+
+
+async def test_a_parent_with_only_children_is_still_a_record() -> None:
+    page = "<table><tr><th></th><th>SE</th></tr><tr><th>Power</th><td>150PS</td></tr></table>"
+    result, _ = await extract_car(page, car_jev())
+    car = result.one(CarModel)
+    assert car.record.model_dump() == {"model": None, "trims": [{"power_ps": 150, "doors": None}]}
+
+
+async def test_a_field_holding_one_model_gets_its_first_child() -> None:
+    fake = (
+        FakeJev()
+        .noul("Does this", p=0.95)
+        .choice("Which detail", pick("size_cc"), state="Engine")
+        .choice("Which of these", first_option, confidence=0.9)
+    )
+    page = (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        "<tr><th>Engine</th><td>1498cc</td><td>1968cc</td></tr></table>"
+    )
+    pipeline = default_pipeline().replace("entities", EntityStage(resolver=ParentChild()))
+    async with Extractor([OneEngine], jev=fake.client(), pipeline=pipeline) as ex:
+        result = await ex.extract(Document.from_bytes(page.encode(), content_type="text/html"))
+    car = result.one(OneEngine)
+    assert car.record.model_dump() == {"model": None, "engine": {"size_cc": 1498}}
+    assert car.meta.engine.value == {"size_cc": 1498}
+    assert [e.kind for e in result.meta.events] == ["extra_children"]

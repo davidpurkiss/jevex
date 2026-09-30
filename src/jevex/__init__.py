@@ -73,7 +73,14 @@ from jevex.normalise import (
     run_chain,
 )
 from jevex.pipeline import Context, Pipeline, Stage
-from jevex.resolve import EntityStage, MultiEntity, SingleEntity
+from jevex.resolve import (
+    ChildFieldError,
+    EntityStage,
+    InvalidScopeError,
+    MultiEntity,
+    ParentChild,
+    SingleEntity,
+)
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
@@ -117,6 +124,7 @@ __all__ = [
     "Candidate",
     "CandidateStage",
     "CategoriseStage",
+    "ChildFieldError",
     "CleanStage",
     "Component",
     "ComponentGateStage",
@@ -160,6 +168,7 @@ __all__ = [
     "ImageStage",
     "ImageText",
     "InvalidGeneratorError",
+    "InvalidScopeError",
     "JevCandidateSelector",
     "JevStatementClassifier",
     "KeyMapping",
@@ -178,6 +187,7 @@ __all__ = [
     "OcrEngine",
     "OcrProcessor",
     "PageLocation",
+    "ParentChild",
     "PdfLayoutError",
     "PdfLayoutParser",
     "Pipeline",

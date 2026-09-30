@@ -66,6 +66,12 @@ class SchemaRun:
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     """Bare values by scope label, then field name, for stages with no metadata to give.
     Used only when ``fields`` has no entry for that field."""
+    parent: str | None = None
+    """For a nested model's run (the entity stage adds one per field ``ParentChild``
+    fills): the parent schema's name. Its records become the parent records' children,
+    not records of their own."""
+    parent_field: str | None = None
+    """The parent schema's field this run's records fill."""
 
     def relevant_components(self) -> set[str] | None:
         """Components that passed the gate for any group; ``None`` if nothing was gated."""

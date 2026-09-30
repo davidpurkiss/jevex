@@ -17,7 +17,18 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from copy import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Optional, cast, overload
+from types import UnionType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Optional,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+    overload,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
@@ -123,6 +134,8 @@ class FieldMetas(Mapping[str, FieldMeta]):
 
 
 _PARTIALS: dict[type[BaseModel], type[BaseModel]] = {}
+_BUILDING: set[type[BaseModel]] = set()
+"""Models whose partial is being built: a model nested in itself keeps its real type."""
 
 # What a user validator on the real model may raise besides ValidationError when it meets
 # an incomplete record (e.g. comparing a field with None).
@@ -133,20 +146,27 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
     """A model with ``model``'s fields, every one optional and defaulting to ``None``.
 
     Each field keeps its constraints, ``Annotated`` validators, alias and description;
-    only the default and optionality change. Model-level behaviour (model and field
-    validators, computed fields, serializers, ``extra="forbid"``) is left behind so a
-    partial record can always be built. It's typed as ``type[M]`` for convenient
-    attribute access, but it isn't a subclass. Cached per model.
+    only the default and optionality change, and a nested model (``Variant``,
+    ``list[Variant]``) becomes its partial too, so a child record missing a field fits.
+    Model-level behaviour (model and field validators, computed fields, serializers,
+    ``extra="forbid"``) is left behind so a partial record can always be built. It's
+    typed as ``type[M]`` for convenient attribute access, but it isn't a subclass.
+    Cached per model.
     """
     if model in _PARTIALS:
         return cast("type[M]", _PARTIALS[model])
-    fields: dict[str, Any] = {}
-    for name, info in model.model_fields.items():
-        optional = copy(info)
-        optional.default = None
-        optional.default_factory = None
-        optional.validate_default = False  # a None default must never be validated
-        fields[name] = (Optional[info.annotation], optional)  # noqa: UP045 - built at runtime
+    _BUILDING.add(model)
+    try:
+        fields: dict[str, Any] = {}
+        for name, info in model.model_fields.items():
+            optional = copy(info)
+            optional.default = None
+            optional.default_factory = None
+            optional.validate_default = False  # a None default must never be validated
+            annotation = _partial_annotation(info.annotation)
+            fields[name] = (Optional[annotation], optional)  # noqa: UP045 - built at runtime
+    finally:
+        _BUILDING.discard(model)
     # Keep the model's value-shaping config (strict, str_strip_whitespace, use_enum_values,
     # ...) so records hold what the real model would; drop extra="forbid", which is about
     # the whole model, and allow population by field name (stages use field names).
@@ -161,6 +181,20 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
     )
     _PARTIALS[model] = partial
     return cast("type[M]", partial)
+
+
+def _partial_annotation(annotation: Any) -> Any:
+    """``annotation`` with every nested model (in a list or a union too) made partial."""
+    model: object = annotation
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        return model if model in _BUILDING else partial_model(model)
+    origin = get_origin(annotation)
+    if origin is list:
+        (item,) = get_args(annotation) or (Any,)
+        return list[_partial_annotation(item)]
+    if origin in (Union, UnionType):
+        return Union[tuple(_partial_annotation(a) for a in get_args(annotation))]  # noqa: UP007
+    return annotation
 
 
 @dataclass(frozen=True)
@@ -179,6 +213,11 @@ class Extracted[T: BaseModel]:
     record: T
     meta: FieldMetas
     model: type[T] = field(repr=False)
+    children: Mapping[str, list[Extracted[BaseModel]]] = field(
+        default_factory=dict[str, list["Extracted[BaseModel]"]]
+    )
+    """Child records (from ``ParentChild``) by nested-model field, each with its own
+    ``meta``. The record holds them too, in that field."""
 
     @property
     def complete(self) -> bool:
@@ -198,8 +237,7 @@ class Extracted[T: BaseModel]:
         use the model's own defaults. Raises ``ValidationError`` if anything required is
         missing or invalid, or whatever the model's own validators raise.
         """
-        values = {name: m.value for name, m in self.meta.items() if m.found and not m.filtered}
-        return self.model.model_validate(values, by_name=True)
+        return self.model.model_validate(self.found_values(), by_name=True)
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-ready: the record's values plus every field's metadata."""
@@ -208,7 +246,14 @@ class Extracted[T: BaseModel]:
             "entity": self.entity,
             "record": self.record.model_dump(mode="json"),
             "meta": {name: m.model_dump(mode="json") for name, m in self.meta.items()},
+            "children": {
+                name: [child.to_dict() for child in kids] for name, kids in self.children.items()
+            },
         }
+
+    def found_values(self) -> dict[str, Any]:
+        """The values :meth:`strict` validates: each found, unfiltered value, as found."""
+        return {name: m.value for name, m in self.meta.items() if m.found and not m.filtered}
 
 
 def threshold_for(
@@ -225,12 +270,27 @@ def build_extracted(
     *,
     threshold: float = 0.0,
     thresholds: Mapping[str, float] | None = None,
+    children: Mapping[str, list[Extracted[BaseModel]]] | None = None,
 ) -> Extracted[BaseModel]:
-    """Build one record from the field metadata stages produced for an entity scope."""
+    """Build one record from the field metadata stages produced for an entity scope.
+
+    ``children`` holds the child records built for its nested-model fields. Such a
+    field's meta has the children's values (a list, or the one child's), and no
+    confidence of its own: thresholds apply inside each child.
+    """
     thresholds = thresholds or {}
+    children = {name: kids for name, kids in (children or {}).items() if kids}
     by_name: dict[str, FieldMeta] = {}
     data: dict[str, Any] = {}
     for f in spec.fields:
+        if (kids := children.get(f.name)) is not None:
+            if f.many:
+                by_name[f.name] = FieldMeta(value=[k.found_values() for k in kids])
+                data[f.name] = [k.record for k in kids]
+            else:
+                by_name[f.name] = FieldMeta(value=kids[0].found_values())
+                data[f.name] = kids[0].record
+            continue
         meta = metas.get(f.name, FieldMeta())
         limit = threshold_for(thresholds, threshold, spec.name, f.name)
         below = meta.found and meta.confidence is not None and meta.confidence < limit
@@ -262,7 +322,19 @@ def build_extracted(
         record=record,
         meta=FieldMetas(by_name),
         model=spec.model,
+        children=children,
     )
+
+
+def inherit(own: Mapping[str, FieldMeta], parent: Mapping[str, FieldMeta]) -> dict[str, FieldMeta]:
+    """A child's metadata: its own, plus each value only its parent found, marked
+    ``shared``. A child's own value always wins."""
+    out = dict(own)
+    for name, meta in parent.items():
+        mine = out.get(name)
+        if meta.found and (mine is None or not mine.found):
+            out[name] = meta.model_copy(update={"shared": True})
+    return out
 
 
 def _field_errors(exc: Exception, data: Mapping[str, Any]) -> dict[str, str]:
