@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -16,8 +18,11 @@ from jevex import (
     Pipeline,
     SchemaSpec,
     TableCell,
+    section_text,
 )
 from jevex.extractor import default_pipeline
+from jevex.jev import Choice
+from jevex.layout import MAX_HEADING_CHARS, MAX_SECTION_CHARS
 from jevex.testing import FakeJev
 
 
@@ -197,3 +202,81 @@ async def test_extractor_lays_out_the_cleaned_document() -> None:
         await ex.extract(html("<nav>Menu</nav><p>Golf</p>"))
     (root,) = seen
     assert [c.text for c in root.walk() if c.text] == ["Golf"]
+
+
+# --- section text ----------------------------------------------------------------------
+
+
+def test_section_text_joins_a_short_trail_unchanged() -> None:
+    assert section_text(["Specs", "Performance"]) == "Specs › Performance"
+    assert section_text([]) == ""
+    assert section_text(["Specs", "  ", "Performance"]) == "Specs › Performance"
+
+
+def test_a_long_heading_is_shortened_at_a_word_boundary() -> None:
+    text = section_text(["Kestrova", "word " * 100], max_heading_chars=30)
+    assert text == "Kestrova › word word word word word word…"
+    assert len(text.split(" › ")[1]) <= 30
+
+
+def test_a_long_heading_without_spaces_is_cut_mid_word() -> None:
+    assert section_text(["x" * 50], max_heading_chars=10) == "x" * 9 + "…"
+
+
+def test_a_long_trail_keeps_the_outermost_and_innermost_headings() -> None:
+    trail = ["Kestrova", "Specs", "Engine", "Performance", "Acceleration"]
+    # "Performance" would make it 41 characters
+    assert section_text(trail, max_chars=40) == "Kestrova › … › Acceleration"
+    assert section_text(trail, max_chars=41) == "Kestrova › … › Performance › Acceleration"
+
+
+def test_when_outermost_and_innermost_do_not_fit_only_the_innermost_is_kept() -> None:
+    assert section_text(["Kestrova", "Acceleration"], max_chars=15) == "Acceleration"
+    assert section_text(["Kestrova", "Acceleration times"], max_chars=12) == "Acceleratio…"
+
+
+@pytest.mark.parametrize("trail", [["word " * 40_000], ["word " * 400] * 50, ["h"] * 1000])
+def test_section_text_is_never_longer_than_the_cap(trail: list[str]) -> None:
+    text = section_text(trail)
+    assert text
+    assert len(text) <= MAX_SECTION_CHARS
+    assert all(len(h) <= MAX_HEADING_CHARS for h in text.split(" › "))
+
+
+@pytest.mark.parametrize("kwargs", [{"max_chars": 0}, {"max_heading_chars": 0}])
+def test_section_text_rejects_a_non_positive_cap(kwargs: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        section_text(["Specs"], **kwargs)
+
+
+class PricedCar(BaseModel):
+    """A car."""
+
+    price: Decimal = Field(description="Price", unit="GBP")
+
+
+def pick_first_candidate(q: Choice) -> str:
+    return next(o for o in q.options if o != "none")
+
+
+async def test_a_200k_character_heading_is_extracted_without_raising() -> None:
+    heading = "word " * 40_000
+    body = f"<main><h1>{heading}</h1><h2>{heading}</h2><p>Price: £24,995</p></main>"
+    fake = (
+        FakeJev(default_p=1.0)
+        .choice("Which detail", "price", state="24,995")
+        .choice("Which of these", pick_first_candidate, state="24,995")
+    )
+    async with Extractor([PricedCar], jev=fake.client()) as ex:
+        result = await ex.extract(html(body))
+
+    assert result.one(PricedCar).strict() == PricedCar(price=Decimal("24995"))
+    sections = [
+        str(c.state["section"])
+        for c in fake.calls
+        if isinstance(c.state, dict) and "section" in c.state
+    ]
+    assert any("content" in c.state for c in fake.calls if isinstance(c.state, dict))
+    assert any("statement" in c.state for c in fake.calls if isinstance(c.state, dict))
+    assert sections
+    assert max(len(s) for s in sections) <= MAX_SECTION_CHARS

@@ -32,6 +32,7 @@ from jevex.jev import (
     ScoreAnswer,
     UnexpectedAnswerError,
 )
+from jevex.layout import MAX_SECTION_CHARS
 from jevex.layout_html import HtmlLayoutParser
 from jevex.testing import FakeJev
 
@@ -120,6 +121,15 @@ def test_units_are_each_containers_blocks_plus_tables() -> None:
     assert perf.text == "Performance\nPower: 110 kW\n0-62 mph: 9.1 s"
     assert perf.state() == {"content": perf.text, "section": "Delmaro Kestrova"}
     assert units[0].state() == {"content": "Delmaro Kestrova\nA roomy family hatchback."}
+
+
+def test_a_unit_states_a_capped_heading_trail() -> None:
+    trail = ["Kestrova", "word " * 1000, "Performance"]
+    [unit] = gate_units(comp("section", "", "r", comp("paragraph", "9.1 s", "p", trail=trail)))
+    section = unit.state()["section"]
+    assert section.startswith("Kestrova › word word")
+    assert section.endswith("… › Performance")
+    assert len(section) <= MAX_SECTION_CHARS
 
 
 def test_long_runs_are_chunked() -> None:

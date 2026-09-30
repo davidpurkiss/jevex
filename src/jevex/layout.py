@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from jevex.interfaces import LayoutParser
     from jevex.pipeline import Context
@@ -124,6 +124,64 @@ class Component(BaseModel):
 
     def find(self, component_id: str) -> Component | None:
         return next((c for c in self.walk() if c.id == component_id), None)
+
+
+MAX_HEADING_CHARS = 200
+"""Each heading in a ``section`` is shortened to this. A heading is a title, and one this
+long is really a paragraph marked up as a heading."""
+
+MAX_SECTION_CHARS = 500
+"""The most a ``section`` can take up in a Jev state. It rides along with every gate unit
+and statement below its headings, so it has to stay small next to their content."""
+
+SECTION_SEPARATOR = " › "
+_ELLIPSIS = "…"
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    """``text`` cut to at most ``max_chars`` with a trailing "…", at the last whitespace in
+    the second half when there is one."""
+    if len(text) <= max_chars:
+        return text
+    keep = max_chars - len(_ELLIPSIS)
+    space = text.rfind(" ", keep // 2, keep + 1)
+    return text[: space if space > 0 else keep].rstrip() + _ELLIPSIS
+
+
+def section_text(
+    trail: Sequence[str],
+    *,
+    max_heading_chars: int = MAX_HEADING_CHARS,
+    max_chars: int = MAX_SECTION_CHARS,
+) -> str:
+    """A heading trail as Jev sees it: the headings joined with " › ", at most
+    ``max_chars`` long.
+
+    Each heading is shortened to ``max_heading_chars`` (ending "…"). If the trail is still
+    too long, headings are dropped from the middle, keeping the outermost (often the page's
+    title) and as many of the innermost as fit, with "…" where the others were. When
+    even the outermost and innermost together don't fit, only the innermost is kept, cut
+    to ``max_chars``. Empty headings are skipped.
+    """
+    if max_heading_chars < 1 or max_chars < 1:
+        raise ValueError(
+            f"max_heading_chars and max_chars must be positive, got {max_heading_chars} "
+            f"and {max_chars}"
+        )
+    headings = [_shorten(h, max_heading_chars) for t in trail if (h := t.strip())]
+    text = SECTION_SEPARATOR.join(headings)
+    if len(text) <= max_chars:
+        return text
+    first, inner = headings[0], headings[1:]
+    kept: list[str] = []
+    while inner:
+        candidate = SECTION_SEPARATOR.join([first, _ELLIPSIS, inner[-1], *kept])
+        if len(candidate) > max_chars:
+            break
+        kept.insert(0, inner.pop())
+    if kept:
+        return SECTION_SEPARATOR.join([first, _ELLIPSIS, *kept])
+    return _shorten(headings[-1], max_chars)
 
 
 def _default_parsers() -> list[LayoutParser]:

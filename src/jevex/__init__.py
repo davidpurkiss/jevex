@@ -46,6 +46,7 @@ from jevex.layout import (
     PageLocation,
     TableCell,
     UnsupportedDocumentError,
+    section_text,
 )
 from jevex.layout_html import HtmlLayoutParser
 from jevex.normalise import (
@@ -200,5 +201,6 @@ __all__ = [
     "normalise",
     "open_store",
     "run_chain",
+    "section_text",
     "table_statements",
 ]

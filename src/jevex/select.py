@@ -31,6 +31,7 @@ from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
 from jevex.interfaces import Selection
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, JSONContent, NoulAnswer
+from jevex.layout import section_text
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 
@@ -83,10 +84,11 @@ def field_statements(
 
 
 def statement_state(statement: Statement) -> JSONContent:
-    """What Jev sees for one statement: its text plus the headings above it."""
+    """What Jev sees for one statement: its text plus the headings above it, capped by
+    :func:`~jevex.layout.section_text`."""
     state: dict[str, Any] = {"statement": statement.text}
-    if statement.heading_trail:
-        state["section"] = " › ".join(statement.heading_trail)
+    if section := section_text(statement.heading_trail):
+        state["section"] = section
     return state
 
 
