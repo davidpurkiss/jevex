@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING
 
-from jevex.clean import decode_html
+from jevex.clean import html_text_of, readable
 from jevex.layout import Component, DomLocation, TableCell, UnsupportedDocumentError
 
 if TYPE_CHECKING:
@@ -204,13 +204,7 @@ class HtmlLayoutParser:
             raise UnsupportedDocumentError(
                 f"HtmlLayoutParser reads HTML, not {document.content_type}"
             )
-        return parse_html(decode_html(document.content)[0])
-
-
-_UNDECODED = {0xDC00 + b: bytes([b]).decode("cp1252", "replace") for b in range(0x80, 0x100)}
-"""``decode_html`` keeps bytes it couldn't decode as lone surrogates (U+DC80-U+DCFF), which
-JSON can't encode. They are read as windows-1252, the WHATWG fallback for a page without
-a working charset (its five undefined bytes become U+FFFD)."""
+        return parse_html(html_text_of(document.content))
 
 
 def parse_html(markup: str) -> Component:
@@ -220,7 +214,7 @@ def parse_html(markup: str) -> Component:
     markup.
     """
     builder = _TreeBuilder()
-    builder.feed(markup.translate(_UNDECODED))
+    builder.feed(readable(markup))  # markup passed in may still hold escaped bytes
     builder.close()
     segmenter = _Segmenter()
     body = builder.ensure_body()
