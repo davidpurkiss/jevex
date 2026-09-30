@@ -809,8 +809,14 @@ def _bold_headers(cells: list[TableCell], bold: set[tuple[int, int]]) -> list[Ta
     else:
         header_rows = set()
     width = max(c.col + c.col_span for c in cells)
-    if width == 2 and all(labelled(c) for c in cells if c.col == 0):
+    first = rows[min(rows)]
+    if (
+        width == 2
+        and any(c.col == 0 for c in first)
+        and all(labelled(c) for c in cells if c.col == 0)
+    ):
         # Labels and values: a bold first value ("Engine | 1.5 TSI") isn't a column header.
+        # A first row with an empty corner (" | SE") still is one.
         header_rows = set()
     first_column = [c for c in cells if c.col == 0 and c.row not in header_rows]
     column = bool(first_column) and all(labelled(c) for c in first_column)

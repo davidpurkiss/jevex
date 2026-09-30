@@ -412,6 +412,12 @@ def test_a_bold_first_value_in_a_label_value_table_is_data() -> None:
         "<tr><td><b>Engine</b></td><td><b>1.5 TSI</b></td></tr>"
         "<tr><td><b>Power</b></td><td>150</td></tr>"
     ) == {(0, 0): True, (0, 1): False, (1, 0): True, (1, 1): False}
+    # With an empty corner, the first row is a column header row.
+    assert headers(
+        "<tr><td></td><td><b>SE</b></td></tr>"
+        "<tr><td><b>Power</b></td><td>150</td></tr>"
+        "<tr><td><b>Torque</b></td><td>250</td></tr>"
+    ) == {(0, 1): True, (1, 0): True, (1, 1): False, (2, 0): True, (2, 1): False}
 
 
 def test_a_table_set_all_in_bold_keeps_its_values_as_data() -> None:
