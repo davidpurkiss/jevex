@@ -74,6 +74,29 @@ async def test_free_calls_leave_the_ledger_alone(
     assert not ledger.exists()
 
 
+async def test_ledger_in_a_missing_dir_blocks_calls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "nope" / "run.ledger"))
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "5")
+    llm = FakeLLM(lambda p, s: {"title": "Dune"})
+    with pytest.raises(LLMError, match="can't use"):
+        await llm.structured("abc", Book)
+    assert llm.calls == []
+
+
+async def test_ledger_never_loosens_the_process_cap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "5")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "a.ledger"))
+    llm = FakeLLM(lambda p, s: {"title": "Dune"}, price=(1_000_000, 1_000_000))
+    await llm.structured("abc", Book)  # $6
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "b.ledger"))  # empty
+    with pytest.raises(LLMBudgetExceededError):
+        await llm.structured("abc", Book)
+
+
 def test_unreadable_ledger_blocks_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ledger = tmp_path / "run.ledger"
     ledger.write_text("llm\n")

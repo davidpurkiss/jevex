@@ -327,6 +327,34 @@ async def test_unreadable_ledger_blocks_requests(
     assert backend.calls == []
 
 
+@pytest.mark.usefixtures("fresh_spend")
+async def test_ledger_in_a_missing_dir_blocks_requests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from jevex.jev import JevError
+
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "nope" / "run.ledger"))
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "1")
+    backend = RecordingBackend()
+    with pytest.raises(JevError, match="can't use"):
+        await JevClient(backend).ask("s", {"q": Noul(instructions="?")})
+    assert backend.calls == []
+
+
+@pytest.mark.usefixtures("fresh_spend")
+async def test_ledger_never_loosens_the_process_cap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from jevex.jev import JevBudgetExceededError
+
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000045")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "a.ledger"))
+    await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})  # $0.0000042
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "b.ledger"))  # empty
+    with pytest.raises(JevBudgetExceededError):
+        await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
+
+
 async def test_sdk_errors_become_jev_backend_errors() -> None:
     from jevex.jev import JevBackendError
 

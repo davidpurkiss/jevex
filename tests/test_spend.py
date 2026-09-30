@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,11 +42,33 @@ def test_unwritable_ledger_raises_the_callers_error(tmp_path: Path) -> None:
         ledger_add(ledger, "jev", 0.1, LedgerError)
 
 
+SPEND_ENV = {"JEVEX_SPEND_LEDGER", "JEVEX_JEV_MAX_COST_USD", "JEVEX_LLM_MAX_COST_USD"}
+
+
 def test_offline_tests_see_no_live_spend_settings() -> None:
     # conftest drops them, so an agent run whose week is spent can still run the suite
-    assert not {"JEVEX_SPEND_LEDGER", "JEVEX_JEV_MAX_COST_USD", "JEVEX_LLM_MAX_COST_USD"} & set(
-        os.environ
+    assert not SPEND_ENV & set(os.environ)
+
+
+def test_offline_tests_drop_spend_settings_they_inherit(tmp_path: Path) -> None:
+    ledger = tmp_path / "run.ledger"
+    env = {k: v for k, v in os.environ.items() if k not in {"JEVEX_LIVE", "JEVEX_RECORD"}}
+    env |= {
+        "JEVEX_SPEND_LEDGER": str(ledger),
+        "JEVEX_JEV_MAX_COST_USD": "0",
+        "JEVEX_LLM_MAX_COST_USD": "0",
+    }
+    here = Path(__file__)
+    test = f"{here}::test_offline_tests_see_no_live_spend_settings"
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", test],
+        cwd=here.parent.parent,
+        env=env,
+        capture_output=True,
+        text=True,
     )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert not ledger.exists()
 
 
 def test_add_appends_lines_shell_tools_can_sum(tmp_path: Path) -> None:
