@@ -113,6 +113,34 @@ async def test_calls_waiting_on_the_ledger_dont_falsely_stop_llm_use(
     assert [e.limit for e in budget.events] == ["llm_rpm"]
 
 
+async def test_a_call_cap_hit_under_a_live_ledger_is_still_reported(store: SQLiteStore) -> None:
+    budget = DocumentBudget(
+        Budgets(per_document=DocBudget(max_llm_calls=2)), ledger(store, llm_rpm=100)
+    )
+    fake = ScriptedLLM()
+    results = await asyncio.gather(*(budget.call_llm(fake, "x", Title) for _ in range(3)))
+    assert sum(r is not None for r in results) == 2
+    assert fake.calls == 2
+    assert budget.llm_stopped
+    assert [e.limit for e in budget.events] == ["max_llm_calls"]
+
+
+async def test_a_slot_given_back_by_the_ledger_goes_to_a_waiting_call(
+    store: SQLiteStore,
+) -> None:
+    now = datetime.now(UTC)
+    await store.record_spend(SpendEntry(amount_usd=0, kind="llm_call", at=now))
+    # One rpm slot left, a call cap of 1: the first call takes the rpm slot, so no call is
+    # refused by the call cap, and the rest are rate-limited, not stopped.
+    budget = DocumentBudget(
+        Budgets(per_document=DocBudget(max_llm_calls=1)), ledger(store, llm_rpm=2)
+    )
+    fake = ScriptedLLM()
+    results = await asyncio.gather(*(budget.call_llm(fake, "x", Title) for _ in range(3)))
+    assert sum(r is not None for r in results) == 1
+    assert budget.llm_calls == 1
+
+
 async def test_a_failed_call_under_a_spend_cap_isnt_reported_as_unpriced() -> None:
     def boom(_p: str, _s: type[BaseModel]) -> object:
         raise RuntimeError("provider down")

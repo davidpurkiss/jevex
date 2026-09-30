@@ -48,6 +48,7 @@ by the extractor and changes the ledger.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -244,6 +245,12 @@ class DocumentBudget:
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
     _pending: int = field(default=0, repr=False)
     """Reserved slots still waiting on the run ledger's checks."""
+    _settled: asyncio.Condition | None = field(default=None, repr=False)
+
+    def _settled_condition(self) -> asyncio.Condition:
+        if self._settled is None:
+            self._settled = asyncio.Condition()
+        return self._settled
 
     def record_hit(self, scope: Scope, limit: str, message: str) -> None:
         """Report a budget hit in ``meta.budget_events`` (once per scope and limit; a
@@ -255,14 +262,14 @@ class DocumentBudget:
         self.llm_stopped = True
         self.record_hit(scope, limit, message)
 
+    def _calls_full(self) -> bool:
+        cap = self.budgets.per_document.max_llm_calls
+        return cap is not None and self.llm_calls >= cap
+
     def _document_refusal(self) -> bool:
-        """Whether a document limit refuses a call now. Only a limit that is really used up
-        stops LLM use: a call slot held by a call still waiting on the run ledger may yet be
-        given back, so while any are pending a full call count refuses without stopping."""
+        """Whether a document limit refuses a call now (and so stops LLM use)."""
         doc = self.budgets.per_document
         if doc.max_llm_calls is not None and self.llm_calls >= doc.max_llm_calls:
-            if self.llm_calls - self._pending < doc.max_llm_calls:
-                return True
             self._stop_llm("document", "max_llm_calls", f"{self.llm_calls} LLM calls (the limit)")
         elif doc.max_spend is not None and self.llm_spend >= doc.max_spend:
             self._stop_llm(
@@ -275,8 +282,20 @@ class DocumentBudget:
         return self.llm_stopped
 
     async def _reserve(self) -> bool:
-        """Take a call slot if every budget allows one. The document checks and the slot
-        happen before any ``await``, so concurrent calls can't pass a count cap together."""
+        """Take a call slot if every budget allows one.
+
+        The document checks and the slot happen with no ``await`` between them, so
+        concurrent calls can't pass a count cap together. A slot is held while the run
+        ledger is asked and given back if it refuses, so a call that finds the count full
+        while others are still pending waits for them to settle: it then either takes a
+        slot that was given back or finds the limit really used up (and reports it).
+        """
+        if self.llm_stopped:
+            return False
+        if self._pending and self._calls_full():
+            settled = self._settled_condition()
+            async with settled:
+                await settled.wait_for(lambda: not (self._pending and self._calls_full()))
         if self.llm_stopped or self._document_refusal():
             return False
         self.llm_calls += 1
@@ -285,9 +304,13 @@ class DocumentBudget:
             refusal = await self.ledger.refuse_llm()
         finally:
             self._pending -= 1
+        if refusal is not None:
+            self.llm_calls -= 1  # give the slot back
+        if self._settled is not None:
+            async with self._settled:
+                self._settled.notify_all()
         if refusal is None:
             return True
-        self.llm_calls -= 1  # give the slot back
         if refusal.stops:
             self._stop_llm("run", refusal.limit, refusal.message)
         else:
@@ -324,16 +347,14 @@ class DocumentBudget:
         """
         if not await self._reserve():
             return None
+        # A call that fails stays counted (the provider may bill it); its cost is unknown
+        # for a different reason than a missing price, so it isn't reported as unpriced.
         try:
             response = await llm.structured(prompt, schema)
         except LLMBudgetExceededError as exc:
             self.llm_calls -= 1  # refused before any request was made
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))
             return None
-        except BaseException:
-            # Counted as a call (the provider may bill it), but its cost is unknown for a
-            # different reason than a missing price, so it isn't reported as unpriced.
-            raise
         await self._settle(response.usage.cost)
         return response
 
