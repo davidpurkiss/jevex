@@ -45,6 +45,12 @@ openai = [
 litellm = [
     "litellm>=1.83.0",
 ]
+pdf = [
+    "docling>=2.131.0",
+    # Listed so uv can take them from the CPU index on Linux (see [tool.uv.sources]).
+    "torch>=2.2.2",
+    "torchvision>=0.17",
+]
 
 [tool.hatch.version]
 path = "src/jevex/__init__.py"
@@ -63,6 +69,18 @@ dev = [
     "ruff>=0.16.9",
     "types-pyyaml>=6.0",
 ]
+
+# Docling (the `pdf` extra) needs torch. On Linux, PyPI's torch pulls in several GB of CUDA
+# libraries, so the dev and CI environments take the CPU-only build instead. Users
+# installing jevex[pdf] get whichever torch their own installer picks.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100

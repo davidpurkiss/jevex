@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -184,11 +185,20 @@ def section_text(
     return _shorten(headings[-1], max_chars)
 
 
-def _default_parsers() -> list[LayoutParser]:
-    # Imported here because the HTML parser builds on this module's models.
-    from jevex.layout_html import HtmlLayoutParser
+def _docling_installed() -> bool:
+    """Whether Docling (the ``pdf`` extra) is importable."""
+    return importlib.util.find_spec("docling") is not None
 
-    return [HtmlLayoutParser()]
+
+def _default_parsers() -> list[LayoutParser]:
+    # Imported here because the parsers build on this module's models.
+    from jevex.layout_html import HtmlLayoutParser
+    from jevex.layout_pdf import PdfLayoutParser
+
+    parsers: list[LayoutParser] = [HtmlLayoutParser()]
+    if _docling_installed():
+        parsers.append(PdfLayoutParser())
+    return parsers
 
 
 @dataclass
@@ -197,7 +207,8 @@ class LayoutStage:
 
     The tree lands on ``ctx.parsed``. When no parser supports the content type, the stage
     records a ``layout_skipped`` event and leaves ``ctx.parsed`` unset, so later stages
-    can still use what the structured-data stage found.
+    can still use what the structured-data stage found. The default parsers read HTML,
+    and PDFs when the ``pdf`` extra is installed.
     """
 
     parsers: list[LayoutParser] = field(default_factory=_default_parsers)
@@ -208,10 +219,13 @@ class LayoutStage:
 
         parser = next((p for p in self.parsers if p.supports(ctx.document)), None)
         if parser is None:
+            detail = f"no layout parser supports {ctx.document.content_type}"
+            if ctx.document.is_pdf and not _docling_installed():
+                detail += "; install jevex[pdf] for the default PDF parser"
             ctx.event(
                 self.name,
                 "layout_skipped",
-                f"no layout parser supports {ctx.document.content_type}",
+                detail,
                 content_type=ctx.document.content_type,
             )
             return
