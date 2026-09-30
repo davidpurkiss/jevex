@@ -10,6 +10,7 @@ from jevex.generators.builtin import (
     NounPhrase,
     NumberWithUnit,
     Range,
+    WholeStatement,
     Year,
 )
 from jevex.generators.regex import InvalidGeneratorError, RegexGenerator, compile_re2
@@ -45,6 +46,7 @@ __all__ = [
     "Range",
     "RegexGenerator",
     "SpecScope",
+    "WholeStatement",
     "Year",
     "compile_re2",
     "default_registry",
