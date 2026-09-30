@@ -17,8 +17,8 @@ Stage order and default implementations (spec: *Pipeline architecture*):
  5    LayoutParser           HTML segmenter; Docling (PDF)  #13, #24
  6    ImageProcessor         OCR                            #26
  7    ComponentGate          Noul per component × group     #14
- 8    EntityResolver         SingleEntity                   #21
- 9    StatementSplitter      by component type              #15
+ 8    StatementSplitter      by component type              #15
+ 9    EntityResolver         SingleEntity; MultiEntity      #21, #27
  10   StatementClassifier    Choice per statement           #16
  11   CandidateGenerator     built-ins + learned            #17
  12   CandidateSelector      Choice over candidates         #18
@@ -82,6 +82,13 @@ class ParsedDocument(BaseModel):
         """Statements belonging to the given components, in document order."""
         wanted = set(component_ids)
         return [s for s in self.statements.values() if s.component_id in wanted]
+
+    def scope_statements(self, scope: EntityScope) -> list[Statement]:
+        """An entity's statements, in document order: those of its components, plus its
+        ``statement_ids`` (a table column's cells) and ``shared_statement_ids``."""
+        components = set(scope.component_ids)
+        ids = {*scope.statement_ids, *scope.shared_statement_ids}
+        return [s for s in self.statements.values() if s.component_id in components or s.id in ids]
 
 
 class GateDecision(BaseModel):

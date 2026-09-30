@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 EXTRA_KEY = "jevex"
 NONE_OPTION = "none"
 NOT_STATED_OPTION = "not stated"
+ALL_OPTION = "all of them"
+"""The entity question's option for a statement that applies to every entity."""
 
 FieldKind = Literal["enum", "bool", "number", "date", "str", "model"]
 
@@ -65,6 +67,13 @@ class SchemaConfig(BaseModel):
     key_path_question: str | None = None
     """Template for the structured-data question, with ``{path}`` and ``{example}``."""
     gate_unit: Literal["document", "page"] = "document"
+    entity_name: str | None = None
+    """What one record is, read mid-sentence: "vehicle", "trim". Defaults to the model's
+    name in words ("VehicleSpec" → "vehicle spec"). Used by ``MultiEntity``'s questions."""
+    boundary_question: str | None = None
+    """Template for ``MultiEntity``'s boundary Noul, with ``{label}`` and ``{entity}``."""
+    entity_question: str | None = None
+    """Template for ``MultiEntity``'s assignment Choice, with ``{entity}``."""
 
 
 def Field(
@@ -287,6 +296,27 @@ class SchemaSpec:
             instructions=template.format(path=path, example=repr(example)),
             options=self.categorise_question().options,
         )
+
+    @property
+    def entity_name(self) -> str:
+        """What one record is called in entity questions (``SchemaConfig.entity_name``)."""
+        return self.config.entity_name or _humanise(self.model.__name__)
+
+    def boundary_question(self, label: str) -> Noul:
+        """For ``MultiEntity``: does ``label`` (a column header, a card's or section's
+        heading) name one entity of its own? Asked about a list of such labels, one Noul
+        each, so "Performance" and "Dimensions" headings don't split a page in two."""
+        template = self.config.boundary_question or 'Does "{label}" name a separate {entity}?'
+        return Noul(instructions=template.format(label=label, entity=self.entity_name))
+
+    def entity_question(self, labels: Sequence[str]) -> Choice:
+        """For ``MultiEntity``: which entity does a statement apply to, or all of them?"""
+        if ALL_OPTION in labels:
+            raise ValueError(f"an entity label may not be the reserved option {ALL_OPTION!r}")
+        template = self.config.entity_question or "Which {entity} does this statement apply to?"
+        options: dict[str, JSONContent | None] = dict.fromkeys(labels)
+        options[ALL_OPTION] = f"It applies to every {self.entity_name}"
+        return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
         """One Choice per statement: which field does it state, or none of them.

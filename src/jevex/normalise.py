@@ -447,7 +447,9 @@ class NormaliseStage:
 
     Per scope and field, the most confident candidate that normalises and validates wins,
     and the rest become alternatives. List fields keep every accepted value, deduplicated
-    in document order. If nothing normalises, the field's meta carries the error. A field
+    in document order. An entity's own statements win over those it shares with every
+    entity (``MultiEntity``'s "all of them"); a value from a shared one is marked
+    ``shared``. If nothing normalises, the field's meta carries the error. A field
     another route already filled (e.g. structured data) isn't overwritten. Values are
     recorded with ``method="generator"``, or ``"vision"`` when the statement came from a
     vision model.
@@ -466,7 +468,9 @@ class NormaliseStage:
                 existing = run.fields.get(scope, {}).get(field_name)
                 if existing is not None and existing.found:
                     continue
-                meta = self._field_meta(ctx, run, field_name, picks)
+                meta = self._field_meta(
+                    ctx, run, field_name, picks, shared=run.shared_statements(scope)
+                )
                 run.set_field(scope, field_name, meta)
 
     def _field_meta(
@@ -475,9 +479,12 @@ class NormaliseStage:
         run: SchemaRun,
         field_name: str,
         picks: list[tuple[str, Selection]],
+        *,
+        shared: set[str],
     ) -> FieldMeta:
         field = run.spec.field(field_name)
-        ranked = sorted(picks, key=lambda p: -p[1].confidence)
+        # The entity's own statements outrank those it shares with every entity.
+        ranked = sorted(picks, key=lambda p: (p[0] in shared, -p[1].confidence))
         accepted: list[tuple[str, Selection, Candidate, Any]] = []
         errors: list[str] = []
         for statement_id, selection in ranked:
@@ -506,11 +513,14 @@ class NormaliseStage:
                 generator_id=selection.candidate.generator_id if selection.candidate else None,
                 source=_source(ctx, statement_id, selection),
                 alternatives=_alternatives(ranked, []),
+                shared=statement_id in shared,
                 error="; ".join(errors),
             )
 
         best_id, best, _, best_value = accepted[0]
+        from_shared = best_id in shared
         if field.many:
+            from_shared = all(a[0] in shared for a in accepted)
             in_order = sorted(accepted, key=lambda a: _position(ctx, a[0], a[2]))
             items: list[Any] = []
             for _, _, _, v in in_order:
@@ -529,6 +539,7 @@ class NormaliseStage:
                 [] if field.many else [best_id],
                 accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
             ),
+            shared=from_shared,
         )
 
 

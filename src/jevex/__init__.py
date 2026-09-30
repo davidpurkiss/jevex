@@ -73,7 +73,7 @@ from jevex.normalise import (
     run_chain,
 )
 from jevex.pipeline import Context, Pipeline, Stage
-from jevex.resolve import EntityStage, SingleEntity
+from jevex.resolve import EntityStage, MultiEntity, SingleEntity
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
@@ -168,6 +168,7 @@ __all__ = [
     "Leaf",
     "Location",
     "MatchSpec",
+    "MultiEntity",
     "NormaliseError",
     "NormaliseStage",
     "NormaliserRegistry",

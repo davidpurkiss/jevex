@@ -329,6 +329,26 @@ async def test_bool_via_noul_both_ways() -> None:
     assert (meta.value, meta.confidence) == (True, 0.9)
 
 
+async def test_direct_answers_prefer_the_entitys_own_statements_over_shared_ones() -> None:
+    fake = FakeJev()
+    fake.noul("automatic gearbox", p=0.95, state="Every")
+    fake.noul("automatic gearbox", p=0.3, state="manual")
+    own = st("s1", "The SE has a manual gearbox", component="c1")
+    everyone = st("s2", "Every trim has an automatic gearbox", component="c2")
+    ctx = context(fake, [own, everyone], {"s1": "automatic", "s2": "automatic"})
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(label="SE", statement_ids=["s1"], shared_statement_ids=["s2"]),
+        EntityScope(label="SE L", shared_statement_ids=["s2"]),
+    ]
+    await run_both(ctx)
+    se, se_l = run.fields["SE"]["automatic"], run.fields["SE L"]["automatic"]
+    # SE's own statement wins even though the shared one is more confident.
+    assert (se.value, se.shared) == (False, False)
+    assert (se_l.value, se_l.shared) == (True, True)
+    assert len(fake.calls) == 2  # the shared statement is still asked about once
+
+
 async def test_list_enum_collects_options_within_and_across_statements() -> None:
     fake = FakeJev(default_p=0.05)
     fake.noul('"red"', p=0.9, state="red and blue")

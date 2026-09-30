@@ -86,6 +86,14 @@ class SchemaRun:
             if component_id in self.component_ids.get(f.group or f.name, ())
         ]
 
+    def shared_statements(self, scope: str) -> set[str]:
+        """Ids of the statements ``scope`` shares with every other entity ("all of them").
+
+        A value from one of these is recorded with ``shared=True``, and only when none of
+        the scope's own statements gives the field.
+        """
+        return {sid for s in self.scopes if s.label == scope for sid in s.shared_statement_ids}
+
     def set_field(self, scope: str, name: str, meta: FieldMeta) -> None:
         self.fields.setdefault(scope, {})[name] = meta
 

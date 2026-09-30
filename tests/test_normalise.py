@@ -16,6 +16,7 @@ from jevex import (
     Span,
     Statement,
 )
+from jevex.entities import EntityScope
 from jevex.interfaces import ParsedDocument, Selection
 from jevex.layout import Component
 from jevex.normalise import (
@@ -321,6 +322,38 @@ async def test_stage_keeps_every_value_for_list_fields_in_document_order() -> No
     run.selections[("doc", "colours", "s1")] = pick(a, "Pure White", 0.8, "strip")
     await NormaliseStage().run(ctx)
     assert run.fields["doc"]["colours"].value == ["Pure White", "Moonstone Grey"]
+
+
+async def test_stage_prefers_the_entitys_own_statements_over_shared_ones() -> None:
+    own, everyone = statement("s1", "Seats 4"), statement("s2", "Every trim seats 5")
+    ctx = context(own, everyone)
+    run = ctx.schemas["Car"]
+    run.scopes = [EntityScope(label="doc", statement_ids=["s1"], shared_statement_ids=["s2"])]
+    run.selections[("doc", "seats", "s1")] = pick(own, "4", 0.6, "parse_number")
+    run.selections[("doc", "seats", "s2")] = pick(everyone, "5", 0.95, "parse_number")
+    run.selections[("doc", "price", "s2")] = pick(everyone, "5", 0.9, "parse_number")
+    await NormaliseStage().run(ctx)
+    seats, price = run.fields["doc"]["seats"], run.fields["doc"]["price"]
+    assert (seats.value, seats.shared) == (4, False)
+    assert [a.raw for a in seats.alternatives] == ["5"]
+    assert (price.value, price.shared) == (5, True)  # only a shared statement gave it
+
+
+async def test_stage_marks_a_list_shared_only_when_every_value_is() -> None:
+    own, everyone = statement("s1", "In Pure White"), statement("s2", "All come in Moonstone Grey")
+    ctx = context(own, everyone)
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(label="a", statement_ids=["s1"], shared_statement_ids=["s2"]),
+        EntityScope(label="b", shared_statement_ids=["s2"]),
+    ]
+    for scope in ("a", "b"):
+        run.selections[(scope, "colours", "s2")] = pick(everyone, "Moonstone Grey", 0.9, "strip")
+    run.selections[("a", "colours", "s1")] = pick(own, "Pure White", 0.8, "strip")
+    await NormaliseStage().run(ctx)
+    a, b = run.fields["a"]["colours"], run.fields["b"]["colours"]
+    assert (a.value, a.shared) == (["Pure White", "Moonstone Grey"], False)
+    assert (b.value, b.shared) == (["Moonstone Grey"], True)
 
 
 async def test_stage_skips_none_picks_and_never_overwrites_found_values() -> None:
