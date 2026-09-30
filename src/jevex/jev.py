@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from jevex._spend import ledger_add, ledger_path, ledger_total
 from jevex._tasks import gather
 
 if TYPE_CHECKING:
@@ -158,7 +159,10 @@ class JevRequestCapError(JevError):
 
 
 class JevBudgetExceededError(JevError):
-    """Sending the request would take this process past ``JEVEX_JEV_MAX_COST_USD``."""
+    """Sending the request would take spend past ``JEVEX_JEV_MAX_COST_USD``.
+
+    Spend is this process's, or everything in ``JEVEX_SPEND_LEDGER`` when that's set.
+    """
 
 
 # --- Process-wide spend cap ------------------------------------------------------------
@@ -167,6 +171,8 @@ class JevBudgetExceededError(JevError):
 # JEVEX_JEV_MAX_COST_USD is set, no request is sent once this process's estimated Jev
 # spend would exceed it. Per-document and per-run budgets are a separate, richer
 # feature (#34); this cap is the backstop that holds whatever the code above does.
+# With JEVEX_SPEND_LEDGER set, the cap counts every process writing to that ledger
+# (jevex._spend), which is how the agent loop caps a whole run and a week.
 
 MAX_COST_ENV = "JEVEX_JEV_MAX_COST_USD"
 _process_cost = 0.0
@@ -195,6 +201,23 @@ def _max_cost() -> float | None:
 
 def _token_cost(tokens: int) -> float:
     return tokens * PRICE_PER_MILLION_INPUT_TOKENS / 1_000_000
+
+
+def _spent() -> float:
+    """Spend the cap compares against: the shared ledger's Jev total, but never less than
+    this process's own (so a ledger can only tighten the cap)."""
+    ledger = ledger_path()
+    if ledger is None:
+        return _process_cost
+    return max(_process_cost, ledger_total(ledger, "jev", JevError))
+
+
+def _charge(usd: float) -> None:
+    global _process_cost
+    _process_cost += usd
+    ledger = ledger_path()
+    if ledger is not None:
+        ledger_add(ledger, "jev", usd, JevError)
 
 
 # --- Metering --------------------------------------------------------------------------
@@ -414,7 +437,6 @@ class JevClient:
         return batches
 
     async def _send(self, state: JSONContent, batch: dict[str, Question]) -> JevResponse:
-        global _process_cost
         estimated = estimate_tokens(state) + sum(
             estimate_tokens(q.model_dump()) for q in batch.values()
         )
@@ -423,9 +445,9 @@ class JevClient:
                 raise JevRequestCapError(f"the cap of {self.max_requests} Jev requests is used up")
             self._started += 1
         cap = _max_cost()
-        if cap is not None and _process_cost + _token_cost(estimated) > cap:
+        if cap is not None and (spent := _spent()) + _token_cost(estimated) > cap:
             raise JevBudgetExceededError(
-                f"Jev spend cap reached: ${_process_cost:.4f} spent, this request would add "
+                f"Jev spend cap reached: ${spent:.4f} spent, this request would add "
                 f"~${_token_cost(estimated):.4f}, cap is ${cap:.2f} ({MAX_COST_ENV})"
             )
         async with self._limiter.semaphore():
@@ -435,7 +457,7 @@ class JevClient:
             except asyncio.CancelledError:
                 # Cancelled mid-request (a sibling failed): the request may still be
                 # billed, so count it at its estimated size before letting go.
-                _process_cost += _token_cost(estimated)
+                _charge(_token_cost(estimated))
                 self.usage.requests += 1
                 self.usage.questions += len(batch)
                 self.usage.input_tokens += estimated
@@ -443,7 +465,7 @@ class JevClient:
                 raise
             elapsed = time.perf_counter() - start
         tokens = response.input_tokens if response.input_tokens is not None else estimated
-        _process_cost += _token_cost(tokens)
+        _charge(_token_cost(tokens))
         self.usage.requests += 1
         self.usage.questions += len(batch)
         self.usage.input_tokens += tokens

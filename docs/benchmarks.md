@@ -72,7 +72,8 @@ One command: `uv run benchmarks/run.py --all`. It stops at the budget cap (below
 
 ## Budget and guardrails
 
-- Hard caps via `JEVEX_JEV_MAX_COST_USD` and the LLM adapters' caps (#32 and #72).
+- Hard caps via `JEVEX_JEV_MAX_COST_USD` and `JEVEX_LLM_MAX_COST_USD` (#32 and #72).
+  Point `JEVEX_SPEND_LEDGER` at a file to make them cover every process in the run.
   Proposed v1 budget: **$25 total** (LLM-only strong is most of it).
 - Live runs happen only under #72's rules. Results files never contain keys.
 - A dry run with `FakeJev` and a fake LLM validates the whole pipeline for free.

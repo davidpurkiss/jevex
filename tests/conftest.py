@@ -11,6 +11,22 @@ import pytest
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 
+SPEND_ENV = ("JEVEX_SPEND_LEDGER", "JEVEX_JEV_MAX_COST_USD", "JEVEX_LLM_MAX_COST_USD")
+
+
+@pytest.fixture(autouse=True)
+def _offline_tests_ignore_live_spend(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Agent runs set a spend ledger and caps for real calls. Fake and replayed calls must
+    neither be charged to the ledger nor fail because the week's budget is spent, so only
+    live tests and cassette recording keep them. Tests that need a cap set their own."""
+    if "live" in request.keywords or os.environ.get("JEVEX_RECORD") == "1":
+        return
+    for name in SPEND_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def typesafe_api_key() -> str:
     """The real Jev key for ``live`` tests; skips the test when it isn't set."""
