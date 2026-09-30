@@ -332,7 +332,7 @@ class DuplicateStatementError(ValueError):
 
 @dataclass
 class StatementStage:
-    """Splits every component of ``ctx.parsed`` into statements (stage 9).
+    """Splits every component of ``ctx.parsed`` into statements (stage 8).
 
     Statements already on the document are kept: those of components outside the tree
     (the structured-data stage's) first, then the rest in reading order, with a

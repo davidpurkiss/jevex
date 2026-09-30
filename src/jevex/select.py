@@ -68,7 +68,7 @@ def field_statements(
         return []
     out: list[tuple[Statement, FieldSpec]] = []
     names = {f.name for f in run.spec.fields}
-    for statement in ctx.parsed.statements_in(scope.component_ids):
+    for statement in ctx.parsed.scope_statements(scope):
         answer = run.categories.get(statement.id)
         if answer is None or answer.choice not in names:
             # A "none" answer routes nowhere, even if a field came close: a bool field
@@ -356,11 +356,17 @@ def _record_direct(
     """Combine one field's direct answers across statements, deterministically.
 
     Scalars: the most confident answer, ties to the earliest statement. Lists: every
-    accepted value, in document order. Skipped if another route already found the field.
+    accepted value, in document order. The entity's own statements win over those it
+    shares with every entity; a value only shared ones give is marked ``shared``. Skipped
+    if another route already found the field.
     """
     existing = run.fields.get(scope, {}).get(spec.name)
     if existing is not None and existing.found:
         return
+    shared = run.shared_statements(scope)
+    own = [o for o in found if o.statement.id not in shared]
+    if own and not spec.many:
+        found = own
     ordered = sorted(found, key=lambda o: o.order)
     values: list[Any] = []
     if spec.many:
@@ -395,5 +401,6 @@ def _record_direct(
                 Alternative(value=o, raw=o, p=p)
                 for o, p in sorted(weighed.items(), key=lambda kv: -kv[1])
             ],
+            shared=not own,
         ),
     )

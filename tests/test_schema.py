@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from jevex import Field, Questions, SchemaConfig, SchemaSpec
 from jevex.jev import Choice, Noul
-from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
+from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
 
 
 class VehicleSpec(BaseModel):
@@ -422,3 +422,36 @@ def test_custom_templates_get_the_description_as_written() -> None:
     assert spec.field("ok").verify_question(True).instructions == (
         "Does it hold that The car is OK: True?"
     )
+
+
+def test_entity_questions_name_the_record_after_the_model() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.entity_name == "vehicle spec"
+    assert spec.boundary_question("SE L") == Noul(
+        instructions='Does "SE L" name a separate vehicle spec?'
+    )
+    assert spec.entity_question(["SE", "SE L"]) == Choice(
+        instructions="Which vehicle spec does this statement apply to?",
+        options={"SE": None, "SE L": None, ALL_OPTION: "It applies to every vehicle spec"},
+    )
+
+
+def test_entity_questions_can_be_overridden() -> None:
+    class Listing(BaseModel):
+        __jevex__ = SchemaConfig(
+            entity_name="car",
+            boundary_question="Is {label} one {entity} for sale?",
+            entity_question="Which {entity} is this about?",
+        )
+        price: int = Field(description="Price")
+
+    spec = SchemaSpec.from_model(Listing)
+    assert spec.boundary_question("Golf").instructions == "Is Golf one car for sale?"
+    question = spec.entity_question(["Golf"])
+    assert question.instructions == "Which car is this about?"
+    assert question.options[ALL_OPTION] == "It applies to every car"
+
+
+def test_entity_question_rejects_the_reserved_label() -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        SchemaSpec.from_model(VehicleSpec).entity_question(["SE", ALL_OPTION])

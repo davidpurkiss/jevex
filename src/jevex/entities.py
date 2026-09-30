@@ -8,9 +8,13 @@ from pydantic import BaseModel, Field
 class EntityScope(BaseModel):
     """A label plus the components and statements that belong to one record.
 
-    Downstream stages run once per scope. ``shared_statement_ids`` hold statements
-    assigned to "all of them", which apply to every entity. ``parent`` names the
-    parent scope's label when a ``ParentChild`` resolver built this scope.
+    Downstream stages run once per scope, over its statements: those of
+    ``component_ids``, plus ``statement_ids`` (a table column's cells, a sentence assigned
+    to this entity) and ``shared_statement_ids``, statements assigned to "all of them",
+    which apply to every entity (see
+    :meth:`ParsedDocument.scope_statements <jevex.interfaces.ParsedDocument.scope_statements>`).
+    ``parent`` names the parent scope's label when a ``ParentChild`` resolver built this
+    scope.
     """
 
     label: str

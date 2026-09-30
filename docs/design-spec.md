@@ -59,8 +59,8 @@ Most documents only take the left-hand path. The right-hand column runs when sel
 | 5 | Layout | `LayoutParser` | HTML DOM segmenter; Docling for PDF | none |
 | 6 | Images | `ImageProcessor` | OCR; vision models as plugins | none |
 | 7 | Component gate | `ComponentGate` | One Noul per component × field group | "Does this section contain the {field description}?" |
-| 8 | Entities | `EntityResolver` | Single, multi or parent/child | Choice: which entity does this statement apply to? |
-| 9 | Statements | `StatementSplitter` | Sentences, list items, key/value pairs, table cells | none |
+| 8 | Statements | `StatementSplitter` | Sentences, list items, key/value pairs, table cells | none |
+| 9 | Entities | `EntityResolver` | Single, multi or parent/child | Choice: which entity does this statement apply to? |
 | 10 | Categorise | `StatementClassifier` | One Choice per statement over the schema's fields + "none" | "Which detail does this statement state?" |
 | 11 | Candidates | `CandidateGenerator` registry | Built-in plus learned generators | none |
 | 12 | Select | `CandidateSelector` | One Choice over candidates + "none" | "Which of these is the {field description}?" |
@@ -516,6 +516,7 @@ The project is `jevex`: Apache 2.0, Python 3.12+, Pydantic v2, fully typed (`py.
 | Evaluation | Harness with learning curves and a CI gate; synthetic test site |
 | Budgets | Per document and per run |
 | Name and license | jevex, Apache 2.0 |
+| Entity stage order (decided in #27) | Statements are split (stage 8) before entities are resolved (stage 9), so a resolver can assign single statements: a table's cells by column, or a sentence Jev says is about one trim. Splitting is CPU-only and already covered every component, so the swap costs nothing. `MultiEntity` also asks one Noul per proposed label ("Does "SE" name a separate vehicle spec?"), because structure alone can't tell trim sections from topic sections. |
 | Required fields (decided in #20) | Records are instances of a generated partial model: the same fields, all optional, keeping each field's constraints, `Annotated` validators and alias, but not model-level validators, computed fields or serializers, so a missing value never raises. It's a separate class with only the fields: `isinstance` against the user's model is false and the model's methods and properties aren't on it. `strict()` returns the real model, validating every found value, including any the type rejected. |
 
 ## Open questions

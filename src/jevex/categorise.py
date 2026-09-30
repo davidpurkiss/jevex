@@ -92,7 +92,8 @@ def _allowed(run: SchemaRun, statement: Statement) -> tuple[str, ...] | None:
 class CategoriseStage:
     """Categorises every in-scope statement for each active schema (stage 10).
 
-    A schema's statements are those in any of its scopes' components, asked once even if
+    A schema's statements are those in any of its scopes
+    (:meth:`~jevex.interfaces.ParsedDocument.scope_statements`), asked once even if
     scopes share them; statements already categorised are skipped. Results land on
     ``SchemaRun.categories``.
     """
@@ -109,7 +110,7 @@ class CategoriseStage:
         for run in ctx.active:
             seen: set[str] = set()
             for scope in run.scopes:
-                for statement in parsed.statements_in(scope.component_ids):
+                for statement in parsed.scope_statements(scope):
                     sid = statement.id
                     if sid in seen or sid in run.categories or statement.kind in SKIPPED_KINDS:
                         continue
