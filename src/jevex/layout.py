@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from jevex.interfaces import LayoutParser
-    from jevex.pipeline import Context
+    from jevex.pipeline import Context, SchemaRun
 
 ComponentType = Literal[
     "section",
@@ -212,13 +212,19 @@ class LayoutStage:
     records a ``layout_skipped`` event and leaves ``ctx.parsed`` unset, so later stages
     can still use what the structured-data stage found. The default parsers read HTML,
     and PDFs when the ``pdf`` extra is installed.
+
+    Pages the document gate ruled out for every active schema (:func:`gated_out_pages`)
+    are left out when the parser is a :class:`~jevex.interfaces.PagedLayoutParser`, with
+    a ``pages_skipped`` event. Another parser lays out every page, with a
+    ``pages_not_skipped`` event.
     """
 
     parsers: list[LayoutParser] = field(default_factory=_default_parsers)
     name: str = "layout"
 
     async def run(self, ctx: Context) -> None:
-        from jevex.interfaces import ParsedDocument  # interfaces imports this module
+        # interfaces imports this module
+        from jevex.interfaces import PagedLayoutParser, ParsedDocument
 
         parser = next((p for p in self.parsers if p.supports(ctx.document)), None)
         if parser is None:
@@ -232,5 +238,38 @@ class LayoutStage:
                 content_type=ctx.document.content_type,
             )
             return
-        root = await parser.parse(ctx.document)
+        skip = gated_out_pages(ctx.active)
+        if not skip:
+            root = await parser.parse(ctx.document)
+        elif isinstance(parser, PagedLayoutParser):
+            root = await parser.parse_pages(ctx.document, skip)
+            ctx.event(
+                self.name,
+                "pages_skipped",
+                f"left out {len(skip)} page(s) the document gate ruled out",
+                pages=sorted(skip),
+            )
+        else:
+            root = await parser.parse(ctx.document)
+            ctx.event(
+                self.name,
+                "pages_not_skipped",
+                f"{type(parser).__name__} can't leave pages out, so it laid out the "
+                f"{len(skip)} page(s) the document gate ruled out",
+                pages=sorted(skip),
+            )
         ctx.parsed = ParsedDocument(document=ctx.document, root=root)
+
+
+def gated_out_pages(runs: Sequence[SchemaRun]) -> frozenset[int]:
+    """The pages no schema in ``runs`` needs: those the document gate asked about and every
+    schema failed. A schema gated per document, or not gated, needs every page, and a page
+    the gate didn't ask about (no text layer) is needed by every schema."""
+    skip: set[int] | None = None
+    for run in runs:
+        gate = run.gate
+        if gate is None or not gate.pages:
+            return frozenset()
+        failed = set(gate.pages) - set(gate.passed_pages)
+        skip = failed if skip is None else skip & failed
+    return frozenset(skip or ())

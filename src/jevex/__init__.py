@@ -1,5 +1,6 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
+from jevex._pdfium import UnreadablePdfError
 from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget, RunLedger
 from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
 from jevex.clean import BoilerplateCleaner, CleanStage
@@ -10,10 +11,12 @@ from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
+    DefaultTextReader,
     DocumentGateStage,
     DocumentText,
     HtmlTextReader,
     NoulDocumentGate,
+    PdfTextReader,
     TextReader,
 )
 from jevex.generators import (
@@ -59,6 +62,7 @@ from jevex.layout import (
     PageLocation,
     TableCell,
     UnsupportedDocumentError,
+    gated_out_pages,
     section_text,
 )
 from jevex.layout_html import HtmlLayoutParser
@@ -132,6 +136,7 @@ __all__ = [
     "Context",
     "DefaultImageLoader",
     "DefaultSplitter",
+    "DefaultTextReader",
     "DocBudget",
     "DoclingConverter",
     "Document",
@@ -190,6 +195,7 @@ __all__ = [
     "ParentChild",
     "PdfLayoutError",
     "PdfLayoutParser",
+    "PdfTextReader",
     "Pipeline",
     "Provenance",
     "Questions",
@@ -225,6 +231,7 @@ __all__ = [
     "ToClassify",
     "Tolerance",
     "UnreadableImageError",
+    "UnreadablePdfError",
     "UnsupportedDocumentError",
     "VerifiedExample",
     "__version__",
@@ -233,6 +240,7 @@ __all__ = [
     "evaluate",
     "flatten",
     "gate_units",
+    "gated_out_pages",
     "generator_spec_json_schema",
     "header_prefix",
     "load_corpus",

@@ -199,6 +199,21 @@ class LayoutParser(Protocol):
 
 
 @runtime_checkable
+class PagedLayoutParser(LayoutParser, Protocol):
+    """A :class:`LayoutParser` that can leave pages out of a paged document (a PDF).
+
+    The layout stage calls :meth:`parse_pages` instead of ``parse`` when the document gate
+    ruled pages out for every active schema, so a long brochure only lays out the pages
+    that passed.
+    """
+
+    async def parse_pages(self, document: Document, skip: frozenset[int]) -> Component:
+        """Lay out ``document`` without its 1-based pages in ``skip``. Components keep the
+        document's own page numbers."""
+        ...
+
+
+@runtime_checkable
 class ImageProcessor(Protocol):
     """Reads one image: OCR, or a vision model (spec: *Image stage*).
 

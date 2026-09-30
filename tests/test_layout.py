@@ -19,10 +19,12 @@ from jevex import (
     Pipeline,
     SchemaSpec,
     TableCell,
+    gated_out_pages,
     layout,
     section_text,
 )
 from jevex.extractor import default_pipeline
+from jevex.interfaces import GateDecision, PagedLayoutParser
 from jevex.jev import Choice
 from jevex.layout import MAX_HEADING_CHARS, MAX_SECTION_CHARS
 from jevex.testing import FakeJev
@@ -205,6 +207,118 @@ async def test_stage_does_not_swallow_parser_errors() -> None:
 
     with pytest.raises(ValueError, match="bad tree"):
         await LayoutStage([Broken()]).run(context(html("<p>x</p>")))
+
+
+# --- Pages the document gate ruled out ----------------------------------------------------
+
+
+class Brochure(BaseModel):
+    """A brochure."""
+
+    model: str = Field(description="Model name")
+
+
+PDF = Document.from_bytes(b"%PDF-1.7\n", content_type="application/pdf")
+
+
+def paged(pages: dict[int, float], *, threshold: float = 0.5) -> GateDecision:
+    passed = [page for page, p in pages.items() if p >= threshold]
+    return GateDecision(
+        p=max(pages.values()), passed=bool(passed), pages=pages, passed_pages=passed
+    )
+
+
+def gated_context(**gates: GateDecision | None) -> Context:
+    ctx = Context.create(
+        PDF, [SchemaSpec.from_model(Car), SchemaSpec.from_model(Brochure)], FakeJev().client()
+    )
+    for name, run in ctx.schemas.items():
+        run.gate = gates.get(name)
+        if run.gate is not None and not run.gate.passed:
+            run.deactivate()
+    return ctx
+
+
+class Paged(Fixed):
+    """A PDF parser that can leave pages out."""
+
+    def __init__(self) -> None:
+        super().__init__("application/pdf", tree())
+        self.parsed: list[frozenset[int] | None] = []
+
+    async def parse(self, document: Document) -> Component:
+        self.parsed.append(None)
+        return self.root
+
+    async def parse_pages(self, document: Document, skip: frozenset[int]) -> Component:
+        self.parsed.append(skip)
+        return self.root
+
+
+def test_gated_out_pages_are_those_every_schema_failed() -> None:
+    ctx = gated_context(
+        Car=paged({1: 0.9, 2: 0.1, 3: 0.2, 5: 0.1}), Brochure=paged({1: 0.1, 2: 0.2, 3: 0.8})
+    )
+    # Page 4 wasn't asked (no text layer); page 5 was only asked about Car.
+    assert gated_out_pages(ctx.active) == {2}
+
+
+def test_no_pages_are_gated_out_when_a_schema_needs_every_page() -> None:
+    per_page = paged({1: 0.9, 2: 0.1})
+    assert gated_out_pages(gated_context(Car=per_page).active) == frozenset()
+    whole = GateDecision(p=0.9, passed=True)
+    assert gated_out_pages(gated_context(Car=per_page, Brochure=whole).active) == frozenset()
+    assert gated_out_pages([]) == frozenset()
+
+
+def test_schemas_the_gate_ruled_out_need_no_pages() -> None:
+    ctx = gated_context(Car=paged({1: 0.9, 2: 0.1}), Brochure=paged({1: 0.1, 2: 0.2}))
+    assert [run.name for run in ctx.active] == ["Car"]
+    assert gated_out_pages(ctx.active) == {2}
+
+
+async def test_stage_leaves_out_pages_every_schema_failed() -> None:
+    parser = Paged()
+    assert isinstance(parser, PagedLayoutParser)
+    ctx = gated_context(
+        Car=paged({1: 0.1, 2: 0.9, 3: 0.2}), Brochure=paged({1: 0.3, 2: 0.9, 3: 0.1})
+    )
+    await LayoutStage([parser]).run(ctx)
+
+    assert parser.parsed == [frozenset({1, 3})]
+    assert ctx.parsed is not None
+    assert ctx.parsed.root == tree()
+    assert [(e.stage, e.kind, e.message, e.data) for e in ctx.events] == [
+        (
+            "layout",
+            "pages_skipped",
+            "left out 2 page(s) the document gate ruled out",
+            {"pages": [1, 3]},
+        )
+    ]
+
+
+async def test_stage_lays_out_every_page_when_no_page_is_ruled_out() -> None:
+    parser = Paged()
+    ctx = gated_context(Car=paged({1: 0.9, 2: 0.1}))
+    await LayoutStage([parser]).run(ctx)
+    assert parser.parsed == [None]
+    assert ctx.events == []
+
+
+async def test_stage_lays_out_every_page_with_a_parser_that_cannot_skip() -> None:
+    ctx = gated_context(Car=paged({1: 0.9, 2: 0.1}), Brochure=paged({1: 0.8, 2: 0.3}))
+    await LayoutStage([Fixed("application/pdf", tree())]).run(ctx)
+
+    assert ctx.parsed is not None
+    assert ctx.parsed.root == tree()
+    assert [(e.kind, e.message, e.data) for e in ctx.events] == [
+        (
+            "pages_not_skipped",
+            "Fixed can't leave pages out, so it laid out the 1 page(s) the document gate ruled out",
+            {"pages": [2]},
+        )
+    ]
 
 
 def test_default_pipeline_lays_out_after_gating() -> None:

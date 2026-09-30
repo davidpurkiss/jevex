@@ -48,11 +48,12 @@ import io
 import statistics
 import threading
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from urllib.parse import unquote_to_bytes
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jevex import _pdfium
 from jevex._tasks import gather
 from jevex.document import sniff_content_type
 from jevex.fetch import FetchError
@@ -64,7 +65,6 @@ from jevex.statements import Statement
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from PIL.Image import Image as PILImage
     from rapidocr import RapidOCR
 
     from jevex.document import Document
@@ -239,50 +239,15 @@ def decode_data_uri(uri: str) -> tuple[bytes, str]:
     return unquote_to_bytes(data), media_type
 
 
-_PDFIUM_LOCK = threading.Lock()
-"""pdfium isn't thread-safe, so every call into it is serialised."""
-
-
 def _pdfium_installed() -> bool:
-    return importlib.util.find_spec("pypdfium2") is not None
-
-
-class _TextPage(Protocol):
-    def get_text_range(self) -> str: ...
-
-
-class _Bitmap(Protocol):
-    def to_pil(self) -> PILImage: ...
-
-
-class _Page(Protocol):
-    def get_size(self) -> tuple[float, float]: ...
-
-    def get_textpage(self) -> _TextPage: ...
-
-    def render(self, *, scale: float, crop: tuple[float, float, float, float]) -> _Bitmap: ...
-
-
-class _Pdf(Protocol):
-    def __len__(self) -> int: ...
-
-    def __getitem__(self, index: int) -> _Page: ...
-
-    def close(self) -> None: ...
-
-
-def _open_pdf(content: bytes) -> _Pdf:
-    """A pypdfium2 ``PdfDocument`` (``pdf`` extra), typed by what's used of it."""
-    import pypdfium2  # pyright: ignore[reportMissingTypeStubs]
-
-    return cast("_Pdf", pypdfium2.PdfDocument(content))
+    return _pdfium.installed()
 
 
 def pages_without_text(document: Document) -> list[int]:
     """The 1-based numbers of a PDF's pages with no text layer (scans, or pages that are
     one big picture), found with pypdfium2 (``pdf`` extra)."""
-    with _PDFIUM_LOCK:
-        pdf = _open_pdf(document.content)
+    with _pdfium.LOCK:
+        pdf = _pdfium.open_pdf(document.content)
         try:
             empty: list[int] = []
             for index in range(len(pdf)):
@@ -299,8 +264,8 @@ def render_pdf(
 ) -> ImageData:
     """Page ``page`` of a PDF as a PNG, cropped to ``bbox`` (page points, top-left
     origin; ``None`` for the whole page), at ``scale`` pixels per point."""
-    with _PDFIUM_LOCK:
-        pdf = _open_pdf(document.content)
+    with _pdfium.LOCK:
+        pdf = _pdfium.open_pdf(document.content)
         try:
             if not 1 <= page <= len(pdf):
                 raise UnreadableImageError(f"the PDF has no page {page}")
