@@ -369,3 +369,16 @@ def test_html_reader_uses_the_page_charset() -> None:
     )
     assert HtmlTextReader().read(doc) == DocumentText("Price £9")
     assert HtmlTextReader().read(PDF) is None
+
+
+async def test_a_page_without_a_working_charset_reads_as_windows_1252() -> None:
+    # Latin-1 bytes, no <meta charset>: not valid UTF-8, so decode_html keeps them as lone
+    # surrogates; the gate must read them as windows-1252 (the WHATWG fallback).
+    page = Document.from_bytes(b"<html><body><p>caf\xe9 \xa320</p></body></html>")
+    assert HtmlTextReader().read(page) == DocumentText("café £20")
+    fake = FakeJev().noul(None, p=0.9)
+    await NoulDocumentGate().gate(page, [SchemaSpec.from_model(Car)], fake.client())
+    [call] = fake.calls
+    assert call.state == "café £20"
+    assert isinstance(call.state, str)
+    call.state.encode("utf-8")  # raises on lone surrogates

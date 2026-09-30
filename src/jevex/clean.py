@@ -276,6 +276,27 @@ class CleanStage:
         ctx.document = self.cleaner.clean(ctx.document)
 
 
+_UNDECODED = {0xDC00 + b: bytes([b]).decode("cp1252", "replace") for b in range(0x80, 0x100)}
+"""``decode_html`` keeps bytes it couldn't decode as lone surrogates (U+DC80-U+DCFF), which
+JSON can't encode. For reading text they are taken as windows-1252, the WHATWG fallback
+for a page without a working charset (its five undefined bytes become U+FFFD)."""
+
+
+def readable(text: str) -> str:
+    """``text`` with :func:`decode_html`'s escaped bytes read as windows-1252."""
+    return text.translate(_UNDECODED)
+
+
+def html_text_of(content: bytes) -> str:
+    """The page's markup as text to read (parse, show to Jev, serialise).
+
+    Like :func:`decode_html`, but bytes the charset couldn't decode are read as
+    windows-1252 instead of kept as lone surrogates, so the text always encodes. Use
+    :func:`decode_html` when the bytes must round-trip (cleaning).
+    """
+    return readable(decode_html(content)[0])
+
+
 def decode_html(content: bytes) -> tuple[str, str]:
     """Decode with the page's charset if that round-trips exactly, else as UTF-8.
 
