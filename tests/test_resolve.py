@@ -771,6 +771,27 @@ async def test_parent_child_looks_inside_a_lone_wrapping_component() -> None:
     assert texts(parsed, two.statement_ids) == ["Trim 2", "200PS."]
 
 
+@pytest.mark.parametrize(
+    "page",
+    [
+        "<header><a href='/'>Menu</a></header><main><h1>Kestrova</h1><p>Intro.</p>"
+        "<h2>SE</h2><p>150PS.</p><h2>SE L</h2><p>180PS.</p></main>",
+        "<article><h1>Kestrova</h1><p>Intro.</p><section><h2>SE</h2><p>150PS.</p></section>"
+        "<section><h2>SE L</h2><p>180PS.</p></section></article>",
+        "<main><section><h1>Kestrova</h1><p>Intro.</p><section><h2>SE</h2><p>150PS.</p>"
+        "</section><section><h2>SE L</h2><p>180PS.</p></section></section></main>",
+    ],
+)
+async def test_parent_child_looks_inside_the_section_under_the_page_title(page: str) -> None:
+    parsed = await parse(page)
+    parent, se, se_l = await ParentChild(children="section").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    assert texts(parsed, parent.statement_ids)[-2:] == ["Kestrova", "Intro."]
+    assert texts(parsed, se.statement_ids) == ["SE", "150PS."]
+    assert texts(parsed, se_l.statement_ids) == ["SE L", "180PS."]
+
+
 async def test_parent_child_takes_a_lone_headed_component_as_the_only_child() -> None:
     parsed = await parse(
         "<h1>Kestrova</h1><p>A family car.</p>"
@@ -821,6 +842,21 @@ async def test_parent_child_needs_to_know_which_nested_field_holds_the_children(
         await ParentChild().resolve(parsed, SchemaSpec.from_model(TwoNested), jev)
     with pytest.raises(ChildFieldError, match=r"CarModel\.model is not a nested model field"):
         await ParentChild(field="model").resolve(parsed, CAR, jev)
+
+
+class Extra(BaseModel):
+    tags: dict[str, str]
+
+
+class PageWithExtra(BaseModel):
+    title: str = Field(description="Title")
+    extra: Extra | None = Field(default=None, description="Extra")
+
+
+async def test_parent_child_rejects_a_nested_model_jevex_cannot_extract() -> None:
+    c = await entity_ctx(MODEL_PAGE, PageWithExtra)
+    with pytest.raises(ChildFieldError, match=r"PageWithExtra\.extra can't hold children: "):
+        await EntityStage(resolver=ParentChild()).run(c)
 
 
 def test_parent_child_rejects_an_unknown_place_for_children() -> None:

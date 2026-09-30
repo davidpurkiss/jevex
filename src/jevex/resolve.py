@@ -17,7 +17,7 @@ from jevex.entities import EntityScope
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.pipeline import SchemaRun, for_each_schema
-from jevex.schema import ALL_OPTION
+from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
 from jevex.select import statement_state
 
 if TYPE_CHECKING:
@@ -250,9 +250,12 @@ class ParentChild:
     - A component type (``"section"``, ``"list_item"``, ``"column"``, ``"breakout"``,
       ``"table"``): each outermost component of that type is a child, labelled by its
       first heading (or first text), with its subtree. A lone one holding others of its
-      type, without a heading of its own (a page-wide section around the trim sections),
-      is a wrapper, so the ones inside it are the children instead; with a heading, it's
-      the only child ("SE", with "Performance" and "Dimensions" sections inside).
+      type is a wrapper (a page-wide section around the trim sections, or the one under
+      the page's first heading), so the ones inside it are the children instead. Only
+      when a heading comes before it (the page's title names the parent) is it the one
+      child ("SE", with "Performance" and "Dimensions" sections inside). A one-child page
+      with no title before the child can't be told from a wrapper, so its sub-sections
+      become the children.
 
     Every other statement is the parent's (labelled ``label``). Children inherit what it
     states: a child field found only in the parent's statements ("Every Kestrova has 5
@@ -311,18 +314,27 @@ class ParentChild:
                 return None
             if self.field not in nested:
                 raise ChildFieldError(f"{schema.name}.{self.field} is not a nested model field")
-            return self.field
-        if len(nested) > 1:
+            name = self.field
+        elif len(nested) > 1:
             raise ChildFieldError(
                 f"{schema.name} has several nested model fields ({', '.join(nested)}); "
                 "say which one holds the children with ParentChild(field=...)"
             )
-        return nested[0] if nested else None
+        elif not nested:
+            return None
+        else:
+            name = nested[0]
+        try:
+            schema.child(name)
+        except (UnsupportedFieldError, ReservedFieldNameError) as exc:
+            raise ChildFieldError(f"{schema.name}.{name} can't hold children: {exc}") from exc
+        return name
 
 
 class ChildFieldError(ValueError):
-    """``ParentChild`` can't tell which field holds the children: the one named isn't a
-    nested model, or none is named and the schema has several."""
+    """``ParentChild`` can't fill the field for children: the one named isn't a nested
+    model, none is named and the schema has several, or jevex can't extract the nested
+    model's fields."""
 
 
 def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozenset[str]]]:
@@ -339,9 +351,13 @@ def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozense
         return found
 
     found = outermost(parsed.root)
-    # A lone headed one is a child with sub-parts ("SE" with "Performance" inside), not a
-    # wrapper.
-    while len(found) == 1 and not _starts_with_heading(found[0]) and (inner := outermost(found[0])):
+    # A lone one after the page's title is a child with sub-parts ("SE" with "Performance"
+    # inside); one that holds the title (or has no heading) wraps the children.
+    title = next((c.id for c in parsed.root.walk() if c.type == "heading"), None)
+    while len(found) == 1 and (inner := outermost(found[0])):
+        lone = found[0]
+        if _starts_with_heading(lone) and lone.children[0].id != title:
+            break
         found = inner
     members: list[tuple[str, frozenset[str]]] = []
     for component in found:

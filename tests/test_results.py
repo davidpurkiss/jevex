@@ -8,6 +8,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
+    Discriminator,
     ValidationError,
     computed_field,
     field_serializer,
@@ -281,8 +282,14 @@ class Powered(BaseModel):
     size: int
 
 
+class Tagged(BaseModel):
+    engine: Annotated[Petrol | Electric, Discriminator("kind")] = Field(description="Engine")
+    size: int
+
+
 class PoweredFleet(BaseModel):
     cars: list[Powered] = Field(description="Cars")
+    tagged: Tagged | None = Field(default=None, description="Tagged")
 
 
 def test_discriminated_unions_keep_their_real_members() -> None:
@@ -293,6 +300,12 @@ def test_discriminated_unions_keep_their_real_members() -> None:
     assert type(car) is partial_model(Powered)
     assert car.engine == Electric(kind="electric", kwh=60)
     assert car.size is None
+    # The same with the discriminator given as Annotated metadata.
+    record = partial_model(PoweredFleet).model_validate(
+        {"tagged": {"engine": {"kind": "petrol", "cc": 1498}}}
+    )
+    assert record.tagged is not None
+    assert record.tagged.engine == Petrol(kind="petrol", cc=1498)
 
 
 def test_a_model_nested_in_itself_keeps_its_real_type() -> None:

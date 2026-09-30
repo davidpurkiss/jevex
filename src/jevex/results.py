@@ -30,7 +30,7 @@ from typing import (
     overload,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, ValidationError, create_model
 
 from jevex.layout import Location
 from jevex.statements import Span
@@ -166,11 +166,10 @@ def partial_model[M: BaseModel](model: type[M]) -> type[M]:
             optional.validate_default = False  # a None default must never be validated
             # A discriminated union's members keep their real type: pydantic needs each
             # one's discriminator to stay a required Literal.
-            annotation = (
-                info.annotation
-                if info.discriminator is not None
-                else _partial_annotation(info.annotation)
+            discriminated = info.discriminator is not None or any(
+                isinstance(m, Discriminator) for m in info.metadata
             )
+            annotation = info.annotation if discriminated else _partial_annotation(info.annotation)
             fields[name] = (Optional[annotation], optional)  # noqa: UP045 - built at runtime
     finally:
         _BUILDING.discard(model)
