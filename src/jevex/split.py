@@ -22,7 +22,8 @@ and stable for a given tree.
 
 A statement longer than :data:`MAX_STATEMENT_CHARS` (a whole product description in one
 ``<li>`` or table cell) is too big for one Jev state, so :class:`StatementStage` cuts it
-into pieces (:func:`cut_statement`), whichever splitter made it.
+into pieces (:func:`cut_statement`), whichever splitter made it. Pieces get ids
+``<statement id>:<n>``.
 """
 
 from __future__ import annotations
