@@ -681,15 +681,19 @@ async def test_a_nested_model_jevex_cannot_extract_is_not_gated() -> None:
     class Odd(BaseModel):
         tags: dict[str, str] = Field(description="Tags")
 
+    class Reserved(BaseModel):
+        none: str = Field(description="Nothing")
+
     class Page(BaseModel):
         name: str = Field(description="Model name")
         odd: Odd = Field(description="Odd bits")
+        reserved: Reserved = Field(description="Reserved bits")
 
     fake = FakeJev()
     ctx = Context.create(Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(Page)], fake.client())
     ctx.parsed = parsed(page())
     await ComponentGateStage().run(ctx)
-    assert set(fake.calls[0].questions) == {"Page.name", "Page.odd"}
+    assert set(fake.calls[0].questions) == {"Page.name", "Page.odd", "Page.reserved"}
     assert fake.calls[0].questions["Page.odd"].instructions == (
         "Does this section contain the odd bits?"
     )
