@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from jevex.clean import decode_html
+from jevex.clean import html_text_of
 from jevex.interfaces import GateDecision
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 
@@ -66,7 +66,7 @@ class HtmlTextReader:
     def read(self, document: Document) -> DocumentText | None:
         if not document.is_html:
             return None
-        return DocumentText(html_text(decode_html(document.content)[0]))
+        return DocumentText(html_text(html_text_of(document.content)))
 
 
 class NoulDocumentGate:
