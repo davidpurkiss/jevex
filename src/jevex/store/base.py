@@ -107,8 +107,13 @@ class GeneratorStats(BaseModel):
 MAX_ENTRY_USD = 1_000_000.0
 
 
+SpendKind = Literal["jev", "llm", "llm_call"]
+"""``jev`` and ``llm`` entries are spend; ``llm_call`` entries (amount 0) mark LLM calls for
+rate limits, so a call and its cost are separate entries."""
+
+
 class SpendEntry(BaseModel):
-    """One charge in the spend ledger. ``kind`` is ``"jev"`` or ``"llm"``.
+    """One charge in the spend ledger (see :data:`SpendKind`).
 
     Amounts are non-negative and finite: the ledger records charges, not refunds, so a
     shared cap can only fill up.
@@ -117,7 +122,7 @@ class SpendEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     amount_usd: float = Field(ge=0, le=MAX_ENTRY_USD, allow_inf_nan=False)
-    kind: Literal["jev", "llm"]
+    kind: SpendKind
     run_id: str | None = None
     note: str | None = None
     at: datetime = Field(default_factory=utcnow)
@@ -195,7 +200,7 @@ class Store(Protocol):
         self,
         *,
         since: datetime | None = None,
-        kind: Literal["jev", "llm"] | None = None,
+        kind: SpendKind | None = None,
         run_id: str | None = None,
     ) -> float:
         """Total USD in the ledger matching every filter given."""
@@ -208,7 +213,7 @@ class Store(Protocol):
         cap_usd: float | None = None,
         max_count: int | None = None,
         since: datetime | None = None,
-        kind: Literal["jev", "llm"] | None = None,
+        kind: SpendKind | None = None,
     ) -> bool:
         """Record ``entry`` only if it keeps the ledger within the given limits.
 

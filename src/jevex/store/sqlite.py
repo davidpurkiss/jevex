@@ -14,8 +14,9 @@ Durability: ``synchronous=NORMAL`` is WAL's usual setting. A committed write sur
 crash of the process but can be lost on power loss or an OS crash. For the ledger that
 means under-counting the last few charges, never corrupting the database.
 
-The spend ledger keeps one row per charge and nothing prunes it yet; a busy host adds
-roughly a row per Jev request and LLM call.
+The spend ledger keeps one row per charge and nothing prunes it yet. With a run budget,
+a busy host adds a row per document (its Jev spend) and per priced LLM call, plus one
+``llm_call`` row per LLM call when ``llm_rpm`` is set.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic_core import to_jsonable_python
 
@@ -45,6 +46,8 @@ from jevex.store.base import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterator
+
+    from jevex.store.base import SpendKind
 
 SCHEMA_VERSION = 1
 
@@ -493,7 +496,7 @@ class SQLiteStore:
         self,
         *,
         since: datetime | None = None,
-        kind: Literal["jev", "llm"] | None = None,
+        kind: SpendKind | None = None,
         run_id: str | None = None,
     ) -> float:
         where, params = self._spend_filter(since, kind, run_id)
@@ -508,7 +511,7 @@ class SQLiteStore:
         cap_usd: float | None = None,
         max_count: int | None = None,
         since: datetime | None = None,
-        kind: Literal["jev", "llm"] | None = None,
+        kind: SpendKind | None = None,
     ) -> bool:
         cap = None if cap_usd is None else _nano_cap(cap_usd)
         if max_count is not None and max_count < 0:

@@ -24,10 +24,10 @@ After categorising, each statement is assigned to a field (or none). Then:
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
 from jevex.interfaces import Selection
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, JSONContent, NoulAnswer
@@ -223,11 +223,9 @@ class SelectStage:
 
     async def run(self, ctx: Context) -> None:
         plans = self._plan(ctx)
-        replies = await asyncio.gather(
-            *(
-                ctx.jev.ask(statement_state(statement), _merged(asks))
-                for statement, asks in plans.values()
-            )
+        replies = await gather(
+            ctx.jev.ask(statement_state(statement), _merged(asks))
+            for statement, asks in plans.values()
         )
         order = {sid: i for i, sid in enumerate(ctx.parsed.statements)} if ctx.parsed else {}
         outcomes: dict[tuple[str, str, str], list[_Outcome]] = {}

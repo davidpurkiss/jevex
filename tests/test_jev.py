@@ -11,6 +11,7 @@ from jevex.jev import (
     Choice,
     ChoiceAnswer,
     JevClient,
+    JevRequestCapError,
     JevResponse,
     JSONContent,
     MissingAnswerError,
@@ -301,3 +302,34 @@ def test_missing_key_is_a_jev_backend_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     with pytest.raises(JevBackendError):
         TypeSafeBackend()
+
+
+async def test_max_requests_caps_a_client_and_counts_requests_as_they_start() -> None:
+    capped = JevClient(RecordingBackend(), max_requests=2)
+    results = await asyncio.gather(
+        *(capped.ask(f"s{i}", {"q": Noul(instructions="a?")}) for i in range(5)),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(r, JevRequestCapError) for r in results) == 3
+    assert capped.usage.requests == 2
+    metered = JevClient(RecordingBackend()).metered(max_requests=0)
+    with pytest.raises(JevRequestCapError, match="0 Jev requests"):
+        await metered.ask("s", {"q": Noul(instructions="a?")})
+
+
+async def test_a_request_cancelled_mid_flight_is_still_counted() -> None:
+    class Hangs:
+        async def system_one(
+            self, state: JSONContent, questions: Mapping[str, Question]
+        ) -> JevResponse:
+            await asyncio.sleep(10)
+            raise AssertionError("unreachable")
+
+    client = JevClient(Hangs())
+    task = asyncio.create_task(client.ask("some state", {"q": Noul(instructions="a?")}))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.usage.requests == 1
+    assert client.usage.input_tokens > 0
