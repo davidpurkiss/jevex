@@ -121,7 +121,7 @@ class SlowLedger(RunLedger):
         self.delay = delay
         self.error = error
 
-    async def refuse_llm(self) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+    async def refuse_llm(self) -> None:
         await asyncio.sleep(self.delay)
         if self.error is not None:
             error, self.error = self.error, None  # fail once
