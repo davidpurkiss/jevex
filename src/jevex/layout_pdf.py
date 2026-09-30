@@ -139,7 +139,7 @@ def from_docling(doc: DoclingDocument) -> Component:
     Component ids are ``c0``, ``c1``... in reading order, so they are stable for the same
     document.
     """
-    blocks = _group(_Mapper(doc).children(doc.body))
+    blocks = _Mapper(doc).children(doc.body)
     if len(blocks) == 1 and blocks[0].type == "section":
         # A document that starts with its own heading needs no extra level.
         blocks = blocks[0].children
@@ -174,8 +174,9 @@ class _Mapper:
     def children(
         self, node: NodeItem, *, attach: Sequence[RefItem] = (), in_list: bool = False
     ) -> list[_Block]:
-        """Blocks for the ``attach`` items and then the node's children, in order. List
-        items outside a list (``in_list`` false) are wrapped in one."""
+        """Blocks for the ``attach`` items and then the node's children, in order, grouped
+        under their headings. List items outside a list (``in_list`` false) are wrapped in
+        one."""
         own = {r.cref for r in attach}
         seen: set[str] = set()  # a caption can be both attached and a child
         blocks: list[_Block] = []
@@ -184,7 +185,7 @@ class _Mapper:
                 continue
             seen.add(ref.cref)
             blocks.extend(self.item(ref.resolve(self.doc)))
-        return blocks if in_list else _wrap_loose_items(blocks)
+        return _group(blocks if in_list else _wrap_loose_items(blocks))
 
     def item(self, item: NodeItem) -> list[_Block]:
         from docling_core.types.doc.common.content_layer import ContentLayer

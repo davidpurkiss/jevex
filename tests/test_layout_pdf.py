@@ -481,6 +481,29 @@ def test_headings_inside_a_container_do_not_leak_out() -> None:
     }
 
 
+def test_same_rank_headings_inside_a_container_close_each_other() -> None:
+    doc = new_doc()
+    doc.add_heading("Options", level=1, prov=prov(1))
+    group = doc.add_list_group()
+    item = doc.add_list_item("Packs", prov=prov(1), parent=group)
+    doc.add_heading("Winter pack", level=2, prov=prov(1), parent=item)
+    doc.add_text(DocItemLabel.TEXT, "Heated seats", prov=prov(1), parent=item)
+    doc.add_heading("Tech pack", level=2, prov=prov(1), parent=item)
+    doc.add_text(DocItemLabel.TEXT, "Head-up display", prov=prov(1), parent=item)
+    picture = doc.add_picture(prov=prov(1))
+    doc.add_heading("Front", level=1, prov=prov(1), parent=picture)
+    doc.add_text(DocItemLabel.TEXT, "LED lights", prov=prov(1), parent=picture)
+    doc.add_heading("Rear", level=1, prov=prov(1), parent=picture)
+    doc.add_text(DocItemLabel.TEXT, "Tow bar", prov=prov(1), parent=picture)
+    trails = {c.text: c.heading_trail for c in from_docling(doc).walk() if c.type == "paragraph"}
+    assert trails == {
+        "Heated seats": ["Options", "Winter pack"],
+        "Head-up display": ["Options", "Tech pack"],
+        "LED lights": ["Options", "Front"],
+        "Tow bar": ["Options", "Rear"],
+    }
+
+
 # --- Parser ------------------------------------------------------------------------------
 
 
