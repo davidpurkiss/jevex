@@ -455,7 +455,8 @@ class KeyPathMapper:
         "Automatic") is asked of Jev as the field's own question about the key-path
         statement: once per distinct value (remembered by the mapper), concurrently, and
         for a single-value field only when no leaf reads directly, for at most
-        :data:`MAX_FALLBACK_VALUES` values. When nothing works, the error is kept."""
+        :data:`MAX_FALLBACK_VALUES` values (a list enum for at most
+        :data:`MAX_LIST_FALLBACK_VALUES`). When nothing works, the error is kept."""
         direct: dict[int, Any] = {}
         errors: dict[int, str] = {}
         for i, leaf in enumerate(leaves):

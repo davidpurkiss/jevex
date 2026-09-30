@@ -612,3 +612,21 @@ async def test_fields_sharing_a_name_dont_share_value_answers() -> None:
     assert result.fields["ListCar"]["fuel"].value == ["ev"]  # asked its own member question
     member_asks = [c for c in fake.calls if any(k.startswith("member") for k in c.questions)]
     assert len(member_asks) == 1
+
+
+async def test_list_enum_fallbacks_are_capped_per_document() -> None:
+    from jevex.keypaths import MAX_LIST_FALLBACK_VALUES
+
+    class Fleet(BaseModel):
+        """A fleet."""
+
+        fuels: list[Literal["petrol", "ev"]] = Field(default_factory=list, description="Fuels")
+
+    data = {"fuels": [f"Blend {i}" for i in range(MAX_LIST_FALLBACK_VALUES + 10)]}
+    fake = FakeJev().choice('key path "fuels[]"', "fuels", confidence=0.9)
+    result = await KeyPathMapper().extract(
+        page(data), [SchemaSpec.from_model(Fleet)], fake.client()
+    )
+    member_asks = [c for c in fake.calls if any(k.startswith("member") for k in c.questions)]
+    assert len(member_asks) == MAX_LIST_FALLBACK_VALUES
+    assert not result.fields["Fleet"]["fuels"].found  # FakeJev accepts no member (p=0)
