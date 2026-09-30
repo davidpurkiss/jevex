@@ -92,7 +92,7 @@ def table_statements(table: Component) -> list[Statement]:
     has_data = {
         covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
     }
-    has_data |= _blank_rows(table.cells, cells)
+    has_data |= blank_rows(table)
 
     def header_only(r: int) -> bool:
         return r not in has_data and all(c.header for c in rows[r])
@@ -179,10 +179,13 @@ def _label_value(cells: list[TableCell], width: int) -> bool:
     )
 
 
-def _blank_rows(all_cells: list[TableCell], filled: list[TableCell]) -> set[int]:
-    """Rows whose filled cells are all headers, followed by an empty data cell in a column
-    that holds data in other rows: ``Towing | | ``. An empty cell before the headers is a
-    corner (`` | SE | GT``), and one in a column that never holds data a spacer."""
+def blank_rows(table: Component) -> set[int]:
+    """The rows of ``table`` that hold data cells, all empty: their filled cells are all
+    headers, followed by an empty data cell in a column that holds data in other rows
+    (``Towing | | ``). Such a row is neither a band nor a header row. An empty cell before
+    the headers is a corner (`` | SE | GT``), and one in a column that never holds data a
+    spacer."""
+    filled = [c for c in table.cells if _clean(c.text)]
     data_columns = {col for c in filled if not c.header for col in range(c.col, c.col + c.col_span)}
     end: dict[int, int] = {}  # row -> the column after its last filled cell
     labels_only: set[int] = set()
@@ -192,7 +195,7 @@ def _blank_rows(all_cells: list[TableCell], filled: list[TableCell]) -> set[int]
     labels_only -= {c.row for c in filled if not c.header}
     return {
         c.row
-        for c in all_cells
+        for c in table.cells
         if c.row in labels_only
         and not c.header
         and not _clean(c.text)

@@ -186,7 +186,7 @@ def test_an_oversized_table_is_split_by_rows_with_its_header_repeated() -> None:
     assert "Trim 40 | £20040" in units[-1].text
 
 
-def test_an_oversized_tables_empty_cells_leave_no_gaps_in_its_pieces() -> None:
+def test_an_oversized_tables_blank_row_is_a_body_row_without_gaps() -> None:
     t = table("t", 40)
     blank = [
         TableCell(row=41, col=0, text="Towing", header=True),
@@ -195,8 +195,9 @@ def test_an_oversized_tables_empty_cells_leave_no_gaps_in_its_pieces() -> None:
     t = t.model_copy(update={"cells": [*t.cells, *blank]})
     units = gate_units(comp("section", "", "r", t), max_chars=120)
     lines = [line for u in units for line in u.text.split("\n")]
-    assert all(u.text.startswith("Trim | Price\n") for u in units)
-    assert "Towing" in lines
+    assert all(u.text.startswith("Trim | Price\nTrim ") for u in units)
+    assert lines.count("Towing") == 1
+    assert units[-1].text.endswith("Trim 40 | £20040\nTowing")
     assert not any(line.startswith(" |") or line.endswith("| ") for line in lines)
 
 

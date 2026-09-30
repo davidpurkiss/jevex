@@ -115,7 +115,7 @@ from jevex.structured import (
     StructuredBlob,
     StructuredSource,
 )
-from jevex.tables import header_prefix, table_statements
+from jevex.tables import blank_rows, header_prefix, table_statements
 
 __version__ = "0.0.1"
 
@@ -235,6 +235,7 @@ __all__ = [
     "UnsupportedDocumentError",
     "VerifiedExample",
     "__version__",
+    "blank_rows",
     "cut_statement",
     "default_registry",
     "evaluate",

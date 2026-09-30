@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
+from jevex.tables import blank_rows
 
 if TYPE_CHECKING:
     from jevex.interfaces import ComponentGate, ParsedDocument
@@ -114,11 +115,12 @@ def _table_rows(table: Component) -> tuple[list[str], list[str]]:
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
         if cell.text:
             rows.setdefault(cell.row, []).append(cell)
+    blank = blank_rows(table)  # a label with empty values ("Towing | | ") is a body row
     header: list[str] = list(captions)
     body: list[str] = []
-    for cells in rows.values():
+    for r, cells in rows.items():
         line = " | ".join(c.text for c in cells)
-        (header if all(c.header for c in cells) else body).append(line)
+        (header if r not in blank and all(c.header for c in cells) else body).append(line)
     return header, body
 
 
