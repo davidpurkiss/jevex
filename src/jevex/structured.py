@@ -57,7 +57,8 @@ DATA_ATTRIBUTE_NOISE = re.compile(
     r"|styled.*|turbo.*|controller|action|bs-.*|toggle|target|dismiss|parent|ride|slide.*"
     r"|ga|ga-.*|gtm.*|track.*|tracking.*|analytics.*|event.*|component.*|module.*"
     r"|src|srcset|sizes|lazy.*|ll-status|aos.*|slick.*|swiper.*|tooltip.*|placement"
-    r"|original-title|toggle-.*|ajax.*|nosnippet)",
+    r"|original-title|toggle-.*|ajax.*|nosnippet"
+    r"|loading-text|complete-text|reset-text)",  # Bootstrap button states
     re.IGNORECASE,
 )
 """``data-*`` attribute names (without ``data-``) that carry no record data: test ids,
