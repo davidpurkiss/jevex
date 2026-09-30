@@ -36,7 +36,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `keypaths.py` | Structured-data stage (stage 4): `flatten` (key paths, collapsed shapes, entity candidates), fingerprints, `KeyPathMapper` (store lookup; one batched Choice per blob and schema on a miss; stores confident answers incl. "none"; enum/bool values Jev can't read directly are asked as the field's own question), `StructuredStage` (values on the default entity, `method="structured"`) |
 | `layout.py` | `Component` tree, `Location` union (`DomLocation`, `PageLocation`, `ImageLocation`), `BBox` |
 | `statements.py` | `Statement`, `Span`, `Candidate`, `NormaliserStep` (compact YAML form) |
-| `split.py` | Statement splitting (stage 9): `DefaultSplitter` (pysbd sentences, list items, `Label: value` pairs, headings, captions, alt text; tables are #25), `StatementStage` |
+| `split.py` | Statement splitting (stage 9): `DefaultSplitter` (pysbd sentences, list items, `Label: value` pairs, headings, captions, alt text; tables are #25), `StatementStage` (cuts statements over `MAX_STATEMENT_CHARS` with `cut_statement`, repeating a cell's headers or a pair's label) |
 | `entities.py` | `EntityScope` |
 | `jev.py` | The only code that talks to Jev: `Noul`/`Choice`/`Score` questions, answers, `JevClient` (batching, splitting, metering), `JevBackend` protocol, `TypeSafeBackend` |
 | `schema.py` | `jevex.Field`, `Questions`, `SchemaConfig`, `SchemaSpec`/`FieldSpec` and every generated question |
@@ -47,7 +47,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `results.py` | `FieldMeta`, `Source`, `Extracted` records, `partial_model`, thresholds |
 | `eval.py` | `jevex eval`: corpus (`truth.json`) loading, record matching, per-field tolerances and scores, `EvalReport` |
 | `store/` | Learned state: `Store` protocol and records (`base.py`), `SQLiteStore` (WAL, `BEGIN IMMEDIATE` writes, integer nano-dollar spend ledger, own worker thread), `open_store(url)` |
-| `tables.py` | `table_statements`: one `table_cell` statement per data cell, rendered `[band › ][row headers · ][column headers: ]value`, with headers structured on `Statement.table` (`TableCellRef`) for entity resolvers |
+| `tables.py` | `table_statements`: one `table_cell` statement per data cell, rendered `[band › ][row headers · ][column headers: ]value`, with headers structured on `Statement.table` (`TableCellRef`) for entity resolvers; `header_prefix` |
 | `testing.py` | `FakeJev` / `FakeLLM` (scripted answers), `Cassette` / `LLMCassette` record/replay |
 | `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/litellm.py` (extras) |
 

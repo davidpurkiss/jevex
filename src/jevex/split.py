@@ -19,6 +19,10 @@ containers             none; their children are split instead
 Each statement carries its component's ``heading_trail`` and ``location``. Ids are
 ``<component id>.<n>`` (table cells: ``<table id>.r<row>c<col>``), so they're unique
 and stable for a given tree.
+
+A statement longer than :data:`MAX_STATEMENT_CHARS` (a whole product description in one
+``<li>`` or table cell) is too big for one Jev state, so :class:`StatementStage` cuts it
+into pieces (:func:`cut_statement`), whichever splitter made it.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from jevex.layout import DomLocation
 from jevex.statements import Statement
-from jevex.tables import table_statements
+from jevex.tables import header_prefix, table_statements
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -247,6 +251,73 @@ def _lines(text: str) -> list[str]:
     return [line for raw in text.split("\n") if (line := _WHITESPACE.sub(" ", raw).strip())]
 
 
+MAX_STATEMENT_CHARS = 4000
+"""Statements longer than this are cut into pieces. Jev takes about 115k characters of
+state plus question, but a statement is meant to state one thing, and a shorter state
+leaves room for the heading trail and a Choice over many fields or candidates."""
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def _cut_text(text: str, max_chars: int) -> list[str]:
+    """``text`` in pieces of at most ``max_chars``, cut at the last sentence end in the
+    second half of each piece, else the last whitespace there, else mid-word."""
+    out: list[str] = []
+    while len(text) > max_chars:
+        floor = max_chars // 2
+        window = text[: max_chars + 1]  # a cut at max_chars keeps the piece within it
+        cut = None
+        for pattern in (_SENTENCE_END, _WHITESPACE):
+            ends = [m.start() for m in pattern.finditer(window, floor) if m.start() > 0]
+            if ends:
+                cut = ends[-1]
+                break
+        if cut is None:
+            out.append(text[:max_chars])
+            text = text[max_chars:].lstrip()
+        else:
+            out.append(text[:cut].rstrip())
+            text = text[cut:].lstrip()
+    if text:
+        out.append(text)
+    return out
+
+
+def _lead(statement: Statement) -> str:
+    """The part every piece of a cut statement repeats: a table cell's headers or a
+    pair's label, so each piece still says what it's about."""
+    text = statement.text
+    if statement.table is not None:
+        prefix = header_prefix(statement.table)
+        return prefix if prefix and text.startswith(prefix) else ""
+    if statement.kind == "key_value" and (m := _KEY_VALUE.match(text)) is not None:
+        return text[: m.start("value")]
+    return ""
+
+
+def cut_statement(statement: Statement, max_chars: int = MAX_STATEMENT_CHARS) -> list[Statement]:
+    """``statement`` in pieces of at most ``max_chars`` characters, or ``[statement]`` if it
+    fits.
+
+    Cuts fall at a sentence end where the second half of a piece has one, else at
+    whitespace, else mid-word; pieces don't overlap, so a value straddling a mid-word cut
+    is lost. A table cell's headers or a pair's label (when no longer than half of
+    ``max_chars``) lead every piece: ``Notes: …`` stays a pair. Pieces keep everything
+    else about the statement; their ids are ``<id>:<n>``.
+    """
+    if max_chars < 1:
+        raise ValueError(f"max_chars must be positive, got {max_chars}")
+    if len(statement.text) <= max_chars:
+        return [statement]
+    lead = _lead(statement)
+    if len(lead) > max_chars // 2:
+        lead = ""
+    pieces = _cut_text(statement.text[len(lead) :].strip(), max_chars - len(lead))
+    return [
+        statement.model_copy(update={"id": f"{statement.id}:{i}", "text": f"{lead}{piece}"})
+        for i, piece in enumerate(pieces)
+    ]
+
+
 class DuplicateStatementError(ValueError):
     """Two statements on one document share an id (a splitter or earlier stage bug)."""
 
@@ -257,22 +328,41 @@ class StatementStage:
 
     Statements already on the document (from the structured-data stage) are kept; new
     ones are added in reading order, and an id clash raises
-    :class:`DuplicateStatementError` rather than replacing one. Without a parsed document
-    the stage does nothing.
+    :class:`DuplicateStatementError` rather than replacing one. A statement longer than
+    ``max_chars`` is cut (:func:`cut_statement`) and a ``statements_cut`` event lists
+    which. Without a parsed document the stage does nothing.
     """
 
     splitter: StatementSplitter = field(default_factory=DefaultSplitter)
+    max_chars: int = MAX_STATEMENT_CHARS
     name: str = "statements"
+
+    def __post_init__(self) -> None:
+        if self.max_chars < 1:
+            raise ValueError(f"max_chars must be positive, got {self.max_chars}")
 
     async def run(self, ctx: Context) -> None:
         parsed = ctx.parsed
         if parsed is None:
             return
+        cut: dict[str, int] = {}
         for component in parsed.root.walk():
-            for statement in self.splitter.split(component):
-                if statement.id in parsed.statements:
-                    raise DuplicateStatementError(
-                        f"statement id {statement.id!r} (component {component.id!r}) is "
-                        "already on the document"
-                    )
-                parsed.statements[statement.id] = statement
+            for whole in self.splitter.split(component):
+                pieces = cut_statement(whole, self.max_chars)
+                if len(pieces) > 1:
+                    cut[whole.id] = len(pieces)
+                for statement in pieces:
+                    if statement.id in parsed.statements:
+                        raise DuplicateStatementError(
+                            f"statement id {statement.id!r} (component {component.id!r}) is "
+                            "already on the document"
+                        )
+                    parsed.statements[statement.id] = statement
+        if cut:
+            ctx.event(
+                self.name,
+                "statements_cut",
+                f"{len(cut)} statement(s) over {self.max_chars} characters were cut into "
+                f"{sum(cut.values())} pieces",
+                pieces=cut,
+            )

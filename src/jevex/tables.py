@@ -160,6 +160,12 @@ def _is_band(row: list[TableCell], width: int) -> bool:
     return len(row) == 1 and row[0].header and row[0].col == 0 and width > 1
 
 
+def header_prefix(ref: TableCellRef) -> str:
+    """What a cell's text starts with before its value: ``"Performance › 0-62 mph (s) ·
+    1.5 TSI SE: "``, or ``""`` for a cell without headers."""
+    return _render(ref.group, ref.row_headers, ref.col_headers, "")
+
+
 def _render(group: str | None, rows: list[str], cols: list[str], value: str) -> str:
     text = f"{' / '.join(cols)}: {value}" if cols else value
     if rows:
