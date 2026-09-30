@@ -1133,6 +1133,61 @@ async def test_a_parent_with_only_children_is_still_a_record() -> None:
     assert car.record.model_dump() == {"model": None, "trims": [{"power_ps": 150, "doors": None}]}
 
 
+class Variant(BaseModel):
+    """One variant of a car."""
+
+    power_ps: int = Field(description="Power", unit="PS")
+    variants: list["Variant"] = Field(default_factory=list, description="Variants")
+
+
+class Range(BaseModel):
+    """A car range."""
+
+    name: str = Field(description="Range name")
+    trims: list["RangeTrim"] = Field(description="Trims")
+
+
+class RangeTrim(BaseModel):
+    """One trim of a range."""
+
+    power_ps: int = Field(description="Power", unit="PS")
+    range: Range | None = Field(default=None, description="Range")
+
+
+Range.model_rebuild()
+
+SELF_NESTED_PAGE = (
+    "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+    "<tr><th>Power</th><td>150PS</td><td>180PS</td></tr></table>"
+)
+
+
+@pytest.mark.parametrize("model", [Variant, Range], ids=["self-nested", "mutually-nested"])
+async def test_children_of_recursive_models_fill_the_parents_record(
+    model: type[BaseModel],
+) -> None:
+    fake = (
+        FakeJev()
+        .noul("Does this", p=0.95)
+        .choice("Which detail", pick("power_ps"), state="Power")
+        .choice("Which of these", first_option, confidence=0.9)
+    )
+    pipeline = default_pipeline().replace("entities", EntityStage(resolver=ParentChild()))
+    async with Extractor([model], jev=fake.client(), pipeline=pipeline) as ex:
+        result = await ex.extract(
+            Document.from_bytes(SELF_NESTED_PAGE.encode(), content_type="text/html")
+        )
+    parent = result.one(model)
+    field = "variants" if model is Variant else "trims"
+    kids = [{"power_ps": 150}, {"power_ps": 180}]
+    assert parent.meta[field].error is None
+    assert parent.meta[field].value == kids
+    assert parent.record.model_dump(exclude_none=True) == {field: kids}
+    assert [type(k) for k in getattr(parent.record, field)] == [
+        type(c.record) for c in parent.children[field]
+    ]
+
+
 async def test_a_field_holding_one_model_gets_its_first_child() -> None:
     fake = (
         FakeJev()
