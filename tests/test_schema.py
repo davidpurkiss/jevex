@@ -489,3 +489,70 @@ def test_child_needs_a_nested_model_field() -> None:
         car.child("model")
     with pytest.raises(KeyError):
         car.child("nope")
+
+
+class Engine(BaseModel):
+    size_cc: int = Field(description="Engine size", unit="cc")
+
+
+class Variant(BaseModel):
+    """A variant of a model. Sold in some markets only."""
+
+    power_ps: int = Field(description="Power", unit="PS")
+    doors: int = Field(description="Number of doors")
+    sunroof: bool = Field(description="Sunroof")
+    automatic: bool = Field(description="has an automatic gearbox")
+    engine: Engine = Field(description="Engine")
+
+
+class OnlyClaims(BaseModel):
+    """Optional extras fitted to one car."""
+
+    heated: bool = Field(description="The seats are heated")
+
+
+class NoDocstring(BaseModel):
+    heated: bool = Field(description="The seats are heated")
+
+
+class Brochure(BaseModel):
+    model: str = Field(description="Model name", group="overview")
+    variants: list[Variant] = Field(description="Variants", group="overview")
+    engine: Engine | None = Field(default=None, description="Engine")
+    extras: OnlyClaims = Field(description="Extras")
+    other: NoDocstring = Field(description="Other kit")
+    custom: Engine = Field(
+        description="Custom", questions=Questions(component_gate="Is an engine described here?")
+    )
+
+
+def test_a_nested_models_gate_question_names_what_it_holds() -> None:
+    questions = {
+        k: q.instructions
+        for k, q in SchemaSpec.from_model(Brochure).component_gate_questions().items()
+    }
+    assert questions == {
+        # Bools that read as a claim and nested models inside it are left out.
+        "overview": (
+            "Does this section contain the model name or power (PS), number of doors or sunroof "
+            "of the variants?"
+        ),
+        "engine": "Does this section contain the engine size (cc) of the engine?",
+        # Nothing to name: the docstring's first sentence, else the field alone.
+        "extras": "Does this section contain the extras (optional extras fitted to one car)?",
+        "other": "Does this section contain the other kit?",
+        "custom": "Is an engine described here?",
+    }
+
+
+def test_a_nested_gate_question_skips_nested_fields_jevex_cannot_extract() -> None:
+    class Odd(BaseModel):
+        tags: dict[str, str] = Field(description="Tags")
+        doors: int = Field(description="Number of doors")
+
+    class Page(BaseModel):
+        odd: Odd = Field(description="Odd bits")
+
+    assert SchemaSpec.from_model(Page).component_gate_questions()["odd"] == Noul(
+        instructions="Does this section contain the number of doors of the odd bits?"
+    )

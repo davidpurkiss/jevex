@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 
 import pytest
@@ -562,6 +563,137 @@ async def test_stage_skips_without_a_parsed_document_or_active_schemas() -> None
 def test_component_gate_is_a_default_stage_between_layout_and_entities() -> None:
     names = [s.name for s in default_pipeline().stages]
     assert names.index("layout") < names.index("component_gate") < names.index("entities")
+
+
+# --- nested models ---------------------------------------------------------------------
+
+
+class Trim(BaseModel):
+    """One trim of a car."""
+
+    power_kw: float = Field(description="Engine power", unit="kW")
+    price: Decimal = Field(description="Trim price", unit="GBP")
+
+
+class CarModel(BaseModel):
+    """A car model page."""
+
+    name: str = Field(description="Model name")
+    trims: list[Trim] = Field(description="Trims")
+
+
+@dataclass
+class TrimsIn:
+    """A resolver giving the whole view to one parent and one child."""
+
+    async def resolve(
+        self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
+    ) -> list[EntityScope]:
+        ids = [c.id for c in parsed.root.walk()]
+        return [
+            EntityScope(label="doc", component_ids=ids),
+            EntityScope(label="SE", component_ids=ids, parent="doc", field="trims"),
+        ]
+
+
+async def test_nested_models_are_gated_per_field_in_the_same_requests() -> None:
+    fake = (
+        FakeJev()
+        .noul("engine power (kW)?", p=0.9, state="Power: 110 kW")
+        .noul("trim price (GBP)?", p=0.9, state="SE | £24,995")
+    )
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarModel)], fake.client()
+    )
+    ctx.parsed = parsed(page())
+    await ComponentGateStage().run(ctx)
+
+    assert len(fake.calls) == len(gate_units(page()))
+    questions = {k: q.instructions for k, q in fake.calls[0].questions.items()}
+    assert questions == {
+        "CarModel.name": "Does this section contain the model name?",
+        "CarModel.trims": (
+            "Does this section contain the engine power (kW) or trim price (GBP) of the trims?"
+        ),
+        "CarModel.trims.power_kw": "Does this section contain the engine power (kW)?",
+        "CarModel.trims.price": "Does this section contain the trim price (GBP)?",
+    }
+    run = ctx.schemas["CarModel"]
+    assert run.child_component_ids == {
+        "trims": {
+            "power_kw": ["root", "s-perf", "h3", "l1", "li1", "li2"],
+            "price": ["root", "t1"],
+        }
+    }
+    # Jev said no to "the trims" everywhere, but what passed a nested field reaches the
+    # trims group, so the resolver sees it.
+    assert run.component_ids == {
+        "name": [],
+        "trims": ["root", "s-perf", "h3", "l1", "li1", "li2", "t1"],
+    }
+
+    await EntityStage(resolver=TrimsIn()).run(ctx)
+    child = ctx.schemas["CarModel.trims"]
+    assert child.component_ids == run.child_component_ids["trims"]
+    assert [f.name for f in child.relevant_fields("li1")] == ["power_kw"]
+    assert [f.name for f in child.relevant_fields("t1")] == ["price"]
+    assert child.relevant_fields("p3") == []
+
+
+async def test_a_nested_field_keeps_what_passed_its_own_question() -> None:
+    fake = FakeJev().noul("of the trims?", p=0.9, state="Book a test drive")
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarModel)], fake.client()
+    )
+    ctx.parsed = parsed(page())
+    await ComponentGateStage().run(ctx)
+    run = ctx.schemas["CarModel"]
+    assert run.component_ids is not None
+    assert "p3" in run.component_ids["trims"]
+    assert run.child_component_ids == {"trims": {"power_kw": [], "price": []}}
+
+
+async def test_a_gate_that_ignores_nested_models_leaves_the_child_run_ungated() -> None:
+    asked: list[list[str]] = []
+
+    class ParentsOnly:
+        async def gate(
+            self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
+        ) -> dict[str, dict[str, list[str]]]:
+            asked.append([s.name for s in schemas])
+            ids = [c.id for c in parsed.root.walk()]
+            return {"CarModel": {"name": ids, "trims": ids}}
+
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarModel)], FakeJev().client()
+    )
+    ctx.parsed = parsed(page())
+    await ComponentGateStage(gate=ParentsOnly()).run(ctx)
+    assert asked == [["CarModel", "CarModel.trims"]]
+    assert ctx.schemas["CarModel"].child_component_ids == {}
+    await EntityStage(resolver=TrimsIn()).run(ctx)
+    child = ctx.schemas["CarModel.trims"]
+    assert child.component_ids is None
+    assert [f.name for f in child.relevant_fields("li1")] == ["power_kw", "price"]
+
+
+async def test_a_nested_model_jevex_cannot_extract_is_not_gated() -> None:
+    class Odd(BaseModel):
+        tags: dict[str, str] = Field(description="Tags")
+
+    class Page(BaseModel):
+        name: str = Field(description="Model name")
+        odd: Odd = Field(description="Odd bits")
+
+    fake = FakeJev()
+    ctx = Context.create(Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(Page)], fake.client())
+    ctx.parsed = parsed(page())
+    await ComponentGateStage().run(ctx)
+    assert set(fake.calls[0].questions) == {"Page.name", "Page.odd"}
+    assert fake.calls[0].questions["Page.odd"].instructions == (
+        "Does this section contain the odd bits?"
+    )
+    assert ctx.schemas["Page"].child_component_ids == {}
 
 
 # --- a real page ---------------------------------------------------------------------
