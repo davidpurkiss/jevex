@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from jevex.document import normalise_source
 from jevex.interfaces import FieldAwareGenerator
 
 if TYPE_CHECKING:
@@ -26,7 +27,9 @@ def scope_matches(
 
     ``fields`` entries may be bare (``zero_to_62_s``) or qualified
     (``VehicleSpec.zero_to_62_s``). A scope locale of ``en`` matches ``en-GB``; locales
-    compare case-insensitively with ``_`` treated as ``-``. A locale- or source-scoped
+    compare case-insensitively with ``_`` treated as ``-``. ``source`` is the document's
+    :attr:`~jevex.Document.source`; scope sources compare after
+    :func:`~jevex.document.normalise_source`. A locale- or source-scoped
     generator does **not** run when the document's locale or source is unknown: a
     decimal-comma generator mustn't guess.
     """
@@ -40,7 +43,11 @@ def scope_matches(
         want, have = _locale(scope.locale), _locale(locale or "")
         if not have or not (have == want or have.startswith(f"{want}-")):
             return False
-    return not (scope.sources and (source is None or source not in scope.sources))
+    if not scope.sources:
+        return True
+    return source is not None and normalise_source(source) in {
+        normalise_source(s) for s in scope.sources
+    }
 
 
 def _locale(tag: str) -> str:

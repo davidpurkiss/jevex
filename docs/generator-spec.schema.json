@@ -96,7 +96,7 @@
           "title": "Locale"
         },
         "sources": {
-          "description": "Document sources (e.g. site hosts).",
+          "description": "Document sources: a URL's host without www. (e.g. example.com) or the document's site id. Case-insensitive; subdomains don't match.",
           "items": {
             "type": "string"
           },

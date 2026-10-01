@@ -2,14 +2,16 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any, Literal
 
+import pytest
 from pydantic import BaseModel
 
 from jevex import Context, Document, DomLocation, Field, SchemaSpec, Statement
 from jevex.entities import EntityScope
-from jevex.generators import GeneratorRegistry, RegexGenerator
+from jevex.generators import GeneratorRegistry, GeneratorSpec, RegexGenerator
 from jevex.interfaces import CandidateSelector, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
+from jevex.learn import GeneratorSnapshot
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
     CandidateStage,
@@ -57,9 +59,10 @@ def context(
     statements: list[Statement],
     categories: dict[str, str],
     models: tuple[type[BaseModel], ...] = (Car,),
+    document: Document | None = None,
 ) -> Context:
     ctx = Context.create(
-        Document.from_bytes(b"<p/>", url="https://example.com"),
+        document or Document.from_bytes(b"<p/>", url="https://example.com"),
         [SchemaSpec.from_model(m) for m in models],
         fake.client(),
     )
@@ -186,6 +189,40 @@ async def test_the_candidate_stage_records_the_generators_it_ran() -> None:
     named = RegexGenerator(id="named", pattern=r"\w+", scope=Scope(fields=frozenset({"model"})))
     await CandidateStage(registry=GeneratorRegistry([timed, named])).run(ctx)
     assert ctx.generators_ran == {"timed"}
+
+
+LEARNED = GeneratorSpec.from_yaml(
+    """
+id: gen-acme
+field: Car.zero_to_62_s
+scope: {sources: [www.acme-cars.com]}
+match: {regex: 'in (\\d+(?:\\.\\d+)?) s', group: 1}
+"""
+)
+
+
+@pytest.mark.parametrize(
+    ("document", "runs"),
+    [
+        (Document.from_bytes(b"<p/>", url="https://acme-cars.com/cars/1"), True),
+        (Document.from_bytes(b"<p/>", url="https://WWW.Acme-Cars.com/cars/1"), True),
+        (Document.from_bytes(b"<p/>", site="acme-cars.com"), True),
+        (Document.from_bytes(b"<p/>", url="https://other.com/cars/1"), False),
+        (Document.from_bytes(b"<p/>", url="https://shop.acme-cars.com/a"), False),
+        (Document.from_bytes(b"<p/>"), False),
+    ],
+)
+async def test_source_scoped_learned_generators_run_only_on_their_sources(
+    document: Document, runs: bool
+) -> None:
+    ctx = context(
+        FakeJev(), [st("s1", "0-62 mph in 9.1 s")], {"s1": "zero_to_62_s"}, document=document
+    )
+    ctx.generators = GeneratorSnapshot(1, GeneratorRegistry([LEARNED.to_generator()]))
+    await CandidateStage(registry=GeneratorRegistry()).run(ctx)
+    found = ctx.schemas["Car"].candidates[("s1", "zero_to_62_s")]
+    assert [(c.raw, c.generator_id) for c in found] == ([("9.1", "gen-acme")] if runs else [])
+    assert ctx.generators_ran == ({"gen-acme"} if runs else set())
 
 
 async def test_no_generator_runs_without_a_statement_for_its_field() -> None:

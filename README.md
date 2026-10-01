@@ -208,6 +208,12 @@ examples are used once a pack is imported into a store.
 extractor = Extractor(schemas=[VehicleSpec], store="sqlite:///jevex.db", packs=["packs/cars"])
 ```
 
+A generator can be limited to some sources with `scope: {sources: [example.com]}`. A
+document's source is its URL's host, lower-cased and without `www.`
+(`https://www.Example.com/cars/1` is `example.com`; `shop.example.com` is a different
+source). When the URL doesn't say, pass one: `Document.from_path(path, site="example.com")`.
+Source-scoped generators don't run on a document with no source.
+
 A community pack is a PyPI package that registers its directory under the `jevex.packs`
 entry point; every installed one is used unless you pass `community_packs=False` (or the
 names to use):

@@ -481,6 +481,31 @@ def test_locale_scoped_generators_skip_documents_of_unknown_locale() -> None:
     assert reg.for_field(SPEC.field("zero_to_62_s"), schema="VehicleSpec", locale="de-AT") == [gen]
 
 
+@pytest.mark.parametrize(
+    ("sources", "source", "matches"),
+    [
+        ({"example.com"}, "example.com", True),
+        ({"WWW.Example.com"}, "example.com", True),
+        ({"example.com"}, "Example.COM", True),
+        ({"other.com", "example.com"}, "example.com", True),
+        ({"example.com"}, "shop.example.com", False),
+        ({"example.com"}, "other.com", False),
+        ({"example.com"}, None, False),
+        (set[str](), None, True),
+    ],
+)
+def test_source_scoped_generators_run_only_on_their_sources(
+    sources: set[str], source: str | None, matches: bool
+) -> None:
+    gen = RegexGenerator(id="g", pattern=r"\d+", scope=Scope(sources=frozenset(sources)))
+    reg = GeneratorRegistry([gen])
+    field = SPEC.field("zero_to_62_s")
+    assert (reg.for_field(field, schema="VehicleSpec", source=source) == [gen]) is matches
+    statement = st("9 s")
+    found = reg.generate(statement, field, schema="VehicleSpec", source=source)
+    assert [c.raw for c in found] == (["9"] if matches else [])
+
+
 def test_re2_errors_are_readable(capfd: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(InvalidGeneratorError) as info:
         RegexGenerator(id="bad", pattern=r"(a")
