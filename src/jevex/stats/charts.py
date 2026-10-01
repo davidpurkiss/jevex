@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import html
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -153,11 +153,18 @@ class _Metric:
     """A fixed top for the y-axis (accuracy's 100%); otherwise from the data."""
 
 
+COST = _Metric("cost_per_document", "Cost per document (USD)", usd)
 LEARNING_METRICS = (
     _Metric("llm_calls_per_document", "LLM calls per document", calls),
-    _Metric("cost_per_document", "Cost per document (USD)", usd),
+    COST,
     _Metric("accuracy", "Accuracy", pct, top=1.0),
 )
+LEARNING_COST_TITLE = "Cost per document, learning included (USD)"
+"""The cost panel's title when the points count the learner's spend (a replay's)."""
+
+
+def _learning_counted(stats: Stats) -> bool:
+    return any(p.learning_counted for p in stats.points)
 
 
 class _Frame:
@@ -271,13 +278,16 @@ def learning_svg(
 ) -> str:
     """View 1, the learning curve: LLM calls per document (the hero), cost per document
     and, for a replay, accuracy, one panel each over the same x-axis, with test-site
-    waves marked and a tick where each generator was learned."""
+    waves marked and a tick where each generator was learned. A replay's cost includes
+    what the learner spent, and its title says so."""
     points = curve(stats)
     metrics = [
         m
         for m in LEARNING_METRICS
         if m.key != "accuracy" or any(p.accuracy is not None for p in points)
     ]
+    if _learning_counted(stats):
+        metrics = [replace(m, title=LEARNING_COST_TITLE) if m is COST else m for m in metrics]
     x_name = "documents processed" if axis == "docs" else "time"
     parts = _open(
         "learning",
@@ -453,19 +463,21 @@ def cost_svg(
     spend = _thin([s for s in stats.spend if axis == "docs" or s.at is not None])
     total = max((s.total for s in spend), default=0.0)
     ticks = nice_ticks(max(total, stats.budget_usd or 0.0))
+    learning = ", learning included" if _learning_counted(stats) else ""
     parts = _open(
         "cost",
         "Cumulative spend",
         _PANEL + 24,
         standalone=standalone,
         animate=animate,
-        label="Cumulative Jev and LLM spend in USD"
+        label=f"Cumulative Jev and LLM spend in USD{learning}"
         + (" against the budget" if stats.budget_usd is not None else ""),
     )
     xs = [s.at.timestamp() if axis == "time" and s.at else float(s.documents) for s in spend]
     frame = _Frame(stats, axis, 24, ticks[-1], extra=xs)
-    parts.append(f'<text class="title" x="{_LEFT}" y="14">Cumulative spend (USD)</text>')
-    parts += _legend(("jev", "llm"), x=_LEFT + 180, y=14, labels=("Jev", "LLM"))
+    title = f"Cumulative spend{learning} (USD)"
+    parts.append(f'<text class="title" x="{_LEFT}" y="14">{_esc(title)}</text>')
+    parts += _legend(("jev", "llm"), x=_LEFT + 8 * len(title) + 4, y=14, labels=("Jev", "LLM"))
     parts += frame.axes(ticks, usd)
     columns = [(frame.x0, {"jev": 0.0, "llm": 0.0})]
     columns += [(x, {"jev": s.jev, "llm": s.llm}) for x, s in zip(xs, spend, strict=True)]

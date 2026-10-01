@@ -46,7 +46,8 @@ class Point:
     """``size`` documents ending ``documents`` documents in (at ``at``, if known), with
     their per-document averages. ``accuracy`` is a replay's (the store has no ground
     truth); ``generators`` is how many learned generators were enabled after it, if
-    known."""
+    known. The ``learning_*`` costs are what the learner spent on their examples, also a
+    replay's (``None`` where not measured); :attr:`cost_per_document` includes them."""
 
     documents: int
     size: int
@@ -58,10 +59,24 @@ class Point:
     accuracy: float | None = None
     generators: int | None = None
     waves: tuple[int, ...] = ()
+    learning_jev_cost_per_document: float | None = None
+    learning_llm_cost_per_document: float | None = None
+
+    @property
+    def learning_counted(self) -> bool:
+        return (
+            self.learning_jev_cost_per_document is not None
+            or self.learning_llm_cost_per_document is not None
+        )
 
     @property
     def cost_per_document(self) -> float:
-        return self.jev_cost_per_document + self.llm_cost_per_document
+        return (
+            self.jev_cost_per_document
+            + self.llm_cost_per_document
+            + (self.learning_jev_cost_per_document or 0.0)
+            + (self.learning_llm_cost_per_document or 0.0)
+        )
 
     def x(self, axis: XAxis) -> float:
         """The point's position on ``axis``: documents, or POSIX seconds."""
@@ -204,6 +219,12 @@ def merge(points: Sequence[Point]) -> Point:
     def mean(key: str) -> float:
         return sum(getattr(p, key) * p.size for p in points) / n if n else 0.0
 
+    def measured_mean(key: str) -> float | None:
+        values = [(cast("float | None", getattr(p, key)), p.size) for p in points]
+        if all(v is None for v, _ in values):
+            return None
+        return sum((v or 0.0) * size for v, size in values) / n if n else 0.0
+
     scored = [p for p in points if p.accuracy is not None]
     scored_n = sum(p.size for p in scored)
     methods: dict[str, int] = {}
@@ -226,6 +247,8 @@ def merge(points: Sequence[Point]) -> Point:
         ),
         generators=last.generators,
         waves=tuple(sorted({w for p in points for w in p.waves})),
+        learning_jev_cost_per_document=measured_mean("learning_jev_cost_per_document"),
+        learning_llm_cost_per_document=measured_mean("learning_llm_cost_per_document"),
     )
 
 
@@ -345,6 +368,8 @@ def _point_json(p: Point) -> dict[str, Any]:
         "cost_per_document": p.cost_per_document,
         "jev_cost_per_document": p.jev_cost_per_document,
         "llm_cost_per_document": p.llm_cost_per_document,
+        "learning_jev_cost_per_document": p.learning_jev_cost_per_document,
+        "learning_llm_cost_per_document": p.learning_llm_cost_per_document,
         "accuracy": p.accuracy,
         "generators": p.generators,
         "waves": list(p.waves),
@@ -518,8 +543,8 @@ def _point_spend(points: Sequence[Point]) -> list[SpendPoint]:
     out: list[SpendPoint] = []
     jev = llm = 0.0
     for p in points:
-        jev += p.jev_cost_per_document * p.size
-        llm += p.llm_cost_per_document * p.size
+        jev += (p.jev_cost_per_document + (p.learning_jev_cost_per_document or 0.0)) * p.size
+        llm += (p.llm_cost_per_document + (p.learning_llm_cost_per_document or 0.0)) * p.size
         out.append(SpendPoint(documents=p.documents, jev=jev, llm=llm, at=p.at))
     return out
 
@@ -609,6 +634,11 @@ def _number(row: Mapping[str, Any], key: str) -> float:
     raise ValueError(f"{key} is {value!r}, not a number")
 
 
+def _measured(row: Mapping[str, Any], key: str) -> float | None:
+    """A column older CSVs lack: ``None`` there, a number otherwise."""
+    return None if row.get(key) is None else _number(row, key)
+
+
 def _replay_batch(r: Mapping[str, Any]) -> tuple[Point, int]:
     """A CSV row as a point and its count of failed documents."""
     point = Point(
@@ -621,6 +651,8 @@ def _replay_batch(r: Mapping[str, Any]) -> tuple[Point, int]:
         accuracy=None if r.get("accuracy") is None else _number(r, "accuracy"),
         generators=None if r.get("generators") is None else int(_number(r, "generators")),
         waves=_waves(r.get("waves")),
+        learning_jev_cost_per_document=_measured(r, "learning_jev_cost_per_document"),
+        learning_llm_cost_per_document=_measured(r, "learning_llm_cost_per_document"),
     )
     return point, int(_number(r, "errors"))
 
