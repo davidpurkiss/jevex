@@ -154,7 +154,7 @@ PROMPT = """\
 Write a regular expression that finds one field's value in statements from documents.
 
 Field: {name}
-Description: {label}
+Description: {description}
 Type: {type}
 
 Example statement: {statement}
@@ -171,8 +171,8 @@ chooses between them.
 - "group" is the capture group holding the value's text (0 for the whole match).
 - "normalise" turns that text into the value, using only these steps, in order:
 {normalisers}"""
-"""The default synthesis prompt. Placeholders: ``name``, ``label``, ``type`` (with the
-unit, if any), ``statement``, ``section`` (``"Section: ...\\n"`` or empty), ``value``,
+"""The default synthesis prompt. Placeholders: ``name``, ``description``, ``type`` (with
+the unit, if any), ``statement``, ``section`` (``"Section: ...\\n"`` or empty), ``value``,
 ``evidence``, ``max_length`` and ``normalisers`` (:data:`NORMALISERS`)."""
 
 
@@ -406,7 +406,7 @@ class GeneratorLearner:
         evidence = example.evidence
         prompt = self.prompt.format(
             name=spec.name,
-            label=spec.label,
+            description=spec.description,
             type=field_type_text(spec) + (f", in {spec.unit}" if spec.unit else ""),
             statement=statement.text,
             section=f"Section: {section}\n" if section else "",
