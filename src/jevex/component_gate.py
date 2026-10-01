@@ -88,8 +88,10 @@ def _lifted(block: Component) -> list[Component]:
     """``block`` with the read images inside it lifted out: the block without them (when it
     has text of its own), then each image, so an image is cut like a section and the
     block's own text is still gated with its neighbours."""
+    if _opens(block):
+        return [block]
     images = _read_images(block)
-    if _opens(block) or not images:
+    if not images:
         return [block]
     ids = {image.id for image in images}
 
