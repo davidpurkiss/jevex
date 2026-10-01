@@ -183,7 +183,8 @@ class CandidateStage:
     """Generates candidate spans for every categorised statement whose field needs them.
 
     ``registry`` holds the stage's own generators; the document's learned ones
-    (``ctx.generators``) run after them.
+    (``ctx.generators``) run after them. Every generator it runs is added to
+    ``ctx.generators_ran``.
     """
 
     registry: GeneratorRegistry = field(default_factory=default_registry)
@@ -195,6 +196,7 @@ class CandidateStage:
         if ctx.generators is not None:
             registry = ctx.generators.on(registry)
         for run in ctx.active:
+            counted: set[str] = set()
             for scope in run.scopes:
                 for statement, spec in field_statements(ctx, run, scope):
                     key = (statement.id, spec.name)
@@ -202,6 +204,14 @@ class CandidateStage:
                         run.candidates[key] = registry.generate(
                             statement, spec, schema=run.name, locale=self.locale
                         )
+                        if spec.name not in counted:
+                            counted.add(spec.name)
+                            ctx.generators_ran.update(
+                                g.id
+                                for g in registry.for_field(
+                                    spec, schema=run.name, locale=self.locale
+                                )
+                            )
 
 
 @dataclass

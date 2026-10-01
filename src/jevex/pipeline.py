@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from jevex.budgets import DocumentBudget
     from jevex.document import Document
     from jevex.entities import EntityScope
+    from jevex.housekeeping import Housekeeper
     from jevex.interfaces import GateDecision, Learner, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
     from jevex.learn import GeneratorSnapshot
@@ -219,6 +220,12 @@ class Context:
     generators: GeneratorSnapshot | None = None
     """The learned generators this document runs with, taken when it starts: generators
     learned meanwhile are for later documents. ``None``: only the stages' own."""
+    generators_ran: set[str] = field(default_factory=set[str])
+    """Ids of the generators the candidate stage ran on at least one statement (the
+    housekeeper counts these documents towards each one's stats)."""
+    housekeeper: Housekeeper | None = None
+    """The extractor's :class:`~jevex.housekeeping.Housekeeper` (when it has a store): the
+    learn stage gives it the document's generator counts. ``None``: none are kept."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:

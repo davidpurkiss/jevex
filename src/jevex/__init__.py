@@ -31,6 +31,7 @@ from jevex.generators import (
     default_registry,
     generator_spec_json_schema,
 )
+from jevex.housekeeping import DuplicateGenerator, GeneratorUse, Housekeeper, generator_use
 from jevex.images import (
     DefaultImageLoader,
     ImageData,
@@ -166,6 +167,7 @@ __all__ = [
     "DocumentGateStage",
     "DocumentText",
     "DomLocation",
+    "DuplicateGenerator",
     "DuplicateStatementError",
     "EmbeddedData",
     "EmbeddedDataReader",
@@ -190,6 +192,8 @@ __all__ = [
     "GeneratorSnapshot",
     "GeneratorSpec",
     "GeneratorStats",
+    "GeneratorUse",
+    "Housekeeper",
     "HtmlLayoutParser",
     "HtmlTextReader",
     "ImageData",
@@ -279,6 +283,7 @@ __all__ = [
     "gate_units",
     "gated_out_pages",
     "generator_spec_json_schema",
+    "generator_use",
     "header_prefix",
     "infer_headers",
     "load_corpus",
