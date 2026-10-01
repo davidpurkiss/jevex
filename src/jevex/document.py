@@ -78,11 +78,16 @@ class Document(BaseModel):
         ``site`` if given, else the URL's host; both pass through :func:`normalise_source`,
         so ``https://WWW.Example.com:8080/a`` is ``example.com``. Subdomains are distinct
         sources (``shop.example.com`` isn't ``example.com``). ``None`` when neither is
-        known, and then no source-scoped generator runs.
+        known (an unparseable URL has no host), and then no source-scoped generator runs.
         """
         if self.site and self.site.strip():
             return normalise_source(self.site)
-        host = urlsplit(self.url).hostname if self.url else None
+        if not self.url:
+            return None
+        try:
+            host = urlsplit(self.url).hostname
+        except ValueError:  # e.g. unbalanced IPv6 brackets
+            return None
         return normalise_source(host) if host else None
 
     @property

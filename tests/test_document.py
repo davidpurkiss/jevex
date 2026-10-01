@@ -77,6 +77,7 @@ def test_document_is_immutable_and_round_trips() -> None:
         ("https://example.com/a", "  ", "example.com"),
         ("file:///tmp/a.html", None, None),
         ("example.com/a", None, None),  # no scheme, so no host
+        ("http://[bad/a", None, None),  # unparseable
         (None, None, None),
     ],
 )
