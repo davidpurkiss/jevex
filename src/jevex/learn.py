@@ -44,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
 from jevex._tasks import gather
 from jevex.budgets import RunLedger
-from jevex.fallback import field_type_text
+from jevex.fallback import FALLBACK_THRESHOLD, field_type_text
 from jevex.generators import (
     GeneratorRegistry,
     GeneratorSpec,
@@ -56,7 +56,7 @@ from jevex.generators.spec import NORMALISE_JSON_SCHEMA
 from jevex.jev import JevBudgetExceededError, JevError
 from jevex.layout import DomLocation, section_text
 from jevex.llm import LLMError
-from jevex.normalise import NormaliseError, normalise
+from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliserRegistry, normalise
 from jevex.select import JevCandidateSelector, statement_state, unique_spans
 from jevex.statements import Statement, StatementKind
 from jevex.store import GeneratorRecord, StoreError
@@ -64,7 +64,7 @@ from jevex.store import GeneratorRecord, StoreError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from jevex.interfaces import CandidateGenerator, CandidateSelector, Learner
+    from jevex.interfaces import CandidateGenerator, CandidateSelector, Learner, Selection
     from jevex.jev import Answer, JevClient
     from jevex.llm import LLM
     from jevex.pipeline import Context
@@ -265,8 +265,9 @@ class GeneratorLearner:
     """The default :class:`~jevex.interfaces.Learner`: synthesise, test and hot-swap.
 
     ``schemas`` are the extractor's (an example's ``field`` is ``"Schema.field"``).
-    ``base`` and ``selector`` should be what the candidate and select stages use, so a
-    generator is tested as documents will run it. ``ledger`` applies the run budget to
+    ``base``, ``locale``, ``selector``, ``normalisers`` and ``fallback_threshold`` should
+    be what the candidate, select, normalise and fallback stages use, so a generator is
+    tested as documents will run it. ``ledger`` applies the run budget to
     the learner's LLM and Jev calls and records their spend.
     """
 
@@ -279,16 +280,23 @@ class GeneratorLearner:
     selector: CandidateSelector = field(default_factory=JevCandidateSelector)
     learn_threshold: float = LEARN_THRESHOLD
     sample_size: int = SAMPLE_SIZE
+    normalisers: NormaliserRegistry = BUILTIN_NORMALISERS
+    locale: str | None = None
+    fallback_threshold: float = FALLBACK_THRESHOLD
+    """Jev must choose the value on the triggering statement at least this confidently,
+    or the fallback would still ask the LLM there."""
     prompt: str = PROMPT
     outcomes: list[LearnOutcome] = field(default_factory=list[LearnOutcome])
-    _queue: asyncio.Queue[object] | None = field(default=None, init=False, repr=False)
+    _queue: asyncio.Queue[VerifiedExample] | None = field(default=None, init=False, repr=False)
     _worker: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
     _error: BaseException | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not 0 <= self.learn_threshold <= 1:
-            raise ValueError(f"learn_threshold must be between 0 and 1, got {self.learn_threshold}")
+        for label in ("learn_threshold", "fallback_threshold"):
+            value = getattr(self, label)
+            if not 0 <= value <= 1:
+                raise ValueError(f"{label} must be between 0 and 1, got {value}")
         if self.sample_size < 0:
             raise ValueError(f"sample_size must not be negative, got {self.sample_size}")
 
@@ -358,9 +366,9 @@ class GeneratorLearner:
     async def _learn(self, example: VerifiedExample, jev: JevClient) -> LearnOutcome:
         schema, spec = self._field(example)
         statement = _statement(example)
-        expected = _expected(example, spec)
+        expected = self._expected(example, spec)
         current = self.snapshot.on(self.base)
-        if _finds(current.generate(statement, spec, schema=schema), spec, expected):
+        if self._finds(self._generate(current, statement, spec, schema), spec, expected):
             raise _Rejected("covered", "the generators in use already find the value")
         draft = await self._synthesise(example, statement, spec)
         try:
@@ -368,7 +376,7 @@ class GeneratorLearner:
         except InvalidGeneratorError as exc:
             raise _Rejected("invalid_spec", str(exc)) from None
         generator = generator_spec.to_generator()
-        if not _finds(generator.generate(statement), spec, expected):
+        if not self._finds(generator.generate(statement), spec, expected):
             raise _Rejected("missed_trigger", "it finds no span with the value", generator_spec)
         if await self.ledger.refuse_document() is not None:
             raise _Rejected("budget", "the run's Jev spend cap is reached", generator_spec)
@@ -432,10 +440,11 @@ class GeneratorLearner:
         registry: GeneratorRegistry,
         expected: Any,
     ) -> bool:
-        candidates = registry.generate(statement, spec, schema=schema)
+        candidates = self._generate(registry, statement, spec, schema)
         questions = self.selector.questions(statement, spec, candidates)
         answers = await jev.ask(statement_state(statement), questions)
-        return self._right(spec, candidates, answers, expected)
+        selection = self._right(spec, candidates, answers, expected)
+        return selection is not None and selection.confidence >= self.fallback_threshold
 
     async def _regression(
         self,
@@ -456,7 +465,7 @@ class GeneratorLearner:
             if other.id == example.id or len(cases) == self.sample_size:
                 continue
             try:
-                cases.append((_statement(other), _expected(other, spec)))
+                cases.append((_statement(other), self._expected(other, spec)))
             except _Rejected:
                 continue  # a stored example this field can no longer read tests nothing
         results = await gather(
@@ -487,8 +496,8 @@ class GeneratorLearner:
         """Whether the old and the new candidates each lead to ``expected``; ``None`` when
         the generator doesn't change the candidates (Jev isn't asked). Both sets go in one
         request."""
-        before = old.generate(statement, spec, schema=schema)
-        after = new.generate(statement, spec, schema=schema)
+        before = self._generate(old, statement, spec, schema)
+        after = self._generate(new, statement, spec, schema)
         if unique_spans(before).keys() == unique_spans(after).keys():
             return None
         old_q = self.selector.questions(statement, spec, before)
@@ -501,8 +510,8 @@ class GeneratorLearner:
             },
         )
         return (
-            self._right(spec, before, _strip(replies, "old/"), expected),
-            self._right(spec, after, _strip(replies, "new/"), expected),
+            self._right(spec, before, _strip(replies, "old/"), expected) is not None,
+            self._right(spec, after, _strip(replies, "new/"), expected) is not None,
         )
 
     def _right(
@@ -511,18 +520,45 @@ class GeneratorLearner:
         candidates: list[Candidate],
         answers: dict[str, Answer],
         expected: Any,
-    ) -> bool:
+    ) -> Selection | None:
+        """The selection, if it picked ``expected``."""
         if not answers:
-            return False
+            return None
         selection = self.selector.selection(spec, candidates, answers)
         picks = selection.accepted if spec.many else []
         if not picks and selection.candidate is not None:
             picks = [selection.candidate]
-        return _finds(picks, spec, expected)
+        return selection if self._finds(picks, spec, expected) else None
+
+    def _generate(
+        self, registry: GeneratorRegistry, statement: Statement, spec: FieldSpec, schema: str
+    ) -> list[Candidate]:
+        return registry.generate(statement, spec, schema=schema, locale=self.locale)
+
+    def _expected(self, example: VerifiedExample, spec: FieldSpec) -> Any:
+        """The example's value as the field types it (a stored date comes back a string)."""
+        try:
+            return normalise(example.value, [], spec, registry=self.normalisers)
+        except NormaliseError as exc:
+            raise _Rejected("unlearnable", f"its value doesn't fit {spec.name}: {exc}") from None
+
+    def _finds(self, candidates: list[Candidate], spec: FieldSpec, expected: Any) -> bool:
+        """Whether any candidate normalises to ``expected`` (or, for a list field, to a
+        list holding it)."""
+        for candidate in candidates:
+            try:
+                value = normalise(
+                    candidate.raw, candidate.normalise, spec, registry=self.normalisers
+                )
+            except NormaliseError:
+                continue
+            if value == expected or (spec.many and isinstance(value, list) and expected in value):
+                return True
+        return False
 
     # -- the worker -----------------------------------------------------------------------
 
-    def _ensure_worker(self) -> asyncio.Queue[object]:
+    def _ensure_worker(self) -> asyncio.Queue[VerifiedExample]:
         loop = asyncio.get_running_loop()
         if self._queue is None or self._worker is None or self._loop is not loop:
             # A new event loop (asyncio.run per batch) can't use the old loop's queue.
@@ -531,11 +567,11 @@ class GeneratorLearner:
             self._worker = loop.create_task(self._work(self._queue))
         return self._queue
 
-    async def _work(self, queue: asyncio.Queue[object]) -> None:
+    async def _work(self, queue: asyncio.Queue[VerifiedExample]) -> None:
         while True:
             item = await queue.get()
             try:
-                await self.learn(cast("VerifiedExample", item))
+                await self.learn(item)
             except Exception as exc:
                 # Not an expected failure (those are outcomes): stop, and let the next
                 # submit, drain or aclose raise it.
@@ -576,27 +612,6 @@ def _statement(example: VerifiedExample) -> Statement:
         heading_trail=headings,
         location=_LOCATION,
     )
-
-
-def _expected(example: VerifiedExample, spec: FieldSpec) -> Any:
-    """The example's value as the field types it (a stored date comes back a string)."""
-    try:
-        return normalise(example.value, [], spec)
-    except NormaliseError as exc:
-        raise _Rejected("unlearnable", f"its value doesn't fit {spec.name}: {exc}") from None
-
-
-def _finds(candidates: list[Candidate], spec: FieldSpec, expected: Any) -> bool:
-    """Whether any candidate normalises to ``expected`` (or, for a list field, to a list
-    holding it)."""
-    for candidate in candidates:
-        try:
-            value = normalise(candidate.raw, candidate.normalise, spec)
-        except NormaliseError:
-            continue
-        if value == expected or (spec.many and isinstance(value, list) and expected in value):
-            return True
-    return False
 
 
 # --- the stage ---------------------------------------------------------------------------

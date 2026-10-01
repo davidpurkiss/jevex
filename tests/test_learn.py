@@ -30,13 +30,14 @@ from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.fallback import FallbackStage
 from jevex.generators import RegexGenerator, default_registry
-from jevex.interfaces import Learner, ParsedDocument
+from jevex.interfaces import Learner, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevBackendError
 from jevex.layout import Component
 from jevex.learn import NORMALISERS, PROMPT, GeneratorDraft, LearnOutcome, draft_spec
 from jevex.llm import LLMError
-from jevex.normalise import NormaliseStage
-from jevex.select import CandidateStage, SelectStage
+from jevex.normalise import BUILTIN_NORMALISERS, FunctionNormaliser, NormaliseStage, strip
+from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
+from jevex.statements import NormaliserStep
 from jevex.store import Store, open_store
 from jevex.testing import FakeJev, FakeLLM
 
@@ -179,6 +180,8 @@ async def test_an_unexpected_error_stops_the_worker_and_is_raised_by_drain() -> 
 def test_settings_are_checked() -> None:
     with pytest.raises(ValueError, match="learn_threshold"):
         GeneratorLearner([SPEC], FakeLLM([]), FakeJev().client(), learn_threshold=1.1)
+    with pytest.raises(ValueError, match="fallback_threshold"):
+        GeneratorLearner([SPEC], FakeLLM([]), FakeJev().client(), fallback_threshold=-0.1)
     with pytest.raises(ValueError, match="sample_size"):
         GeneratorLearner([SPEC], FakeLLM([]), FakeJev().client(), sample_size=-1)
 
@@ -659,3 +662,62 @@ async def test_without_a_store_or_learner_there_is_no_snapshot() -> None:
 def test_the_extractor_checks_the_learn_threshold() -> None:
     with pytest.raises(ValueError, match="learn_threshold"):
         Extractor([Car], generator_llm=FakeLLM([]), learn_threshold=1.5)
+
+
+async def test_a_value_jev_picks_without_confidence_misses_the_trigger() -> None:
+    fake = FakeJev().choice(None, pick("9.1"), confidence=0.4)
+    outcome = await learned(fake, FakeLLM([DRAFT]), example(), fallback_threshold=0.5)
+    assert outcome.status == "missed_trigger"
+    assert outcome.message == "Jev doesn't choose its value"
+
+
+async def test_generators_are_run_with_the_learners_locale() -> None:
+    scoped = RegexGenerator(
+        id="uk", pattern=r"(\d+\.\d+) seconds", group=1, scope=Scope(locale="en-GB")
+    )
+    base = GeneratorRegistry([scoped])
+    unknown = await learned(FakeJev(), FakeLLM([DRAFT]), example(), base=base)
+    assert unknown.status != "covered"
+    uk = await learned(FakeJev(), FakeLLM([]), example(), base=base, locale="en-GB")
+    assert uk.status == "covered"
+
+
+async def test_values_are_normalised_with_the_learners_normalisers() -> None:
+    def tenths(value: Any, **_: Any) -> float:
+        return int(value) / 10
+
+    custom = BUILTIN_NORMALISERS.with_normaliser(FunctionNormaliser("tenths", tenths))
+    base = GeneratorRegistry(
+        [
+            RegexGenerator(
+                id="t", pattern=r"(\d+) tenths", group=1, normalise=(NormaliserStep(name="tenths"),)
+            )
+        ]
+    )
+    ex = example("It takes 91 tenths", 9.1)
+    outcome = await learned(FakeJev(), FakeLLM([]), ex, base=base, normalisers=custom)
+    assert outcome.status == "covered"
+
+
+async def test_the_extractors_learner_tests_as_the_pipeline_runs() -> None:
+    registry = GeneratorRegistry()
+    norm = BUILTIN_NORMALISERS.with_normaliser(FunctionNormaliser("noop", strip))
+    selector = JevCandidateSelector(accept_at=0.7)
+    stages = (
+        default_pipeline()
+        .replace("candidates", CandidateStage(registry=registry, locale="en-GB"))
+        .replace("select", SelectStage(selector=selector))
+        .replace("normalise", NormaliseStage(registry=norm))
+        .replace("fallback", FallbackStage(fallback_threshold=0.7))
+    )
+    async with Extractor(
+        [Car], jev=FakeJev().client(), pipeline=stages, generator_llm=FakeLLM([])
+    ) as extractor:
+        lrn = await extractor.learner()
+        assert lrn is not None
+        assert lrn.base is registry
+        assert lrn.locale == "en-GB"
+        assert lrn.selector is selector
+        assert lrn.normalisers is norm
+        assert lrn.fallback_threshold == 0.7
+        assert lrn.learn_threshold == 0.9

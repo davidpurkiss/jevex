@@ -15,7 +15,7 @@ from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
-from jevex.fallback import FallbackStage
+from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
 from jevex.generators import GeneratorRegistry
 from jevex.images import ImageStage
@@ -24,7 +24,7 @@ from jevex.jev import JevClient, JevRequestCapError
 from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
 from jevex.learn import LEARN_THRESHOLD, GeneratorLearner, LearnedGenerators, LearnStage
-from jevex.normalise import NormaliseStage
+from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
@@ -461,9 +461,9 @@ class Extractor:
     async def learner(self) -> GeneratorLearner | None:
         """The learner (created on first use), or ``None`` without a ``generator_llm``.
 
-        Its ``outcomes`` say what became of each queued example. It tests generators
-        with the pipeline's candidate generators and selector, when the pipeline has the
-        default candidate and select stages.
+        Its ``outcomes`` say what became of each queued example. It tests generators as
+        the pipeline's default candidate, select, normalise and fallback stages would run
+        them (their generators, locale, selector, normalisers and fallback threshold).
         """
         if self.generator_llm is None:
             return None
@@ -471,6 +471,8 @@ class Extractor:
         if self._learner is None:
             candidates = _stage(self.pipeline, "candidates", CandidateStage)
             select = _stage(self.pipeline, "select", SelectStage)
+            norm = _stage(self.pipeline, "normalise", NormaliseStage)
+            fallback = _stage(self.pipeline, "fallback", FallbackStage)
             self._learner = GeneratorLearner(
                 self.schemas,
                 self.generator_llm,
@@ -478,7 +480,10 @@ class Extractor:
                 generators=learned or LearnedGenerators(),
                 ledger=await self.ledger(),
                 base=candidates.registry if candidates else GeneratorRegistry(),
+                locale=candidates.locale if candidates else None,
                 selector=select.selector if select else JevCandidateSelector(),
+                normalisers=norm.registry if norm else BUILTIN_NORMALISERS,
+                fallback_threshold=fallback.fallback_threshold if fallback else FALLBACK_THRESHOLD,
                 learn_threshold=self.learn_threshold,
             )
         return self._learner
