@@ -22,7 +22,10 @@ from jevex import (
     Housekeeper,
     LearnedGenerators,
     LearnStage,
+    Pack,
     PackDiff,
+    PackError,
+    PackManifest,
     Pipeline,
     SchemaSpec,
     Statement,
@@ -485,6 +488,29 @@ async def test_load_reads_the_stores_enabled_generators() -> None:
     assert snapshot.registry.ids == ["gen-a"]
 
 
+def spec_pack(*gen_ids: str, disables: list[str] | None = None, regex: str = r"(\d+) secs") -> Pack:
+    return Pack(
+        manifest=PackManifest(name="cars", version="1", disables=disables or []),
+        generators=[GeneratorSpec.parse(spec_record(g, regex).spec) for g in gen_ids],
+    )
+
+
+async def test_load_puts_the_packs_under_the_store() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    await store.set_generator_enabled("gen-c", False)
+    project = spec_pack("gen-a", "gen-b", disables=["gen-d"])
+    community = spec_pack("gen-c", "gen-d", "gen-e")
+    snapshot = await LearnedGenerators(store, packs=[project, community]).load()
+    assert snapshot.registry.ids == ["gen-a", "gen-b", "gen-e"]
+    # Without a store, the packs alone.
+    assert (await LearnedGenerators(packs=[community]).load()).registry.ids == [
+        "gen-c",
+        "gen-d",
+        "gen-e",
+    ]
+
+
 async def test_an_invalid_stored_spec_is_a_store_error() -> None:
     store = open_store(":memory:")
     await store.put_generator(GeneratorRecord(id="gen-x", field=FIELD, spec={"id": "gen-x"}))
@@ -679,6 +705,61 @@ async def test_a_stores_learned_generators_are_used_without_a_generator_llm() ->
         result = await ex.extract(Document.from_bytes(b"<p/>"))
     assert result.meta.generator_snapshot == 0
     assert result.one(Car).meta.zero_to_62_s.generator_id == "gen-a"
+
+
+async def test_a_project_packs_generators_are_used_without_a_store(tmp_path: Path) -> None:
+    spec_pack("gen-p", regex=r"(\d+(?:\.\d+)?) seconds").write(tmp_path / "cars")
+    fake = FakeJev().choice(None, pick("9.1"))
+    async with Extractor(
+        [Car], jev=fake.client(), pipeline=pipeline(), packs=[tmp_path / "cars"]
+    ) as ex:
+        assert [p.name for p in await ex.packs()] == ["cars"]
+        result = await ex.extract(Document.from_bytes(b"<p/>"))
+        assert await ex.store() is None
+    assert result.meta.generator_snapshot == 0
+    assert result.one(Car).meta.zero_to_62_s.generator_id == "gen-p"
+
+
+async def test_the_store_disables_a_packs_generator_for_the_extractor() -> None:
+    store = open_store(":memory:")
+    await store.set_generator_enabled("gen-p", False)
+    packs = [spec_pack("gen-p", regex=r"(\d+(?:\.\d+)?) seconds")]
+    fake = FakeJev().choice(None, pick("9.1"))
+    async with Extractor(
+        [Car], jev=fake.client(), pipeline=pipeline(), store=store, packs=packs
+    ) as ex:
+        learned = await ex.learned_generators()
+        assert learned is not None
+        assert learned.current.registry.ids == []
+        result = await ex.extract(Document.from_bytes(b"<p/>"))
+    assert result.records == []  # nothing found the value
+
+
+async def test_the_extractor_takes_community_packs_as_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[list[str] | None] = []
+
+    def community(names: list[str] | None = None) -> list[Pack]:
+        asked.append(names)
+        return [spec_pack("gen-c")]
+
+    monkeypatch.setattr("jevex.extractor.community_packs", community)
+    for setting, expected in ((True, [None]), (["cars"], [["cars"]]), (False, [])):
+        asked.clear()
+        ex = Extractor([Car], jev=FakeJev().client(), community_packs=setting)
+        found = await ex.packs()
+        assert asked == expected
+        assert len(found) == len(expected)
+        await ex.aclose()
+
+
+async def test_a_pack_that_wont_load_fails_the_extract(tmp_path: Path) -> None:
+    async with Extractor(
+        [Car], jev=FakeJev().client(), pipeline=pipeline(), packs=[tmp_path / "missing"]
+    ) as ex:
+        with pytest.raises(PackError, match="no such pack directory"):
+            await ex.extract(Document.from_bytes(b"<p/>"))
 
 
 async def test_without_a_store_or_learner_there_is_no_snapshot() -> None:

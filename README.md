@@ -168,6 +168,37 @@ extractor = Extractor(schemas=[VehicleSpec], store="postgresql://jevex@db.intern
 Its tables go in a `jevex` schema. To choose another, pass a store instead:
 `store=PostgresStore(url, db_schema="jevex_staging")` (from `jevex.store.postgres`).
 
+### Packs
+
+A pack is learned state as reviewable YAML: a directory with a `manifest.yaml` (name,
+version, schemas, locales, and `disables`: generator ids from lower layers it turns off),
+`generators/<id>.yaml`, `key_mappings/<fingerprint>.yaml` and optional
+`examples/<Schema.field>.yaml`.
+
+```sh
+jevex pack export --store sqlite:///jevex.db --out packs/cars --name cars --version 1.0.0
+jevex pack diff packs/cars sqlite:///jevex.db   # what the store learned since
+jevex pack import packs/cars --store sqlite:///other.db
+```
+
+An extractor uses packs' generators under its store's: the store first, then the project
+packs you pass, then the community packs installed. The first layer with an id wins, and
+any layer can disable a lower layer's generator without editing it. Key mappings and
+examples are used once a pack is imported into a store.
+
+```python
+extractor = Extractor(schemas=[VehicleSpec], store="sqlite:///jevex.db", packs=["packs/cars"])
+```
+
+A community pack is a PyPI package that registers its directory under the `jevex.packs`
+entry point; every installed one is used unless you pass `community_packs=False` (or the
+names to use):
+
+```toml
+[project.entry-points."jevex.packs"]
+automotive-uk = "jevex_pack_automotive_uk"  # the package directory holding manifest.yaml
+```
+
 ## Development
 
 ```sh
