@@ -2,8 +2,9 @@
 
 ``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
 ``jevex eval`` scores a corpus, ``jevex learn`` compiles logged examples into a pack diff,
-and ``jevex pack export|import|diff`` moves learned state between stores and packs. The
-other commands are placeholders until their issues land. Uses only the standard library
+``jevex pack export|import|diff`` moves learned state between stores and packs, and
+``jevex testsite build|serve`` writes and serves the synthetic test site. The other
+commands are placeholders until their issues land. Uses only the standard library
 (argparse), so the CLI adds nothing to a core install.
 """
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import importlib
 import importlib.util
@@ -44,6 +46,8 @@ from jevex.packs import (
 )
 from jevex.schema import UnsupportedFieldError
 from jevex.store import StoreError, open_store
+from jevex.testsite import BUILD_DIR, build, server
+from jevex.testsite.waves import DEFAULT_WAVES, format_waves, parse_waves
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,13 +57,13 @@ if TYPE_CHECKING:
     from jevex.llm import LLM
     from jevex.packs import Pack, PackChanges
     from jevex.store import Store
+    from jevex.testsite.waves import Waves
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 
 PLANNED = {
-    "testsite": ("Build and serve the synthetic test site", 45),
     "serve": ("Run the extraction microservice", 53),
 }
 
@@ -485,6 +489,44 @@ def format_report(report: EvalReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _testsite_build(args: argparse.Namespace) -> str:
+    try:
+        manifest = build(args.seed, args.out, waves=args.waves)
+    except ValueError as exc:  # an --out that isn't a build
+        raise CliError(str(exc)) from exc
+    except ImportError as exc:  # no Pillow for the scanned and infographic pages
+        raise CliError(f"{exc}, or leave scanned and infographic out of --waves") from exc
+    except OSError as exc:
+        raise CliError(str(exc)) from exc
+    pages: list[dict[str, Any]] = manifest["pages"]
+    lines = [f"built {_count(len(pages), 'page')} for seed {args.seed} in {args.out}"]
+    for number, wave in enumerate(manifest["waves"], start=1):
+        count = sum(1 for p in pages if p["wave"] == number)
+        lines.append(f"  wave {number}: {', '.join(wave)} ({_count(count, 'page')})")
+    lines.append(f"digest {manifest['digest']}")
+    return "\n".join(lines) + "\n"
+
+
+def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:
+    try:
+        httpd = server(args.dir, args.host, args.port)
+    except (ValueError, OSError) as exc:
+        raise CliError(str(exc)) from exc
+    with httpd:
+        host, port = httpd.server_address[:2]
+        print(f"serving {args.dir} at http://{host}:{port}/ (Ctrl-C to stop)", file=stdout)
+        stdout.flush()
+        with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C is how serving ends
+            httpd.serve_forever()
+
+
+def _waves(text: str) -> Waves:
+    try:
+        return parse_waves(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _usd(text: str) -> float:
     value = float(text)
     if not value >= 0:
@@ -639,6 +681,42 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--examples", action="store_true", help="Compare verified examples too")
     diff.add_argument("--json", action="store_true", help="Print the changes as JSON")
 
+    site = commands.add_parser(
+        "testsite",
+        help="Build and serve the synthetic test site",
+        description="A seeded synthetic car site with exact ground truth (truth.json) for "
+        "jevex eval. The same seed always builds the same site.",
+    )
+    site_commands = site.add_subparsers(dest="testsite_command", metavar="<testsite command>")
+    site_commands.required = True
+    site_build = site_commands.add_parser(
+        "build",
+        help="Write the site and its truth.json",
+        description="Write the site's pages, index.html and truth.json. Pages are listed "
+        "wave by wave, so a replay meets each wave's template families together. An "
+        "earlier build in --out is replaced; any other non-empty directory is refused.",
+    )
+    site_build.add_argument("--seed", type=int, default=42, help="The dataset seed (default 42)")
+    site_build.add_argument(
+        "--out", default=BUILD_DIR, help=f"Where to write (default {BUILD_DIR})"
+    )
+    site_build.add_argument(
+        "--waves",
+        type=_waves,
+        default=DEFAULT_WAVES,
+        metavar="SCHEDULE",
+        help="Template families per wave: waves split by ';', families by ','. Families "
+        f"left out aren't built (default {format_waves(DEFAULT_WAVES)!r})",
+    )
+    site_serve = site_commands.add_parser(
+        "serve",
+        help="Serve a built site over HTTP",
+        description="Serve a site jevex testsite build wrote, until interrupted.",
+    )
+    site_serve.add_argument("--dir", default=BUILD_DIR, help=f"The build (default {BUILD_DIR})")
+    site_serve.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
+    site_serve.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
+
     for name, (summary, issue) in PLANNED.items():
         commands.add_parser(name, help=f"{summary} (not implemented yet, #{issue})")
     return parser
@@ -694,6 +772,12 @@ def main(
                 return EXIT_OK
             run = _pack_export if args.pack_command == "export" else _pack_import
             stdout.write(asyncio.run(run(args)))
+            return EXIT_OK
+        if args.command == "testsite":
+            if args.testsite_command == "build":
+                stdout.write(_testsite_build(args))
+            else:
+                _testsite_serve(args, stdout)
             return EXIT_OK
         if args.command == "learn":
             diff = asyncio.run(_learn(args, jev, llm))

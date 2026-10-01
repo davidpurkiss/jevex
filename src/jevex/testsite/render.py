@@ -34,6 +34,8 @@ from jevex.testsite.drawing import Drawing, text_width, to_pdf, to_png, to_scann
 from jevex.testsite.phrasing import FUEL_WORDS, LABELS, SENTENCES, cell, listing_facts
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from jevex.testsite.dataset import Dataset, Model
     from jevex.testsite.drawing import RGB
     from jevex.testsite.schemas import Listing, VehicleSpec
@@ -41,6 +43,8 @@ if TYPE_CHECKING:
 HTML = "text/html"
 PDF = "application/pdf"
 PNG = "image/png"
+FAMILIES = ("table", "kv", "prose", "grid", "listing", "pdf", "scanned", "infographic")
+"""Every template family, in the order the module docstring describes them."""
 
 
 @dataclass
@@ -433,22 +437,36 @@ def _trim_slug(v: VehicleSpec) -> str:
     return v.trim.lower().replace(" ", "-")
 
 
-def render(dataset: Dataset, *, grid_size: int = 12) -> list[Page]:
-    """Every page of the site, in a stable order.
+def render(
+    dataset: Dataset, *, grid_size: int = 12, families: Collection[str] | None = None
+) -> list[Page]:
+    """The site's pages (only those of ``families``, if given), in a stable order.
 
     Raises ``ImportError`` without Pillow (the ``testsite`` extra), which draws the
-    ``scanned`` and ``infographic`` pages.
+    ``scanned`` and ``infographic`` pages, and ``ValueError`` for an unknown family.
     """
+    wanted = set(FAMILIES if families is None else families)
+    if unknown := sorted(wanted - set(FAMILIES)):
+        raise ValueError(f"unknown template families {unknown}; they're {', '.join(FAMILIES)}")
+    seed = dataset.seed
     pages: list[Page] = []
     for model in dataset.models:
-        pages.append(table_page(dataset.seed, model))
-        pages.append(kv_page(dataset.seed, model))
-        pages.extend(prose_page(dataset.seed, model, v) for v in model.variants)
-        pages.append(pdf_page(dataset.seed, model))
-        pages.append(scanned_page(dataset.seed, model))
-        pages.append(infographic_page(dataset.seed, model))
+        if "table" in wanted:
+            pages.append(table_page(seed, model))
+        if "kv" in wanted:
+            pages.append(kv_page(seed, model))
+        if "prose" in wanted:
+            pages.extend(prose_page(seed, model, v) for v in model.variants)
+        if "pdf" in wanted:
+            pages.append(pdf_page(seed, model))
+        if "scanned" in wanted:
+            pages.append(scanned_page(seed, model))
+        if "infographic" in wanted:
+            pages.append(infographic_page(seed, model))
     listings = list(enumerate(dataset.listings, start=1))
-    for page_no, start in enumerate(range(0, len(listings), grid_size), start=1):
-        pages.append(grid_page(dataset.seed, page_no, listings[start : start + grid_size]))
-    pages.extend(listing_page(dataset.seed, i, item) for i, item in listings)
+    if "grid" in wanted:
+        for page_no, start in enumerate(range(0, len(listings), grid_size), start=1):
+            pages.append(grid_page(seed, page_no, listings[start : start + grid_size]))
+    if "listing" in wanted:
+        pages.extend(listing_page(seed, i, item) for i, item in listings)
     return pages

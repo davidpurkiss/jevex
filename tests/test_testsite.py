@@ -1,13 +1,27 @@
 import io
 import json
+import threading
+import urllib.request
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from jevex import testsite
 from jevex.document import sniff_content_type
-from jevex.testsite import Dataset, Page, build, digest, drawing, generate, render
+from jevex.testsite import (
+    DEFAULT_WAVES,
+    FAMILIES,
+    Dataset,
+    Page,
+    build,
+    digest,
+    drawing,
+    generate,
+    render,
+    server,
+)
 from jevex.testsite.schemas import Listing, VehicleSpec
 
 SCHEMAS = {"VehicleSpec": VehicleSpec, "Listing": Listing}
@@ -225,7 +239,7 @@ def test_a_failed_render_keeps_the_earlier_build(
     build(42, tmp_path)
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
 
-    def no_pillow(dataset: Dataset) -> list[Page]:
+    def no_pillow(dataset: Dataset, **kwargs: object) -> list[Page]:
         raise ImportError("install jevex[testsite]")
 
     monkeypatch.setattr(testsite, "render", no_pillow)
@@ -256,9 +270,10 @@ def test_build_writes_the_site_and_truth(tmp_path: Path) -> None:
     on_disk = json.loads((tmp_path / "truth.json").read_text())
     assert on_disk == json.loads(json.dumps(manifest))
     pages = {p.path: p for p in render(generate(42))}
+    assert {p["path"] for p in manifest["pages"]} == set(pages)
     for page in manifest["pages"]:
         assert (tmp_path / page["path"]).read_bytes() == pages[page["path"]].content
-    assert on_disk["digest"] == digest(list(pages.values()))
+    assert on_disk["digest"] == digest([pages[p["path"]] for p in manifest["pages"]])
 
 
 @pytest.mark.parametrize("escape", ["absolute", "dotdot"])
@@ -272,3 +287,97 @@ def test_rebuild_never_deletes_outside_the_directory(tmp_path: Path, escape: str
     with pytest.raises(ValueError, match="refusing"):
         build(42, site)
     assert victim.read_text() == "keep"
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def test_build_is_deterministic(tmp_path: Path) -> None:
+    build(42, tmp_path / "a")
+    drawing._png.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    drawing._scanned_pdf.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    build(42, tmp_path / "b")
+    first, second = _files(tmp_path / "a"), _files(tmp_path / "b")
+    assert first == second  # every page, index.html and truth.json, byte for byte
+
+
+def test_build_lists_pages_wave_by_wave(tmp_path: Path) -> None:
+    manifest = build(42, tmp_path)
+    assert manifest["waves"] == [list(wave) for wave in DEFAULT_WAVES]
+    pages = manifest["pages"]
+    assert {p["family"] for p in pages} == set(FAMILIES)
+    numbers = {f: n for n, wave in enumerate(DEFAULT_WAVES, start=1) for f in wave}
+    assert [p["wave"] for p in pages] == sorted(p["wave"] for p in pages)
+    for page in pages:
+        assert page["wave"] == numbers[page["family"]]
+    # Within a wave, render's order stands.
+    rendered = [p.path for p in render(generate(42)) if p.family in DEFAULT_WAVES[0]]
+    assert [p["path"] for p in pages if p["wave"] == 1] == rendered
+
+
+def test_a_custom_schedule_builds_only_its_families(tmp_path: Path) -> None:
+    manifest = build(42, tmp_path, waves=[["prose"], ["grid", "table"]])
+    pages = manifest["pages"]
+    assert manifest["waves"] == [["prose"], ["grid", "table"]]
+    variants = len(generate(42).variants)
+    assert [p["family"] for p in pages if p["wave"] == 1] == ["prose"] * variants
+    assert {p["family"] for p in pages if p["wave"] == 2} == {"grid", "table"}
+    assert {p.relative_to(tmp_path).parts[0] for p in tmp_path.rglob("*.*")} == {
+        *("specs", "used", "index.html", "truth.json")
+    }
+    index = (tmp_path / "index.html").read_text()
+    first, second = index.index("<h2>Wave 1: prose</h2>"), index.index("<h2>Wave 2: grid, table")
+    assert first < index.index('href="specs/') < second  # prose links under wave 1
+    assert second < index.index("-table.html")
+    assert second < index.index("used/page-1")
+
+
+def test_a_bad_schedule_leaves_the_earlier_build(tmp_path: Path) -> None:
+    build(42, tmp_path, waves=[["table"]])
+    before = _files(tmp_path)
+    with pytest.raises(ValueError, match="unknown family 'tables'"):
+        build(7, tmp_path, waves=[["tables"]])
+    assert _files(tmp_path) == before
+
+
+def test_render_only_the_families_asked_for() -> None:
+    data = generate(42, n_models=2, n_listings=3)
+    assert render(data, families=[]) == []
+    assert {p.family for p in render(data, families={"kv", "listing"})} == {"kv", "listing"}
+    with pytest.raises(ValueError, match=r"unknown template families \['tabel'\]"):
+        render(data, families=["table", "tabel"])
+
+
+@pytest.fixture
+def site(tmp_path: Path) -> Iterator[str]:
+    build(42, tmp_path, waves=[["pdf"], ["listing"]])
+    httpd = server(tmp_path, port=0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    host, port = httpd.server_address[:2]
+    try:
+        yield f"http://{host!s}:{port}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join()
+
+
+@pytest.mark.enable_socket
+@pytest.mark.allow_hosts(["127.0.0.1"])
+def test_server_serves_the_build(site: str, tmp_path: Path) -> None:
+    with urllib.request.urlopen(f"{site}/") as response:
+        assert response.headers["Content-Type"].startswith("text/html")
+        assert b"<h2>Wave 1: pdf</h2>" in response.read()
+    truth = json.loads((tmp_path / "truth.json").read_text())
+    pdf = next(p["path"] for p in truth["pages"] if p["family"] == "pdf")
+    with urllib.request.urlopen(f"{site}/{pdf}") as response:
+        assert response.headers["Content-Type"] == "application/pdf"
+        assert response.read() == (tmp_path / pdf).read_bytes()
+
+
+def test_server_needs_a_build(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<html></html>")
+    with pytest.raises(ValueError, match="has no test site; build one first"):
+        server(tmp_path, port=0)

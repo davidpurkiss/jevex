@@ -249,6 +249,17 @@ uv run pytest
 scanned (image-only) PDFs and infographic PNGs, with each fact worded several ways. The
 scans and infographics need Pillow: `uv sync --extra testsite` (or `--all-extras`).
 
+```sh
+jevex testsite build --seed 42                  # deterministic: same seed, same files
+jevex testsite build --waves "table;kv,grid"    # only these families, in two waves
+jevex testsite serve                            # http://127.0.0.1:8000/
+```
+
+`truth.json` lists the pages wave by wave, so a replay meets each wave's template
+families together and the LLM-call rate spikes, then falls as generators are learned. The
+default schedule is `table,listing;kv,grid;prose;pdf;scanned,infographic`. Families left
+out of `--waves` aren't built.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
