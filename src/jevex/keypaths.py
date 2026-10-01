@@ -20,8 +20,19 @@
 Mapped values are normalised like any candidate: numbers, money and dates take the chain
 the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
 bool values that don't read directly are asked of Jev as the field's own question. They
-are recorded on the default entity with ``method="structured"``. Later stages don't
-overwrite them; whether the layout route runs at all is the structured mode's call (#31).
+are recorded on the default entity with ``method="structured"``.
+
+The stage's :data:`StructuredMode` decides what the layout route (stages 5–13) does next:
+
+- ``structured_only`` (default): a schema the embedded data gave any value is finished;
+  the layout route runs only for schemas it gave nothing.
+- ``fill_gaps``: the layout route runs while a field is left empty, and selects values
+  only for those fields (a schema with none left is finished). The component gate and
+  the categoriser still consider every field: they run before entities are resolved, and
+  a found field stays a categorise option so statements about it aren't misrouted.
+- ``merge``: the layout route looks for every field, and
+  :meth:`~jevex.pipeline.SchemaRun.offer_field` settles each disagreement by confidence,
+  recording the losing value in ``meta.conflicts``.
 """
 
 from __future__ import annotations
@@ -30,7 +41,7 @@ import hashlib
 import json
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
@@ -54,9 +65,12 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.interfaces import StructuredExtractor
     from jevex.jev import JevClient, Question, ScoreAnswer
-    from jevex.pipeline import Context
+    from jevex.pipeline import Context, SchemaRun
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.store import Store
+
+StructuredMode = Literal["structured_only", "fill_gaps", "merge"]
+"""How structured data combines with the layout route (spec: *Structured-data stage*)."""
 
 ACCEPT_AT = 0.5
 """A Jev answer at or above this confidence becomes a stored mapping (field or "none")."""
@@ -633,13 +647,22 @@ class StructuredStage:
     """Runs a :class:`~jevex.interfaces.StructuredExtractor` (stage 4).
 
     Values are recorded on the default entity of each active schema, and statements on
-    ``ctx.structured``. Fields later routes fill are left alone where this one found them.
+    ``ctx.structured``. ``mode`` (a :data:`StructuredMode`) decides whether the layout
+    route then runs for each schema, and for which fields; a schema it skips is
+    finished (:meth:`~jevex.pipeline.SchemaRun.finish`) with a ``layout_route_skipped`` event.
     :func:`~jevex.extractor.default_pipeline` builds a fresh stage each time, so the
     mapper's in-memory mappings belong to one pipeline.
     """
 
     extractor: StructuredExtractor = field(default_factory=KeyPathMapper)
+    mode: StructuredMode = "structured_only"
     name: str = "structured"
+
+    def __post_init__(self) -> None:
+        if self.mode not in get_args(StructuredMode):
+            raise ValueError(
+                f"unknown structured mode {self.mode!r}; use one of {get_args(StructuredMode)}"
+            )
 
     async def run(self, ctx: Context) -> None:
         runs = ctx.active
@@ -664,3 +687,21 @@ class StructuredStage:
                     f"{run.name}: {', '.join(found)} from embedded data",
                     schema=run.name,
                 )
+            self._apply_mode(ctx, run, found)
+
+    def _apply_mode(self, ctx: Context, run: SchemaRun, found: list[str]) -> None:
+        if self.mode == "merge":
+            run.merge = True
+            return
+        if self.mode == "structured_only":
+            done = bool(found)
+        else:
+            done = all(not run.needs(SINGLE_ENTITY_LABEL, f.name) for f in run.spec.fields)
+        if done:
+            run.finish()
+            ctx.event(
+                self.name,
+                "layout_route_skipped",
+                f"{run.name}: embedded data gave what {self.mode} needs; no layout route",
+                schema=run.name,
+            )

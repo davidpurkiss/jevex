@@ -450,7 +450,8 @@ class NormaliseStage:
     in document order. An entity's own statements win over those it shares with every
     entity (``MultiEntity``'s "all of them"); a value from a shared one is marked
     ``shared``. If nothing normalises, the field's meta carries the error. A field
-    another route already filled (e.g. structured data) isn't overwritten. Values are
+    another route already filled (e.g. structured data) isn't overwritten; in ``merge``
+    mode the two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are
     recorded with ``method="generator"``, or ``"vision"`` when the statement came from a
     vision model.
     """
@@ -465,13 +466,12 @@ class NormaliseStage:
                 if selection.candidate is not None:
                     grouped.setdefault((scope, field_name), []).append((statement_id, selection))
             for (scope, field_name), picks in grouped.items():
-                existing = run.fields.get(scope, {}).get(field_name)
-                if existing is not None and existing.found:
+                if not run.needs(scope, field_name):
                     continue
                 meta = self._field_meta(
                     ctx, run, field_name, picks, shared=run.shared_statements(scope)
                 )
-                run.set_field(scope, field_name, meta)
+                run.offer_field(scope, field_name, meta)
 
     def _field_meta(
         self,

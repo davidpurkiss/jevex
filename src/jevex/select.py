@@ -20,7 +20,8 @@ After categorising, each statement is assigned to a field (or none). Then:
   came from a vision model). That happens once every answer is
   in, combining statements in document order, so the result never depends on which Jev
   reply arrived first. Fields another route already filled (e.g. structured data) are
-  left alone.
+  left alone and not asked about, except in the structured stage's ``merge`` mode, where
+  :meth:`~jevex.pipeline.SchemaRun.offer_field` settles disagreements.
 """
 
 from __future__ import annotations
@@ -62,7 +63,9 @@ def field_statements(
     """(statement, field) pairs in scope that the classifier assigned to a field.
 
     A statement pairs with its top category and, when that is a field, with every other
-    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first.
+    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. Fields another
+    route already found for the scope (structured data, in ``fill_gaps`` mode) are left
+    out, so nothing is asked about them; in ``merge`` mode every field stays.
     """
     if ctx.parsed is None:
         return []
@@ -80,7 +83,9 @@ def field_statements(
             if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
         )
         chosen = [answer.choice, *(name for _, name in reversed(also))]
-        out.extend((statement, run.spec.field(name)) for name in chosen)
+        out.extend(
+            (statement, run.spec.field(name)) for name in chosen if run.needs(scope.label, name)
+        )
     return out
 
 
@@ -358,10 +363,9 @@ def _record_direct(
     Scalars: the most confident answer, ties to the earliest statement. Lists: every
     accepted value, in document order. The entity's own statements win over those it
     shares with every entity; a value only shared ones give is marked ``shared``. Skipped
-    if another route already found the field.
+    if another route already found the field, unless routes are merged.
     """
-    existing = run.fields.get(scope, {}).get(spec.name)
-    if existing is not None and existing.found:
+    if not run.needs(scope, spec.name):
         return
     shared = run.shared_statements(scope)
     own = [o for o in found if o.statement.id not in shared]
@@ -383,7 +387,7 @@ def _record_direct(
         for option, p in outcome.weighed.items():
             if option not in values:
                 weighed[option] = max(weighed.get(option, 0.0), p)
-    run.set_field(
+    run.offer_field(
         scope,
         spec.name,
         FieldMeta(

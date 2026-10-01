@@ -10,6 +10,25 @@ jevex narrows each document step by step (document → component → statement �
 > skeleton are in place, and the stages are landing now. The PyPI release (0.0.1) only
 > reserves the name; there is no usable extraction yet.
 
+## Embedded data
+
+When a page embeds machine-readable data (JSON-LD, microdata, RDFa, app state such as
+`__NEXT_DATA__`, `data-*` attributes), jevex maps its key paths to your fields first. The
+structured stage's `mode` decides what happens next:
+
+| Mode | Behaviour |
+| --- | --- |
+| `structured_only` (default) | A schema the embedded data gave any value skips the layout route; the rest go on to it. |
+| `fill_gaps` | The layout route runs while some field is still empty, and only those fields get values from it (the component gate and categoriser still consider every field). |
+| `merge` | The layout route looks for every field. The more confident value wins (a direct read of embedded data counts as certain), and the other is kept in `meta.conflicts`. |
+
+```python
+from jevex import StructuredStage
+from jevex.extractor import default_pipeline
+
+pipeline = default_pipeline().replace("structured", StructuredStage(mode="fill_gaps"))
+```
+
 ## PDFs
 
 PDF layout uses [Docling](https://github.com/docling-project/docling), an optional extra:

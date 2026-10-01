@@ -84,7 +84,10 @@ def default_pipeline() -> Pipeline:
     if unknown:
         raise ValueError(f"default stages {unknown} are not in STAGE_ORDER {STAGE_ORDER}")
     # The structured stage's mapper remembers mappings; each pipeline gets its own.
-    stages = [StructuredStage() if isinstance(s, StructuredStage) else s for s in DEFAULT_STAGES]
+    stages = [
+        StructuredStage(mode=s.mode) if isinstance(s, StructuredStage) else s
+        for s in DEFAULT_STAGES
+    ]
     return Pipeline(sorted(stages, key=lambda s: STAGE_ORDER.index(s.name)))
 
 
@@ -206,7 +209,9 @@ class ExtractionResult:
                 url=ctx.document.url,
                 content_type=ctx.document.content_type,
                 gates={name: run.gate for name, run in ctx.schemas.items() if run.gate},
-                active_schemas=[run.name for run in ctx.active if run.parent is None],
+                active_schemas=[
+                    name for name, run in ctx.schemas.items() if run.active and run.parent is None
+                ],
                 jev=JevUsageSummary(
                     requests=usage.requests,
                     questions=usage.questions,

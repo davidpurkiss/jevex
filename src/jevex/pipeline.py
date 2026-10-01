@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from jevex._tasks import gather
+from jevex.results import Conflict
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -78,6 +79,14 @@ class SchemaRun:
     not records of their own."""
     parent_field: str | None = None
     """The parent schema's field this run's records fill."""
+    finished: bool = False
+    """Set when the schema needs nothing from later stages: the structured stage found its
+    values and its mode skips the layout route. Unlike :meth:`deactivate`, its records are
+    still built; it just leaves ``Context.active``."""
+    merge: bool = False
+    """Set by the structured stage in ``merge`` mode: later routes look for every field
+    again, and :meth:`offer_field` settles disagreements instead of keeping the first
+    value found."""
 
     def relevant_components(self) -> set[str] | None:
         """Components that passed the gate for any group; ``None`` if nothing was gated."""
@@ -109,6 +118,41 @@ class SchemaRun:
     def set_field(self, scope: str, name: str, meta: FieldMeta) -> None:
         self.fields.setdefault(scope, {})[name] = meta
 
+    def needs(self, scope: str, name: str) -> bool:
+        """Whether a route should still look for ``name`` in ``scope``: no route found it
+        yet, or routes are merged."""
+        existing = self.fields.get(scope, {}).get(name)
+        return self.merge or existing is None or not existing.found
+
+    def offer_field(self, scope: str, name: str, meta: FieldMeta) -> None:
+        """Record a route's ``meta`` unless another route already found the field.
+
+        In ``merge`` mode, two found values are weighed instead: the more confident one
+        wins (a value with no confidence, such as a direct read of embedded data, counts
+        as certain; a tie keeps the earlier route's), and the other, if it differs, goes
+        on the winner's ``conflicts``.
+        """
+        existing = self.fields.get(scope, {}).get(name)
+        if existing is None or not existing.found:
+            self.set_field(scope, name, meta)
+            return
+        if not self.merge or not meta.found:
+            return
+        winner, loser = existing, meta
+        if _certainty(meta) > _certainty(existing):
+            winner, loser = meta, existing
+        conflicts = [*winner.conflicts, *loser.conflicts]
+        if loser.value != winner.value:
+            conflicts.append(
+                Conflict(
+                    value=loser.value,
+                    method=loser.method,
+                    confidence=loser.confidence,
+                    source=loser.source,
+                )
+            )
+        self.set_field(scope, name, winner.model_copy(update={"conflicts": conflicts}))
+
     @property
     def name(self) -> str:
         return self.spec.name
@@ -116,6 +160,14 @@ class SchemaRun:
     def deactivate(self) -> None:
         """Stop later stages working on this schema (e.g. the document gate said no)."""
         self.active = False
+
+    def finish(self) -> None:
+        """Stop later stages working on this schema because it has what it needs."""
+        self.finished = True
+
+
+def _certainty(meta: FieldMeta) -> float:
+    return 1.0 if meta.confidence is None else meta.confidence
 
 
 @dataclass
@@ -157,7 +209,8 @@ class Context:
 
     @property
     def active(self) -> list[SchemaRun]:
-        return [run for run in self.schemas.values() if run.active]
+        """The runs later stages work on: those still active and not finished."""
+        return [run for run in self.schemas.values() if run.active and not run.finished]
 
     def stop(self, stage: str, reason: str) -> None:
         """End the run early; later stages are skipped."""
@@ -239,7 +292,9 @@ class Pipeline:
             if ctx.stopped:
                 break
             if not ctx.active:
-                ctx.stop(stage.name, "no schema is still active")
+                # Finished schemas need nothing more; only all-inactive ones stop the run.
+                if not any(run.active for run in ctx.schemas.values()):
+                    ctx.stop(stage.name, "no schema is still active")
                 break
             start = time.perf_counter()
             try:
