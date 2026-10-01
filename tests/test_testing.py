@@ -1,16 +1,34 @@
 import json
 import re
 import socket
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 from pytest_socket import SocketBlockedError
 
-from jevex.jev import Choice, ChoiceAnswer, Noul, NoulAnswer, Score, ScoreAnswer
+import jevex.testing
+from jevex import Extractor
+from jevex.jev import (
+    Choice,
+    ChoiceAnswer,
+    JevClient,
+    JevResponse,
+    JSONContent,
+    Noul,
+    NoulAnswer,
+    Question,
+    Score,
+    ScoreAnswer,
+)
+from jevex.llm import LLMResponse
 from jevex.testing import (
     Cassette,
     CassetteMissError,
     FakeJev,
+    FakeLLM,
+    LLMCassette,
     UnscriptedQuestionError,
     cassette,
     request_key,
@@ -129,6 +147,99 @@ async def test_cassette_records_then_replays(tmp_path: Path) -> None:
 async def test_cassette_miss_raises_with_hint(tmp_path: Path) -> None:
     with pytest.raises(CassetteMissError, match="JEVEX_RECORD=1"):
         await Cassette(tmp_path / "empty.json").system_one("s", {"q": Noul(instructions="?")})
+
+
+class Car(BaseModel):
+    """A car."""
+
+    model: str
+
+
+class ClosableBackend:
+    """A recording backend that notes when it's closed."""
+
+    def __init__(self, fake: FakeJev | None = None, *, fail: bool = False) -> None:
+        self.fake = fake or FakeJev()
+        self.fail = fail
+        self.closed = 0
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        return await self.fake.system_one(state, questions)
+
+    async def aclose(self) -> None:
+        self.closed += 1
+        if self.fail:
+            raise ConnectionError("close failed")
+
+
+async def test_cassette_closes_its_inner_backend(tmp_path: Path) -> None:
+    inner = ClosableBackend(FakeJev().noul("Is it", p=0.8))
+    recorder = Cassette(tmp_path / "c.json", record=True, inner=inner)
+    await recorder.system_one("state", {"q": Noul(instructions="Is it fast?")})
+    await recorder.aclose()
+    assert inner.closed == 1
+
+
+async def test_extractor_closes_a_cassettes_inner_backend(tmp_path: Path) -> None:
+    inner = ClosableBackend()
+    async with Extractor([Car], jev=JevClient(Cassette(tmp_path / "c.json", inner=inner))):
+        pass
+    assert inner.closed == 1
+
+
+async def test_cassette_closes_the_api_backend_it_made_to_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made: list[ClosableBackend] = []
+
+    def api_backend() -> ClosableBackend:
+        made.append(ClosableBackend(FakeJev().noul("Is it", p=0.8)))
+        return made[-1]
+
+    monkeypatch.setattr(jevex.testing, "TypeSafeBackend", api_backend)
+    recorder = Cassette(tmp_path / "c.json", record=True)
+    await recorder.system_one("state", {"q": Noul(instructions="Is it fast?")})
+    await recorder.aclose()
+    assert [b.closed for b in made] == [1]
+
+
+async def test_cassette_close_without_a_closable_inner_is_a_no_op(tmp_path: Path) -> None:
+    await Cassette(tmp_path / "c.json").aclose()  # replay: no inner
+    await Cassette(tmp_path / "c.json", record=True, inner=FakeJev()).aclose()  # no aclose
+    await LLMCassette(tmp_path / "llm.json").aclose()
+    await LLMCassette(tmp_path / "llm.json", FakeLLM([]), record=True).aclose()
+
+
+async def test_cassette_close_failure_propagates(tmp_path: Path) -> None:
+    inner = ClosableBackend(fail=True)
+    with pytest.raises(ConnectionError, match="close failed"):
+        await Cassette(tmp_path / "c.json", inner=inner).aclose()
+
+
+class Title(BaseModel):
+    title: str
+
+
+class ClosableLLM:
+    def __init__(self) -> None:
+        self.llm = FakeLLM([{"title": "Dune"}])
+        self.closed = 0
+
+    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+        return await self.llm.structured(prompt, schema)
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+async def test_llm_cassette_closes_its_inner_llm(tmp_path: Path) -> None:
+    inner = ClosableLLM()
+    recorder = LLMCassette(tmp_path / "llm.json", inner, record=True)
+    assert (await recorder.structured("Title: Dune", Title)).output == Title(title="Dune")
+    await recorder.aclose()
+    assert inner.closed == 1
 
 
 def test_cassette_mode_follows_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

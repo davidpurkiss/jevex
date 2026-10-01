@@ -241,7 +241,8 @@ class Cassette:
 
     In record mode, requests go to ``inner`` (by default the real API) and each response
     is saved. In replay mode, an unrecorded request raises :class:`CassetteMissError`,
-    so tests never reach the network by accident.
+    so tests never reach the network by accident. :meth:`aclose` closes ``inner`` (an
+    ``Extractor`` calls it when it closes), so a recording run doesn't leak connections.
     """
 
     def __init__(self, path: str | Path, *, record: bool = False, inner: JevBackend | None = None):
@@ -276,11 +277,21 @@ class Cassette:
         self.save()
         return response
 
+    async def aclose(self) -> None:
+        """Close the inner backend, the one passed in or the API backend recording made."""
+        await _aclose(self._inner)
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(self._entries, indent=2, sort_keys=True, default=str) + "\n"
         )
+
+
+async def _aclose(inner: object) -> None:
+    close = getattr(inner, "aclose", None)
+    if close is not None:
+        await close()
 
 
 def cassette(path: str | Path, *, inner: JevBackend | None = None) -> Cassette:
@@ -374,6 +385,7 @@ class LLMCassette:
 
     Keyed by the prompt and the schema's JSON schema. In replay mode an unrecorded call
     raises :class:`CassetteMissError`; ``JEVEX_RECORD=1`` (see :func:`llm_cassette`) records.
+    :meth:`aclose` closes ``inner`` when it has an ``aclose``.
     """
 
     def __init__(self, path: str | Path, inner: LLM | None = None, *, record: bool = False):
@@ -419,6 +431,10 @@ class LLMCassette:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._entries, indent=2, sort_keys=True) + "\n")
         return response
+
+    async def aclose(self) -> None:
+        """Close the inner LLM. An ``Extractor`` doesn't close LLMs it's given, so call it."""
+        await _aclose(self._inner)
 
 
 def llm_cassette(path: str | Path, inner: LLM | None = None) -> LLMCassette:
