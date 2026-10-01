@@ -51,6 +51,7 @@ from pydantic import (
 from yaml.composer import ComposerError
 from yaml.constructor import ConstructorError
 
+from jevex.document import LOCALE_TAG
 from jevex.generators.regex import (
     MAX_PATTERN_LENGTH,
     InvalidGeneratorError,
@@ -256,7 +257,7 @@ class SpecScope(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    locale: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$")
+    locale: str | None = Field(default=None, pattern=LOCALE_TAG)
     sources: list[str] = Field(
         default_factory=list[str],
         description=(

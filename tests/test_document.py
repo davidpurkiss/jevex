@@ -101,3 +101,18 @@ def test_from_path_takes_a_site(tmp_path: Path) -> None:
 )
 def test_normalise_source(raw: str, expected: str) -> None:
     assert normalise_source(raw) == expected
+
+
+def test_from_bytes_and_from_path_take_the_locale(tmp_path: Path) -> None:
+    doc = Document.from_bytes(b"<p/>", content_language="de-DE, en", locale="de_AT")
+    assert (doc.content_language, doc.locale) == ("de-DE, en", "de_AT")
+    assert Document.model_validate_json(doc.model_dump_json()) == doc
+    path = tmp_path / "a.html"
+    path.write_bytes(b"<html></html>")
+    assert Document.from_path(path, locale="fr-FR").locale == "fr-FR"
+
+
+@pytest.mark.parametrize("locale", ["", "German", "de DE", "de-", "1234"])
+def test_a_locale_that_is_not_a_language_tag_is_rejected(locale: str) -> None:
+    with pytest.raises(ValidationError, match="locale"):
+        Document.from_bytes(b"<p/>", locale=locale)

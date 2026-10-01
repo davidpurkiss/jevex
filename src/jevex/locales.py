@@ -10,17 +10,27 @@ the arguments that differ (``decimal``, ``order``, ``gallon``), never overriding
 chain already sets. Built-in generators use it with the document's locale; a declarative
 generator uses it with its own scope's locale, so a generator scoped ``de-DE`` reads
 "1.234,5" as 1234.5 without spelling that out in every step.
+
+:func:`document_locale` finds a document's own locale (the caller's, the page's
+``<html lang>``, its ``Content-Language``), so one pipeline reads each page by its own
+conventions and runs only the locale-scoped generators meant for it.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Literal
 
+from jevex.clean import html_text_of
+from jevex.document import LOCALE_TAG
 from jevex.statements import NormaliserStep
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from jevex.document import Document
 
 DecimalMark = Literal[".", ","]
 DateOrder = Literal["dmy", "mdy"]
@@ -213,3 +223,72 @@ def localise_steps(
             NormaliserStep(name=step.name, args={**step.args, **missing}) if missing else step
         )
     return out
+
+
+_TAG = re.compile(LOCALE_TAG)
+
+_HEAD_TAGS = frozenset(
+    {"html", "head", "meta", "title", "link", "base", "style", "script", "noscript", "template"}
+)
+"""Elements that can come before the body; the first other one ends the head."""
+
+
+def document_locale(document: Document) -> str | None:
+    """The document's own locale, or ``None`` when nothing says.
+
+    The caller's :attr:`~jevex.Document.locale` wins. Then, for HTML, the root element's
+    ``lang`` (or ``xml:lang``), then a ``<meta http-equiv="Content-Language">``, then the
+    HTTP :attr:`~jevex.Document.content_language`, as browsers read a page's language. A
+    header or pragma naming several languages counts by its first. Values that aren't a
+    language tag (``lang=""``, ``lang="English"``) are skipped, so the next source counts.
+    """
+    if document.locale:
+        return document.locale
+    if document.is_html:
+        found = html_language(document.content)
+        if found:
+            return found
+    return _first_tag(document.content_language)
+
+
+def html_language(content: bytes) -> str | None:
+    """The language an HTML page declares before its body: the root element's ``lang``
+    or ``xml:lang``, else a ``Content-Language`` pragma. ``None`` when neither is a
+    language tag."""
+    reader = _HeadReader()
+    try:
+        reader.feed(html_text_of(content))
+        reader.close()
+    except _HeadEnded:
+        pass
+    return _first_tag(reader.lang) or _first_tag(reader.pragma)
+
+
+def _first_tag(value: str | None) -> str | None:
+    """The first language in a header-style list (``de-DE, en``), if it's a tag."""
+    tag = (value or "").split(",", 1)[0].strip()
+    return tag if _TAG.match(tag) else None
+
+
+class _HeadEnded(Exception):
+    """Stops :class:`_HeadReader` at the body: the page's language is declared by then."""
+
+
+class _HeadReader(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.lang: str | None = None
+        self.pragma: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in _HEAD_TAGS:
+            raise _HeadEnded
+        values = dict(attrs)
+        if tag == "html" and self.lang is None:
+            self.lang = _first_tag(values.get("lang")) or _first_tag(values.get("xml:lang"))
+        elif (
+            tag == "meta"
+            and self.pragma is None
+            and (values.get("http-equiv") or "").strip().lower() == "content-language"
+        ):
+            self.pragma = values.get("content")

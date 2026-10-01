@@ -1,7 +1,14 @@
 import pytest
 
-from jevex import LocaleConventions, NormaliserStep, locale_conventions, localise_steps
-from jevex.locales import EN_GB
+from jevex import (
+    Document,
+    LocaleConventions,
+    NormaliserStep,
+    document_locale,
+    locale_conventions,
+    localise_steps,
+)
+from jevex.locales import EN_GB, html_language
 
 
 def steps(*items: object) -> list[NormaliserStep]:
@@ -93,3 +100,65 @@ def test_arguments_a_step_sets_are_never_overridden() -> None:
     )
     assert localise_steps(chain, locale_conventions("de-DE")) == chain
     assert localise_steps(chain, locale_conventions("en-US")) == chain
+
+
+# --- document_locale -------------------------------------------------------------------
+
+
+def html(
+    markup: str, *, content_language: str | None = None, locale: str | None = None
+) -> Document:
+    return Document.from_bytes(
+        markup.encode(), content_type="text/html", content_language=content_language, locale=locale
+    )
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (html('<!doctype html><html lang="de-DE"><body><p>9,1 s</p>'), "de-DE"),
+        (html("<HTML LANG='fr'><HEAD></HEAD><BODY>"), "fr"),
+        (html('<html xml:lang="nl-BE"><body>'), "nl-BE"),
+        (html('<html lang="de-AT" xml:lang="en"><body>'), "de-AT"),
+        (
+            html('<html><head><meta http-equiv="Content-Language" content="es-ES, en">'),
+            "es-ES",
+        ),
+        (html('<html lang="de"><body>', content_language="fr-FR"), "de"),
+        (html("<html><body><p>Hallo</p>", content_language="de-CH"), "de-CH"),
+        (html("<html><body>", content_language="de-DE, en-GB"), "de-DE"),
+        (html('<html lang="de-DE"><body>', locale="en_US"), "en_US"),
+        (html("<p>Hallo</p>"), None),
+        (html('<html lang=""><body>'), None),
+        (html('<html lang="English"><body>', content_language="en-GB"), "en-GB"),
+        (html("<html><body>", content_language="*"), None),
+        (Document.from_bytes(b"%PDF-1.7", content_language="de"), "de"),
+        (Document.from_bytes(b"%PDF-1.7", locale="pl-PL"), "pl-PL"),
+        (Document.from_bytes(b"%PDF-1.7"), None),
+    ],
+)
+def test_document_locale_takes_the_caller_then_the_page_then_the_header(
+    document: Document, expected: str | None
+) -> None:
+    assert document_locale(document) == expected
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        (b'\xef\xbb\xbf<html lang="de-DE"><body>', "de-DE"),
+        (
+            b'<html><head><script>document.write("<html lang=fr>")</script>'
+            b'<meta http-equiv="content-language" content="it"></head>',
+            "it",
+        ),
+        (b'<html><body><div lang="de">Hallo</div><meta http-equiv="content-language"', None),
+        (b'<div lang="de"><html lang="de">', None),
+        (b'<html lang="de-DE"', None),
+        (b"", None),
+    ],
+)
+def test_html_language_reads_only_what_comes_before_the_body(
+    markup: bytes, expected: str | None
+) -> None:
+    assert html_language(markup) == expected

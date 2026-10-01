@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from jevex._tasks import gather
+from jevex.locales import document_locale
 from jevex.results import Conflict
 
 if TYPE_CHECKING:
@@ -240,6 +242,12 @@ class Context:
             jev=jev,
             schemas={s.name: SchemaRun(s) for s in schemas},
         )
+
+    @cached_property
+    def locale(self) -> str | None:
+        """The document's own locale (:func:`~jevex.locales.document_locale`), ``None``
+        when it doesn't say. Read once: cleaning keeps what it's read from."""
+        return document_locale(self.document)
 
     @property
     def active(self) -> list[SchemaRun]:
