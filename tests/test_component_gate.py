@@ -472,6 +472,108 @@ def test_a_pdf_figure_with_text_found_in_it_is_cut_like_a_section() -> None:
     ]
 
 
+def read_inline_image(cid: str = "img") -> Component:
+    """An inline image the image stage read: a paragraph and a headed section found in it."""
+    return comp(
+        "image",
+        "Brochure",
+        cid,
+        comp("paragraph", "Delmaro Kestrova brochure", f"{cid}-t0"),
+        comp(
+            "section",
+            "",
+            f"{cid}-t1",
+            comp("heading", "Price", f"{cid}-t2"),
+            comp("paragraph", "From £24,995 on the road.", f"{cid}-t3", trail=["Price"]),
+        ),
+    )
+
+
+def test_a_read_image_in_a_paragraph_is_lifted_out_after_the_paragraphs_own_text() -> None:
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "The Kestrova.", "p1"),
+        comp("paragraph", "See the brochure below.", "p", read_inline_image()),
+        comp("paragraph", "Book a test drive.", "p2"),
+    )
+    units = gate_units(root)
+    assert [(u.id, u.component_ids) for u in units] == [
+        ("root#0", ("p1", "p")),
+        ("img#0", ("img", "img-t0")),
+        ("img-t1#0", ("img-t2", "img-t3")),
+        ("root#1", ("p2",)),
+    ]
+    assert units[0].text == "The Kestrova.\nSee the brochure below."
+    assert units[1].text == "Brochure\nDelmaro Kestrova brochure"
+
+
+def test_a_read_image_in_a_list_item_is_lifted_out_after_the_list() -> None:
+    items = comp(
+        "list",
+        "",
+        "l",
+        comp("list_item", "Power: 110 kW", "li1"),
+        comp("list_item", "Brochure:", "li2", read_inline_image()),
+    )
+    root = comp("section", "", "root", comp("paragraph", "The Kestrova.", "p1"), items)
+    units = gate_units(root)
+    assert [(u.id, u.component_ids) for u in units] == [
+        ("root#0", ("p1", "l", "li1", "li2")),
+        ("img#0", ("img", "img-t0")),
+        ("img-t1#0", ("img-t2", "img-t3")),
+    ]
+    assert units[0].text == "The Kestrova.\nPower: 110 kW\nBrochure:"
+
+
+def test_a_block_holding_only_a_read_image_gives_no_unit_of_its_own() -> None:
+    root = comp("section", "", "root", comp("paragraph", "", "p", read_inline_image()))
+    assert [u.component_ids for u in gate_units(root)] == [
+        ("img", "img-t0"),
+        ("img-t2", "img-t3"),
+    ]
+
+
+def test_a_root_block_holding_a_read_image_is_cut_into_its_text_and_the_image() -> None:
+    root = comp("paragraph", "See the brochure below.", "p", read_inline_image())
+    assert [(u.id, u.component_ids) for u in gate_units(root)] == [
+        ("p#0", ("p",)),
+        ("img#0", ("img", "img-t0")),
+        ("img-t1#0", ("img-t2", "img-t3")),
+    ]
+
+
+def test_only_images_are_lifted_out_of_a_block_not_containers_inside_it() -> None:
+    card = comp(
+        "section",
+        "",
+        "card",
+        comp("paragraph", "Sharp Objects £47.82", "cp"),
+        comp("paragraph", "", "cq", read_inline_image()),
+    )
+    root = comp("section", "", "root", comp("list", "", "l", comp("list_item", "", "li", card)))
+    assert [u.component_ids for u in gate_units(root)] == [
+        ("l", "li", "card", "cp", "cq"),
+        ("img", "img-t0"),
+        ("img-t2", "img-t3"),
+    ]
+
+
+def test_an_inline_image_without_text_read_from_it_is_gated_as_before() -> None:
+    figure = comp("image", "Front view", "img2", comp("caption", "Figure 2: the grille", "cap"))
+    root = comp(
+        "section",
+        "",
+        "root",
+        comp("paragraph", "The Kestrova.", "p1", comp("image", "Side view", "img1")),
+        comp("list", "", "l", comp("list_item", "Front:", "li", figure)),
+    )
+    [unit] = gate_units(root)
+    assert unit.component_ids == ("p1", "img1", "l", "li", "img2", "cap")
+    assert unit.text == "The Kestrova.\nSide view\nFront:\nFront view\nFigure 2: the grille"
+
+
 # --- the gate ------------------------------------------------------------------------
 
 
@@ -518,6 +620,38 @@ async def test_a_scanned_page_passes_only_the_ocr_text_jev_says_contains_the_fie
     # The image passes as the price section's ancestor; the rest of the page doesn't.
     assert result["Car"]["price"] == ["root", "img", "img-t5", "img-t6", "img-t7"]
     assert result["Car"]["performance"] == []
+
+
+def with_children(root: Component, cid: str, children: list[Component]) -> Component:
+    if root.id == cid:
+        return root.model_copy(update={"children": children})
+    kids = [with_children(c, cid, children) for c in root.children]
+    return root.model_copy(update={"children": kids})
+
+
+async def test_an_inline_image_passes_only_the_text_read_from_it_that_holds_the_field() -> None:
+    html = (
+        b"<html><body><p>The Kestrova.</p>"
+        b"<p>See the brochure: <img src='b.png' alt='Brochure'></p></body></html>"
+    )
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html))
+    [image] = [c for c in root.walk() if c.type == "image"]
+    root = with_children(root, image.id, read_inline_image(image.id).children)
+    fake = FakeJev().noul("contain the price (GBP)?", p=0.9, state="24,995")
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    by_id = {c.id: c for c in root.walk()}
+    passed = [(by_id[c].type, by_id[c].text) for c in result["Car"]["price"]]
+    # The paragraph and image pass as the price section's ancestors; the intro doesn't.
+    assert passed == [
+        ("section", ""),
+        ("paragraph", "See the brochure:"),
+        ("image", "Brochure"),
+        ("section", ""),
+        ("heading", "Price"),
+        ("paragraph", "From £24,995 on the road."),
+    ]
 
 
 async def test_non_noul_answers_are_an_error() -> None:
