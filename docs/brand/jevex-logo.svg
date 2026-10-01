@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 160" role="img" aria-label="jevex">
+  <title>jevex</title>
+  <!-- Logo for light backgrounds. Mark: four bars narrowing (document → component → statement → value) into
+       the found value; it also reads as a falling chart of LLM calls. Wordmark: drawn
+       strokes, no font needed; the j's dot is the value. -->
+  <g transform="translate(20 8)">
+    <rect x="0" y="0" width="124" height="20" rx="10" fill="#C4B5FD"/>
+    <rect x="18" y="30" width="88" height="20" rx="10" fill="#A78BFA"/>
+    <rect x="34" y="60" width="56" height="20" rx="10" fill="#7C3AED"/>
+    <rect x="46" y="90" width="32" height="20" rx="10" fill="#5B21B6"/>
+    <circle cx="62" cy="130" r="8" fill="#34D399"/>
+    <circle cx="62" cy="130" r="14" fill="none" stroke="#34D399" stroke-width="3" opacity="0.35"/>
+  </g>
+  <g transform="translate(166 4)" fill="none" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="34" cy="24" r="9" fill="#34D399" stroke="none"/>
+    <path stroke="#1E1B4B" d="M34 50 V112 A15 15 0 0 1 19 127 H13 M60 75 H110 A25 25 0 1 0 101.07 94.15 M126 50 L148 100 L170 50"/>
+    <path stroke="#7C3AED" d="M191 75 H241 A25 25 0 1 0 232.07 94.15 M256 50 L298 100 M298 50 L256 100"/>
+  </g>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="jevex">
+  <title>jevex</title>
+  <!-- Favicon: the mark simplified to three bars on even coordinates of a 32 px grid, so
+       every edge lands on a whole pixel at 16 px too. -->
+  <rect width="32" height="32" rx="7" fill="#1E1B4B"/>
+  <rect x="4" y="4" width="24" height="4" rx="2" fill="#8B5CF6"/>
+  <rect x="8" y="10" width="16" height="4" rx="2" fill="#C4B5FD"/>
+  <rect x="12" y="16" width="8" height="4" rx="2" fill="#EDE9FE"/>
+  <circle cx="16" cy="26" r="4" fill="#34D399"/>
+</svg>

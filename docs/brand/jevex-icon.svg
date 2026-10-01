@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="jevex">
+  <title>jevex</title>
+  <!-- App icon and avatar: the dark mark on an ink tile, so it reads on any background. -->
+  <rect width="512" height="512" rx="112" fill="#1E1B4B"/>
+  <g transform="translate(94.8 66) scale(2.6)">
+    <rect x="0" y="0" width="124" height="20" rx="10" fill="#7C3AED"/>
+    <rect x="18" y="30" width="88" height="20" rx="10" fill="#A78BFA"/>
+    <rect x="34" y="60" width="56" height="20" rx="10" fill="#C4B5FD"/>
+    <rect x="46" y="90" width="32" height="20" rx="10" fill="#EDE9FE"/>
+    <circle cx="62" cy="130" r="8" fill="#34D399"/>
+    <circle cx="62" cy="130" r="14" fill="none" stroke="#34D399" stroke-width="3" opacity="0.45"/>
+  </g>
+</svg>
