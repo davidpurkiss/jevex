@@ -183,6 +183,13 @@
                   "currency": {
                     "pattern": "^[A-Z]{3}$",
                     "type": "string"
+                  },
+                  "decimal": {
+                    "enum": [
+                      ".",
+                      ","
+                    ],
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -190,6 +197,50 @@
             },
             "required": [
               "parse_money"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "parse_number": {
+                "additionalProperties": false,
+                "properties": {
+                  "decimal": {
+                    "enum": [
+                      ".",
+                      ","
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "parse_number"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "parse_range": {
+                "additionalProperties": false,
+                "properties": {
+                  "decimal": {
+                    "enum": [
+                      ".",
+                      ","
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "parse_range"
             ],
             "type": "object"
           },
