@@ -128,6 +128,13 @@ def test_precision_and_recall() -> None:
     assert FieldScore().precision is None
 
 
+def test_accuracy_counts_every_kind_of_mistake() -> None:
+    s = FieldScore(correct=6, wrong=1, missing=1, spurious=2, empty=5)
+    assert s.accuracy == pytest.approx(6 / 10)  # empties are neither right nor wrong
+    assert FieldScore(empty=3).accuracy is None
+    assert s.to_dict()["accuracy"] == s.accuracy
+
+
 def test_records_pair_by_agreement() -> None:
     expected = (
         Expected("SE", {"trim": "SE", "power_kw": 110}),
@@ -185,6 +192,15 @@ def test_load_corpus_from_a_test_site_build(tmp_path: Path) -> None:
     corpus = load_corpus(tmp_path)
     assert len(corpus) == len(manifest["pages"])
     assert {i.schema for i in corpus} == {"VehicleSpec", "Listing"}
+    assert [i.wave for i in corpus] == [p["wave"] for p in manifest["pages"]]
+    assert corpus[0].wave == 1
+
+
+def test_a_page_without_a_wave_has_none(tmp_path: Path) -> None:
+    (tmp_path / "x.html").write_text("<p>x</p>")
+    page: dict[str, Any] = {"path": "x.html", "schema": "X", "records": []}
+    (tmp_path / "truth.json").write_text(json.dumps({"pages": [page]}))
+    assert load_corpus(tmp_path)[0].wave is None
 
 
 def test_load_corpus_errors(tmp_path: Path) -> None:
@@ -207,6 +223,8 @@ MALFORMED: list[tuple[Any, str]] = [
         "page 0: record 0 must be an object with a 'values' object",
     ),
     ([{"schema": "X", "records": []}], "page 0: missing 'path'"),
+    ([{"path": "x.html", "schema": "X", "records": [], "wave": "2"}], "'wave' must be a number"),
+    ([{"path": "x.html", "schema": "X", "records": [], "wave": True}], "'wave' must be a number"),
     ([{"path": "/nope/x.html", "schema": "X", "records": []}], "lists /nope/x.html, which doesn't"),
 ]
 
@@ -262,6 +280,7 @@ async def test_a_perfect_extractor_scores_100_percent(tmp_path: Path) -> None:
     assert summary["precision"] == 1.0
     assert summary["recall"] == 1.0
     assert summary["errors"] == 0
+    assert summary["accuracy"] == 1.0
     assert summary["resolution_mix"]["jev"] > 0
     assert all(s.wrong == s.missing == s.spurious == 0 for s in report.field_scores().values())
 

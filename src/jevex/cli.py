@@ -1,11 +1,11 @@
 """The ``jevex`` command line (spec: *Integration › CLI*).
 
 ``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
-``jevex eval`` scores a corpus, ``jevex learn`` compiles logged examples into a pack diff,
-``jevex pack export|import|diff`` moves learned state between stores and packs, and
-``jevex testsite build|serve`` writes and serves the synthetic test site. The other
-commands are placeholders until their issues land. Uses only the standard library
-(argparse), so the CLI adds nothing to a core install.
+``jevex eval`` scores a corpus (``--replay``: learning curves), ``jevex learn`` compiles
+logged examples into a pack diff, ``jevex pack export|import|diff`` moves learned state
+between stores and packs, and ``jevex testsite build|serve`` writes and serves the
+synthetic test site. The other commands are placeholders until their issues land. Uses
+only the standard library (argparse), so the CLI adds nothing to a core install.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ from jevex.packs import (
     load_pack,
     pack_generators,
 )
+from jevex.replay import REPLAY_BATCH_SIZE, replay
 from jevex.schema import UnsupportedFieldError
 from jevex.store import StoreError, open_store
 from jevex.testsite import BUILD_DIR, build, server
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from jevex.jev import JevClient
     from jevex.llm import LLM
     from jevex.packs import Pack, PackChanges
+    from jevex.replay import ReplayReport
     from jevex.store import Store
     from jevex.testsite.waves import Waves
 
@@ -186,6 +188,60 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
             raise CliError(str(exc)) from exc
         except JevError as exc:  # the spend cap or the API itself: the run can't be scored
             raise CliError(f"Jev: {exc}") from exc
+
+
+async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> ReplayReport:
+    schemas = [load_schema(s) for s in args.schema]
+    try:
+        corpus = load_corpus(args.corpus)
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+    for out in (args.csv, args.html):
+        if out is not None and not await asyncio.to_thread(Path(out).parent.is_dir):
+            raise CliError(f"no such directory for {out}")  # before anything is spent
+    if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
+        raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
+    model = (llm or load_llm(args.llm)) if args.llm else None
+    try:
+        try:
+            # An empty in-memory store, so key mappings and generators are learned from
+            # scratch; no community packs, so the curve starts from nothing.
+            extractor = Extractor(
+                schemas,
+                jev=jev,
+                store=":memory:",
+                extraction_llm=model,
+                generator_llm=model,
+                community_packs=False,
+            )
+        except (ValueError, UnsupportedFieldError) as exc:
+            raise CliError(str(exc)) from exc
+        async with extractor:
+            try:
+                return await replay(extractor, corpus, batch_size=args.batch_size)
+            except ValueError as exc:
+                raise CliError(str(exc)) from exc
+            except JevError as exc:
+                raise CliError(f"Jev: {exc}") from exc
+    finally:
+        # The extractor doesn't close an LLM it's given; an adapter built here is ours.
+        close = getattr(model, "aclose", None) if llm is None else None
+        if close is not None:
+            await close()
+
+
+def _write_replay(args: argparse.Namespace, replayed: ReplayReport) -> list[str]:
+    """Write ``--csv`` and ``--html``; return a line saying where each went."""
+    written: list[str] = []
+    for out, text in ((args.csv, replayed.to_csv), (args.html, replayed.to_html)):
+        if out is None:
+            continue
+        try:
+            Path(out).write_text(text(), encoding="utf-8")
+        except OSError as exc:
+            raise CliError(str(exc)) from exc
+        written.append(f"wrote {out}")
+    return written
 
 
 LLM_PROVIDERS = ("anthropic", "openai", "gemini", "litellm")
@@ -470,7 +526,8 @@ def format_report(report: EvalReport) -> str:
     s = report.summary()
     lines = [
         f"documents: {s['documents']}  errors: {s['errors']}",
-        f"precision: {pct(s['precision'])}  recall: {pct(s['recall'])}",
+        f"precision: {pct(s['precision'])}  recall: {pct(s['recall'])}  "
+        f"accuracy: {pct(s['accuracy'])}",
         f"per document: ${s['cost_per_document']:.5f}  {s['jev_requests_per_document']:.1f} "
         f"Jev requests ({s['jev_questions_per_document']:.1f} questions)  "
         f"{s['llm_calls_per_document']:.1f} LLM calls",
@@ -534,6 +591,13 @@ def _usd(text: str) -> float:
     return value
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {text}")
+    return value
+
+
 def _probability(text: str) -> float:
     value = float(text)
     if not 0.0 <= value <= 1.0:
@@ -587,8 +651,35 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MODULE:CLASS",
         help="Every schema the corpus uses (repeatable), e.g. jevex.testsite:VehicleSpec",
     )
-    evaluate.add_argument("--concurrency", type=int, default=4, help="Documents at a time")
+    evaluate.add_argument(
+        "--concurrency", type=int, default=4, help="Documents at a time (not with --replay)"
+    )
     evaluate.add_argument("--json", action="store_true", help="Print the full report as JSON")
+    evaluate.add_argument(
+        "--replay",
+        action="store_true",
+        help="Learning curves: start from an empty store, run the documents one at a time "
+        "in the corpus's order, and report per batch (CSV on stdout unless --csv/--html)",
+    )
+    evaluate.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        metavar="N",
+        help=f"Documents per replay batch (default {REPLAY_BATCH_SIZE})",
+    )
+    evaluate.add_argument("--csv", metavar="PATH", help="Write the replay's batches as CSV")
+    evaluate.add_argument(
+        "--html",
+        metavar="PATH",
+        help="Write the replay's chart of accuracy, cost and LLM calls per document",
+    )
+    evaluate.add_argument(
+        "--llm",
+        metavar="PROVIDER[:MODEL]",
+        help="Replay with this LLM for the fallback and learning: "
+        f"{', '.join(LLM_PROVIDERS)} (anthropic defaults to {ANTHROPIC_MODEL}). "
+        "Without it the replay runs on Jev alone",
+    )
 
     learn = commands.add_parser(
         "learn",
@@ -733,7 +824,8 @@ def main(
     """Run the CLI and return its exit code.
 
     0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``),
-    including ``jevex eval`` runs where any document failed (the report is still printed).
+    including ``jevex eval`` runs (and replays) where any document failed (the report is
+    still printed).
     2: a usage error, no command, or a command that isn't implemented yet.
     ``jev``, ``llm`` (``jevex learn``'s generator LLM), ``out`` and ``err`` are injectable
     for tests.
@@ -749,7 +841,35 @@ def main(
         summary, issue = PLANNED[args.command]
         print(f"jevex {args.command}: not implemented yet ({summary}; see #{issue})", file=stderr)
         return EXIT_USAGE
+    if args.command == "eval" and not args.replay:
+        given = [
+            flag
+            for flag, value in (
+                ("--batch-size", args.batch_size),
+                ("--csv", args.csv),
+                ("--html", args.html),
+                ("--llm", args.llm),
+            )
+            if value is not None
+        ]
+        if given:
+            parser.error(f"{', '.join(given)} only apply with --replay")
     try:
+        if args.command == "eval" and args.replay:
+            if args.batch_size is None:
+                args.batch_size = REPLAY_BATCH_SIZE
+            replayed = asyncio.run(_replay(args, jev, llm))
+            written = _write_replay(args, replayed)
+            if args.json:
+                json.dump(replayed.to_dict(), stdout, indent=2, ensure_ascii=False)
+                stdout.write("\n")
+            elif not written:
+                stdout.write(replayed.to_csv())
+            else:
+                stdout.write(format_report(replayed.report) + "\n".join(written) + "\n")
+            for doc in replayed.failed:
+                print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
+            return EXIT_ERROR if replayed.failed else EXIT_OK
         if args.command == "eval":
             report = asyncio.run(_eval(args, jev))
             if args.json:

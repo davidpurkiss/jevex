@@ -80,6 +80,8 @@ class CorpusItem:
     path: Path
     schema: str
     records: tuple[Expected, ...]
+    wave: int | None = None
+    """The test-site wave the page was released in (its ``wave``), if the manifest says."""
 
 
 def load_corpus(directory: str | Path) -> list[CorpusItem]:
@@ -121,8 +123,14 @@ def _corpus_item(root: Path, page: Any) -> CorpusItem:
         if r is None or not isinstance(r.get("values"), dict):
             raise TypeError(f"record {j} must be an object with a 'values' object")
         expected.append(Expected(str(r.get("entity", "")), dict(r["values"])))
+    wave = entry.get("wave")
+    if wave is not None and (not isinstance(wave, int) or isinstance(wave, bool)):
+        raise TypeError(f"'wave' must be a number, not {wave!r}")
     return CorpusItem(
-        path=root / str(entry["path"]), schema=str(entry["schema"]), records=tuple(expected)
+        path=root / str(entry["path"]),
+        schema=str(entry["schema"]),
+        records=tuple(expected),
+        wave=wave,
     )
 
 
@@ -267,6 +275,13 @@ class FieldScore:
         expected = self.correct + self.wrong + self.missing
         return self.correct / expected if expected else None
 
+    @property
+    def accuracy(self) -> float | None:
+        """Correct values over every value that was expected, found, or both: one number
+        that a wrong, a missing and a spurious value each lower."""
+        scored = self.correct + self.wrong + self.missing + self.spurious
+        return self.correct / scored if scored else None
+
     def add(self, other: FieldScore) -> None:
         self.correct += other.correct
         self.wrong += other.wrong
@@ -283,6 +298,7 @@ class FieldScore:
             "empty": self.empty,
             "precision": self.precision,
             "recall": self.recall,
+            "accuracy": self.accuracy,
         }
 
 
@@ -431,7 +447,10 @@ class EvalReport:
             "errors": len(self.failed),
             "precision": overall.precision,
             "recall": overall.recall,
+            "accuracy": overall.accuracy,
             "cost_per_document": sum(d.cost for d in self.documents) / n,
+            "jev_cost_per_document": sum(d.jev_cost for d in self.documents) / n,
+            "llm_cost_per_document": sum(d.llm_cost for d in self.documents) / n,
             "seconds_per_document": sum(seconds) / len(seconds) if seconds else None,
             "latency_p50": _percentile(seconds, 0.5),
             "latency_p95": _percentile(seconds, 0.95),
@@ -528,6 +547,66 @@ def resolve_tolerances(
     }
 
 
+def check_schemas(corpus: list[CorpusItem], tolerances: Mapping[str, object]) -> None:
+    """Raise ``ValueError`` if the corpus uses a schema the extractor doesn't have
+    (``tolerances`` is :func:`resolve_tolerances`' result, keyed by schema)."""
+    unknown = sorted({i.schema for i in corpus} - set(tolerances))
+    if unknown:
+        raise ValueError(f"the corpus uses schemas the extractor doesn't have: {unknown}")
+
+
+async def run_document(
+    extractor: Extractor,
+    item: CorpusItem,
+    tolerances: Mapping[str, Mapping[str, Tolerance]],
+) -> DocumentRun:
+    """Extract one corpus document and score it (``tolerances`` as for
+    :func:`score_document`).
+
+    Raises the :data:`RUN_ERRORS`; any other extraction error is recorded on the run,
+    which then scores as all missing.
+    """
+    document = await asyncio.to_thread(Document.from_path, item.path, url=item.path.as_posix())
+    start = time.perf_counter()
+    try:
+        result = await extractor.extract(document)
+    except RUN_ERRORS:
+        raise
+    except Exception as exc:  # scored as all-missing; the run carries on
+        return DocumentRun(
+            path=item.path.as_posix(),
+            schema=item.schema,
+            seconds=time.perf_counter() - start,
+            jev_requests=0,
+            jev_questions=0,
+            jev_cost=0.0,
+            llm_calls=0,
+            llm_cost=0.0,
+            methods=Counter(),
+            fields=_all_missing(item, tolerances[item.schema]),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    seconds = time.perf_counter() - start
+    methods: Counter[str] = Counter(
+        m.method
+        for r in result.records
+        for m in r.meta.values()
+        if m.found and not m.filtered and m.method
+    )
+    return DocumentRun(
+        path=item.path.as_posix(),
+        schema=item.schema,
+        seconds=seconds,
+        jev_requests=result.meta.jev.requests,
+        jev_questions=result.meta.jev.questions,
+        jev_cost=result.meta.jev.cost,
+        llm_calls=result.meta.llm.calls,
+        llm_cost=result.meta.llm.cost,
+        methods=methods,
+        fields=score_document(item, result, tolerances),
+    )
+
+
 async def evaluate(
     extractor: Extractor,
     corpus: list[CorpusItem],
@@ -542,54 +621,12 @@ async def evaluate(
     scoring them; other per-document errors are recorded and scored as all missing.
     """
     resolved = resolve_tolerances(extractor, tolerances)
-    unknown = sorted({i.schema for i in corpus} - set(resolved))
-    if unknown:
-        raise ValueError(f"the corpus uses schemas the extractor doesn't have: {unknown}")
+    check_schemas(corpus, resolved)
     semaphore = asyncio.Semaphore(concurrency)
 
     async def one(item: CorpusItem) -> DocumentRun:
         async with semaphore:
-            document = await asyncio.to_thread(
-                Document.from_path, item.path, url=item.path.as_posix()
-            )
-            start = time.perf_counter()
-            try:
-                result = await extractor.extract(document)
-            except RUN_ERRORS:
-                raise
-            except Exception as exc:  # scored as all-missing; the run carries on
-                return DocumentRun(
-                    path=item.path.as_posix(),
-                    schema=item.schema,
-                    seconds=time.perf_counter() - start,
-                    jev_requests=0,
-                    jev_questions=0,
-                    jev_cost=0.0,
-                    llm_calls=0,
-                    llm_cost=0.0,
-                    methods=Counter(),
-                    fields=_all_missing(item, resolved[item.schema]),
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-            seconds = time.perf_counter() - start
-        methods: Counter[str] = Counter(
-            m.method
-            for r in result.records
-            for m in r.meta.values()
-            if m.found and not m.filtered and m.method
-        )
-        return DocumentRun(
-            path=item.path.as_posix(),
-            schema=item.schema,
-            seconds=seconds,
-            jev_requests=result.meta.jev.requests,
-            jev_questions=result.meta.jev.questions,
-            jev_cost=result.meta.jev.cost,
-            llm_calls=result.meta.llm.calls,
-            llm_cost=result.meta.llm.cost,
-            methods=methods,
-            fields=score_document(item, result, resolved),
-        )
+            return await run_document(extractor, item, resolved)
 
     tasks = [asyncio.create_task(one(i)) for i in corpus]
     try:

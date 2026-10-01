@@ -260,6 +260,19 @@ families together and the LLM-call rate spikes, then falls as generators are lea
 default schedule is `table,listing;kv,grid;prose;pdf;scanned,infographic`. Families left
 out of `--waves` aren't built.
 
+`jevex eval` scores extraction against a build (or any directory with a `truth.json`).
+`--replay` draws the learning curve: it starts from an empty in-memory store, runs the
+pages one at a time in order (letting learning finish after each), and reports accuracy,
+cost per document and LLM calls per document per batch, as CSV and as a self-contained
+HTML chart with the waves marked. `--llm` turns on the LLM fallback and learning; without
+it the replay runs on Jev alone.
+
+```sh
+jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing
+jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing \
+    --replay --batch-size 20 --llm anthropic --csv curve.csv --html curve.html
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
