@@ -7,17 +7,27 @@ from pydantic import BaseModel
 
 from jevex import (
     BoilerplateCleaner,
+    CategoriseStage,
     Component,
     ComponentGateStage,
     Context,
     Document,
     DomLocation,
     EntityStage,
+    Extractor,
     Field,
+    FieldMeta,
+    LayoutStage,
+    MultiEntity,
     NoulComponentGate,
+    ParentChild,
+    Pipeline,
     Questions,
     SchemaSpec,
+    SingleEntity,
     Statement,
+    StatementStage,
+    StructuredStage,
     gate_units,
 )
 from jevex.component_gate import _question_key  # pyright: ignore[reportPrivateUsage]
@@ -25,10 +35,12 @@ from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ComponentGate, ParsedDocument
 from jevex.jev import (
+    Choice,
     ChoiceAnswer,
     JevClient,
     JevResponse,
     JSONContent,
+    Noul,
     NoulAnswer,
     Question,
     ScoreAnswer,
@@ -36,6 +48,7 @@ from jevex.jev import (
 )
 from jevex.layout import MAX_SECTION_CHARS, TableCell
 from jevex.layout_html import HtmlLayoutParser
+from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.testing import FakeJev
 
 
@@ -968,6 +981,179 @@ async def test_a_nested_model_jevex_cannot_extract_is_not_gated() -> None:
         "Does this section contain the odd bits?"
     )
     assert ctx.schemas["Page"].child_component_ids == {}
+
+
+# --- groups embedded data already filled ---------------------------------------------
+
+
+def found_price(fake: FakeJev, *models: type[BaseModel]) -> Context:
+    """A context where an earlier route (embedded data) found the car's price."""
+    specs = [SchemaSpec.from_model(m) for m in models or (Car,)]
+    ctx = Context.create(Document.from_bytes(b"<p/>"), specs, fake.client())
+    ctx.parsed = parsed(page())
+    ctx.schemas["Car"].set_field(
+        SINGLE_ENTITY_LABEL, "price", FieldMeta(value=Decimal(24995), method="structured")
+    )
+    return ctx
+
+
+def gate_questions(fake: FakeJev) -> dict[str, JSONContent]:
+    return {k: q.instructions for k, q in fake.calls[0].questions.items()}
+
+
+async def test_a_single_entity_pipeline_does_not_gate_groups_already_found() -> None:
+    fake = FakeJev().noul("engine power", p=0.9, state="Power: 110 kW")
+    ctx = found_price(fake)
+    await Pipeline([ComponentGateStage(), EntityStage()]).run(ctx)
+
+    assert len(fake.calls) == len(gate_units(page()))
+    assert gate_questions(fake) == {
+        "Car.performance": "Does this section contain the engine power (kW) or 0-62 mph time (s)?"
+    }
+    run = ctx.schemas["Car"]
+    assert run.ungated_groups == {"price"}
+    assert run.component_ids == {"performance": ["root", "s-perf", "h3", "l1", "li1", "li2"]}
+    [event] = [e for e in ctx.events if e.kind == "groups_not_gated"]
+    assert event.message == "Car: price already found; not gated"
+    assert event.data == {"schema": "Car", "groups": ["price"]}
+    # The found field stays a categorise option wherever another group passed, so "From
+    # £24,995" in a performance section isn't put down to power.
+    assert [f.name for f in run.relevant_fields("li1")] == ["price", "power_kw", "zero_to_62_s"]
+    assert run.relevant_fields("p3") == []
+
+
+async def test_other_resolvers_still_gate_groups_already_found() -> None:
+    resolvers = [
+        MultiEntity(),
+        ParentChild(field="trims", children="table_columns"),
+        SingleEntity(label="car"),  # values found on "document" wouldn't reach its record
+    ]
+    for resolver in resolvers:
+        fake = FakeJev()
+        ctx = found_price(fake)
+        await Pipeline([ComponentGateStage(), EntityStage(resolver=resolver)]).run(ctx)
+        assert set(fake.calls[0].questions) == {"Car.price", "Car.performance"}, resolver
+        assert ctx.schemas["Car"].ungated_groups == set()
+        assert "groups_not_gated" not in [e.kind for e in ctx.events]
+
+
+async def test_found_groups_are_gated_without_a_pipeline_or_entity_stage() -> None:
+    fake = FakeJev()
+    await ComponentGateStage().run(found_price(fake))  # run by hand: no pipeline to check
+    fake2 = FakeJev()
+    await Pipeline([ComponentGateStage()]).run(found_price(fake2))
+    for f in (fake, fake2):
+        assert set(f.calls[0].questions) == {"Car.price", "Car.performance"}
+
+
+async def test_skip_found_overrides_the_resolver_check() -> None:
+    fake = FakeJev()
+    await ComponentGateStage(skip_found=True).run(found_price(fake))
+    assert set(fake.calls[0].questions) == {"Car.performance"}
+    fake = FakeJev()
+    ctx = found_price(fake)
+    await Pipeline([ComponentGateStage(skip_found=False), EntityStage()]).run(ctx)
+    assert set(fake.calls[0].questions) == {"Car.price", "Car.performance"}
+
+
+async def test_a_group_is_gated_while_any_of_its_fields_is_still_needed() -> None:
+    fake = FakeJev()
+    ctx = found_price(fake)
+    run = ctx.schemas["Car"]
+    run.set_field(SINGLE_ENTITY_LABEL, "power_kw", FieldMeta(value=110.0, method="structured"))
+    run.set_field(SINGLE_ENTITY_LABEL, "zero_to_62_s", FieldMeta(value=None, method="structured"))
+    await ComponentGateStage(skip_found=True).run(ctx)
+    # 0-62 wasn't found (an empty value isn't a find), so its group is still asked about.
+    assert set(fake.calls[0].questions) == {"Car.performance"}
+
+
+async def test_merge_mode_gates_every_group() -> None:
+    fake = FakeJev()
+    ctx = found_price(fake)
+    ctx.schemas["Car"].merge = True
+    await ComponentGateStage(skip_found=True).run(ctx)
+    assert set(fake.calls[0].questions) == {"Car.price", "Car.performance"}
+
+
+async def test_other_schemas_are_still_gated_in_the_same_requests() -> None:
+    fake = FakeJev()
+    await ComponentGateStage(skip_found=True).run(found_price(fake, Car, Book))
+    assert len(fake.calls) == len(gate_units(page()))
+    assert gate_questions(fake) == {
+        "Car.performance": "Does this section contain the engine power (kW) or 0-62 mph time (s)?",
+        "Book.title": "Is this the book's title?",
+    }
+
+
+async def test_a_found_nested_field_drops_its_models_questions_too() -> None:
+    fake = FakeJev()
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarModel)], fake.client()
+    )
+    ctx.parsed = parsed(page())
+    run = ctx.schemas["CarModel"]
+    trims = [{"power_kw": 110.0, "price": Decimal(24995)}]
+    run.set_field(SINGLE_ENTITY_LABEL, "trims", FieldMeta(value=trims, method="structured"))
+    await ComponentGateStage(skip_found=True).run(ctx)
+    assert gate_questions(fake) == {"CarModel.name": "Does this section contain the model name?"}
+    assert run.child_component_ids == {}
+    assert run.component_ids == {"name": []}
+
+
+async def test_with_every_group_found_nothing_is_asked_and_nothing_is_reported_missing() -> None:
+    fake = FakeJev(strict=True)
+    ctx = found_price(fake)
+    run = ctx.schemas["Car"]
+    for name in ("power_kw", "zero_to_62_s"):
+        run.set_field(SINGLE_ENTITY_LABEL, name, FieldMeta(value=1.0, method="structured"))
+    await ComponentGateStage(skip_found=True).run(ctx)
+    assert fake.calls == []
+    assert run.component_ids == {}
+    assert run.relevant_fields("li1") == []
+    assert [e.kind for e in ctx.events] == ["groups_not_gated"]
+
+
+FILLED_PAGE = b"""<!doctype html><html><head>
+<script type="application/ld+json">{"@type": "Car", "offers": {"price": 24995}}</script>
+</head><body><main>
+  <h1>Delmaro Kestrova 1.5 SE</h1>
+  <section><h2>Performance</h2>
+    <ul><li>Power: 110 kW</li><li>0-62 mph: 9.1 s</li></ul>
+  </section>
+  <section><h2>Price</h2><p>On the road from &pound;24,995.</p></section>
+</main></body></html>"""
+
+
+async def test_fill_gaps_with_the_default_resolver_skips_the_gate_for_embedded_values() -> None:
+    fake = (
+        FakeJev()
+        .choice('key path "offers.price"', lambda q: "price" if "price" in q.options else "none")
+        .choice('key path "@type"', "none")
+        .noul("engine power", p=0.9, state="Power: 110 kW")
+    )
+    pipeline = Pipeline(
+        [
+            StructuredStage(mode="fill_gaps"),
+            LayoutStage(),
+            ComponentGateStage(),
+            StatementStage(),
+            EntityStage(),
+            CategoriseStage(),
+        ]
+    )
+    ex = Extractor([Car], jev=fake.client(), pipeline=pipeline)
+    result = await ex.extract(Document.from_bytes(FILLED_PAGE, url="https://cars.test/k"))
+
+    nouls = [c for c in fake.calls if any(isinstance(q, Noul) for q in c.questions.values())]
+    assert nouls
+    assert {k for c in nouls for k in c.questions} == {"Car.performance"}
+    categorised = [c for c in fake.calls if "Car" in c.questions]
+    assert categorised
+    for call in categorised:
+        question = call.questions["Car"]
+        assert isinstance(question, Choice)
+        assert list(question.options) == ["price", "power_kw", "zero_to_62_s", "none"]
+    assert result.one(Car).record.price == Decimal(24995)
 
 
 # --- a real page ---------------------------------------------------------------------

@@ -112,6 +112,24 @@ async def test_stages_run_in_order_and_are_timed() -> None:
     assert set(ctx.timings) == {"a", "b", "c"}
 
 
+async def test_a_stage_can_see_the_pipeline_running_it() -> None:
+    seen: list[list[str]] = []
+
+    @dataclass
+    class Look:
+        name: str = "look"
+
+        async def run(self, ctx: Context) -> None:
+            assert ctx.pipeline is not None
+            seen.append(ctx.pipeline.names)
+
+    assert ctx_for(Car).pipeline is None
+    pipeline = Pipeline([*stages("a"), Look()])
+    ctx = await pipeline.run(ctx_for(Car))
+    assert ctx.pipeline is pipeline
+    assert seen == [["a", "look"]]
+
+
 @dataclass
 class Stopper:
     name: str = "stopper"
