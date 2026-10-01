@@ -29,7 +29,7 @@ from jevex.interfaces import ParsedDocument
 from jevex.jev import Choice, ChoiceAnswer, JevBudgetExceededError
 from jevex.layout import Component
 from jevex.normalise import NormaliseStage
-from jevex.replay import CSV_COLUMNS, nice_ticks
+from jevex.replay import CSV_COLUMNS
 from jevex.results import FieldMeta
 from jevex.select import CandidateStage, SelectStage
 from jevex.store import KeyMapping, open_store
@@ -327,43 +327,24 @@ def test_to_dict_has_the_summary_and_batches() -> None:
     json.dumps(data)  # JSON types only
 
 
-def test_the_html_charts_each_metric_marks_waves_and_inlines_the_data() -> None:
+def test_the_html_is_the_stats_report_with_waves_and_the_data() -> None:
     runs = [doc_run(llm_calls=3), doc_run(llm_calls=1), doc_run(), doc_run()]
     page = report(runs, [1, 1, 2, 2], 1).to_html(title="Replay <seed 42>")
     assert page.startswith("<!doctype html>")
-    assert page.count("<svg") == 3
-    for title in ("Accuracy", "Cost per document (USD)", "LLM calls per document"):
-        assert f"<h2>{title}</h2>" in page
-    assert page.count(">wave 2</text>") == 3  # one marker per chart
     assert "Replay &lt;seed 42&gt;" in page
     assert "<seed 42>" not in page
-    assert page.count('class="dot"') == 12
-    assert "batch 1: documents 1–1\nLLM calls per document: 3.00" in page
-    assert page.count("<tr>") == 5  # the header and a row per batch
-    assert "<script>" not in page  # nothing runs: it's safe to open from anywhere
-    data = page.split('id="replay-data">')[1].split("</script>")[0]
-    assert json.loads(data)["batches"][0]["llm_calls_per_document"] == 3
-
-
-def test_the_inlined_data_cant_close_its_script_tag(monkeypatch: pytest.MonkeyPatch) -> None:
-    sneaky = {"x": "</script><script>alert(1)</script>"}
-
-    def to_dict(_self: ReplayReport) -> dict[str, Any]:
-        return sneaky
-
-    monkeypatch.setattr(ReplayReport, "to_dict", to_dict)
-    page = report([doc_run()], [1], 1).to_html()
-    assert "</script><script>" not in page
-    data = page.split('id="replay-data">')[1].split("</script>")[0]
-    assert json.loads(data) == sneaky
-
-
-def test_a_batch_without_a_value_breaks_the_line() -> None:
-    runs = [doc_run(), doc_run(), doc_run(0), doc_run(), doc_run()]
-    page = report(runs, [None] * 5, 1).to_html()
-    accuracy = page.split("<svg")[1]
-    assert accuracy.count("<polyline") == 2
-    assert accuracy.count('class="dot"') == 4
+    assert "4 documents from an empty store in batches of 1; accuracy 100.0% overall" in page
+    # Learning curve (LLM calls, cost, accuracy), resolution mix and cost: documents only.
+    assert page.count("<svg") == 3
+    assert 'data-axis="time"' not in page
+    for title in ("LLM calls per document", "Cost per document (USD)", "Accuracy"):
+        assert f">{title}</text>" in page
+    assert page.count(">wave 2</text>") == 5  # every panel marks it
+    assert "data-refresh" not in page  # a report doesn't reload itself
+    data = json.loads(page.split('id="stats-data">')[1].split("</script>")[0])
+    assert [p["llm_calls_per_document"] for p in data["learning"]["points"]] == [3, 1, 0, 0]
+    assert data["learning"]["waves"] == [{"documents": 2, "wave": 2}]
+    assert data["summary"]["kind"] == "replay"
 
 
 def test_an_empty_replay_still_renders() -> None:
@@ -371,20 +352,6 @@ def test_an_empty_replay_still_renders() -> None:
     assert page.count("<svg") == 3
     assert "<polyline" not in page
     assert report([], [], 10).to_csv() == ",".join(CSV_COLUMNS) + "\n"
-
-
-@pytest.mark.parametrize(
-    ("top", "ticks"),
-    [
-        (0.0, [0.0, 1.0]),
-        (3.0, [0.0, 1.0, 2.0, 3.0]),
-        (0.0042, [0.0, 0.002, 0.004, 0.006]),
-        (7.0, [0.0, 2.0, 4.0, 6.0, 8.0]),
-        (10.0, [0.0, 2.5, 5.0, 7.5, 10.0]),
-    ],
-)
-def test_nice_ticks(top: float, ticks: list[float]) -> None:
-    assert nice_ticks(top) == ticks
 
 
 # --- CLI -------------------------------------------------------------------------------
@@ -492,6 +459,7 @@ def test_cli_replay_writes_csv_and_html(
     assert sum(float(r["llm_calls_per_document"]) * int(r["size"]) for r in rows) == len(llm.calls)
     assert float(rows[0]["llm_calls_per_document"]) > 0
     assert ">wave 2</text>" in html_path.read_text()
+    assert 'id="stats-data"' in html_path.read_text()
 
 
 def test_cli_replay_json(site: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,9 +4,11 @@
 ``jevex eval`` scores a corpus (``--replay``: learning curves; ``--gate``: a regression
 gate against a baseline), ``jevex learn`` compiles
 logged examples into a pack diff, ``jevex pack export|import|diff`` moves learned state
-between stores and packs, and ``jevex testsite build|serve`` writes and serves the
-synthetic test site. The other commands are placeholders until their issues land. Uses
-only the standard library (argparse), so the CLI adds nothing to a core install.
+between stores and packs, ``jevex stats`` serves the stats UI over a store or a replay's
+CSV (``jevex stats export --svg <view>`` writes a chart), and ``jevex testsite
+build|serve`` writes and serves the synthetic test site. The other commands are
+placeholders until their issues land. Uses only the standard library (argparse), so the
+CLI adds nothing to a core install.
 """
 
 from __future__ import annotations
@@ -57,6 +59,8 @@ from jevex.packs import (
 )
 from jevex.replay import REPLAY_BATCH_SIZE, LearningStoppedError, replay
 from jevex.schema import UnsupportedFieldError
+from jevex.stats import CHART_VIEWS, chart_svg, replay_loader, stats_server, store_loader
+from jevex.stats.server import DEFAULT_PORT
 from jevex.store import StoreError, open_store
 from jevex.testsite import BUILD_DIR, build, server
 from jevex.testsite.waves import DEFAULT_WAVES, format_waves, parse_waves
@@ -71,6 +75,7 @@ if TYPE_CHECKING:
     from jevex.llm import LLM
     from jevex.packs import Pack, PackChanges
     from jevex.replay import ReplayReport
+    from jevex.stats.server import Loader
     from jevex.store import Store
     from jevex.testsite.waves import Waves
 
@@ -666,6 +671,44 @@ def _testsite_build(args: argparse.Namespace) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _stats_loader(args: argparse.Namespace) -> Loader:
+    if args.store is not None:
+        return store_loader(args.store, budget_usd=args.budget)
+    return replay_loader(args.replay, budget_usd=args.budget)
+
+
+def _stats_export(args: argparse.Namespace) -> str:
+    """Write ``--svg``'s chart to ``--out``; return a line saying where it went."""
+    try:
+        stats = _stats_loader(args)()
+        svg = chart_svg(
+            stats,
+            args.svg,
+            args.x or stats.default_axis(),
+            standalone=True,
+            animate=not args.static,
+        )
+        Path(args.out).write_text(svg + "\n", encoding="utf-8")
+    except (StoreError, OSError, ValueError) as exc:
+        raise CliError(str(exc)) from exc
+    return f"wrote {args.out}\n"
+
+
+def _stats_serve(args: argparse.Namespace, stdout: TextIO) -> None:
+    load = _stats_loader(args)
+    try:
+        load()  # fail now, not on the first request, if the source can't be read
+        httpd = stats_server(load, args.host, args.port)
+    except (StoreError, OSError, ValueError) as exc:
+        raise CliError(str(exc)) from exc
+    with httpd:
+        host, port = httpd.server_address[:2]
+        print(f"serving stats at http://{host}:{port}/stats/ (Ctrl-C to stop)", file=stdout)
+        stdout.flush()
+        with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C is how serving ends
+            httpd.serve_forever()
+
+
 def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:
     try:
         httpd = server(args.dir, args.host, args.port)
@@ -928,6 +971,38 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--examples", action="store_true", help="Compare verified examples too")
     diff.add_argument("--json", action="store_true", help="Print the changes as JSON")
 
+    stats = commands.add_parser(
+        "stats",
+        help="Serve the stats UI, or export a chart as SVG",
+        description="Show learning curves, the resolution mix, cost, generators, fields and "
+        "budget events from a store (live: every page load reads it again) or a replay's "
+        "CSV (jevex eval --replay --csv). 'export' writes one chart as an SVG file, "
+        "animated unless --static, for READMEs.",
+    )
+    stats.add_argument(
+        "action",
+        nargs="?",
+        choices=("serve", "export"),
+        default="serve",
+        help="serve (the default) or export",
+    )
+    source = stats.add_mutually_exclusive_group(required=True)
+    source.add_argument("--store", help="A store URL, e.g. sqlite:///jevex.db")
+    source.add_argument("--replay", metavar="CSV", help="A replay's CSV")
+    stats.add_argument("--budget", type=_usd, help="Draw a budget line at this many USD")
+    stats.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
+    stats.add_argument(
+        "--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT})"
+    )
+    stats.add_argument("--svg", choices=CHART_VIEWS, help="export: the chart to write")
+    stats.add_argument("--out", metavar="PATH", help="export: where to write the SVG")
+    stats.add_argument(
+        "--x",
+        choices=("docs", "time"),
+        help="export: the x-axis (default: time for a store, documents for a replay)",
+    )
+    stats.add_argument("--static", action="store_true", help="export: no animation")
+
     site = commands.add_parser(
         "testsite",
         help="Build and serve the synthetic test site",
@@ -997,6 +1072,16 @@ def main(
         summary, issue = PLANNED[args.command]
         print(f"jevex {args.command}: not implemented yet ({summary}; see #{issue})", file=stderr)
         return EXIT_USAGE
+    if args.command == "stats":
+        export_only = [
+            flag
+            for flag, value in (("--svg", args.svg), ("--out", args.out), ("--x", args.x))
+            if value is not None
+        ] + (["--static"] if args.static else [])
+        if args.action == "export" and (args.svg is None or args.out is None):
+            parser.error("jevex stats export needs --svg and --out")
+        if args.action == "serve" and export_only:
+            parser.error(f"{', '.join(export_only)} only apply to jevex stats export")
     if args.command == "eval" and args.replay and args.concurrency is not None:
         parser.error("--replay runs one document at a time: leave out --concurrency")
     if args.command == "eval" and not args.replay:
@@ -1056,6 +1141,12 @@ def main(
                 return EXIT_OK
             run = _pack_export if args.pack_command == "export" else _pack_import
             stdout.write(asyncio.run(run(args)))
+            return EXIT_OK
+        if args.command == "stats":
+            if args.action == "export":
+                stdout.write(_stats_export(args))
+            else:
+                _stats_serve(args, stdout)
             return EXIT_OK
         if args.command == "testsite":
             if args.testsite_command == "build":
