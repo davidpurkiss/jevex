@@ -9,6 +9,7 @@ from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor
+from jevex.fallback import FallbackStage, LLMFieldExtractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
     DefaultTextReader,
@@ -43,6 +44,7 @@ from jevex.images import (
     UnreadableImageError,
     text_components,
 )
+from jevex.interfaces import LLMAnswer
 from jevex.keypaths import (
     FlatBlob,
     KeyPathMapper,
@@ -161,6 +163,7 @@ __all__ = [
     "Extracted",
     "ExtractionResult",
     "Extractor",
+    "FallbackStage",
     "FetchError",
     "Field",
     "FieldMeta",
@@ -186,6 +189,8 @@ __all__ = [
     "JevStatementClassifier",
     "KeyMapping",
     "KeyPathMapper",
+    "LLMAnswer",
+    "LLMFieldExtractor",
     "LayoutStage",
     "Leaf",
     "Location",
