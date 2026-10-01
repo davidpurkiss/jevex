@@ -20,6 +20,7 @@ from jevex import (
     Statement,
     gate_units,
 )
+from jevex.component_gate import _question_key  # pyright: ignore[reportPrivateUsage]
 from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.interfaces import ComponentGate, ParsedDocument
@@ -904,6 +905,46 @@ async def test_a_gate_that_ignores_nested_models_leaves_the_child_run_ungated() 
     child = ctx.schemas["CarModel.trims"]
     assert child.component_ids is None
     assert [f.name for f in child.relevant_fields("li1")] == ["power_kw", "price"]
+
+
+async def test_a_dotted_group_does_not_collide_with_a_nested_models_group() -> None:
+    class Listing(BaseModel):
+        """A car model listing."""
+
+        list_price: Decimal = Field(description="List price", unit="GBP", group="trims.price")
+        trims: list[Trim] = Field(description="Trims")
+
+    fake = (
+        FakeJev()
+        .noul("list price (GBP)?", p=0.9, state="Book a test drive")
+        .noul("trim price (GBP)?", p=0.9, state="SE | £24,995")
+    )
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(Listing)], fake.client()
+    )
+    ctx.parsed = parsed(page())
+    await ComponentGateStage().run(ctx)
+
+    questions = {k: q.instructions for k, q in fake.calls[0].questions.items()}
+    assert questions == {
+        "Listing.trims.price": "Does this section contain the list price (GBP)?",
+        "Listing.trims": (
+            "Does this section contain the engine power (kW) or trim price (GBP) of the trims?"
+        ),
+        "Listing.trims.power_kw": "Does this section contain the engine power (kW)?",
+        "Listing.trims.price#2": "Does this section contain the trim price (GBP)?",
+    }
+    run = ctx.schemas["Listing"]
+    assert run.component_ids is not None
+    assert run.component_ids["trims.price"] == ["root", "p3"]
+    assert run.child_component_ids["trims"]["price"] == ["root", "t1"]
+
+
+def test_a_taken_question_key_gets_a_free_suffix() -> None:
+    taken = {"A.b": 1, "A.b#2": 2}
+    assert _question_key({}, "A.b") == "A.b"
+    assert _question_key(taken, "A.b") == "A.b#3"
+    assert _question_key(taken, "A.b#2") == "A.b#2#2"
 
 
 async def test_a_nested_model_jevex_cannot_extract_is_not_gated() -> None:

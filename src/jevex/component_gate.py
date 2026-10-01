@@ -34,8 +34,10 @@ from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
 from jevex.tables import infer_headers, row_roles
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from jevex.interfaces import ComponentGate, ParsedDocument
-    from jevex.jev import JevClient
+    from jevex.jev import JevClient, Noul
     from jevex.layout import Component, TableCell
     from jevex.pipeline import Context
     from jevex.schema import SchemaSpec
@@ -355,11 +357,10 @@ class NoulComponentGate:
         self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
     ) -> dict[str, dict[str, list[str]]]:
         units = gate_units(parsed.root, max_chars=self.max_chars)
-        questions = {
-            f"{s.name}.{group}": (s.name, group, q)
-            for s in schemas
-            for group, q in s.component_gate_questions().items()
-        }
+        questions: dict[str, tuple[str, str, Noul]] = {}
+        for s in schemas:
+            for group, q in s.component_gate_questions().items():
+                questions[_question_key(questions, f"{s.name}.{group}")] = (s.name, group, q)
         out: dict[str, dict[str, list[str]]] = {
             s.name: {group: [] for group in s.groups} for s in schemas
         }
@@ -390,6 +391,20 @@ class NoulComponentGate:
                         parent = parents.get(parent)
                 groups[group] = sorted(passed, key=order.__getitem__)
         return out
+
+
+def _question_key(taken: Mapping[str, object], key: str) -> str:
+    """``key``, or ``key#2``, ``key#3``... if it's taken.
+
+    Group names are free-form, so a parent's group ``"trims.price"`` and the ``price``
+    group of its nested spec ``"CarModel.trims"`` both read ``"CarModel.trims.price"``.
+    The first keeps the plain key, so recorded requests still match.
+    """
+    out, n = key, 1
+    while out in taken:
+        n += 1
+        out = f"{key}#{n}"
+    return out
 
 
 def _parents(root: Component) -> dict[str, str]:
