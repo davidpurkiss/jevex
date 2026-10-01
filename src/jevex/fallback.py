@@ -356,7 +356,14 @@ class FallbackStage:
 
 def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_Ask]) -> None:
     """The best verified answer replaces the Jev answer; with none, the rejected values
-    become alternatives of whatever Jev found (low-confidence, or nothing)."""
+    become alternatives of whatever Jev found (low-confidence, or nothing).
+
+    Among verified answers the entity's own statements beat shared ones, as in the other
+    routes, but any verified answer beats the unverified Jev answer, even a shared one
+    over the entity's own. A list field takes every verified item, in document order,
+    from the own statements that gave any (else from shared ones), with the least
+    certain contributing answer's probability.
+    """
     spec = run.spec.field(name)
     shared = run.shared_statements(scope)
     existing = run.fields.get(scope, {}).get(name)
@@ -369,13 +376,22 @@ def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_As
             run.set_field(scope, name, base.model_copy(update={"alternatives": alternatives}))
         return
     order = {sid: i for i, sid in enumerate(ctx.parsed.statements)} if ctx.parsed else {}
-    # The entity's own statements beat shared ones, then the more certain, then the earlier.
     accepted.sort(
         key=lambda a: (a.statement.id in shared, -a.p, order.get(a.statement.id, len(order)))
     )
     best = accepted[0]
-    value: Any = best.kept if spec.many else best.kept[0]
-    alternatives = list(rejected)
+    if spec.many:
+        used = [a for a in accepted if (a.statement.id in shared) == (best.statement.id in shared)]
+        items: list[Any] = []
+        for ask in sorted(used, key=lambda a: order.get(a.statement.id, len(order))):
+            items.extend(v for v in ask.kept if v not in items)
+        value: Any = items
+        confidence = min(a.p for a in used)
+        others: list[_Ask] = []
+    else:
+        value, confidence = best.kept[0], best.p
+        others = [a for a in accepted[1:] if a.kept[0] != value]
+    alternatives = [*(existing.alternatives if existing else []), *rejected]
     if existing is not None and existing.found:
         alternatives.append(
             Alternative(
@@ -384,26 +400,35 @@ def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_As
                 p=existing.confidence if existing.confidence is not None else 0.0,
             )
         )
-    for other in accepted[1:]:
-        other_value = other.kept if spec.many else other.kept[0]
-        if other_value != value and other.answer is not None:
-            alternatives.append(
-                Alternative(value=other_value, raw=other.answer.evidence, p=other.p)
-            )
+    alternatives.extend(
+        Alternative(value=a.kept[0], raw=a.answer.evidence if a.answer else None, p=a.p)
+        for a in others
+    )
     run.set_field(
         scope,
         name,
         FieldMeta(
             value=value,
-            confidence=best.p,
+            confidence=confidence,
             method="llm",
             source=_source(ctx, best),
-            alternatives=sorted(alternatives, key=lambda a: -a.p),
+            alternatives=_ranked(alternatives, value),
             verified=True,
             shared=best.statement.id in shared,
             conflicts=existing.conflicts if existing is not None else [],
         ),
     )
+
+
+def _ranked(alternatives: list[Alternative], value: Any) -> list[Alternative]:
+    """Most likely first, one per value, never the chosen value (or a chosen list item)."""
+    chosen: list[Any] = cast("list[Any]", value) if isinstance(value, list) else [value]
+    out: dict[str, Alternative] = {}
+    for alt in sorted(alternatives, key=lambda a: -a.p):
+        if alt.value == value or alt.value in chosen:
+            continue
+        out.setdefault(repr(alt.value), alt)
+    return list(out.values())
 
 
 def _raw(meta: FieldMeta) -> str | None:

@@ -387,6 +387,60 @@ async def test_list_fields_verify_each_item() -> None:
     assert [e.value for e in ctx.verified] == ["SE", "SEL"]
 
 
+async def test_list_items_from_every_verified_statement_are_merged_in_order() -> None:
+    statements = [
+        st("s1", "Trims: SE and SEL."),
+        st("s2", "Also available as the GTI."),
+        st("s3", "Every trim, even the R."),
+    ]
+    fake = FakeJev(default_p=0.9).noul('"SEL"', p=0.8)
+    ctx = context(fake, statements, {"s1": "trims", "s2": "trims", "s3": "trims"})
+    ctx.schemas["Car"].scopes = [
+        EntityScope(label="doc", component_ids=["c1"], shared_statement_ids=["s3"])
+    ]
+
+    def answer(prompt: str, _schema: type[BaseModel]) -> object:
+        if "GTI" in prompt:
+            return {"stated": True, "value": ["GTI"], "evidence": "GTI"}
+        if "the R" in prompt:
+            return {"stated": True, "value": ["R"], "evidence": "R"}
+        return {"stated": True, "value": ["SE", "SEL"], "evidence": "SE and SEL"}
+
+    ctx.extraction_llm = FakeLLM(answer)
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    # Own statements' items only (the shared R is left out), in document order.
+    assert (m.value, m.confidence, m.shared) == (["SE", "SEL", "GTI"], 0.8, False)
+    assert m.source is not None
+    assert m.source.statement_id == "s2"  # the most certain contributing statement
+
+
+async def test_an_llm_answer_keeps_the_alternatives_jev_weighed() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.9)
+    ctx = context(fake, [st("s1")], {"s1": "zero_to_62_s"})
+    picked(ctx, "s1", "zero_to_62_s", "62", 0.3)
+    run = ctx.schemas["Car"]
+    weighed = [Alternative(value="9.1", raw="9.1", p=0.25), Alternative(value=8.0, p=0.1)]
+    run.set_field("doc", "zero_to_62_s", meta(ctx).model_copy(update={"alternatives": weighed}))
+    ctx.extraction_llm = llm(value=9.1, evidence="9.1")
+    await FallbackStage().run(ctx)
+    assert meta(ctx).alternatives == [
+        Alternative(value=62.0, raw="62", p=0.3),
+        Alternative(value="9.1", raw="9.1", p=0.25),
+        Alternative(value=8.0, p=0.1),
+    ]
+
+
+async def test_an_llm_answer_confirming_the_jev_value_doesnt_list_it_again() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.9)
+    ctx = context(fake, [st("s1")], {"s1": "zero_to_62_s"})
+    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.3)
+    ctx.extraction_llm = llm(value=9.1, evidence="9.1")
+    await FallbackStage().run(ctx)
+    m = meta(ctx)
+    assert (m.value, m.confidence, m.alternatives) == (9.1, 0.9, [])
+
+
 async def test_a_custom_extractor_is_used() -> None:
     @dataclass
     class Rules:
@@ -411,8 +465,12 @@ def test_output_models_type_the_value_for_structured_output() -> None:
     assert output_model(SPEC.field("zero_to_62_s")) is number
 
 
-def test_the_prompt_can_be_overridden() -> None:
-    extractor = LLMFieldExtractor(FakeLLM([]), prompt="{name}: {statement}")
+async def test_the_prompt_can_be_overridden() -> None:
+    model = FakeLLM([{"stated": True, "value": 9.1, "evidence": "9.1"}])
+    extractor = LLMFieldExtractor(model, prompt="{name} ({type}{unit}): {section}{statement}")
+    answer = await extractor.extract(st("s1"), SPEC.field("zero_to_62_s"), DocumentBudget())
+    assert answer == LLMAnswer(value=9.1, evidence="9.1")
+    assert model.calls[0].prompt == f"zero_to_62_s (a number in s): {TEXT}"
     assert extractor.prompt != PROMPT
 
 
