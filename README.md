@@ -83,7 +83,11 @@ from jevex.extractor import default_pipeline
 pipeline = default_pipeline().replace("candidates", CandidateStage(locale="de-DE"))
 ```
 
-`jevex.document_locale(document)` shows which locale a document gets.
+`jevex.document_locale(document)` shows which locale a document gets. The statement
+stage splits sentences by the same locale's language (German pages keep "z. B." and
+"3. Mai" mid-sentence), falling back to `StatementStage(locale=...)`, then the candidate
+stage's locale, then English; a language the sentence splitter doesn't know is split as
+English.
 
 | Locale | Reads |
 | --- | --- |

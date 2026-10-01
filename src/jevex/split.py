@@ -39,7 +39,10 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Protocol, cast
 
+from jevex.interfaces import LocaleAwareSplitter
 from jevex.layout import DomLocation, ImageLocation
+from jevex.locales import locale_conventions
+from jevex.select import CandidateStage
 from jevex.statements import Statement
 from jevex.tables import header_prefix, table_statements
 
@@ -189,20 +192,27 @@ class DefaultSplitter:
     """The default :class:`~jevex.interfaces.StatementSplitter`.
 
     ``language`` is the pysbd language code (``en``, ``de``, ``fr``...); unsupported codes
-    fall back to English. Only the component itself is split, never its children: the
-    stage calls the splitter on every component in the tree.
+    fall back to English. :class:`StatementStage` splits each document by its own
+    language instead (:meth:`split_in`). Only the component itself is split, never its
+    children: the stage calls the splitter on every component in the tree.
     """
 
     language: str = "en"
 
     def split(self, component: Component) -> list[Statement]:
+        return self.split_in(component, None)
+
+    def split_in(self, component: Component, locale: str | None) -> list[Statement]:
+        """Split with the sentence rules of ``locale``'s language (``de-AT`` → ``de``), or
+        of ``language`` when ``locale`` is ``None`` or empty."""
+        language = locale_conventions(locale).language if locale else self.language
         kind = component.type
         text = component.text.strip()
         if not text:
             return []
         pieces: list[tuple[str, StatementKind]]
         if kind == "paragraph":
-            pieces = self._paragraph(text)
+            pieces = self._paragraph(text, language)
         elif kind == "list_item":
             pieces = self._list_item(text, _dl_part(component))
         elif kind == "heading":
@@ -229,10 +239,10 @@ class DefaultSplitter:
             for i, (piece, piece_kind) in enumerate(pieces)
         ]
 
-    def _paragraph(self, text: str) -> list[tuple[str, StatementKind]]:
+    def _paragraph(self, text: str, language: str) -> list[tuple[str, StatementKind]]:
         out: list[tuple[str, StatementKind]] = []
         for line in _lines(text):
-            said = sentences(line, language=self.language)
+            said = sentences(line, language=language)
             if len(said) == 1 and is_key_value(line):
                 out.append((line, "key_value"))
             else:
@@ -326,6 +336,14 @@ def cut_statement(statement: Statement, max_chars: int = MAX_STATEMENT_CHARS) ->
     ]
 
 
+def _candidate_locale(ctx: Context) -> str | None:
+    """The locale the pipeline's candidate stage is configured with, if any."""
+    if ctx.pipeline is None:
+        return None
+    stage = next((s for s in ctx.pipeline if s.name == "candidates"), None)
+    return stage.locale if isinstance(stage, CandidateStage) else None
+
+
 class DuplicateStatementError(ValueError):
     """Two statements on one document share an id (a splitter or earlier stage bug)."""
 
@@ -341,9 +359,17 @@ class StatementStage:
     replacing one. A statement longer than
     ``max_chars`` is cut (:func:`cut_statement`) and a ``statements_cut`` event lists
     which. Without a parsed document the stage does nothing.
+
+    A :class:`~jevex.interfaces.LocaleAwareSplitter` (the default) splits by the
+    document's locale (:attr:`Context.locale <jevex.pipeline.Context.locale>`: the
+    caller's, ``<html lang>`` or ``Content-Language``), else the stage's ``locale``, else
+    the pipeline's :class:`~jevex.CandidateStage` ``locale`` (so one configured locale
+    serves both), else the splitter's own language (English unless set). A language pysbd
+    doesn't know is split as English.
     """
 
     splitter: StatementSplitter = field(default_factory=DefaultSplitter)
+    locale: str | None = None
     max_chars: int = MAX_STATEMENT_CHARS
     name: str = "statements"
 
@@ -364,11 +390,12 @@ class StatementStage:
             else:
                 statements[statement.id] = statement
         cut: dict[str, int] = {}
+        split = self._split_for(ctx.locale or self.locale or _candidate_locale(ctx))
         for component in parsed.root.walk():
             if component.id in existing:
                 statements.update((s.id, s) for s in existing[component.id])
                 continue
-            for whole in self.splitter.split(component):
+            for whole in split(component):
                 pieces = cut_statement(whole, self.max_chars)
                 if len(pieces) > 1:
                     cut[whole.id] = len(pieces)
@@ -388,3 +415,9 @@ class StatementStage:
                 f"{sum(cut.values())} pieces",
                 pieces=cut,
             )
+
+    def _split_for(self, locale: str | None) -> Callable[[Component], list[Statement]]:
+        splitter = self.splitter
+        if isinstance(splitter, LocaleAwareSplitter):
+            return lambda component: splitter.split_in(component, locale)
+        return splitter.split
