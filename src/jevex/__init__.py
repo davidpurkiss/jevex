@@ -115,7 +115,7 @@ from jevex.structured import (
     StructuredBlob,
     StructuredSource,
 )
-from jevex.tables import blank_rows, header_prefix, table_statements
+from jevex.tables import blank_rows, header_prefix, infer_headers, table_statements
 
 __version__ = "0.0.1"
 
@@ -244,6 +244,7 @@ __all__ = [
     "gated_out_pages",
     "generator_spec_json_schema",
     "header_prefix",
+    "infer_headers",
     "load_corpus",
     "normalise",
     "open_store",

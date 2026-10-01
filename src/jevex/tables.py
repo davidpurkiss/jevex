@@ -24,7 +24,8 @@ A spec table's cell "9.1" means nothing alone; rendered as
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
 statement per row, its cells joined with ``" | "``; a two-column one without headers whose
-first column holds labels (not numbers) reads as ``label: value`` instead. The headers also
+first column holds labels (not numbers) reads as ``label: value`` instead, and a wider one
+shaped like a comparison table has its headers inferred (:func:`infer_headers`). The headers also
 travel structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
 entity resolver can split a comparison table by column (one trim per column).
 
@@ -56,6 +57,7 @@ def _label(text: str) -> str:
 
 def table_statements(table: Component) -> list[Statement]:
     """One statement per non-empty data cell of ``table`` (or per row, without headers)."""
+    table = infer_headers(table)
     cells = [c for c in table.cells if _clean(c.text)]
     if not cells:
         return []
@@ -183,6 +185,61 @@ def _label_value(cells: list[TableCell], width: int) -> bool:
         and all(c.row_span == 1 and c.col_span == 1 for c in cells)
         and all(any(ch.isalpha() for ch in c.text) for c in cells if c.col == 0)
     )
+
+
+def infer_headers(table: Component) -> Component:
+    """``table`` with its first row and first column marked as headers, when it has no
+    header cells but reads as a comparison table (``Spec | SE | GT`` over
+    ``Power | 150 PS | 200 PS`` in plain ``td``); otherwise ``table`` unchanged.
+
+    It must be at least three columns wide (two columns read as ``label: value``). The
+    first row must name every other column with a label, and every row below must start
+    with one (a label has a letter and fewer digits than letters: ``1.5 TSI`` and
+    ``0-62 mph (s)`` are labels, ``150 PS`` and ``2019`` are not). The cells below the first
+    row and right of the first column must mostly be number-like. That last check is the
+    guard: a table of plain records (``Name | City | Role``) has text in its body just like
+    its first row, so it keeps one statement per row, and so does a table whose first row
+    is already data (``Power | 150 PS | 200 PS``).
+    """
+    cells = [c for c in table.cells if _clean(c.text)]
+    if not cells or any(c.header for c in table.cells):
+        return table
+    width = max(c.col + c.col_span for c in cells)
+    top = min(c.row for c in cells)
+    body_rows = {c.row for c in cells} - {top}
+    first_row = [c for c in cells if c.row == top and c.col > 0]
+    labels = [c for c in cells if c.row > top and c.col == 0]
+    values = [c for c in cells if c.row > top and c.col > 0]
+    named = {col for c in first_row for col in range(c.col, c.col + c.col_span)}
+    labelled = {covered for c in labels for covered in range(c.row, c.row + c.row_span)}
+    if (
+        width < 3
+        or not values
+        or named != set(range(1, width))
+        or not body_rows <= labelled
+        or not all(_is_label(c.text) for c in [*first_row, *labels])
+        or sum(_number_like(c.text) for c in values) * 2 <= len(values)
+    ):
+        return table
+    inferred = [
+        c.model_copy(update={"header": True}) if c.row == top or c.col == 0 else c
+        for c in table.cells
+    ]
+    return table.model_copy(update={"cells": inferred})
+
+
+def _digits_and_letters(text: str) -> tuple[int, int]:
+    return sum(ch.isdigit() for ch in text), sum(ch.isalpha() for ch in text)
+
+
+def _is_label(text: str) -> bool:
+    digits, letters = _digits_and_letters(text)
+    return letters > digits
+
+
+def _number_like(text: str) -> bool:
+    digits, letters = _digits_and_letters(text)
+    return digits > 0 and digits >= letters
 
 
 def blank_rows(table: Component) -> set[int]:

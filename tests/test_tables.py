@@ -11,7 +11,7 @@ from jevex import (
 from jevex.generators import default_registry
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
-from jevex.tables import blank_rows, header_prefix, table_statements
+from jevex.tables import blank_rows, header_prefix, infer_headers, table_statements
 from jevex.testsite import VehicleSpec, generate, render
 
 
@@ -431,3 +431,87 @@ def test_bold_td_labels_are_headers_through_the_cleaner_and_parser() -> None:
 def test_header_less_two_column_html_table_reads_as_labels_and_values() -> None:
     t = html_table("<tr><td>Engine</td><td>1.5 TSI</td></tr><tr><td>Power</td><td>150 PS</td></tr>")
     assert texts(t) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+
+
+def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_headers() -> None:
+    t = html_table(
+        "<tr><td>Spec</td><td>1.5 TSI SE</td><td>GT</td></tr>"
+        "<tr><td>Power</td><td>150 PS</td><td>200 PS</td></tr>"
+        "<tr><td>0-62 mph (s)</td><td>9.1</td><td>7.4</td></tr>"
+        "<tr><td>Gearbox</td><td>Manual</td><td>Automatic</td></tr>"
+        "<tr><td>Towing (kg)</td><td></td><td></td></tr>"
+        "<tr><td>Price</td><td>&pound;24,995</td><td>&pound;31,250</td></tr>"
+    )
+    statements = table_statements(t)
+    assert [s.text for s in statements] == [
+        "Power · 1.5 TSI SE: 150 PS",
+        "Power · GT: 200 PS",
+        "0-62 mph (s) · 1.5 TSI SE: 9.1",
+        "0-62 mph (s) · GT: 7.4",
+        "Gearbox · 1.5 TSI SE: Manual",
+        "Gearbox · GT: Automatic",
+        "Price · 1.5 TSI SE: £24,995",
+        "Price · GT: £31,250",
+    ]
+    ref = statements[1].table
+    assert ref is not None
+    assert (ref.row, ref.col, ref.row_headers, ref.col_headers) == (1, 2, ["Power"], ["GT"])
+    assert [s.table.col_headers for s in statements if s.table] == [["1.5 TSI SE"], ["GT"]] * 4
+    assert blank_rows(infer_headers(t)) == {4}
+
+
+def test_an_inferred_comparison_table_keeps_an_empty_corner_and_bands() -> None:
+    t = html_table(
+        "<tr><td></td><td>SE</td><td>GT</td></tr>"
+        "<tr><td colspan=3>Performance</td></tr>"
+        "<tr><td>Power</td><td>150 PS</td><td>200 PS</td></tr>"
+        "<tr><td>Economy</td></tr>"
+        "<tr><td>Combined (mpg)</td><td colspan=2>52.3</td></tr>"
+    )
+    assert texts(t) == [
+        "Performance › Power · SE: 150 PS",
+        "Performance › Power · GT: 200 PS",
+        "Economy › Combined (mpg) · SE / GT: 52.3",
+    ]
+
+
+def test_a_header_less_table_of_plain_records_stays_rows() -> None:
+    records = html_table(
+        "<tr><td>Name</td><td>City</td><td>Role</td></tr>"
+        "<tr><td>Alice</td><td>London</td><td>Engineer</td></tr>"
+        "<tr><td>Bob</td><td>Leeds</td><td>Designer</td></tr>"
+    )
+    assert texts(records) == [
+        "Name | City | Role",
+        "Alice | London | Engineer",
+        "Bob | Leeds | Designer",
+    ]
+    assert infer_headers(records) is records
+
+
+def test_header_inference_needs_a_comparison_tables_shape() -> None:
+    def rows(*grid: tuple[str, ...]) -> Component:
+        cells = [cell(r, c, text) for r, row in enumerate(grid) for c, text in enumerate(row)]
+        return table(*cells)
+
+    unchanged = [
+        # The first row is already data: its values aren't labels.
+        rows(("Power", "150 PS", "200 PS"), ("Torque", "250 Nm", "320 Nm")),
+        # A first column of years, not labels.
+        rows(("Year", "Power", "Torque"), ("2019", "150 PS", "250 Nm")),
+        # A column the first row doesn't name.
+        rows(("Spec", "SE", ""), ("Power", "150 PS", "200 PS")),
+        # A row without a label.
+        rows(("Spec", "SE", "GT"), ("Power", "150 PS", "200 PS"), ("", "250 Nm", "320 Nm")),
+        # Values mostly text: records, not specs.
+        rows(("Spec", "SE", "GT"), ("Power", "150 PS", "Petrol"), ("Gearbox", "Manual", "Auto")),
+        # Only a first row, or labels without values.
+        rows(("Spec", "SE", "GT")),
+        rows(("Spec", "SE", "GT"), ("Performance",)),
+    ]
+    for t in unchanged:
+        assert infer_headers(t) is t
+        assert all(s.table and not s.table.col_headers for s in table_statements(t))
+    # Tables that already have headers are left as they are.
+    headed = table(cell(0, 1, "SE", header=True), cell(1, 0, "Power"), cell(1, 1, "150 PS"))
+    assert infer_headers(headed) is headed
