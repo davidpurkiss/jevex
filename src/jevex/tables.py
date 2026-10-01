@@ -193,13 +193,15 @@ def infer_headers(table: Component) -> Component:
     ``Power | 150 PS | 200 PS`` in plain ``td``); otherwise ``table`` unchanged.
 
     It must be at least three columns wide (two columns read as ``label: value``). The
-    first row must name every other column with a label, and every row below must start
-    with one (a label has a letter and fewer digits than letters: ``1.5 TSI`` and
-    ``0-62 mph (s)`` are labels, ``150 PS`` and ``2019`` are not). The cells below the first
-    row and right of the first column must mostly be number-like. That last check is the
-    guard: a table of plain records (``Name | City | Role``) has text in its body just like
-    its first row, so it keeps one statement per row, and so does a table whose first row
-    is already data (``Power | 150 PS | 200 PS``).
+    first row must name every other column with a name (more letters than digits:
+    ``1.5 TSI`` is one, ``150 PS`` and ``2019`` aren't), and every row below must start with
+    a label (some letter: ``0-62 mph``, not ``2019``). The cells below the first row and
+    right of the first column must mostly be number-like. Those checks are the guard: a
+    table of plain records (``Name | City | Role``) has text in its body just like its
+    first row, so it keeps one statement per row, and so does a table whose first row is
+    already number-like data (``Power | 150 PS | 200 PS``). A first row of text data
+    (``Gearbox | Manual | Automatic``) can't be told from column names by shape, so it is
+    read as one.
     """
     cells = [c for c in table.cells if _clean(c.text)]
     if not cells or any(c.header for c in table.cells):
@@ -217,7 +219,8 @@ def infer_headers(table: Component) -> Component:
         or not values
         or named != set(range(1, width))
         or not body_rows <= labelled
-        or not all(_is_label(c.text) for c in [*first_row, *labels])
+        or not all(_is_name(c.text) for c in first_row)
+        or not all(any(ch.isalpha() for ch in c.text) for c in labels)
         or sum(_number_like(c.text) for c in values) * 2 <= len(values)
     ):
         return table
@@ -232,7 +235,7 @@ def _digits_and_letters(text: str) -> tuple[int, int]:
     return sum(ch.isdigit() for ch in text), sum(ch.isalpha() for ch in text)
 
 
-def _is_label(text: str) -> bool:
+def _is_name(text: str) -> bool:
     digits, letters = _digits_and_letters(text)
     return letters > digits
 

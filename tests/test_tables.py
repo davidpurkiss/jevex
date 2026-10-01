@@ -437,7 +437,7 @@ def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_heade
     t = html_table(
         "<tr><td>Spec</td><td>1.5 TSI SE</td><td>GT</td></tr>"
         "<tr><td>Power</td><td>150 PS</td><td>200 PS</td></tr>"
-        "<tr><td>0-62 mph (s)</td><td>9.1</td><td>7.4</td></tr>"
+        "<tr><td>0-62 mph</td><td>9.1</td><td>7.4</td></tr>"
         "<tr><td>Gearbox</td><td>Manual</td><td>Automatic</td></tr>"
         "<tr><td>Towing (kg)</td><td></td><td></td></tr>"
         "<tr><td>Price</td><td>&pound;24,995</td><td>&pound;31,250</td></tr>"
@@ -446,8 +446,8 @@ def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_heade
     assert [s.text for s in statements] == [
         "Power · 1.5 TSI SE: 150 PS",
         "Power · GT: 200 PS",
-        "0-62 mph (s) · 1.5 TSI SE: 9.1",
-        "0-62 mph (s) · GT: 7.4",
+        "0-62 mph · 1.5 TSI SE: 9.1",
+        "0-62 mph · GT: 7.4",
         "Gearbox · 1.5 TSI SE: Manual",
         "Gearbox · GT: Automatic",
         "Price · 1.5 TSI SE: £24,995",
