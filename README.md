@@ -101,6 +101,19 @@ Adapters ship as extras: `jevex[anthropic]` (`jevex.llm.anthropic.AnthropicLLM`)
 supports, including local Ollama). Any object with an async `structured(prompt, schema)`
 method works too.
 
+## Learned state
+
+jevex keeps what it learns (key mappings, generators, verified examples, stats) and the
+run's spend ledger in a store. The default is SQLite, safe for several processes on one
+host. For several hosts or many workers, use Postgres (`pip install "jevex[postgres]"`):
+
+```python
+extractor = Extractor(schemas=[VehicleSpec], store="postgresql://jevex@db.internal/jevex")
+```
+
+Its tables go in a `jevex` schema. To choose another, pass a store instead:
+`store=PostgresStore(url, db_schema="jevex_staging")` (from `jevex.store.postgres`).
+
 ## Development
 
 ```sh
