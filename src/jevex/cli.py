@@ -18,6 +18,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -699,6 +700,13 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _rate(text: str) -> float:
+    value = float(text)
+    if not (math.isfinite(value) and value >= 0):
+        raise argparse.ArgumentTypeError(f"must be a number, 0 or more, not {text}")
+    return value
+
+
 def _field_drop(text: str) -> float | None:
     return None if text.strip().lower() == "none" else _probability(text)
 
@@ -823,7 +831,7 @@ def build_parser() -> argparse.ArgumentParser:
         evaluate.add_argument(
             flag,
             dest=dest,
-            type=_field_drop if dest == "max_field_drop" else _probability,
+            type={"max_field_drop": _field_drop, "max_llm_rise": _rate}.get(dest, _probability),
             default=argparse.SUPPRESS,
             metavar="X",
             help=f"{help_text}; with --gate it overrides the baseline's",

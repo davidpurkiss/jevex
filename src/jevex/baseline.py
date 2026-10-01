@@ -146,6 +146,8 @@ class Check(BaseModel):
 
     @property
     def passed(self) -> bool:
+        """Whether the run's value is within ``limit`` (a run scoring nothing passes only
+        when the baseline scored nothing too)."""
         if self.value is None:
             # Nothing scored now: only a regression if something was scored before.
             return self.baseline is None
@@ -177,10 +179,12 @@ class GateResult(BaseModel):
 
     @property
     def regressions(self) -> list[Check]:
+        """The checks that failed, in order."""
         return [c for c in self.checks if not c.passed]
 
     @property
     def passed(self) -> bool:
+        """True when no check failed."""
         return not self.regressions
 
 

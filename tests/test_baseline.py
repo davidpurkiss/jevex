@@ -395,6 +395,33 @@ def test_the_gate_counts_the_fallback_s_llm_calls(
     assert len(llm.calls) == 1
 
 
+def test_a_plain_eval_closes_the_llm_it_builds(
+    corpus: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.cli as cli
+
+    closed: list[bool] = []
+
+    class ClosingLLM(FakeLLM):
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    built = ClosingLLM(lambda _p, _s: {"zero_to_62_s": 1.0})
+    specs: list[str] = []
+
+    def load(spec: str) -> FakeLLM:
+        specs.append(spec)
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", load)
+    stage = ReadTitle(ask_llm={"Dune"})
+    code, _, _ = eval_cli(corpus, monkeypatch, "--llm", "openai:gpt-x", stage=stage)
+    assert code == 0
+    assert specs == ["openai:gpt-x"]
+    assert len(built.calls) == 1  # the fallback's LLM is the one built
+    assert closed == [True]
+
+
 def test_json_output_stays_json_with_the_gate(
     corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -490,6 +517,8 @@ def test_a_failed_document_fails_a_run_that_passes_the_gate(
         ["--gate", "a.json", "--write-baseline", "b.json"],
         ["--gate", "a.json", "--max-accuracy-drop", "2"],
         ["--gate", "a.json", "--max-field-drop", "lots"],
+        ["--gate", "a.json", "--max-llm-rise", "-1"],
+        ["--gate", "a.json", "--max-llm-rise", "inf"],
     ],
 )
 def test_gate_flag_usage_errors(
@@ -576,15 +605,25 @@ async def test_the_test_site_passes_the_eval_gate(
         inner = AnthropicLLM()
     llm = llm_cassette(LLM_CASSETTE, inner)
     jev = JevClient(cassette(JEV_CASSETTE))
-    async with Extractor([VehicleSpec, Listing], jev=jev, extraction_llm=llm) as extractor:
-        report = await evaluate(extractor, load_corpus(corpus))
+    try:
+        # No community packs: the recording must depend only on the repo.
+        async with Extractor(
+            [VehicleSpec, Listing], jev=jev, extraction_llm=llm, community_packs=False
+        ) as extractor:
+            report = await evaluate(extractor, load_corpus(corpus))
+    finally:
+        if inner is not None:
+            await inner.aclose()
     digest = corpus_digest(corpus)
     if recording or os.environ.get(UPDATE_ENV) == "1":
         assert not report.failed, [d.error for d in report.failed]
-        Baseline.from_report(report, corpus=digest).write(GATE_BASELINE)
+        # A new recording keeps the tolerances the committed baseline set.
+        kept = Baseline.load(GATE_BASELINE).tolerances if GATE_BASELINE.exists() else None
+        Baseline.from_report(report, corpus=digest, tolerances=kept).write(GATE_BASELINE)
         return
     baseline = Baseline.load(GATE_BASELINE)
-    stale = [d.error for d in report.failed if "no recording" in (d.error or "")]
+    # A Jev or LLM request that wasn't recorded (run_document names the exception first).
+    stale = [d.error for d in report.failed if (d.error or "").startswith("CassetteMissError")]
     if stale or digest != baseline.corpus:
         pytest.xfail(f"the test-site recording is stale; re-record it ({stale[:1]})")
     assert not report.failed, [d.error for d in report.failed]

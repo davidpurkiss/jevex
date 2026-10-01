@@ -4,10 +4,12 @@ from jevex._pdfium import UnreadablePdfError
 from jevex.baseline import (
     Baseline,
     BaselineError,
+    Check,
     GateResult,
     GateTolerances,
     check_baseline,
     corpus_digest,
+    ensure_comparable,
 )
 from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget, RunLedger
 from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
@@ -183,6 +185,7 @@ __all__ = [
     "CandidateStage",
     "CategoriseStage",
     "Changes",
+    "Check",
     "ChildFieldError",
     "CleanStage",
     "Component",
@@ -326,6 +329,7 @@ __all__ = [
     "cut_statement",
     "default_registry",
     "diff_packs",
+    "ensure_comparable",
     "evaluate",
     "example_id",
     "example_statement",
