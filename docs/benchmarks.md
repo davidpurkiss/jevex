@@ -76,7 +76,8 @@ jevex corpus check DIR benchmarks/corpora/NAME.lock     # exit 1, listing what d
   markup: the `<h1>` title, the product table's "Price (incl. tax)" and "Availability"
   rows, and the `star-rating` class. A human spot-checks them before the lock is committed.
   The pages are kept with the results rather than in the repo. The committed
-  `books.lock` is the fetch of 2026-10-01, whose labels were all spot-checked (#211). If
+  `books.lock` is the fetch of 2026-10-01. Its labels were checked against the pages'
+  markup by script, and a 20-label spot-check was posted on #211 for the owner to confirm. If
   the site starts serving different bytes, the lock check fails and a new fetch needs a
   new lock.
 - **`spec-sheets-local`** lives outside the repo, in the directory `$JEVEX_BENCH_SPEC_SHEETS`
