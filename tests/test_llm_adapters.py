@@ -117,6 +117,28 @@ async def test_anthropic_cost_uses_the_model_that_served() -> None:
     assert response.usage.cost == pytest.approx((12 * 2 + 7 * 10) / 1_000_000)
 
 
+async def test_anthropic_dated_snapshot_is_costed_at_its_base_price() -> None:
+    body = message('{"title": "Dune"}', model="claude-haiku-4-5-20251001")
+    body["usage"]["iterations"] = [
+        {"type": "message", "model": "claude-opus-5-5", "input_tokens": 100, "output_tokens": 5},
+        {
+            "type": "fallback_message",
+            "model": "claude-haiku-4-5-20251001",
+            "input_tokens": 12,
+            "output_tokens": 7,
+        },
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=body)
+
+    llm = AnthropicLLM("claude-opus-5-5", client=anthropic_client(handler))
+    response = await llm.structured("x", Book)
+    assert response.model == "claude-haiku-4-5-20251001"
+    assert response.usage.cost == pytest.approx((100 * 4 + 5 * 20 + 12 * 1 + 7 * 5) / 1_000_000)
+    assert process_llm_cost() == pytest.approx(response.usage.cost)
+
+
 async def test_anthropic_cost_sums_fallback_attempts_at_their_own_prices() -> None:
     body = message('{"title": "Dune"}', model="claude-sonnet-5-5")
     body["usage"]["iterations"] = [

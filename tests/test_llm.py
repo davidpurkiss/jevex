@@ -42,6 +42,32 @@ def test_cost_from_the_price_table() -> None:
     assert cost("gemini-3.5-flash", 1_000_000, 1_000_000) == pytest.approx(10.5)
 
 
+def test_dated_snapshot_is_costed_at_its_base_model_price() -> None:
+    assert cost("claude-haiku-4-5-20251001", 1_000_000, 1_000_000) == pytest.approx(6.0)
+    mine = {"mine": ModelPrice(3, 9)}
+    assert cost("mine-20260115", 1_000_000, 0, mine) == pytest.approx(3.0)
+
+
+def test_exact_entry_wins_over_the_dated_snapshot_base_name() -> None:
+    prices = {"mine": ModelPrice(3, 9), "mine-20260115": ModelPrice(1, 2)}
+    assert cost("mine-20260115", 1_000_000, 1_000_000, prices) == pytest.approx(3.0)
+    assert cost("mine", 1_000_000, 1_000_000, prices) == pytest.approx(12.0)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "unknown-model-20251001",  # dated, but the base isn't priced either
+        "claude-haiku-4-5-2025100",  # seven digits: not a snapshot date
+        "claude-haiku-4-5-20251001-beta",  # the date isn't the suffix
+        "claude-haiku-4-5-2025-10-01",  # dashed dates aren't this form
+        "claude-haiku-4",  # a prefix of a priced model
+    ],
+)
+def test_unpriced_models_still_cost_none(model: str) -> None:
+    assert cost(model, 10, 10) is None
+
+
 def test_gemini_flash_3x_promotion_ends_with_2026() -> None:
     assert gemini_flash_3x_price(date(2026, 12, 31)) == ModelPrice(0.75, 3.75)
     assert gemini_flash_3x_price(date(2027, 1, 1)) == ModelPrice(1.50, 7.50)
