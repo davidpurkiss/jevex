@@ -40,8 +40,10 @@ class ReviewItem(BaseModel):
     in :class:`~jevex.store.VerifiedExample`. ``meta`` is everything known about the value,
     including its source statement and the alternatives. ``threshold`` is the review
     threshold it fell below. ``context`` is what the learner replays the statement with
-    (heading trail and statement kind). ``id`` is the same for the same value from the same
-    statement (id and text) of the same entity and URL, so a sink can drop repeats.
+    (heading trail and statement kind). ``document_source`` is the document's
+    :attr:`~jevex.Document.source`, which the example keeps for generator scoping. ``id`` is
+    the same for the same value from the same statement (id and text) of the same entity
+    and URL, so a sink can drop repeats.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -53,6 +55,7 @@ class ReviewItem(BaseModel):
     meta: FieldMeta
     threshold: float
     context: dict[str, Any] = Field(default_factory=dict[str, Any])
+    document_source: str | None = None
 
     def example(self, value: Any, *, evidence: tuple[int, int] | None = None) -> VerifiedExample:
         """A person's answer as a verified example on the item's statement.
@@ -91,6 +94,7 @@ class ReviewItem(BaseModel):
             evidence=evidence,
             context=dict(self.context),
             source="human",
+            document_source=self.document_source,
         )
 
 
@@ -124,10 +128,12 @@ def review_items(
     thresholds: Mapping[str, float] | None = None,
     statements: Mapping[str, Statement] | None = None,
     url: str | None = None,
+    document_source: str | None = None,
 ) -> list[ReviewItem]:
     """The records' (and their children's) found values with a confidence below the
     threshold: ``thresholds`` per field (keys as for the extractor's ``thresholds``), else
-    ``threshold``. ``statements`` (by id) give each item its statement's ``context``."""
+    ``threshold``. ``statements`` (by id) give each item its statement's ``context``;
+    ``url`` and ``document_source`` are the document's."""
     thresholds = thresholds or {}
     statements = statements or {}
     out: list[ReviewItem] = []
@@ -156,11 +162,17 @@ def review_items(
                     context={"heading_trail": statement.heading_trail, "kind": statement.kind}
                     if statement is not None
                     else {},
+                    document_source=document_source,
                 )
             )
         for kids in record.children.values():
             out += review_items(
-                kids, threshold=threshold, thresholds=thresholds, statements=statements, url=url
+                kids,
+                threshold=threshold,
+                thresholds=thresholds,
+                statements=statements,
+                url=url,
+                document_source=document_source,
             )
     return out
 

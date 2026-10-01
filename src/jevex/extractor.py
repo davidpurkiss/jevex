@@ -737,6 +737,7 @@ class Extractor:
                 thresholds=self.review_thresholds,
                 statements=_statements(ctx),
                 url=document.url,
+                document_source=document.source,
             )
             if items:
                 await self.review_sink.send(items)

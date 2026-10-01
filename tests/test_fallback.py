@@ -183,6 +183,7 @@ async def test_no_candidates_falls_back_and_a_verified_answer_is_used() -> None:
     assert (example.value, example.probability, example.source) == (9.1, 0.95, "llm")
     assert example.evidence == (TEXT.index("9.1"), TEXT.index("9.1") + len("9.1 seconds"))
     assert example.context["heading_trail"] == ["Performance"]
+    assert example.document_source == "example.com"  # for the learner's generator scoping
 
 
 async def test_none_falls_back_only_when_the_category_was_confident() -> None:

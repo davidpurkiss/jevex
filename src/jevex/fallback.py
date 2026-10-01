@@ -342,7 +342,7 @@ class FallbackStage:
             ask.kept = [v for i, v in enumerate(ask.values) if i in passed]
             if ask.kept:
                 ask.p = min(ask.item_p[i] for i in passed)
-                ctx.verified.extend(_examples(ask))
+                ctx.verified.extend(_examples(ask, ctx.document.source))
             ask.rejected = [
                 _rejected(ctx, ask, v, ask.item_p[i])
                 for i, v in enumerate(ask.values)
@@ -467,7 +467,7 @@ def _rejected(ctx: Context, ask: _Ask, value: Any, p: float) -> Alternative:
     return Alternative(value=value, raw=evidence, p=p)
 
 
-def _examples(ask: _Ask) -> list[VerifiedExample]:
+def _examples(ask: _Ask, document_source: str | None) -> list[VerifiedExample]:
     """The verified answer as an example for the learner, one per value."""
     statement = ask.statement
     field_key = f"{ask.run.name}.{ask.spec.name}"
@@ -484,6 +484,7 @@ def _examples(ask: _Ask) -> list[VerifiedExample]:
                 context={"heading_trail": statement.heading_trail, "kind": statement.kind},
                 source="llm",
                 probability=ask.p,
+                document_source=document_source,
             )
         )
     return out

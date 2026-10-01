@@ -79,7 +79,10 @@ class VerifiedExample(BaseModel):
 
     ``evidence`` is the ``(start, end)`` character span of the value in ``statement``.
     ``context`` holds whatever the learner needs to replay it (heading trail, component
-    type, locale...).
+    type, locale...). ``source`` is who verified it; ``document_source`` is where the
+    statement came from (:attr:`jevex.Document.source`), so the learner runs the
+    generators scoped to that source on it. ``None`` when unknown: then no
+    source-scoped generator runs on it.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -93,6 +96,7 @@ class VerifiedExample(BaseModel):
     source: Literal["llm", "human"] = "llm"
     probability: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
+    document_source: str | None = None
 
 
 def example_id(field: str, statement: str, value: Any) -> str:

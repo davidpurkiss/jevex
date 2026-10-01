@@ -252,6 +252,7 @@ class _ExampleEntry(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict[str, Any])
     source: Literal["llm", "human"] = "llm"
     probability: float | None = None
+    document_source: str | None = None
 
     @classmethod
     def of(cls, e: VerifiedExample) -> _ExampleEntry:

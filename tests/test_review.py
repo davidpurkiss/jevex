@@ -136,8 +136,11 @@ def test_child_records_values_are_sent_with_their_nested_field() -> None:
         build_extracted(trims, "SE", {"power_ps": meta(110, 0.9)}),
     ]
     record = build_extracted(parent, "doc", {"name": meta("Golf", 0.95)}, children={"trims": kids})
-    got = review_items([record], thresholds={"Range.trims.power_ps": 0.5})
+    got = review_items(
+        [record], thresholds={"Range.trims.power_ps": 0.5}, document_source="example.com"
+    )
     assert [(i.field, i.entity, i.threshold) for i in got] == [("Range.trims.power_ps", "GT", 0.5)]
+    assert got[0].document_source == "example.com"
 
 
 def test_an_item_without_a_known_statement_has_no_context() -> None:
@@ -145,6 +148,8 @@ def test_an_item_without_a_known_statement_has_no_context() -> None:
     [found] = review_items([record])
     assert found.context == {}
     assert found.url is None
+    assert found.document_source is None
+    assert found.example(9.1).document_source is None
 
 
 def test_item_ids_are_stable_and_tell_entities_apart() -> None:
@@ -185,6 +190,11 @@ def test_confirming_the_value_reuses_its_span_and_the_fallbacks_example_id() -> 
         source="human",
         created_at=ex.created_at,
     )
+
+
+def test_the_example_keeps_the_documents_source() -> None:
+    found = item().model_copy(update={"document_source": "cars.example.com"})
+    assert found.example(9.1).document_source == "cars.example.com"
 
 
 def test_a_correction_has_only_the_evidence_given() -> None:
@@ -262,6 +272,20 @@ async def test_extract_sends_each_documents_uncertain_values_to_the_sink() -> No
     assert first.field == "Car.zero_to_62_s"
     assert first.context == {"heading_trail": ["Performance"], "kind": "list_item"}
     assert first.url == URL
+    assert first.document_source == "example.com"
+
+
+async def test_a_documents_site_is_the_items_and_the_feedbacks_source() -> None:
+    queue = ReviewQueue()
+    store = open_store(":memory:")
+    doc = Document.from_bytes(b"<p/>", url=URL, site="Example-Cars.co.uk")
+    async with extractor({"zero_to_62_s": meta(9.1, 0.6)}, review_sink=queue, store=store) as ex:
+        await ex.extract(doc)
+        [review] = queue.items
+        example = await ex.feedback(review, 9.1)
+    assert review.document_source == "example-cars.co.uk"
+    assert example.document_source == "example-cars.co.uk"
+    assert await store.examples("Car.zero_to_62_s") == [example]
 
 
 async def test_a_document_with_nothing_uncertain_isnt_sent() -> None:

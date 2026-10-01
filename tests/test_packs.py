@@ -83,7 +83,10 @@ def full_pack() -> Pack:
             mapping("$.mpg", "mpg", normalisers=["parse_number", {"unit": {"from": "mpg"}}]),
             KeyMapping(fingerprint="fp/../2", schema="Car", path="$.name", field="model"),
         ],
-        examples=[ex("ex-2", value="Café", evidence=None), ex()],
+        examples=[
+            ex("ex-2", value="Café", evidence=None),
+            ex(document_source="cars.example.com"),
+        ],
     )
 
 
@@ -154,6 +157,8 @@ def test_the_files_are_readable_yaml(tmp_path: Path) -> None:
     examples = (tmp_path / "examples/Car.zero_to_62_s.yaml").read_text()
     assert examples.startswith("field: Car.zero_to_62_s\nexamples:\n- id: ex-1\n")
     assert "value: Café" in examples  # Unicode stays readable
+    assert examples.count("document_source:") == 1  # only where it's known
+    assert "  document_source: cars.example.com\n" in examples
 
 
 def test_writing_the_same_state_twice_writes_the_same_bytes(tmp_path: Path) -> None:
@@ -530,7 +535,10 @@ def test_creation_times_dont_count_as_changes() -> None:
                 m.model_copy(update={"created_at": m.created_at.replace(year=2000)})
                 for m in old.key_mappings
             ],
-            "examples": [ex("ex-2", value="Café", evidence=None), ex()],
+            "examples": [
+                e.model_copy(update={"created_at": e.created_at.replace(year=2000)})
+                for e in old.examples
+            ],
         }
     )
     assert diff_packs(old, new).empty

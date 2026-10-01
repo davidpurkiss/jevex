@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Version 1's tables; a new database runs this, then every migration.
 _SCHEMA = """
@@ -120,6 +120,9 @@ CREATE TABLE key_path_unsure (
     count INTEGER NOT NULL,
     PRIMARY KEY (fingerprint, schema_name, path)
 );
+""",
+    3: """
+ALTER TABLE examples ADD COLUMN document_source TEXT;
 """,
 }
 
@@ -446,7 +449,9 @@ class SQLiteStore:
         def run() -> None:
             with self._write() as cur:
                 cur.execute(
-                    "INSERT OR REPLACE INTO examples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO examples (id, field, statement, value, "
+                    "evidence_start, evidence_end, context, source, probability, created_at, "
+                    "document_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         example.id,
                         example.field,
@@ -458,6 +463,7 @@ class SQLiteStore:
                         example.source,
                         example.probability,
                         _ts(example.created_at),
+                        example.document_source,
                     ),
                 )
 
@@ -492,6 +498,7 @@ class SQLiteStore:
                     source=r["source"],
                     probability=r["probability"],
                     created_at=_dt(r["created_at"]),
+                    document_source=r["document_source"],
                 )
                 for r in self._rows(sql, params)
             ]
