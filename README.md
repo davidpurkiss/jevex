@@ -138,9 +138,10 @@ jevex learn --schema cars:VehicleSpec --store sqlite:///jevex.db --out review/ \
 ```
 
 `--pack` is the pack the diff is against: its generators count as learned, so examples
-they already find cost nothing. `learn_mode="hybrid"` learns inline as usual; a periodic
-`jevex learn` then also puts the generators learned inline that the pack lacks into the
-diff. In Python, `await extractor.compile_pack(pack)` returns the same `PackDiff`.
+they already find cost nothing. `learn_mode="hybrid"` learns inline as usual (like compile
+mode, it needs a `store=`); a periodic `jevex learn` then also puts the generators learned
+inline that the pack lacks into the diff. In Python, `await extractor.compile_pack(pack)`
+returns the same `PackDiff`.
 
 ## Learned state
 
