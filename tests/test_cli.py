@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 
-from jevex import Context, GeneratorRecord, GeneratorSpec, VerifiedExample, cli
+from jevex import Context, CorpusLock, GeneratorRecord, GeneratorSpec, VerifiedExample, cli
 from jevex.cli import CliError, load_llm, load_schema, main
+from jevex.fetch import RobotsDisallowedError
 from jevex.generators import GeneratorRegistry
 from jevex.jev import Choice
 from jevex.llm import ANTHROPIC_MODEL
@@ -979,3 +980,81 @@ def test_stats_serve_checks_the_source_first(tmp_path: Path) -> None:
     code, out, err = run_cli("stats", "--replay", str(tmp_path / "nope.csv"))
     assert (code, out) == (1, "")
     assert err.startswith("jevex: error: [Errno 2] No such file or directory")
+
+
+# --- jevex corpus ----------------------------------------------------------------------
+
+
+def test_corpus_lock_and_check(tmp_path: Path) -> None:
+    corpus = tmp_path / "site"
+    run_cli("testsite", "build", "--seed", "7", "--out", str(corpus), "--waves", "kv")
+    lock = tmp_path / "site.lock"
+    code, stdout, err = run_cli(
+        "corpus", "lock", str(corpus), "--name", "kv", "--out", str(lock), "--publish", "aggregate"
+    )
+    assert (code, err) == (0, "")
+    assert stdout == f"locked 16 documents of {corpus} as 'kv' in {lock}\n"
+    written = json.loads(lock.read_text())
+    assert (written["name"], written["publish"]) == ("kv", "aggregate")
+    assert written["settings"] == {"seed": 7, "waves": [["kv"]]}
+
+    code, stdout, err = run_cli("corpus", "check", str(corpus), str(lock))
+    assert (code, err) == (0, "")
+    assert stdout == f"{corpus} matches the 'kv' lock (16 documents)\n"
+
+    page = sorted(written["documents"])[0]
+    (corpus / page).write_text("changed")
+    code, stdout, err = run_cli("corpus", "check", str(corpus), str(lock))
+    assert (code, stdout) == (1, "")
+    assert err == f"jevex: error: {corpus} doesn't match the 'kv' lock:\n1 changed: {page}\n"
+
+
+def test_corpus_lock_and_check_report_bad_input(tmp_path: Path) -> None:
+    code, _, err = run_cli("corpus", "lock", str(tmp_path), "--name", "x", "--out", "x.lock")
+    assert code == 1
+    assert err.startswith(f"jevex: error: {tmp_path / 'truth.json'} isn't a corpus manifest")
+    code, _, err = run_cli("corpus", "check", str(tmp_path), str(tmp_path / "x.lock"))
+    assert code == 1
+    assert err.startswith("jevex: error: can't read lock")
+
+
+def test_corpus_books_fetches_a_sample(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    async def fake_books(out: str, *, sample: int, seed: int) -> CorpusLock:
+        calls.append((out, sample, seed))
+        return CorpusLock(name="books", truth="t", documents={"pages/a.html": "h"}, digest="d")
+
+    monkeypatch.setattr(cli, "books_corpus", fake_books)
+    lock = tmp_path / "books.lock"
+    code, stdout, err = run_cli(
+        "corpus", "books", "--out", "b", "--sample", "1", "--seed", "3", "--lock", str(lock)
+    )
+    assert (code, err) == (0, "")
+    assert calls == [("b", 1, 3)]
+    assert stdout == f"fetched 1 book (seed 3) into b\nwrote {lock}\n"
+    assert CorpusLock.load(lock).digest == "d"
+
+    code, stdout, _ = run_cli("corpus", "books", "--out", "b")
+    assert calls[-1] == ("b", 200, 42)
+    assert stdout == "fetched 1 book (seed 42) into b\n"
+
+
+def test_corpus_books_reports_fetch_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def blocked(out: str, *, sample: int, seed: int) -> CorpusLock:
+        raise RobotsDisallowedError("robots.txt disallows it")
+
+    monkeypatch.setattr(cli, "books_corpus", blocked)
+    code, stdout, err = run_cli("corpus", "books", "--out", str(tmp_path))
+    assert (code, stdout) == (1, "")
+    assert err == "jevex: error: robots.txt disallows it\n"
+
+
+def test_corpus_needs_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("corpus")
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit) as exc:
+        run_cli("corpus", "books", "--out", "b", "--sample", "0")
+    assert exc.value.code == 2
+    assert "must be at least 1, not 0" in capsys.readouterr().err

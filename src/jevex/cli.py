@@ -7,7 +7,8 @@ logged examples into a pack diff, ``jevex pack export|import|diff`` moves learne
 between stores and packs, ``jevex stats`` serves the stats UI over a store or a replay's
 CSV (``jevex stats export --svg <view>`` writes a chart), ``jevex serve`` runs the
 extraction microservice (``server`` extra, :mod:`jevex.server`), and ``jevex testsite
-build|serve`` writes and serves the synthetic test site. Uses only the standard library
+build|serve`` writes and serves the synthetic test site, and ``jevex corpus lock|check|books``
+freezes benchmark corpora (:mod:`jevex.benchmarks`). Uses only the standard library
 (argparse), so the CLI adds nothing to a core install.
 """
 
@@ -37,6 +38,14 @@ from jevex.baseline import (
     check_baseline,
     corpus_digest,
     ensure_comparable,
+)
+from jevex.benchmarks import (
+    BOOKS_SAMPLE,
+    CorpusLock,
+    Publish,
+    books_corpus,
+    check_lock,
+    lock_corpus,
 )
 from jevex.budgets import Budgets, Period, RunBudget
 from jevex.document import Document
@@ -761,6 +770,41 @@ def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:
             httpd.serve_forever()
 
 
+def _corpus_lock(args: argparse.Namespace) -> str:
+    try:
+        lock = lock_corpus(args.corpus, args.name, publish=args.publish)
+        lock.write(args.out)
+    except (ValueError, OSError) as exc:
+        raise CliError(str(exc)) from exc
+    documents = _count(len(lock.documents), "document")
+    return f"locked {documents} of {args.corpus} as {lock.name!r} in {args.out}\n"
+
+
+def _corpus_check(args: argparse.Namespace) -> str:
+    try:
+        lock = CorpusLock.load(args.lock)
+        check = check_lock(args.corpus, lock)
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
+    if not check.ok:
+        raise CliError(f"{args.corpus} doesn't match the {lock.name!r} lock:\n{check.describe()}")
+    documents = _count(len(lock.documents), "document")
+    return f"{args.corpus} matches the {lock.name!r} lock ({documents})\n"
+
+
+async def _corpus_books(args: argparse.Namespace) -> str:
+    try:
+        lock = await books_corpus(args.out, sample=args.sample, seed=args.seed)
+        if args.lock is not None:
+            lock.write(args.lock)
+    except (ValueError, FetchError, OSError) as exc:
+        raise CliError(str(exc)) from exc
+    lines = [f"fetched {_count(len(lock.documents), 'book')} (seed {args.seed}) into {args.out}"]
+    if args.lock is not None:
+        lines.append(f"wrote {args.lock}")
+    return "\n".join(lines) + "\n"
+
+
 def _waves(text: str) -> Waves:
     try:
         return parse_waves(text)
@@ -1129,6 +1173,53 @@ def build_parser() -> argparse.ArgumentParser:
     site_serve.add_argument("--dir", default=BUILD_DIR, help=f"The build (default {BUILD_DIR})")
     site_serve.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
     site_serve.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
+
+    corpus = commands.add_parser(
+        "corpus",
+        help="Lock, check and fetch benchmark corpora",
+        description="Freeze a corpus (truth.json plus its documents) as a lock of hashes, "
+        "check a corpus against its lock, or fetch the books.toscrape.com corpus. See "
+        "docs/benchmarks.md.",
+    )
+    corpus_commands = corpus.add_subparsers(dest="corpus_command", metavar="<corpus command>")
+    corpus_commands.required = True
+    lock = corpus_commands.add_parser(
+        "lock",
+        help="Write a corpus's lock",
+        description="Hash truth.json and every document it lists into a lock file.",
+    )
+    lock.add_argument("corpus", help="Directory containing truth.json and the documents")
+    lock.add_argument("--name", required=True, help="The corpus's name, e.g. testsite")
+    lock.add_argument("--out", required=True, help="Where to write the lock")
+    lock.add_argument(
+        "--publish",
+        choices=get_args(Publish),
+        default="full",
+        help="What results may be published: full (per document) or aggregate (default full)",
+    )
+    check = corpus_commands.add_parser(
+        "check",
+        help="Check a corpus against its lock",
+        description="Exit 1, listing what differs, unless the corpus matches the lock.",
+    )
+    check.add_argument("corpus", help="Directory containing truth.json and the documents")
+    check.add_argument("lock", help="The lock file")
+    books = corpus_commands.add_parser(
+        "books",
+        help="Fetch the books.toscrape.com corpus",
+        description="Fetch a seeded sample of books.toscrape.com product pages (robots.txt "
+        "honoured, one request a second) and label each from its markup. Makes real "
+        "requests to the site.",
+    )
+    books.add_argument("--out", required=True, help="A new or empty directory for the corpus")
+    books.add_argument(
+        "--sample",
+        type=_positive_int,
+        default=BOOKS_SAMPLE,
+        help=f"How many books (default {BOOKS_SAMPLE})",
+    )
+    books.add_argument("--seed", type=int, default=42, help="The sample's seed (default 42)")
+    books.add_argument("--lock", help="Also write the corpus's lock here")
     return parser
 
 
@@ -1247,6 +1338,14 @@ def main(
                 stdout.write(_testsite_build(args))
             else:
                 _testsite_serve(args, stdout)
+            return EXIT_OK
+        if args.command == "corpus":
+            if args.corpus_command == "lock":
+                stdout.write(_corpus_lock(args))
+            elif args.corpus_command == "check":
+                stdout.write(_corpus_check(args))
+            else:
+                stdout.write(asyncio.run(_corpus_books(args)))
             return EXIT_OK
         if args.command == "learn":
             diff = asyncio.run(_learn(args, jev, llm))
