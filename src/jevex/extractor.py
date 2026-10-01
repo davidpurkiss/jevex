@@ -34,12 +34,13 @@ from jevex.learn import (
     PackDiff,
     compile_pack,
 )
-from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
+from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
-from jevex.schema import ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
+from jevex.review import REVIEW_THRESHOLD, review_items
+from jevex.schema import FieldSpec, ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
@@ -53,6 +54,9 @@ if TYPE_CHECKING:
     from jevex.llm import LLM
     from jevex.packs import Pack
     from jevex.pipeline import SchemaRun, Stage
+    from jevex.review import ReviewItem, ReviewSink
+    from jevex.statements import Statement
+    from jevex.store import VerifiedExample
 
 # The spec's stage order (see jevex.interfaces). Default stages must use these names; they
 # are sorted into this order, so issues can add their stage without coordinating position.
@@ -267,6 +271,18 @@ def _threshold_keys(specs: Sequence[SchemaSpec]) -> set[str]:
     }
 
 
+def _field_specs(specs: Sequence[SchemaSpec]) -> dict[str, FieldSpec]:
+    """Every field by ``"Schema.field"``, nested models' children included."""
+    return {f"{s.name}.{f.name}": f for s in [*specs, *_child_specs(specs)] for f in s.fields}
+
+
+def _statements(ctx: Context) -> dict[str, Statement]:
+    statements = {s.id: s for s in ctx.structured}
+    if ctx.parsed is not None:
+        statements.update(ctx.parsed.statements)
+    return statements
+
+
 def _child_specs(specs: Sequence[SchemaSpec]) -> list[SchemaSpec]:
     """Specs of the nested models jevex can extract (a nested model it can't is only an
     error if ``ParentChild`` is asked to fill it)."""
@@ -375,6 +391,9 @@ class Extractor:
         prune_after: int | None = PRUNE_AFTER,
         packs: Sequence[Pack | str | Path] = (),
         community_packs: bool | Sequence[str] = True,
+        review_sink: ReviewSink | None = None,
+        review_threshold: float = REVIEW_THRESHOLD,
+        review_thresholds: Mapping[str, float] | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -413,7 +432,12 @@ class Extractor:
         ``community_packs`` the installed ones below them: all (``True``, the default),
         none (``False``) or those named. Their generators are used under the store's: the
         first layer with an id wins, and a layer can disable a lower one's generators.
-        Packs are loaded on first use."""
+        Packs are loaded on first use.
+
+        ``review_sink`` (:mod:`jevex.review`) receives each document's found values with a
+        confidence below ``review_threshold`` (or ``review_thresholds``, keyed like
+        ``thresholds``), whatever the record thresholds are. Answers given back through
+        :meth:`feedback` become verified examples."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -429,6 +453,18 @@ class Extractor:
             unknown = sorted(set(unknown) - _threshold_keys(_child_specs(self.schemas)))
         if unknown:
             raise ValueError(f"thresholds for unknown fields: {unknown}")
+        self.review_sink = review_sink
+        self.review_threshold = review_threshold
+        self.review_thresholds = dict(review_thresholds or {})
+        if not 0 <= review_threshold <= 1:
+            raise ValueError(f"review_threshold must be between 0 and 1, got {review_threshold}")
+        unknown = sorted(
+            set(self.review_thresholds)
+            - _threshold_keys(self.schemas)
+            - _threshold_keys(_child_specs(self.schemas))
+        )
+        if unknown:
+            raise ValueError(f"review_thresholds for unknown fields: {unknown}")
         self._jev = jev
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self.budgets = budgets or Budgets()
@@ -600,6 +636,49 @@ class Extractor:
         learned = LearnedGenerators(store, persist=False, packs=await self.packs())
         return await compile_pack(await self._new_learner(self.generator_llm, learned), pack)
 
+    async def feedback(
+        self, item: ReviewItem, value: Any, *, evidence: tuple[int, int] | None = None
+    ) -> VerifiedExample:
+        """Record a person's answer to a review item as a verified example and return it.
+
+        ``value`` is the right value for the item's field in its statement (the extracted
+        one, to confirm it), normalised as the field types it (``"9.1"`` → ``9.1``). For a
+        list field it is one item: call again for each item the statement states.
+        ``evidence`` is its ``(start, end)`` span in the statement, if known
+        (:meth:`~jevex.review.ReviewItem.example`). The example is stored, replacing an
+        LLM example of the same answer, and the learner (inline mode, with a
+        ``generator_llm``) queues it like a verified LLM answer. Needs a ``store=``, or a
+        ``generator_llm`` to learn from it in this process.
+
+        Raises ``ValueError`` for an item of a field this extractor doesn't have, an item
+        without a source statement, a ``None`` value, a list for a list field, a value
+        that doesn't fit the field, or evidence outside the statement.
+        """
+        spec = _field_specs(self.schemas).get(item.field)
+        if spec is None:
+            raise ValueError(f"{item.field} isn't a field of this extractor's schemas")
+        if spec.many and isinstance(value, list):
+            raise ValueError(f"{item.field} is a list field: give one item per feedback call")
+        if value is not None:
+            norm = _stage(self.pipeline, "normalise", NormaliseStage)
+            registry = norm.registry if norm else BUILTIN_NORMALISERS
+            try:
+                value = normalise(value, [], spec, registry=registry)
+            except NormaliseError as exc:
+                raise ValueError(str(exc)) from None
+        example = item.example(value, evidence=evidence)
+        learner = await self.learner()
+        if learner is not None:
+            await learner.submit(example)
+            return example
+        if self._store_source is None and (self._store is None or self._owns_store):
+            # Not the in-memory store an extractor opens for itself: it'd be lost on close.
+            raise ValueError("feedback keeps verified examples in a store: pass store=")
+        store = await self.store()
+        assert store is not None
+        await store.add_example(example)
+        return example
+
     async def wait_for_learning(self) -> None:
         """Wait until every example queued so far has been learned from (or rejected)."""
         if self._learner is not None:
@@ -637,9 +716,20 @@ class Extractor:
             # mid-flight is counted at its estimate), so this is the document's whole Jev
             # spend, recorded even when a stage failed.
             await budget.finish_document(ctx.jev.usage.cost)
-        return ExtractionResult.from_context(
+        result = ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
+        if self.review_sink is not None:
+            items = review_items(
+                result.records,
+                threshold=self.review_threshold,
+                thresholds=self.review_thresholds,
+                statements=_statements(ctx),
+                url=document.url,
+            )
+            if items:
+                await self.review_sink.send(items)
+        return result
 
     def extract_sync(self, document: Document) -> ExtractionResult:
         """Blocking wrapper for scripts and notebooks without a running event loop.

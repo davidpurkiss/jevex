@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -89,6 +90,16 @@ class VerifiedExample(BaseModel):
     source: Literal["llm", "human"] = "llm"
     probability: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
+
+
+def example_id(field: str, statement: str, value: Any) -> str:
+    """The id of the example of ``value`` for ``field`` in ``statement``.
+
+    The same answer gets the same id whoever gave it, so a human confirming an LLM answer
+    replaces that example (:meth:`Store.add_example`) rather than adding a second one.
+    """
+    digest = hashlib.sha256(f"{field}\0{statement}\0{value!r}".encode()).hexdigest()
+    return f"ex-{digest[:12]}"
 
 
 class GeneratorStats(BaseModel):
