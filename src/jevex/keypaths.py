@@ -26,8 +26,10 @@ The stage's :data:`StructuredMode` decides what the layout route (stages 5–13)
 
 - ``structured_only`` (default): a schema the embedded data gave any value is finished;
   the layout route runs only for schemas it gave nothing.
-- ``fill_gaps``: the layout route looks only for the fields left empty (a schema with
-  none left is finished).
+- ``fill_gaps``: the layout route runs while a field is left empty, and selects values
+  only for those fields (a schema with none left is finished). The component gate and
+  the categoriser still consider every field: they run before entities are resolved, and
+  a found field stays a categorise option so statements about it aren't misrouted.
 - ``merge``: the layout route looks for every field, and
   :meth:`~jevex.pipeline.SchemaRun.offer_field` settles each disagreement by confidence,
   recording the losing value in ``meta.conflicts``.

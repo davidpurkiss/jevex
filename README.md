@@ -19,7 +19,7 @@ structured stage's `mode` decides what happens next:
 | Mode | Behaviour |
 | --- | --- |
 | `structured_only` (default) | A schema the embedded data gave any value skips the layout route; the rest go on to it. |
-| `fill_gaps` | The layout route runs only for the fields the embedded data left empty. |
+| `fill_gaps` | The layout route runs while some field is still empty, and only those fields get values from it (the component gate and categoriser still consider every field). |
 | `merge` | The layout route looks for every field. The more confident value wins (a direct read of embedded data counts as certain), and the other is kept in `meta.conflicts`. |
 
 ```python
