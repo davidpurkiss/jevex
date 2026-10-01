@@ -55,6 +55,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `eval.py` | `jevex eval`: corpus (`truth.json`) loading, record matching, per-field tolerances and scores, `EvalReport` |
 | `store/` | Learned state: `Store` protocol and records (`base.py`), `SQLiteStore` (WAL, `BEGIN IMMEDIATE` writes, integer nano-dollar spend ledger, own worker thread), `PostgresStore` (`postgres.py`, `postgres` extra: psycopg pool, tables in their own Postgres schema, writes shielded from cancellation; tests use a bundled server from `pixeltable-pgserver`), `open_store(url)` |
 | `tables.py` | `table_statements`: one `table_cell` statement per data cell, rendered `[band › ][row headers · ][column headers: ]value`, with headers structured on `Statement.table` (`TableCellRef`) for entity resolvers; `header_prefix`; `blank_rows` (a label whose data cells are empty: not a band or header row, for the gate too); `row_roles` (each row a header, band or body row, as the statements read it; the gate splits oversized tables by it); `infer_headers` (a header-less comparison table's first row and column, guarded by number-like values) |
+| `testsite/` | Synthetic test site: `dataset.py` (seeded makes, models, trims, listings), `phrasing.py` (the phrasing bank: sentences, labels, value formats, listing facts), `render.py` (families `table`, `kv`, `prose`, `grid`, `listing`, `pdf` spec sheets, `scanned` image-only PDFs, `infographic` PNGs; `Page.content` bytes + `content_type`), `drawing.py` (`Drawing` → vector PDF, PNG or scanned PDF; rasterising needs the `testsite` extra, Pillow, and ASCII text: `plain` drawings), `build`/`digest` in `__init__` |
 | `testing.py` | `FakeJev` / `FakeLLM` (scripted answers), `Cassette` / `LLMCassette` record/replay |
 | `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/gemini.py`, `llm/litellm.py` (extras) |
 
@@ -76,7 +77,8 @@ How the parts fit together:
 Put new modules where the spec's structure suggests. For example: `jevex/clean.py`,
 `jevex/layout_html.py`, `jevex/generators/`, `jevex/normalise.py`, `jevex/store/`,
 `jevex/llm/`, `jevex/contrib/scrapy.py`, `jevex/cli.py`. Heavy dependencies are optional
-extras (`pdf`, `ocr`, `anthropic`, `openai`, `gemini`, `litellm`, `postgres`, `server`, `scrapy`).
+extras (`pdf`, `ocr`, `anthropic`, `openai`, `gemini`, `litellm`, `postgres`, `server`, `scrapy`,
+`testsite`).
 Import them lazily inside the code that needs them.
 
 ## Conventions

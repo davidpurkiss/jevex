@@ -244,6 +244,11 @@ uv run pyright
 uv run pytest
 ```
 
+`jevex.testsite.build(seed, out_dir)` writes a synthetic car site with exact ground truth
+(`truth.json`) for `jevex eval`: HTML pages in several template families, spec-sheet PDFs,
+scanned (image-only) PDFs and infographic PNGs, with each fact worded several ways. The
+scans and infographics need Pillow: `uv sync --extra testsite` (or `--all-extras`).
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

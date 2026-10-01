@@ -1,8 +1,9 @@
 """A deterministic synthetic car site with exact ground truth (spec: *Synthetic test site*).
 
-``build(seed, out_dir)`` writes the site's HTML pages, an index, and ``truth.json``: for
-every page its template family, schema and expected records. Eval (#46) scores extraction
-against it, and the learning demo replays it (#45, #47).
+``build(seed, out_dir)`` writes the site's pages (HTML, PDFs and images), an index, and
+``truth.json``: for every page its template family, schema, content type and expected
+records. Eval (#46) scores extraction against it, and the learning demo replays it (#45,
+#47). The phrasing bank (:mod:`jevex.testsite.phrasing`) words each fact several ways.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ def build(seed: int = 42, out_dir: str | Path = "testsite/build") -> dict[str, A
     for page in pages:
         target = out / page.path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(page.html, encoding="utf-8")
+        target.write_bytes(page.content)
     (out / "index.html").write_text(_index(pages), encoding="utf-8")
     manifest: dict[str, Any] = {
         "seed": seed,
@@ -67,11 +68,15 @@ def _remove_previous_build(out: Path) -> None:
 
 
 def digest(pages: list[Page]) -> str:
-    """A hash of every page's path and bytes: equal digests mean identical sites."""
+    """A hash of every page's path and bytes: equal digests mean identical sites.
+
+    PDFs and HTML are byte for byte the same everywhere. Rasterised pages (scans and
+    infographics) can differ between Pillow versions, which may draw text a pixel apart.
+    """
     h = hashlib.sha256()
     for page in pages:
         h.update(page.path.encode())
-        h.update(page.html.encode())
+        h.update(page.content)
     return h.hexdigest()
 
 

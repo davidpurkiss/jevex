@@ -560,6 +560,8 @@ def site_statements() -> list[tuple[str, str, list[Statement], Component]]:
     async def parse_all() -> list[tuple[str, str, list[Statement], Component]]:
         out: list[tuple[str, str, list[Statement], Component]] = []
         for page in render(generate(7)):
+            if page.content_type != "text/html":
+                continue
             doc = BoilerplateCleaner().clean(
                 Document.from_bytes(page.html.encode(), url=f"https://site.test/{page.path}")
             )
