@@ -112,9 +112,8 @@ def test_schema_by_module_path_and_by_file() -> None:
     assert load_schema(SCHEMA).__name__ == "Book"
 
 
-@pytest.mark.parametrize("command", ["testsite", "serve"])
-def test_planned_commands_say_so(command: str) -> None:
-    code, _, err = run_cli(command)
+def test_planned_commands_say_so() -> None:
+    code, _, err = run_cli("serve")
     assert code == 2
     assert "not implemented yet" in err
     assert "#" in err
@@ -634,3 +633,107 @@ def test_a_broken_community_pack_is_a_clean_error(
     code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
     assert (code, out) == (1, "")
     assert err == "jevex: error: pack: installed pack 'cars' (cars_pack) failed to load: boom\n"
+
+
+def test_testsite_build_writes_the_site_and_says_what_it_built(tmp_path: Path) -> None:
+    out = tmp_path / "site"
+    code, stdout, err = run_cli(
+        "testsite", "build", "--seed", "7", "--out", str(out), "--waves", "table,listing;kv"
+    )
+    assert (code, err) == (0, "")
+    manifest = json.loads((out / "truth.json").read_text())
+    assert manifest["seed"] == 7
+    assert manifest["waves"] == [["table", "listing"], ["kv"]]
+    lines = stdout.splitlines()
+    assert lines[0] == f"built {len(manifest['pages'])} pages for seed 7 in {out}"
+    assert lines[1] == "  wave 1: table, listing (88 pages)"
+    assert lines[2] == "  wave 2: kv (16 pages)"
+    assert lines[3] == f"digest {manifest['digest']}"
+    again = tmp_path / "again"
+    run_cli("testsite", "build", "--seed", "7", "--out", str(again), "--waves", "table,listing;kv")
+    assert (again / "truth.json").read_bytes() == (out / "truth.json").read_bytes()
+
+
+def test_testsite_build_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    def fake_build(seed: int, out_dir: str, *, waves: object) -> dict[str, object]:
+        calls.append((seed, out_dir, waves))
+        return {"waves": [], "pages": [], "digest": "d"}
+
+    monkeypatch.setattr(cli, "build", fake_build)
+    code, stdout, _ = run_cli("testsite", "build")
+    assert code == 0
+    assert calls == [(42, "testsite/build", cli.DEFAULT_WAVES)]
+    assert stdout == "built 0 pages for seed 42 in testsite/build\ndigest d\n"
+
+
+def test_testsite_build_refuses_a_bad_schedule(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("testsite", "build", "--waves", "table;tables")
+    assert exc.value.code == 2
+    assert "--waves: wave 2: unknown family 'tables'" in capsys.readouterr().err
+
+
+def test_testsite_build_errors_are_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "notes.txt").write_text("mine")
+    code, _, err = run_cli("testsite", "build", "--out", str(tmp_path))
+    assert code == 1
+    assert err.startswith("jevex: error: ")
+    assert "refusing" in err
+    assert (tmp_path / "notes.txt").read_text() == "mine"
+
+    def no_pillow(*args: object, **kwargs: object) -> None:
+        raise ImportError("Rendering the test site's images needs Pillow: install jevex[testsite]")
+
+    monkeypatch.setattr(cli, "build", no_pillow)
+    code, _, err = run_cli("testsite", "build", "--out", str(tmp_path / "new"))
+    assert code == 1
+    assert err.endswith("jevex[testsite], or leave scanned and infographic out of --waves\n")
+
+
+def test_testsite_serve_serves_until_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served: list[tuple[str, str, int]] = []
+
+    class FakeServer:
+        server_address = ("127.0.0.1", 8123)
+        closed = False
+
+        def __enter__(self) -> "FakeServer":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self.closed = True
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+    fake = FakeServer()
+
+    def fake_server(directory: str, host: str, port: int) -> FakeServer:
+        served.append((directory, host, port))
+        return fake
+
+    monkeypatch.setattr(cli, "server", fake_server)
+    code, out, err = run_cli("testsite", "serve", "--dir", str(tmp_path), "--port", "8123")
+    assert (code, err) == (0, "")
+    assert served == [(str(tmp_path), "127.0.0.1", 8123)]
+    assert out == f"serving {tmp_path} at http://127.0.0.1:8123/ (Ctrl-C to stop)\n"
+    assert fake.closed
+
+
+def test_testsite_serve_needs_a_build(tmp_path: Path) -> None:
+    code, out, err = run_cli("testsite", "serve", "--dir", str(tmp_path))
+    assert (code, out) == (1, "")
+    assert err == (
+        f"jevex: error: {tmp_path} has no test site; build one first (jevex testsite build)\n"
+    )
+
+
+def test_testsite_needs_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("testsite")
+    assert exc.value.code == 2
+    assert "testsite command" in capsys.readouterr().err
