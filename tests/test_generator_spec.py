@@ -67,6 +67,14 @@ def test_the_spec_example_parses() -> None:
     assert spec.provenance.created == date(2026, 9, 29)
 
 
+def test_a_nested_models_field_is_scoped_to_its_child_run() -> None:
+    spec = GeneratorSpec.parse(minimal(field="Book.editions.price"))
+    assert (spec.schema_name, spec.field_name) == ("Book.editions", "price")
+    scope = spec.to_generator().scope
+    assert scope.fields == {"Book.editions.price"}
+    assert scope.schemas == {"Book.editions"}
+
+
 def test_yaml_round_trip_is_lossless_and_compact() -> None:
     spec = GeneratorSpec.from_yaml(SPEC_YAML)
     text = spec.to_yaml()
@@ -154,7 +162,8 @@ def test_every_built_in_normaliser_is_allowed_and_real() -> None:
         ({"surprise": 1}, "surprise"),
         ({"scope": {"locale": "en-GB", "kinds": ["number"]}}, "scope.kinds"),
         ({"field": "price"}, "field"),
-        ({"field": "Book.price.amount"}, "field"),
+        ({"field": "Book.edition.price.amount"}, "field"),
+        ({"field": "Book..price"}, "field"),
         ({"id": "has space"}, "id"),
         ({"id": ""}, "id"),
         ({"scope": {"locale": "not a locale"}}, "scope.locale"),

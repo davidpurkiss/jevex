@@ -109,7 +109,9 @@ same pattern never needs the LLM again. The LLM writes an RE2 pattern and a chai
 built-in normalisers. The generator is kept only if it finds the value in the statement it
 came from, Jev picks that value there, and it doesn't make Jev wrong on the field's stored
 examples. Documents that start after it is accepted use it; documents already running keep
-the generators they started with (`meta.generator_snapshot` says which).
+the generators they started with (`meta.generator_snapshot` says which). A nested model's
+fields are learned too: a generator for `ModelPage.variants.price` runs only on the
+variants, not on the page's own fields.
 
 ```python
 extractor = Extractor(

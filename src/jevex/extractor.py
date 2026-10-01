@@ -41,7 +41,7 @@ from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
 from jevex.review import REVIEW_THRESHOLD, review_items
-from jevex.schema import FieldSpec, ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
+from jevex.schema import FieldSpec, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
@@ -285,16 +285,8 @@ def _statements(ctx: Context) -> dict[str, Statement]:
 
 
 def _child_specs(specs: Sequence[SchemaSpec]) -> list[SchemaSpec]:
-    """Specs of the nested models jevex can extract (a nested model it can't is only an
-    error if ``ParentChild`` is asked to fill it)."""
-    out: list[SchemaSpec] = []
-    for spec in specs:
-        for f in spec.child_fields:
-            try:
-                out.append(spec.child(f.name))
-            except (UnsupportedFieldError, ReservedFieldNameError):
-                continue
-    return out
+    """Specs of the nested models jevex can extract (:meth:`SchemaSpec.children`)."""
+    return [child for spec in specs for child in spec.children()]
 
 
 def _records(

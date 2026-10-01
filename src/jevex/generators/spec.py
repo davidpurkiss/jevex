@@ -71,7 +71,7 @@ MAX_SPEC_CHARS = 20_000
 
 _ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 _NAME = r"[A-Za-z_][A-Za-z0-9_]*"
-_FIELD = rf"^{_NAME}\.{_NAME}$"
+_FIELD = rf"^{_NAME}(?:\.{_NAME})?\.{_NAME}$"
 
 
 # Error messages quote untrusted input; keep the quotes short whatever its shape.
@@ -293,7 +293,13 @@ class GeneratorSpec(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str = Field(pattern=_ID)
-    field: str = Field(pattern=_FIELD, description="Schema.field, e.g. VehicleSpec.price")
+    field: str = Field(
+        pattern=_FIELD,
+        description=(
+            "Schema.field, e.g. VehicleSpec.price, or Schema.nested_field.field for a "
+            "nested model's field, e.g. ModelPage.variants.price"
+        ),
+    )
     scope: SpecScope = Field(default_factory=SpecScope)
     match: MatchSpec
     normalise: Annotated[list[NormaliserStep], WithJsonSchema(NORMALISE_JSON_SCHEMA)] = Field(
@@ -329,13 +335,15 @@ class GeneratorSpec(BaseModel):
 
     @property
     def schema_name(self) -> str:
-        """The schema part of ``field``: ``VehicleSpec`` for ``VehicleSpec.price``."""
-        return self.field.split(".", 1)[0]
+        """The schema part of ``field``, as its run is named: ``VehicleSpec`` for
+        ``VehicleSpec.price``, ``ModelPage.variants`` for ``ModelPage.variants.price``."""
+        return self.field.rpartition(".")[0]
 
     @property
     def field_name(self) -> str:
-        """The field part of ``field``: ``price`` for ``VehicleSpec.price``."""
-        return self.field.split(".", 1)[1]
+        """The field part of ``field``: ``price`` for ``VehicleSpec.price`` (and for
+        ``ModelPage.variants.price``)."""
+        return self.field.rpartition(".")[2]
 
     @classmethod
     def parse(cls, data: object) -> GeneratorSpec:

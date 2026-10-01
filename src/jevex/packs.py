@@ -127,7 +127,7 @@ class Pack(BaseModel):
         if self.manifest.schemas:
             allowed = set(self.manifest.schemas)
             used = (
-                [g.schema_name for g in self.generators]
+                [_schema_of(g.field) for g in self.generators]
                 + [m.schema_name for m in self.key_mappings]
                 + [_schema_of(e.field) for e in self.examples]
             )
@@ -326,6 +326,8 @@ def _unique(what: str, keys: list[str]) -> None:
 
 
 def _schema_of(field: str) -> str:
+    """The top-level schema a field belongs to, as a manifest's ``schemas`` names it:
+    ``ModelPage`` for ``ModelPage.variants.price`` too."""
     return field.split(".", 1)[0]
 
 
@@ -476,10 +478,10 @@ async def export_pack(
     def keep(schema: str) -> bool:
         return not wanted or schema in wanted
 
-    generators = [g for g in await stored_generators(store) if keep(g.schema_name)]
+    generators = [g for g in await stored_generators(store) if keep(_schema_of(g.field))]
     mappings = [m for m in await store.key_mappings() if keep(m.schema_name)]
     found = [e for e in await store.examples() if keep(_schema_of(e.field))] if examples else []
-    used = {g.schema_name for g in generators} | {m.schema_name for m in mappings}
+    used = {_schema_of(g.field) for g in generators} | {m.schema_name for m in mappings}
     used |= {_schema_of(e.field) for e in found}
     manifest = PackManifest(
         name=name,

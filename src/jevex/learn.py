@@ -45,6 +45,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
@@ -360,7 +361,8 @@ class _Rejected(Exception):
 class GeneratorLearner:
     """The default :class:`~jevex.interfaces.Learner`: synthesise, test and hot-swap.
 
-    ``schemas`` are the extractor's (an example's ``field`` is ``"Schema.field"``).
+    ``schemas`` are the extractor's (an example's ``field`` is ``"Schema.field"``, or
+    ``"Parent.nested_field.field"`` for a nested model's field).
     ``base``, ``locale``, ``selector``, ``normalisers`` and ``fallback_threshold`` should
     be what the candidate, select, normalise and fallback stages use, so a generator is
     tested as documents will run it. ``ledger`` applies the run budget to
@@ -492,9 +494,15 @@ class GeneratorLearner:
             snapshot=snapshot.version,
         )
 
+    @cached_property
+    def all_schemas(self) -> tuple[SchemaSpec, ...]:
+        """``schemas`` and their nested models' specs (:meth:`~jevex.SchemaSpec.children`,
+        named ``"Parent.nested_field"``): every schema an example's ``field`` can name."""
+        return (*self.schemas, *(child for s in self.schemas for child in s.children()))
+
     def _field(self, example: VerifiedExample) -> tuple[str, FieldSpec]:
-        schema, _, name = example.field.partition(".")
-        spec = next((s for s in self.schemas if s.name == schema), None)
+        schema, _, name = example.field.rpartition(".")
+        spec = next((s for s in self.all_schemas if s.name == schema), None)
         found = next((f for f in spec.fields if f.name == name), None) if spec else None
         if found is None or not found.needs_candidates:
             raise _Rejected("unlearnable", f"{example.field} isn't a candidate field")
@@ -791,10 +799,10 @@ async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] 
     gives the examples and the local layer's generators, and nothing is published to it.
     The learner runs on the store's generators plus ``pack``'s (less those the store
     disables), so an example they already find costs nothing, and each generator accepted
-    is in use for the examples after it. It learns from the schemas' candidate fields'
-    examples that it :meth:`~GeneratorLearner.wants`, oldest first. Running it again is
-    safe: covered examples are skipped without an LLM call, but ones rejected before are
-    tried again.
+    is in use for the examples after it. It learns from the candidate fields' examples
+    (nested models' fields too: :attr:`~GeneratorLearner.all_schemas`) that it
+    :meth:`~GeneratorLearner.wants`, oldest first. Running it again is safe: covered
+    examples are skipped without an LLM call, but ones rejected before are tried again.
     """
     learned = learner.generators
     store = learned.store
@@ -807,7 +815,7 @@ async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] 
     stored = await learned.stored()
     await learned.load(also=[spec for spec in pack if spec.id not in disabled])
     outcomes: list[LearnOutcome] = []
-    for schema in learner.schemas:
+    for schema in learner.all_schemas:
         for spec in schema.fields:
             if not spec.needs_candidates:
                 continue
