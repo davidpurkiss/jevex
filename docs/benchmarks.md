@@ -65,7 +65,9 @@ jevex corpus check DIR benchmarks/corpora/NAME.lock     # exit 1, listing what d
 - **`testsite`** isn't stored. The run rebuilds it from its seed
   (`jevex testsite build --seed 42`) and checks the build against the committed
   `testsite.lock`, which CI tests as well. HTML and PDFs are byte-identical everywhere.
-  The raster pages depend on the Pillow version, which `uv.lock` pins.
+  The raster pages (scans and infographics) depend on the Pillow version, which
+  `uv.lock` pins. The PNGs also need a Python whose `zlib` is classic zlib rather than
+  zlib-ng (`zlib.ZLIB_RUNTIME_VERSION`), as in uv's 3.12 and 3.13 builds and CI.
 - **`books`** is fetched once with `jevex corpus books --out DIR --lock
   benchmarks/corpora/books.lock`, which makes real requests to the site. The fetch walks
   the whole catalogue (50 pages, 1000 books) through `SimpleFetcher`, which honours

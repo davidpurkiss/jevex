@@ -5,8 +5,8 @@ left and text placed by its baseline. :func:`to_pdf` writes it as a one-page PDF
 text layer (Helvetica, WinAnsi), byte for byte the same every time: no dates, no IDs.
 :func:`to_png` and :func:`to_scanned_pdf` rasterise it with Pillow (the ``testsite``
 extra), the second as an image-only PDF with a scanner's tilt, paper tone, speckle and
-blur. PNGs are byte for byte the same on every platform too (:func:`png_bytes`). Rasterised
-text is set in Pillow's bundled font, so it's a little narrower or wider
+blur. A PNG's bytes depend only on its pixels and the Python's zlib (:func:`png_bytes`).
+Rasterised text is set in Pillow's bundled font, so it's a little narrower or wider
 than in the PDF; layouts leave room for that. That font has no ``£`` or en dash, so a
 drawing meant for rasterising is ``plain``: its text is ASCII (:func:`plain_text`).
 """

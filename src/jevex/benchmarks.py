@@ -525,6 +525,8 @@ class CorpusSpec(BaseModel):
 
 
 class BootstrapSettings(BaseModel):
+    """How :func:`bootstrap_interval` runs for published results: resamples and confidence."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     samples: int = Field(default=1000, ge=100)
