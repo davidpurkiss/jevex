@@ -96,9 +96,10 @@ class JevexPipeline:
 
     Enable it in ``ITEM_PIPELINES`` and set ``JEVEX_SCHEMAS`` (see the module docs for
     every setting). The pipeline owns its extractor: it's made when the spider opens
-    (:meth:`make_extractor`) and closed when it closes. Items are extracted concurrently,
-    up to Scrapy's ``CONCURRENT_ITEMS``. An extraction that raises fails its item, which
-    Scrapy logs and drops.
+    (:meth:`make_extractor`) and closed when it closes. Items are extracted concurrently:
+    up to Scrapy's ``CONCURRENT_ITEMS`` per response, for as many responses as Scrapy is
+    processing at once, so cap spend with a budget rather than concurrency settings. An
+    extraction that raises fails its item, which Scrapy logs and drops.
 
     Counts go to Scrapy's stats under ``jevex/``: ``documents``, ``records``, ``stopped``
     (documents a budget or gate stopped early), ``jev_requests``, ``llm_calls``,

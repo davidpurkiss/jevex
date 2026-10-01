@@ -151,7 +151,8 @@ def test_document_from_response_keeps_octet_stream_when_nothing_says_more() -> N
         headers={"Content-Type": "application/octet-stream"},
     )
     assert document_from_response(response).content_type == "application/octet-stream"
-    assert document_from_response(Response(url="https://books.example/blob", body=b"\x00"))
+    unknown = Response(url="https://books.example/blob", body=b"\x00")
+    assert document_from_response(unknown).content_type == "application/octet-stream"
 
 
 # --- JevexPipeline -------------------------------------------------------------------
