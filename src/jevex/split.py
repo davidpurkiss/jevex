@@ -138,8 +138,17 @@ _LAST_WORD = re.compile(r"(\w+)\.$")
 # What may follow a mid-sentence abbreviation: a lowercase word, a number, a symbol or an
 # all-caps acronym ("excl. VAT"). A capitalised word starts a real sentence ("5 min. Then").
 _CONTINUES = re.compile(r"^(?:[a-z0-9£$€(\[%&+\-–]|[A-Z]{2,5}\b)")
-# German capitalises nouns, so a capitalised word after one of its own abbreviations
-# continues the sentence ("inkl. Versand"), unless it's a word that usually opens one.
+# German capitalises nouns, so a capitalised word after an abbreviation that qualifies what
+# follows it continues the sentence ("inkl. Versand"), unless it's a word that usually opens
+# one. Noun abbreviations ("MwSt.", "Nr.") often end a sentence, so they aren't listed.
+_PREPOSITIVE = {
+    "de": frozenset(
+        {
+            "inkl", "exkl", "zzgl", "abzgl", "ca", "bzw", "ggf", "evtl", "bspw", "max", "vgl",
+            "lt", "gem", "mtl", "eff", "zul",
+        }
+    ),
+}  # fmt: skip
 _SENTENCE_OPENERS = {
     "de": frozenset(
         {
@@ -187,12 +196,17 @@ def _mis_split(fragment: str, following: str, language: str) -> bool:
     if word is None:
         return False
     abbreviation = word.group(1).lower()
-    own = abbreviation in LANGUAGE_ABBREVIATIONS.get(language, frozenset())
-    if (own or abbreviation in ABBREVIATIONS) and _CONTINUES.match(following):
+    if (
+        abbreviation in ABBREVIATIONS
+        or abbreviation in LANGUAGE_ABBREVIATIONS.get(language, frozenset())
+    ) and _CONTINUES.match(following):
         return True
-    openers = _SENTENCE_OPENERS.get(language)
     first = _FIRST_WORD.match(following)
-    return own and openers is not None and first is not None and first.group() not in openers
+    return (
+        abbreviation in _PREPOSITIVE.get(language, frozenset())
+        and first is not None
+        and first.group() not in _SENTENCE_OPENERS.get(language, frozenset())
+    )
 
 
 def sentences(text: str, *, language: str = "en") -> list[str]:

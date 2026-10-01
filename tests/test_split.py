@@ -780,10 +780,15 @@ PRICE = "Der Wagen kostet ca. 25.000 € inkl. MwSt. und hat 150 PS."
             ["Preis zzgl. Überführung und inkl. Garantie."],
         ),
         ("Verbrauch ca. 5 l, max. Leistung 150 PS.", ["Verbrauch ca. 5 l, max. Leistung 150 PS."]),
-        ("Inkl. Navigationssystem.", ["Inkl. Navigationssystem."]),
+        ("Preis inkl. Versand.", ["Preis inkl. Versand."]),
         ("Ein Paket evtl. Ende Mai.", ["Ein Paket evtl. Ende Mai."]),
         # An article or pronoun after one still starts a new sentence.
         ("Das kostet 5 € max. Der Rest ist frei.", ["Das kostet 5 € max.", "Der Rest ist frei."]),
+        # So does one after a noun abbreviation, which can end a sentence.
+        (
+            "Der Preis beträgt 300 € zzgl. USt. Lieferung frei.",
+            ["Der Preis beträgt 300 € zzgl. USt.", "Lieferung frei."],
+        ),
         # English abbreviations keep the English rule on a German page.
         ("Fahrzeit 5 min. Danach Pause.", ["Fahrzeit 5 min.", "Danach Pause."]),
         # A word that isn't an abbreviation still ends the sentence.
