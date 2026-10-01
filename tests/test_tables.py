@@ -433,6 +433,42 @@ def test_header_less_two_column_html_table_reads_as_labels_and_values() -> None:
     assert texts(t) == ["Engine: 1.5 TSI", "Power: 150 PS"]
 
 
+def test_a_label_with_an_empty_value_in_a_label_value_table_gives_nothing() -> None:
+    plain = html_table(
+        "<tr><td>Engine</td><td>1.5 TSI</td></tr>"
+        "<tr><td>Towing</td><td></td></tr>"
+        "<tr><td>Kerb weight</td><td>&nbsp;</td></tr>"
+        "<tr><td>Power</td><td>150 PS</td></tr>"
+    )
+    assert texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+    assert [s.id.split(".")[-1] for s in table_statements(plain)] == ["r0c1", "r3c1"]
+    # The bold-label version of the same table gave nothing already, as a blank row.
+    bold = html_table(
+        "<tr><td><b>Engine</b></td><td>1.5 TSI</td></tr>"
+        "<tr><td><b>Towing</b></td><td></td></tr>"
+        "<tr><td><b>Power</b></td><td>150 PS</td></tr>"
+    )
+    assert texts(bold) == texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+
+
+def test_a_header_less_table_that_isnt_label_value_keeps_rows_with_empty_cells() -> None:
+    # Numbers in the first column: rows of values, so an empty value keeps its row.
+    numbers = html_table("<tr><td>2019</td><td>150 PS</td></tr><tr><td>2021</td><td></td></tr>")
+    assert texts(numbers) == ["2019 | 150 PS", "2021"]
+    # Wider than two columns: one statement per row, empty cells left out.
+    wide = html_table(
+        "<tr><td>Kestrova</td><td>SE</td><td>£24,995</td></tr>"
+        "<tr><td>Kestrova</td><td></td><td></td></tr>"
+    )
+    assert texts(wide) == ["Kestrova | SE | £24,995", "Kestrova"]
+    # A label alone in its row, with no value cell at all, isn't a label without a value.
+    no_cell = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, "Notes"))
+    assert texts(no_cell) == ["Engine: 1.5 TSI", "Notes"]
+    # A value whose label cell is empty stays a statement.
+    no_label = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, ""), cell(1, 1, "Red"))
+    assert texts(no_label) == ["Engine: 1.5 TSI", "Red"]
+
+
 def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_headers() -> None:
     t = html_table(
         "<tr><td>Spec</td><td>1.5 TSI SE</td><td>GT</td></tr>"

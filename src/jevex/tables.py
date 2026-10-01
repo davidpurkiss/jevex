@@ -24,9 +24,10 @@ A spec table's cell "9.1" means nothing alone; rendered as
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
 statement per row, its cells joined with ``" | "``; a two-column one without headers whose
-first column holds labels (not numbers) reads as ``label: value`` instead, and a wider one
-shaped like a comparison table has its headers inferred (:func:`infer_headers`). The headers also
-travel structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
+first column holds labels (not numbers) reads as ``label: value`` instead (a label whose
+value cell is empty giving nothing, like a blank row), and a wider one shaped like a
+comparison table has its headers inferred (:func:`infer_headers`). The headers also travel
+structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
 entity resolver can split a comparison table by column (one trim per column).
 
 This works on :class:`~jevex.layout.TableCell` grids from any layout parser (HTML and
@@ -71,9 +72,12 @@ def table_statements(table: Component) -> list[Statement]:
         # No headers, or nothing but headers: nothing to attach, so one statement per row,
         # except that a two-column table without headers is read as labels and values.
         pairs = not any(c.header for c in cells) and _label_value(cells, width)
+        empty_values = {c.row for c in table.cells if c.col == 1 and not _clean(c.text)}
         out: list[Statement] = []
         for r in ordered:
             row = sorted(rows[r], key=lambda c: c.col)
+            if pairs and len(row) == 1 and row[0].col == 0 and r in empty_values:
+                continue  # a label without its value ("Towing | "), as a blank row gives nothing
             if pairs and len(row) == 2:
                 label, value = _label(row[0].text), _clean(row[1].text)
                 ref = TableCellRef(row=r, col=1, row_headers=[label], row_labels=[label])
