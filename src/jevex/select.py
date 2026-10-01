@@ -58,14 +58,15 @@ this probability: "In stock (22 available)" states both ``in_stock`` and
 
 
 def field_statements(
-    ctx: Context, run: SchemaRun, scope: EntityScope
+    ctx: Context, run: SchemaRun, scope: EntityScope, *, include_found: bool = False
 ) -> list[tuple[Statement, FieldSpec]]:
     """(statement, field) pairs in scope that the classifier assigned to a field.
 
     A statement pairs with its top category and, when that is a field, with every other
     field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. Fields another
     route already found for the scope (structured data, in ``fill_gaps`` mode) are left
-    out, so nothing is asked about them; in ``merge`` mode every field stays.
+    out, so nothing is asked about them; in ``merge`` mode, or with ``include_found`` (the
+    LLM fallback second-guesses low-confidence values), every field stays.
     """
     if ctx.parsed is None:
         return []
@@ -84,7 +85,9 @@ def field_statements(
         )
         chosen = [answer.choice, *(name for _, name in reversed(also))]
         out.extend(
-            (statement, run.spec.field(name)) for name in chosen if run.needs(scope.label, name)
+            (statement, run.spec.field(name))
+            for name in chosen
+            if include_found or run.needs(scope.label, name)
         )
     return out
 

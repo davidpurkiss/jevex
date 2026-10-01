@@ -266,7 +266,7 @@ class FallbackStage:
         asks: dict[tuple[str, str, str], _Ask] = {}
         for run in ctx.active:
             for scope in run.scopes:
-                for statement, spec in field_statements(ctx, run, scope):
+                for statement, spec in field_statements(ctx, run, scope, include_found=True):
                     if not spec.needs_candidates or not self.needs(run, scope.label, spec.name):
                         continue
                     why = self.trigger(run, scope.label, statement, spec)

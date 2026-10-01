@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from jevex import Context, Extractor, Pipeline
 from jevex.cli import main
@@ -28,7 +29,7 @@ from jevex.eval import (
 from jevex.jev import JevBudgetExceededError
 from jevex.results import FieldMeta
 from jevex.schema import SchemaSpec
-from jevex.testing import FakeJev
+from jevex.testing import FakeJev, FakeLLM
 from jevex.testsite import build
 from jevex.testsite.schemas import Listing, VehicleSpec
 
@@ -294,6 +295,29 @@ async def test_the_summary_and_json_carry_run_metrics(tmp_path: Path) -> None:
     doc = report.to_dict()["documents"][0]
     assert doc["methods"] == {"jev": sum(doc["methods"].values())}
     assert "jev_questions" in doc
+
+
+async def test_llm_calls_and_cost_are_reported_per_document(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    oracle = oracle_for(tmp_path)
+    model = FakeLLM(lambda _p, _s: {"ok": True}, price=(1.0, 1.0))
+
+    class Ok(BaseModel):
+        ok: bool
+
+    @dataclass
+    class WithLLM:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            await oracle.run(ctx)
+            assert ctx.budget is not None
+            await ctx.budget.call_llm(model, "Is this ok?", Ok)
+
+    ex = Extractor([VehicleSpec, Listing], jev=FakeJev().client(), pipeline=Pipeline([WithLLM()]))
+    report = await evaluate(ex, load_corpus(tmp_path))
+    assert report.summary()["llm_calls_per_document"] == 1
+    assert all(d.llm_calls == 1 and d.llm_cost > 0 for d in report.documents)
 
 
 async def test_records_of_another_schema_are_spurious(tmp_path: Path) -> None:
