@@ -70,8 +70,11 @@ the statements it returns are tagged `vision`, and so are the values taken from 
 
 ## Locales
 
-Generators read numbers, amounts and dates the way the page's locale writes them. Set it
-on the candidate stage:
+Generators read numbers, amounts and dates the way the page's locale writes them. Each
+document's locale comes from, in order: the caller (`Document.from_bytes(..., locale="de-DE")`),
+the page's `<html lang>` (or a `<meta http-equiv="Content-Language">`), and the HTTP
+`Content-Language` header (`Document(content_language=...)`; `SimpleFetcher` and the Scrapy
+integration fill it in). When none of them says, the candidate stage's own locale is used:
 
 ```python
 from jevex import CandidateStage
@@ -79,6 +82,8 @@ from jevex.extractor import default_pipeline
 
 pipeline = default_pipeline().replace("candidates", CandidateStage(locale="de-DE"))
 ```
+
+`jevex.document_locale(document)` shows which locale a document gets.
 
 | Locale | Reads |
 | --- | --- |
@@ -90,7 +95,7 @@ Normaliser steps take the matching arguments (`{parse_number: {decimal: ","}}`,
 `{parse_date: {order: mdy}}`, `{unit: {from: mpg, gallon: us}}`), and a learned or pack
 generator scoped to a locale (`scope: {locale: de-DE}`) gets them added to its chain, so
 it reads its locale's numbers without spelling that out. A locale-scoped generator runs
-only when the stage's locale matches it (`de` matches `de-AT`), never when it's unset. `locale_conventions("de-DE")` shows what jevex
+only when the document's locale matches it (`de` matches `de-AT`), never when it's unknown. `locale_conventions("de-DE")` shows what jevex
 assumes for a tag.
 
 ## LLM fallback
