@@ -318,6 +318,78 @@ async def test_a_value_that_doesnt_fit_the_field_is_unlearnable() -> None:
     assert "doesn't fit zero_to_62_s" in outcome.message
 
 
+# --- nested models -----------------------------------------------------------------------
+
+
+class Variant(BaseModel):
+    zero_to_62_s: float = Field(description="0-62 mph time", unit="s")
+    gearbox: Literal["manual", "automatic"] = Field(description="Gearbox")
+
+
+class Range(BaseModel):
+    name: str = Field(description="Range name")
+    variants: list[Variant] = Field(description="Variants")
+
+
+RANGE = SchemaSpec.from_model(Range)
+CHILD_FIELD = "Range.variants.zero_to_62_s"
+
+
+def range_learner(fake: FakeJev, llm: FakeLLM, store: Store | None = None) -> GeneratorLearner:
+    return GeneratorLearner(
+        [RANGE],
+        llm,
+        fake.client(),
+        generators=LearnedGenerators(store if store is not None else open_store(":memory:")),
+        base=GeneratorRegistry(),
+    )
+
+
+def test_all_schemas_holds_the_nested_models_specs() -> None:
+    lrn = range_learner(FakeJev(), FakeLLM([]))
+    assert [s.name for s in lrn.all_schemas] == ["Range", "Range.variants"]
+
+
+async def test_a_nested_models_field_is_learned_for_its_child_run() -> None:
+    store = open_store(":memory:")
+    fake = FakeJev(strict=True).choice("Which of these is the 0-62 mph time (s)?", pick("9.1"))
+    lrn = range_learner(fake, FakeLLM(lambda _p, _s: DRAFT), store)
+    outcome = await lrn.learn(example(field=CHILD_FIELD))
+    assert outcome.status == "accepted"
+    assert outcome.spec is not None
+    assert outcome.spec.field == CHILD_FIELD
+    [record] = await store.generators()
+    assert record.field == CHILD_FIELD
+    # Documents run it on the child run (named "Range.variants"), as the candidate stage does.
+    variants = RANGE.child("variants")
+    statement = Statement(id="s1", text=TEXT, kind="sentence", component_id="c", location=LOC)
+    found = lrn.snapshot.registry.generate(
+        statement, variants.field("zero_to_62_s"), schema="Range.variants"
+    )
+    assert [c.raw for c in found] == ["9.1"]
+    assert lrn.snapshot.registry.generate(statement, SPEC.fields[0], schema="Car") == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "Range.variants.missing",
+        "Range.variants.gearbox",
+        "Range.variants",
+        "Range.name.zero_to_62_s",
+        "Range.nope.zero_to_62_s",
+        "Other.variants.zero_to_62_s",
+        "Range.variants.engine.zero_to_62_s",
+    ],
+)
+async def test_an_unknown_nested_path_is_unlearnable(field: str) -> None:
+    llm = FakeLLM([])
+    outcome = await range_learner(FakeJev(strict=True), llm).learn(example(field=field))
+    assert outcome.status == "unlearnable"
+    assert outcome.message == f"{field} isn't a candidate field"
+    assert llm.calls == []
+
+
 @pytest.mark.parametrize(
     "draft",
     [
@@ -1136,6 +1208,21 @@ async def test_compile_pack_takes_only_wanted_examples_of_candidate_fields() -> 
         compiler(FakeJev().choice(None, pick("9.1")), FakeLLM([DRAFT]), store, learn_threshold=0.9)
     )
     assert [(o.example_id, o.status) for o in diff.outcomes] == [("human", "accepted")]
+
+
+async def test_compile_pack_learns_from_a_nested_models_examples() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example(field=CHILD_FIELD))
+    lrn = GeneratorLearner(
+        [RANGE],
+        FakeLLM([DRAFT]),
+        FakeJev().choice(None, pick("9.1")).client(),
+        generators=LearnedGenerators(store, persist=False),
+        base=GeneratorRegistry(),
+    )
+    diff = await compile_pack(lrn)
+    assert [(o.field, o.status) for o in diff.outcomes] == [(CHILD_FIELD, "accepted")]
+    assert [g.field for g in diff.generators] == [CHILD_FIELD]
 
 
 async def test_compile_pack_reports_rejected_examples_and_writes_no_generator() -> None:
