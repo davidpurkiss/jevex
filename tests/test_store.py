@@ -391,6 +391,7 @@ async def test_an_examples_locale_round_trips_in_its_context(store: Store) -> No
         ({}, None),
         ({"locale": ""}, None),
         ({"locale": "English"}, None),  # not a language tag: not a scope either
+        ({"locale": "de-DE\n"}, None),
         ({"locale": 7}, None),
     ],
 )

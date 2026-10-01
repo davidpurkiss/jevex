@@ -109,7 +109,7 @@ class VerifiedExample(BaseModel):
         ``None`` when it didn't say or the value isn't a language tag. The learner scopes
         what it learns from the example to it."""
         locale = self.context.get("locale")
-        return locale if isinstance(locale, str) and _LOCALE.match(locale) else None
+        return locale if isinstance(locale, str) and _LOCALE.fullmatch(locale) else None
 
 
 _LOCALE = re.compile(LOCALE_TAG)
