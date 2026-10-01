@@ -1243,6 +1243,9 @@ postgres = [
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
 ]
+testsite = [
+    { name = "pillow" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1267,6 +1270,7 @@ requires-dist = [
     { name = "onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.20" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=3.22.0" },
     { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'testsite'", specifier = ">=10.1" },
     { name = "protego", specifier = ">=0.7.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.6" },
     { name = "psycopg-pool", marker = "extra == 'postgres'", specifier = ">=3.3.3" },
@@ -1281,7 +1285,7 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform != 'linux' and extra == 'pdf'", specifier = ">=0.17" },
     { name = "typesafe-sdk", specifier = ">=0.7.2" },
 ]
-provides-extras = ["anthropic", "gemini", "litellm", "ocr", "openai", "pdf", "postgres"]
+provides-extras = ["anthropic", "gemini", "litellm", "ocr", "openai", "pdf", "postgres", "testsite"]
 
 [package.metadata.requires-dev]
 dev = [

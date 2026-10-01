@@ -67,6 +67,10 @@ postgres = [
     "psycopg[binary]>=3.3.6",
     "psycopg-pool>=3.3.3",
 ]
+# Draws the synthetic test site's scanned PDFs and infographics (load_default(size=) needs 10.1).
+testsite = [
+    "pillow>=10.1",
+]
 
 [tool.hatch.version]
 path = "src/jevex/__init__.py"

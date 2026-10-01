@@ -254,7 +254,7 @@ def test_captured_js_rendered_page_loses_its_data_script() -> None:
 
 
 def test_synthetic_test_site_keeps_main_and_drops_its_chrome() -> None:
-    pages = render(generate(42))
+    pages = [p for p in render(generate(42)) if p.content_type == "text/html"]
     families = {page.family: page for page in reversed(pages)}  # the first of each family
     families["prose (JSON-LD)"] = next(p for p in pages if "application/ld+json" in p.html)
     assert len(families) == 6

@@ -3,17 +3,23 @@
 Template families (the ``family`` in the ground truth):
 
 - ``table``: one page per model; a spec table with a column per trim (multi-entity).
-- ``prose``: one page per variant; sentences drawn from a phrasing bank. Some pages also
+- ``prose``: one page per variant; sentences drawn from the phrasing bank. Some pages also
   embed schema.org ``Car`` JSON-LD.
 - ``kv``: one page per model; a section per trim with ``<dl>`` key/value pairs.
 - ``grid``: used-car listing grids, one card per listing (multi-entity).
 - ``listing``: one page per used-car listing.
+- ``pdf``: one spec-sheet PDF per model; a ruled table with a column per trim, sometimes
+  with band rows (multi-entity).
+- ``scanned``: one per model; a spec sheet printed and scanned, an image-only PDF.
+- ``infographic``: one PNG per model, for one of its trims; a tile per spec.
+
+Rasterised pages (``scanned``, ``infographic``) write prices as ``GBP 17,000``, not
+``£17,000``, because the font they're drawn in has no pound sign.
 
 Each page gets its own ``random.Random(f"{seed}:{path}")``, so pages don't change when
-others are added. Pages carry realistic boilerplate (nav, cookie banner, footer) for the
-cleaner. Power (whole kW in the truth) may be shown as rounded PS or bhp, within about
-0.37 kW of the truth, and top speed (whole mph) as rounded km/h, within about 0.31 mph,
-so eval compares those numbers with a small tolerance. Everything else is shown exactly.
+others are added. HTML pages carry realistic boilerplate (nav, cookie banner, footer) for
+the cleaner. Values are worded from :mod:`jevex.testsite.phrasing`, whose docstring says
+which ones are rounded (so eval compares them with a small tolerance).
 """
 
 from __future__ import annotations
@@ -24,39 +30,42 @@ from dataclasses import dataclass, field
 from html import escape
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from decimal import Decimal
+from jevex.testsite.drawing import Drawing, text_width, to_pdf, to_png, to_scanned_pdf
+from jevex.testsite.phrasing import FUEL_WORDS, LABELS, SENTENCES, cell, listing_facts
 
+if TYPE_CHECKING:
     from jevex.testsite.dataset import Dataset, Model
+    from jevex.testsite.drawing import RGB
     from jevex.testsite.schemas import Listing, VehicleSpec
 
-PS_PER_KW = 1 / 0.73549875
-BHP_PER_KW = 1 / 0.745699872
-KMH_PER_MPH = 1.609344
-FUEL_WORDS = {
-    "petrol": ("Petrol", "petrol"),
-    "diesel": ("Diesel", "diesel"),
-    "hybrid": ("Hybrid", "self-charging hybrid"),
-    "phev": ("Plug-in hybrid", "plug-in hybrid"),
-    "ev": ("Electric", "fully electric"),
-}
+HTML = "text/html"
+PDF = "application/pdf"
+PNG = "image/png"
 
 
 @dataclass
 class Page:
-    """One rendered page and its ground truth.
+    """One rendered page (an HTML page, a PDF or an image) and its ground truth.
 
     ``records[].entity`` is ``"document"`` for single-record pages, the trim name on
-    ``table``/``kv`` pages, and ``listing-N`` on grids (matching the card's ``id``).
+    ``table``/``kv``/``pdf``/``scanned`` pages, and ``listing-N`` on grids (matching the
+    card's ``id``).
     """
 
     path: str
     family: str
     schema: str
-    html: str
+    content: bytes
+    content_type: str = HTML
     records: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     json_ld: bool = False
+
+    @property
+    def html(self) -> str:
+        """The page's HTML. Raises ``ValueError`` for a PDF or an image."""
+        if self.content_type != HTML:
+            raise ValueError(f"{self.path} is {self.content_type}, not HTML")
+        return self.content.decode()
 
     def truth(self) -> dict[str, Any]:
         """The page's entry in ``truth.json``."""
@@ -64,133 +73,17 @@ class Page:
             "path": self.path,
             "family": self.family,
             "schema": self.schema,
+            "content_type": self.content_type,
             "json_ld": self.json_ld,
             "records": self.records,
         }
 
 
-# --- phrasing bank ---------------------------------------------------------------------
-
-
-def _power(rng: random.Random, kw: float) -> str:
-    unit = rng.choice(("kW", "PS", "bhp"))
-    if unit == "kW":
-        return f"{kw:g} kW"
-    return f"{round(kw * (PS_PER_KW if unit == 'PS' else BHP_PER_KW))}{rng.choice(('', ' '))}{unit}"
-
-
-def _price(rng: random.Random, gbp: Decimal) -> str:
-    amount = f"{int(gbp):,}"
-    return rng.choice((f"£{amount}", f"£{amount}", f"{amount} GBP"))
-
-
-def _engine(rng: random.Random, cc: int | None) -> str:
-    if cc is None:
-        return "None (electric)"
-    return rng.choice((f"{cc:,} cc", f"{cc}cc", f"{cc} cc"))
-
-
-def _top_speed(rng: random.Random, mph: int) -> str:
-    if rng.random() < 0.3:
-        return f"{round(mph * KMH_PER_MPH)} km/h"
-    return f"{mph} mph"
-
-
-SENTENCES: dict[str, tuple[Callable[[random.Random, VehicleSpec], str], ...]] = {
-    "zero_to_62_s": (
-        lambda r, v: f"It reaches 62 mph from rest in {v.zero_to_62_s} seconds.",
-        lambda r, v: f"0-62 mph takes {v.zero_to_62_s} s.",
-        lambda r, v: f"The sprint from 0–62mph is over in {v.zero_to_62_s}s.",
-        lambda r, v: f"Accelerating from 0 to 62 mph takes just {v.zero_to_62_s} seconds.",
-    ),
-    "power_kw": (
-        lambda r, v: f"Power comes in at {_power(r, v.power_kw)}.",
-        lambda r, v: f"It develops {_power(r, v.power_kw)} of maximum power.",
-        lambda r, v: f"Peak output is {_power(r, v.power_kw)}.",
-    ),
-    "top_speed_mph": (
-        lambda r, v: f"Top speed is {_top_speed(r, v.top_speed_mph)}.",
-        lambda r, v: f"It will run on to a maximum of {_top_speed(r, v.top_speed_mph)}.",
-    ),
-    "price_gbp": (
-        lambda r, v: f"On-the-road prices start at {_price(r, v.price_gbp)}.",
-        lambda r, v: f"The {v.trim} costs {_price(r, v.price_gbp)} on the road.",
-    ),
-    "seats": (
-        lambda r, v: f"There's room for {v.seats} people.",
-        lambda r, v: f"It seats {v.seats}.",
-    ),
-    "automatic": (
-        lambda r, v: (
-            "An automatic gearbox is standard."
-            if v.automatic
-            else "It comes with a six-speed manual gearbox."
-        ),
-        lambda r, v: f"Transmission is {'automatic' if v.automatic else 'manual'}.",
-    ),
-    "fuel_type": (
-        lambda r, v: f"It's a {FUEL_WORDS[v.fuel_type][1]} model.",
-        lambda r, v: f"The powertrain is {FUEL_WORDS[v.fuel_type][1]}.",
-    ),
-    "engine_size_cc": (
-        lambda r, v: (
-            f"The engine displaces {_engine(r, v.engine_size_cc)}."
-            if v.engine_size_cc
-            else "There's no combustion engine."
-        ),
-    ),
-    "co2_g_km": (
-        lambda r, v: (
-            f"CO2 emissions are {v.co2_g_km} g/km."
-            if v.co2_g_km
-            else "Tailpipe CO2 emissions are 0 g/km."
-        ),
-    ),
-}
-
-LABELS: dict[str, tuple[str, ...]] = {
-    "fuel_type": ("Fuel type", "Powertrain", "Fuel"),
-    "engine_size_cc": ("Engine size", "Displacement", "Engine capacity"),
-    "power_kw": ("Maximum power", "Power output", "Power"),
-    "zero_to_62_s": ("0-62 mph (s)", "Acceleration 0–62mph", "0-62mph"),
-    "top_speed_mph": ("Top speed", "Maximum speed"),
-    "co2_g_km": ("CO2 emissions (g/km)", "CO2"),
-    "price_gbp": ("OTR price", "Price from", "Price"),
-    "seats": ("Seats", "Seating capacity"),
-    "automatic": ("Transmission", "Gearbox"),
-}
-
-
-def _cell(rng: random.Random, name: str, v: VehicleSpec) -> str:
-    """The value text for a table cell or key/value pair."""
-    match name:
-        case "fuel_type":
-            return FUEL_WORDS[v.fuel_type][0]
-        case "engine_size_cc":
-            return _engine(rng, v.engine_size_cc)
-        case "power_kw":
-            return _power(rng, v.power_kw)
-        case "zero_to_62_s":
-            return f"{v.zero_to_62_s}" if rng.random() < 0.5 else f"{v.zero_to_62_s} s"
-        case "top_speed_mph":
-            return _top_speed(rng, v.top_speed_mph)
-        case "co2_g_km":
-            return str(v.co2_g_km)
-        case "price_gbp":
-            return _price(rng, v.price_gbp)
-        case "seats":
-            return str(v.seats)
-        case "automatic":
-            return "Automatic" if v.automatic else "Manual"
-        case _:
-            raise KeyError(name)
-
-
 # --- page chrome -----------------------------------------------------------------------
 
 
-def _layout(title: str, body: str, *, head: str = "") -> str:
-    return f"""<!doctype html>
+def _layout(title: str, body: str, *, head: str = "") -> bytes:
+    html = f"""<!doctype html>
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
@@ -208,6 +101,7 @@ def _layout(title: str, body: str, *, head: str = "") -> str:
 </body>
 </html>
 """
+    return html.encode()
 
 
 def _truth(v: VehicleSpec, entity: str) -> dict[str, Any]:
@@ -259,7 +153,7 @@ def table_page(seed: int, model: Model) -> Page:
     rows: list[str] = []
     for name in SPEC_ORDER:
         label = rng.choice(LABELS[name])
-        cells = "".join(f"<td>{escape(_cell(rng, name, v))}</td>" for v in model.variants)
+        cells = "".join(f"<td>{escape(cell(rng, name, v))}</td>" for v in model.variants)
         rows.append(f"<tr><th>{escape(label)}</th>{cells}</tr>")
     body = f"""<h1>{escape(model.make)} {escape(model.name)}: specifications</h1>
 <p>Compare the {escape(model.make)} {escape(model.name)} range below.</p>
@@ -274,13 +168,13 @@ def table_page(seed: int, model: Model) -> Page:
         path=path,
         family="table",
         schema="VehicleSpec",
-        html=_layout(f"{model.make} {model.name} specifications", body),
+        content=_layout(f"{model.make} {model.name} specifications", body),
         records=[_truth(v, v.trim) for v in model.variants],
     )
 
 
 def prose_page(seed: int, model: Model, v: VehicleSpec) -> Page:
-    path = f"specs/{model.slug}-{v.trim.lower().replace(' ', '-')}.html"
+    path = f"specs/{model.slug}-{_trim_slug(v)}.html"
     rng = random.Random(f"{seed}:{path}")
     fields = list(SENTENCES)
     rng.shuffle(fields)
@@ -295,7 +189,7 @@ def prose_page(seed: int, model: Model, v: VehicleSpec) -> Page:
         path=path,
         family="prose",
         schema="VehicleSpec",
-        html=_layout(
+        content=_layout(
             f"{v.make} {v.model} {v.trim}", body, head=_json_ld(v) if with_json_ld else ""
         ),
         records=[_truth(v, "document")],
@@ -309,7 +203,7 @@ def kv_page(seed: int, model: Model) -> Page:
     sections: list[str] = []
     for v in model.variants:
         pairs = "".join(
-            f"<dt>{escape(rng.choice(LABELS[name]))}</dt><dd>{escape(_cell(rng, name, v))}</dd>"
+            f"<dt>{escape(rng.choice(LABELS[name]))}</dt><dd>{escape(cell(rng, name, v))}</dd>"
             for name in SPEC_ORDER
         )
         sections.append(f"<section><h2>{escape(v.trim)}</h2><dl>{pairs}</dl></section>")
@@ -318,19 +212,9 @@ def kv_page(seed: int, model: Model) -> Page:
         path=path,
         family="kv",
         schema="VehicleSpec",
-        html=_layout(f"{model.make} {model.name} trims", body),
+        content=_layout(f"{model.make} {model.name} trims", body),
         records=[_truth(v, v.trim) for v in model.variants],
     )
-
-
-def _listing_facts(rng: random.Random, item: Listing) -> list[str]:
-    return [
-        rng.choice((f"£{int(item.price_gbp):,}", f"Price: £{int(item.price_gbp):,}")),
-        rng.choice((f"{item.mileage_miles:,} miles", f"Mileage: {item.mileage_miles:,} mi")),
-        FUEL_WORDS[item.fuel_type][0],
-        item.colour,
-        rng.choice((f"Registered {item.year}", f"{item.year} reg")),
-    ]
 
 
 def grid_page(seed: int, page_no: int, items: list[tuple[int, Listing]]) -> Page:
@@ -338,7 +222,7 @@ def grid_page(seed: int, page_no: int, items: list[tuple[int, Listing]]) -> Page
     rng = random.Random(f"{seed}:{path}")
     cards: list[str] = []
     for index, item in items:
-        facts = "".join(f"<li>{escape(f)}</li>" for f in _listing_facts(rng, item))
+        facts = "".join(f"<li>{escape(f)}</li>" for f in listing_facts(rng, item))
         cards.append(
             f'<article class="listing" id="listing-{index}">'
             f"<h3>{escape(item.make)} {escape(item.model)}</h3><ul>{facts}</ul>"
@@ -351,7 +235,7 @@ def grid_page(seed: int, page_no: int, items: list[tuple[int, Listing]]) -> Page
         path=path,
         family="grid",
         schema="Listing",
-        html=_layout(f"Used cars page {page_no}", body),
+        content=_layout(f"Used cars page {page_no}", body),
         records=[
             {"entity": f"listing-{i}", "values": item.model_dump(mode="json")} for i, item in items
         ],
@@ -361,27 +245,208 @@ def grid_page(seed: int, page_no: int, items: list[tuple[int, Listing]]) -> Page
 def listing_page(seed: int, index: int, item: Listing) -> Page:
     path = f"used/{index}.html"
     rng = random.Random(f"{seed}:{path}")
-    facts = _listing_facts(rng, item)
+    facts = listing_facts(rng, item)
     body = f"""<h1>{item.year} {escape(item.make)} {escape(item.model)}</h1>
 <p>{escape(facts[0])}. {escape(facts[1])}.</p>
-<dl><dt>Fuel</dt><dd>{escape(facts[2])}</dd><dt>Colour</dt><dd>{escape(item.colour)}</dd>
+<dl><dt>Fuel</dt><dd>{escape(FUEL_WORDS[item.fuel_type][0])}</dd><dt>Colour</dt><dd>{escape(item.colour)}</dd>
 <dt>First registered</dt><dd>{item.year}</dd></dl>"""
     return Page(
         path=path,
         family="listing",
         schema="Listing",
-        html=_layout(f"{item.year} {item.make} {item.model}", body),
+        content=_layout(f"{item.year} {item.make} {item.model}", body),
         records=[{"entity": "document", "values": item.model_dump(mode="json")}],
     )
 
 
+# --- PDFs and images -------------------------------------------------------------------
+
+A4 = (595.0, 842.0)
+MARGIN = 50.0
+WHITE: RGB = (1.0, 1.0, 1.0)
+GREY: RGB = (0.35, 0.35, 0.38)
+PALETTE: tuple[RGB, ...] = (
+    (0.11, 0.23, 0.42),
+    (0.55, 0.10, 0.12),
+    (0.08, 0.36, 0.29),
+    (0.22, 0.22, 0.25),
+    (0.36, 0.18, 0.47),
+)
+BACKGROUNDS: tuple[RGB, ...] = ((0.97, 0.96, 0.93), (0.93, 0.95, 0.98), (1.0, 1.0, 1.0))
+BANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Engine and transmission", ("fuel_type", "engine_size_cc", "power_kw", "automatic")),
+    ("Performance", ("zero_to_62_s", "top_speed_mph", "co2_g_km")),
+    ("Practicality and price", ("seats", "price_gbp")),
+)
+"""Band rows grouping a spec sheet's rows, in order; every field is in one band."""
+INTROS = (
+    "Specifications for every trim in the {make} {model} range.",
+    "All figures are manufacturer data for the {model} line-up.",
+    "Compare the {model} trims side by side.",
+)
+SHEET_SUBTITLES = ("Technical specification", "Specifications and prices", "Range data sheet")
+FOOTNOTES = (
+    "Figures are subject to change. Testsite Motors Ltd, 2026.",
+    "All prices include VAT and first registration. E&OE.",
+)
+TILE_SUBTITLES = ("At a glance", "The key numbers", "Facts and figures")
+CELL_SIZE = 9.0
+LABEL_WIDTH = 145.0
+ROW_HEIGHT = 22.0
+
+
+def spec_sheet(rng: random.Random, model: Model, *, plain: bool = False) -> Drawing:
+    """A one-page A4 spec sheet: a ruled table with a row per spec and a column per trim."""
+    width, height = A4
+    d = Drawing(width, height, title=f"{model.make} {model.name} specifications", plain=plain)
+    accent = rng.choice(PALETTE)
+    d.box(0, 0, width, 84, accent)
+    d.text(MARGIN, 44, f"{model.make} {model.name}", 22, bold=True, fill=WHITE)
+    d.text(MARGIN, 66, rng.choice(SHEET_SUBTITLES), 11, fill=WHITE)
+    d.text(MARGIN, 118, rng.choice(INTROS).format(make=model.make, model=model.name), 10)
+
+    variants = model.variants
+    col = (width - 2 * MARGIN - LABEL_WIDTH) / len(variants)
+    right = width - MARGIN
+    columns = [MARGIN + LABEL_WIDTH + i * col for i in range(len(variants))]
+    top = y = 140.0
+    d.box(MARGIN, y, right - MARGIN, ROW_HEIGHT, (0.9, 0.9, 0.92))
+    corner = rng.choice(("Specification", "", "Trim"))
+    _row(d, y, [corner, *(v.trim for v in variants)], col, bold=True)
+    y += ROW_HEIGHT
+    d.rule(MARGIN, y, right, y, 1.0)
+    rows = [(top, y)]  # where the column rules go: every row but the bands
+    banded = rng.random() < 0.5
+    for band, names in BANDS:
+        if banded:
+            d.box(MARGIN, y, right - MARGIN, ROW_HEIGHT, (0.96, 0.96, 0.97))
+            d.text(MARGIN + 4, y + ROW_HEIGHT - 7, band, CELL_SIZE, bold=True)
+            y += ROW_HEIGHT
+            d.rule(MARGIN, y, right, y)
+        start = y
+        for name in names:
+            texts = [rng.choice(LABELS[name]), *(cell(rng, name, v) for v in variants)]
+            _row(d, y, texts, col)
+            y += ROW_HEIGHT
+            d.rule(MARGIN, y, right, y)
+        rows.append((start, y))
+    d.rule(MARGIN, top, right, top)
+    d.rule(MARGIN, top, MARGIN, y)
+    d.rule(right, top, right, y)
+    for x in columns:
+        for row_top, row_bottom in rows:
+            d.rule(x, row_top, x, row_bottom)
+    d.text(MARGIN, height - 40, rng.choice(FOOTNOTES), 8, fill=GREY)
+    d.text(right - 50, height - 40, "Page 1 of 1", 8, fill=GREY)
+    return d
+
+
+def _row(d: Drawing, y: float, texts: list[str], col: float, *, bold: bool = False) -> None:
+    """One table row: a label, then a cell per trim column."""
+    for i, text in enumerate(texts):
+        x = MARGIN if i == 0 else MARGIN + LABEL_WIDTH + (i - 1) * col
+        room = (LABEL_WIDTH if i == 0 else col) - 8
+        if text_width(d.shown(text), CELL_SIZE, bold=bold) > room:
+            raise ValueError(f"{text!r} doesn't fit a {room:g} pt column")  # a layout bug
+        if text:
+            d.text(x + 4, y + ROW_HEIGHT - 7, text, CELL_SIZE, bold=bold)
+
+
+def infographic(rng: random.Random, v: VehicleSpec) -> Drawing:
+    """A landscape "at a glance" graphic for one trim: a coloured tile per spec."""
+    width, height = 600.0, 444.0
+    d = Drawing(width, height, title=f"{v.make} {v.model} {v.trim}", plain=True)
+    d.box(0, 0, width, height, rng.choice(BACKGROUNDS))
+    accent = rng.choice(PALETTE)
+    d.text(30, 50, f"{v.make} {v.model} {v.trim}", 24, bold=True, fill=accent)
+    d.text(30, 74, rng.choice(TILE_SUBTITLES), 12, fill=GREY)
+    names = list(LABELS)
+    rng.shuffle(names)
+    tile_w, tile_h, gap = 172.0, 100.0, 12.0
+    for i, name in enumerate(names):
+        x, y = 30 + (i % 3) * (tile_w + gap), 96 + (i // 3) * (tile_h + gap)
+        d.box(x, y, tile_w, tile_h, accent)
+        value = d.shown(cell(rng, name, v))
+        size = min(22.0, (tile_w - 28) / text_width(value, 1, bold=True))
+        d.text(x + 14, y + 50, value, size, bold=True, fill=WHITE)
+        d.text(x + 14, y + 80, rng.choice(LABELS[name]), 11, fill=WHITE)
+    d.text(30, height - 6, "Manufacturer data. Testsite Motors Ltd, 2026.", 8, fill=GREY)
+    return d
+
+
+def pdf_page(seed: int, model: Model) -> Page:
+    path = f"brochures/{model.slug}-spec-sheet.pdf"
+    rng = random.Random(f"{seed}:{path}")
+    return Page(
+        path=path,
+        family="pdf",
+        schema="VehicleSpec",
+        content=to_pdf(spec_sheet(rng, model)),
+        content_type=PDF,
+        records=[_truth(v, v.trim) for v in model.variants],
+    )
+
+
+def scanned_drawing(seed: int, model: Model) -> Drawing:
+    """The spec sheet a ``scanned`` page shows, before it's printed and scanned."""
+    drawing = spec_sheet(random.Random(f"{seed}:{_scanned_path(model)}"), model, plain=True)
+    drawing.title = "Scanned document"
+    return drawing
+
+
+def _scanned_path(model: Model) -> str:
+    return f"scans/{model.slug}-spec-sheet-scan.pdf"
+
+
+def scanned_page(seed: int, model: Model) -> Page:
+    path = _scanned_path(model)
+    return Page(
+        path=path,
+        family="scanned",
+        schema="VehicleSpec",
+        content=to_scanned_pdf(scanned_drawing(seed, model), f"{seed}:{path}:scan"),
+        content_type=PDF,
+        records=[_truth(v, v.trim) for v in model.variants],
+    )
+
+
+def infographic_drawing(seed: int, model: Model) -> tuple[str, Drawing, VehicleSpec]:
+    """The path, graphic and trim of a model's ``infographic`` page."""
+    v = random.Random(f"{seed}:infographics/{model.slug}").choice(model.variants)
+    path = f"infographics/{model.slug}-{_trim_slug(v)}.png"
+    return path, infographic(random.Random(f"{seed}:{path}"), v), v
+
+
+def infographic_page(seed: int, model: Model) -> Page:
+    path, drawing, v = infographic_drawing(seed, model)
+    return Page(
+        path=path,
+        family="infographic",
+        schema="VehicleSpec",
+        content=to_png(drawing),
+        content_type=PNG,
+        records=[_truth(v, "document")],
+    )
+
+
+def _trim_slug(v: VehicleSpec) -> str:
+    return v.trim.lower().replace(" ", "-")
+
+
 def render(dataset: Dataset, *, grid_size: int = 12) -> list[Page]:
-    """Every page of the site, in a stable order."""
+    """Every page of the site, in a stable order.
+
+    Raises ``ImportError`` without Pillow (the ``testsite`` extra), which draws the
+    ``scanned`` and ``infographic`` pages.
+    """
     pages: list[Page] = []
     for model in dataset.models:
         pages.append(table_page(dataset.seed, model))
         pages.append(kv_page(dataset.seed, model))
         pages.extend(prose_page(dataset.seed, model, v) for v in model.variants)
+        pages.append(pdf_page(dataset.seed, model))
+        pages.append(scanned_page(dataset.seed, model))
+        pages.append(infographic_page(dataset.seed, model))
     listings = list(enumerate(dataset.listings, start=1))
     for page_no, start in enumerate(range(0, len(listings), grid_size), start=1):
         pages.append(grid_page(dataset.seed, page_no, listings[start : start + grid_size]))

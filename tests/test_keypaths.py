@@ -550,7 +550,7 @@ def site_jev() -> FakeJev:
 
 async def test_the_test_sites_json_ld_maps_to_the_truth() -> None:
     pages = [p for p in render(generate(42)) if p.json_ld]
-    assert len(pages) == 15
+    assert len(pages) == 11
     mapper = KeyPathMapper()
     fake = site_jev()
     for p in pages:

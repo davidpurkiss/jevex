@@ -1,32 +1,106 @@
+import io
 import json
 from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from jevex.testsite import build, digest, generate, render
+from jevex import testsite
+from jevex.document import sniff_content_type
+from jevex.testsite import Dataset, Page, build, digest, drawing, generate, render
 from jevex.testsite.schemas import Listing, VehicleSpec
 
 SCHEMAS = {"VehicleSpec": VehicleSpec, "Listing": Listing}
 
 
 def test_same_seed_same_site_different_seed_different_site() -> None:
-    assert digest(render(generate(42))) == digest(render(generate(42)))
+    first = digest(render(generate(42)))
+    drawing._png.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    drawing._scanned_pdf.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    assert digest(render(generate(42))) == first  # rasterised again, not from the cache
     assert digest(render(generate(42))) != digest(render(generate(7)))
 
 
 def test_pages_dont_change_when_the_dataset_grows() -> None:
-    small = {p.path: p.html for p in render(generate(42, n_models=4, n_listings=12))}
-    large = {p.path: p.html for p in render(generate(42, n_models=4, n_listings=24))}
-    for path, html in small.items():
-        if path.startswith("specs/"):
-            assert large[path] == html
+    small = {p.path: p.content for p in render(generate(42, n_models=4, n_listings=12))}
+    large = {p.path: p.content for p in render(generate(42, n_models=4, n_listings=24))}
+    model_pages = [p for p in small if not p.startswith("used/")]
+    assert {p.split("/")[0] for p in model_pages} == {"specs", "brochures", "scans", "infographics"}
+    for path in model_pages:
+        assert large[path] == small[path]
 
 
 def test_every_family_is_present() -> None:
-    families = Counter(p.family for p in render(generate(42)))
-    assert set(families) == {"table", "kv", "prose", "grid", "listing"}
+    pages = render(generate(42))
+    families = Counter(p.family for p in pages)
+    assert set(families) == {
+        *("table", "kv", "prose", "grid", "listing"),
+        *("pdf", "scanned", "infographic"),
+    }
     assert families["grid"] >= 2
+    assert families["pdf"] == families["scanned"] == families["infographic"] == 16
+    types = {p.family: p.content_type for p in pages}
+    assert types["pdf"] == types["scanned"] == "application/pdf"
+    assert types["infographic"] == "image/png"
+    assert {types[f] for f in ("table", "kv", "prose", "grid", "listing")} == {"text/html"}
+    for page in pages:
+        assert sniff_content_type(page.content) == page.content_type
+        assert page.truth()["content_type"] == page.content_type
+
+
+def test_html_is_only_for_html_pages() -> None:
+    pages = render(generate(42, n_models=1, n_listings=0))
+    assert next(p for p in pages if p.family == "table").html.startswith("<!doctype html>")
+    pdf = next(p for p in pages if p.family == "pdf")
+    with pytest.raises(ValueError, match="is application/pdf, not HTML"):
+        _ = pdf.html
+
+
+def test_spec_sheet_pdfs_have_a_text_layer_with_every_trim() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    data = generate(42)
+    pages = [p for p in render(data) if p.family == "pdf"]
+    for model, page in zip(data.models, pages, strict=True):
+        assert page.path == f"brochures/{model.slug}-spec-sheet.pdf"
+        assert [r["entity"] for r in page.records] == [v.trim for v in model.variants]
+        pdf = pdfium.PdfDocument(page.content)
+        assert len(pdf) == 1
+        assert pdf[0].get_size() == (595, 842)
+        text = pdf[0].get_textpage().get_text_range()
+        assert f"{model.make} {model.name}" in text
+        for v in model.variants:
+            assert v.trim in text
+            assert f"{int(v.price_gbp):,}" in text
+
+
+def test_scanned_pdfs_are_one_image_and_no_text() -> None:
+    pdfium = pytest.importorskip("pypdfium2")
+    scans = [p for p in render(generate(42)) if p.family == "scanned"]
+    assert len({p.content for p in scans}) == len(scans)
+    for page in scans:
+        pdf = pdfium.PdfDocument(page.content)
+        assert len(pdf) == 1
+        assert pdf[0].get_textpage().get_text_range().strip() == ""
+        objects = list(pdf[0].get_objects())
+        assert [o.type for o in objects] == [pdfium.raw.FPDF_PAGEOBJ_IMAGE]
+        assert b"/Filter /DCTDecode" in page.content
+
+
+def test_infographics_are_pngs_of_one_trim() -> None:
+    image_module = pytest.importorskip("PIL.Image")
+    data = generate(42)
+    pages = [p for p in render(data) if p.family == "infographic"]
+    trims: set[str] = set()
+    for model, page in zip(data.models, pages, strict=True):
+        [record] = page.records
+        assert record["entity"] == "document"
+        trim = record["values"]["trim"]
+        assert trim in {v.trim for v in model.variants}
+        assert page.path == f"infographics/{model.slug}-{trim.lower().replace(' ', '-')}.png"
+        trims.add(trim)
+        with image_module.open(io.BytesIO(page.content)) as image:
+            assert image.size == (1200, 888)
+    assert len(trims) > 1  # not always the same trim
 
 
 def test_json_ld_on_some_prose_pages_only() -> None:
@@ -62,6 +136,8 @@ def test_multi_entity_pages_have_one_record_per_entity() -> None:
 
 def test_truth_values_appear_on_the_page() -> None:
     for page in render(generate(42)):
+        if page.content_type != "text/html":
+            continue  # test_testsite_truth reads PDFs and drawings
         for record in page.records:
             values = record["values"]
             assert values["model"] in page.html
@@ -128,7 +204,9 @@ def test_rebuild_replaces_an_earlier_build(tmp_path: Path) -> None:
     build(7, tmp_path)
     on_disk = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*.html")}
     listed = {p["path"] for p in json.loads((tmp_path / "truth.json").read_text())["pages"]}
-    assert on_disk == listed | {"index.html"}
+    assert on_disk == {p for p in listed if p.endswith(".html")} | {"index.html"}
+    files = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
+    assert files == listed | {"index.html", "truth.json"}
 
 
 def test_build_refuses_a_foreign_truth_json_and_keeps_its_files(tmp_path: Path) -> None:
@@ -139,6 +217,21 @@ def test_build_refuses_a_foreign_truth_json_and_keeps_its_files(tmp_path: Path) 
         build(42, tmp_path)
     assert (tmp_path / "docs" / "report.pdf").exists()
     assert (tmp_path / "truth.json").read_text() == '{"records": []}'
+
+
+def test_a_failed_render_keeps_the_earlier_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    build(42, tmp_path)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    def no_pillow(dataset: Dataset) -> list[Page]:
+        raise ImportError("install jevex[testsite]")
+
+    monkeypatch.setattr(testsite, "render", no_pillow)
+    with pytest.raises(ImportError):
+        build(7, tmp_path)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 
 def test_rebuild_keeps_files_it_did_not_write(tmp_path: Path) -> None:
@@ -162,9 +255,10 @@ def test_build_writes_the_site_and_truth(tmp_path: Path) -> None:
     assert (tmp_path / "truth.json").exists()
     on_disk = json.loads((tmp_path / "truth.json").read_text())
     assert on_disk == json.loads(json.dumps(manifest))
+    pages = {p.path: p for p in render(generate(42))}
     for page in manifest["pages"]:
-        assert (tmp_path / page["path"]).is_file()
-    assert on_disk["digest"] == digest(render(generate(42)))
+        assert (tmp_path / page["path"]).read_bytes() == pages[page["path"]].content
+    assert on_disk["digest"] == digest(list(pages.values()))
 
 
 @pytest.mark.parametrize("escape", ["absolute", "dotdot"])
