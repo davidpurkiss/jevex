@@ -222,6 +222,81 @@ def test_an_oversized_comparison_table_without_headers_repeats_its_inferred_head
     assert all(u.text.startswith("Spec | SE | GT\nSpec ") for u in units)
 
 
+def banded_table(*rows: tuple[str, ...]) -> Component:
+    """A table whose rows of one cell are bands spanning it and whose rows starting with
+    an empty cell are header rows; other rows are a header cell then data cells."""
+    cells: list[TableCell] = []
+    for r, row in enumerate(rows):
+        if len(row) == 1:
+            cells.append(TableCell(row=r, col=0, text=row[0], header=True, col_span=3))
+            continue
+        header_row = row[0] == ""
+        for c, text in enumerate(row):
+            cells.append(TableCell(row=r, col=c, text=text, header=header_row or c == 0))
+    return Component.model_validate(
+        {
+            "id": "t",
+            "type": "table",
+            "text": "\n".join(" | ".join(row) for row in rows),
+            "cells": cells,
+            "children": [comp("caption", "Kestrova specification", "cap")],
+            "location": DomLocation(dom_path="/t"),
+        }
+    )
+
+
+def test_an_oversized_tables_mid_table_bands_stay_with_the_rows_they_group() -> None:
+    perf = [(f"Power {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, 9)]
+    econ = [(f"MPG {r}", f"{r}1", f"{r}2") for r in range(1, 9)]
+    t = banded_table(("", "SE", "GT"), ("Performance",), *perf, ("Economy",), *econ)
+    units = gate_units(comp("section", "", "r", t), max_chars=120)
+    texts = [u.text for u in units]
+    assert texts == [
+        "Kestrova specification\nSE | GT\nPerformance\nPower 1 | 10 PS | 15 PS\n"
+        "Power 2 | 20 PS | 25 PS\nPower 3 | 30 PS | 35 PS",
+        "Kestrova specification\nSE | GT\nPerformance\nPower 4 | 40 PS | 45 PS\n"
+        "Power 5 | 50 PS | 55 PS\nPower 6 | 60 PS | 65 PS",
+        "Kestrova specification\nSE | GT\nPerformance\nPower 7 | 70 PS | 75 PS\n"
+        "Power 8 | 80 PS | 85 PS\nEconomy\nMPG 1 | 11 | 12",
+        "Kestrova specification\nSE | GT\nEconomy\nMPG 2 | 21 | 22\nMPG 3 | 31 | 32\n"
+        "MPG 4 | 41 | 42\nMPG 5 | 51 | 52\nMPG 6 | 61 | 62",
+        "Kestrova specification\nSE | GT\nEconomy\nMPG 7 | 71 | 72\nMPG 8 | 81 | 82",
+    ]
+    assert all(len(text) <= 120 for text in texts)
+
+
+def test_an_oversized_tables_leading_bands_and_repeated_header_row_read_as_its_cells() -> None:
+    rows = [(f"Power {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, 5)]
+    t = banded_table(
+        ("Technical data",), ("", "SE", "GT"), ("Performance",), *rows, ("", "SE L", "R"), *rows
+    )
+    units = gate_units(comp("section", "", "r", t), max_chars=110)
+    texts = [u.text for u in units]
+    assert texts[0].startswith(
+        "Kestrova specification\nTechnical data\nSE | GT\nPerformance\nPower 1 |"
+    )
+    # Later pieces repeat the band in force, not the title band above the header row, and
+    # the header row repeated mid-table replaces the leading one from there on.
+    assert texts[1].startswith("Kestrova specification\nSE | GT\nPerformance\nPower ")
+    assert texts[-1].startswith("Kestrova specification\nSE L | R\nPerformance\nPower ")
+    assert "SE L | R" not in texts[0]
+    assert all(len(text) <= 110 for text in texts)
+
+
+def test_an_oversized_tables_context_over_half_a_piece_is_not_repeated() -> None:
+    rows = [(f"Power {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, 9)]
+    t = banded_table(("", "SE " + "x" * 60, "GT"), *rows)
+    units = gate_units(comp("section", "", "r", t), max_chars=120)
+    lines = [line for u in units for line in u.text.split("\n")]
+    assert len(units) > 1
+    assert lines == [
+        "Kestrova specification",
+        f"SE {'x' * 60} | GT",
+        *(" | ".join(row) for row in rows),
+    ]
+    assert all(len(u.text) <= 120 for u in units)
+
+
 def test_an_oversized_list_is_split_by_items() -> None:
     items = [comp("list_item", f"Feature number {i}", f"li{i}") for i in range(20)]
     units = gate_units(comp("section", "", "r", comp("list", "", "l", *items)), max_chars=100)

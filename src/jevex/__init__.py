@@ -115,7 +115,14 @@ from jevex.structured import (
     StructuredBlob,
     StructuredSource,
 )
-from jevex.tables import blank_rows, header_prefix, infer_headers, table_statements
+from jevex.tables import (
+    RowRole,
+    blank_rows,
+    header_prefix,
+    infer_headers,
+    row_roles,
+    table_statements,
+)
 
 __version__ = "0.0.1"
 
@@ -202,6 +209,7 @@ __all__ = [
     "RapidOcrEngine",
     "RegexGenerator",
     "RobotsDisallowedError",
+    "RowRole",
     "RunBudget",
     "RunLedger",
     "SQLiteStore",
@@ -248,6 +256,7 @@ __all__ = [
     "load_corpus",
     "normalise",
     "open_store",
+    "row_roles",
     "run_chain",
     "section_text",
     "table_statements",
