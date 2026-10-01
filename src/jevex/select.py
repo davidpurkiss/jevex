@@ -180,19 +180,26 @@ class JevCandidateSelector:
 
 @dataclass
 class CandidateStage:
-    """Generates candidate spans for every categorised statement whose field needs them."""
+    """Generates candidate spans for every categorised statement whose field needs them.
+
+    ``registry`` holds the stage's own generators; the document's learned ones
+    (``ctx.generators``) run after them.
+    """
 
     registry: GeneratorRegistry = field(default_factory=default_registry)
     locale: str | None = None
     name: str = "candidates"
 
     async def run(self, ctx: Context) -> None:
+        registry = self.registry
+        if ctx.generators is not None:
+            registry = ctx.generators.on(registry)
         for run in ctx.active:
             for scope in run.scopes:
                 for statement, spec in field_statements(ctx, run, scope):
                     key = (statement.id, spec.name)
                     if spec.needs_candidates and key not in run.candidates:
-                        run.candidates[key] = self.registry.generate(
+                        run.candidates[key] = registry.generate(
                             statement, spec, schema=run.name, locale=self.locale
                         )
 

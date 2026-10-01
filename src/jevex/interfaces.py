@@ -24,7 +24,7 @@ Stage order and default implementations (spec: *Pipeline architecture*):
  12   CandidateSelector      Choice over candidates         #18
  13   Normaliser             declarative built-ins          #19
  14   LLMExtractor           opt-in LLM + Jev verification  #33
- 15   Learner                async synthesise/test/swap     #38
+ 15   Learner                GeneratorLearner (async)       #38
 ====  =====================  ============================  =====
 """
 
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
     from jevex.keypaths import StructuredResult
     from jevex.schema import FieldSpec, SchemaSpec
-    from jevex.store import Store
+    from jevex.store import Store, VerifiedExample
 
 
 class ParsedDocument(BaseModel):
@@ -143,20 +143,6 @@ class LLMAnswer(BaseModel):
 
     value: Any
     evidence: str
-    verified_p: float | None = None
-
-
-class VerifiedExample(BaseModel):
-    """An answer that passed verification, queued for learning."""
-
-    model_config = ConfigDict(frozen=True)
-
-    schema_name: str
-    field: str
-    statement: Statement
-    value: Any
-    evidence: str
-    heading_trail: list[str] = Field(default_factory=list[str])
 
 
 @runtime_checkable
@@ -334,4 +320,10 @@ class LLMExtractor(Protocol):
 
 @runtime_checkable
 class Learner(Protocol):
+    """Learns from verified examples (the learn stage's plugin).
+
+    ``submit`` must return without waiting for the learning itself, so the document
+    carries on; it may skip examples it doesn't want (e.g. below its learn threshold).
+    """
+
     async def submit(self, example: VerifiedExample) -> None: ...

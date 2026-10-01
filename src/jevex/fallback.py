@@ -121,7 +121,8 @@ def output_model(spec: FieldSpec) -> type[LLMOutput]:
     return _OUTPUTS[key]
 
 
-def _type_text(spec: FieldSpec) -> str:
+def field_type_text(spec: FieldSpec) -> str:
+    """The field's type in words, for prompts: "a number", "a list, each item text"..."""
     item = {
         "number": "a number",
         "date": "a date, as YYYY-MM-DD",
@@ -152,7 +153,7 @@ class LLMFieldExtractor:
             name=field.name,
             label=field.label,
             phrase=field.phrase,
-            type=_type_text(field),
+            type=field_type_text(field),
             unit=f" in {field.unit}" if field.unit else "",
         )
         response = await budget.call_llm(self.llm, prompt, output_model(field))

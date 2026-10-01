@@ -191,12 +191,13 @@ def _normaliser_item_schema() -> dict[str, Any]:
     return {"anyOf": options}
 
 
-_NORMALISE_SCHEMA: dict[str, Any] = {
+NORMALISE_JSON_SCHEMA: dict[str, Any] = {
     "type": "array",
     "items": _normaliser_item_schema(),
     "maxItems": MAX_NORMALISERS,
     "description": "Built-in normalisers, applied in order.",
 }
+"""The JSON schema of a spec's ``normalise`` list (also what the learner asks for)."""
 
 
 def _check_step_keys(steps: object) -> None:
@@ -291,7 +292,7 @@ class GeneratorSpec(BaseModel):
     field: str = Field(pattern=_FIELD, description="Schema.field, e.g. VehicleSpec.price")
     scope: SpecScope = Field(default_factory=SpecScope)
     match: MatchSpec
-    normalise: Annotated[list[NormaliserStep], WithJsonSchema(_NORMALISE_SCHEMA)] = Field(
+    normalise: Annotated[list[NormaliserStep], WithJsonSchema(NORMALISE_JSON_SCHEMA)] = Field(
         default_factory=list[NormaliserStep], max_length=MAX_NORMALISERS
     )
     provenance: Provenance = Field(default_factory=Provenance)
