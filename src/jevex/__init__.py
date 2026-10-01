@@ -119,6 +119,7 @@ from jevex.resolve import (
     SingleEntity,
 )
 from jevex.results import Extracted, FieldMeta, Source
+from jevex.review import ReviewItem, ReviewQueue, ReviewSink, review_items
 from jevex.schema import Field, FieldSpec, Questions, SchemaConfig, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import DefaultSplitter, DuplicateStatementError, StatementStage, cut_statement
@@ -139,6 +140,7 @@ from jevex.store import (
     Store,
     StoreError,
     VerifiedExample,
+    example_id,
     open_store,
 )
 from jevex.structured import (
@@ -261,6 +263,9 @@ __all__ = [
     "Questions",
     "RapidOcrEngine",
     "RegexGenerator",
+    "ReviewItem",
+    "ReviewQueue",
+    "ReviewSink",
     "RobotsDisallowedError",
     "RowRole",
     "RunBudget",
@@ -304,6 +309,7 @@ __all__ = [
     "default_registry",
     "diff_packs",
     "evaluate",
+    "example_id",
     "example_statement",
     "export_pack",
     "flatten",
@@ -321,6 +327,7 @@ __all__ = [
     "normalise",
     "open_store",
     "pack_generators",
+    "review_items",
     "row_roles",
     "run_chain",
     "section_text",

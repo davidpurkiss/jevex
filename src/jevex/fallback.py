@@ -34,7 +34,6 @@ Jev answers and the hit is in ``meta.budget_events``.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -50,7 +49,7 @@ from jevex.normalise import NormaliseError, normalise
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.select import field_statements, statement_state, unique_spans
 from jevex.statements import Span
-from jevex.store import VerifiedExample
+from jevex.store import VerifiedExample, example_id
 
 if TYPE_CHECKING:
     from jevex.interfaces import LLMExtractor
@@ -475,10 +474,9 @@ def _examples(ask: _Ask) -> list[VerifiedExample]:
     evidence = (ask.span.start, ask.span.end) if ask.span else None
     out: list[VerifiedExample] = []
     for value in ask.kept:
-        digest = hashlib.sha256(f"{field_key}\0{statement.text}\0{value!r}".encode()).hexdigest()
         out.append(
             VerifiedExample(
-                id=f"ex-{digest[:12]}",
+                id=example_id(field_key, statement.text, value),
                 field=field_key,
                 statement=statement.text,
                 value=value,

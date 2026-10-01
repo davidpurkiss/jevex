@@ -36,6 +36,7 @@ from jevex.store.base import (
     Store,
     StoreError,
     VerifiedExample,
+    example_id,
 )
 from jevex.store.sqlite import SQLiteStore
 
@@ -78,5 +79,6 @@ __all__ = [
     "Store",
     "StoreError",
     "VerifiedExample",
+    "example_id",
     "open_store",
 ]

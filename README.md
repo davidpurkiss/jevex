@@ -155,6 +155,24 @@ stats = await store.generator_stats("gen-0f3a9c")
 print(stats.hit_rate, stats.win_rate)
 ```
 
+## Review
+
+A `review_sink` gets every value whose confidence is below `review_threshold` (0.8 by
+default; `review_thresholds` per field, keyed like `thresholds`) as a `ReviewItem`: the
+field, the entity, the document URL and the value's full `FieldMeta`, in one `send(items)`
+call per document. Any object with an async `send` works; `ReviewQueue` keeps them in
+memory. Send a person's answer back with `feedback`, and it becomes a verified example:
+stored, and learned from like an LLM answer Jev verified.
+
+```python
+queue = ReviewQueue()
+extractor = Extractor(schemas=[VehicleSpec], store="sqlite:///jevex.db", review_sink=queue)
+await extractor.extract(document)
+for item in queue.items:
+    print(item.field, item.meta.value, item.meta.source.statement)
+await extractor.feedback(queue.items[0], 7.4)  # the right value in that statement
+```
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the
