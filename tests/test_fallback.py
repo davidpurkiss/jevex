@@ -186,6 +186,23 @@ async def test_no_candidates_falls_back_and_a_verified_answer_is_used() -> None:
     assert example.document_source == "example.com"  # for the learner's generator scoping
 
 
+@pytest.mark.parametrize(
+    ("content", "locale"), [(b'<html lang="de-DE"><p/></html>', "de-DE"), (b"<p/>", None)]
+)
+async def test_the_example_carries_the_documents_own_locale(
+    content: bytes, locale: str | None
+) -> None:
+    fake = FakeJev(strict=True).noul(VERIFY, p=0.95)
+    ctx = context(fake, [st("s1", trail=["Performance"])], {"s1": "zero_to_62_s"})
+    ctx.document = Document.from_bytes(content, url="https://example.com")
+    ctx.extraction_llm = llm(value=9.1, evidence="9.1 seconds")
+    await FallbackStage().run(ctx)
+    [example] = ctx.verified
+    assert example.locale == locale  # what the learner scopes its generator to
+    assert ("locale" in example.context) == (locale is not None)
+    assert example.context["heading_trail"] == ["Performance"]
+
+
 async def test_none_falls_back_only_when_the_category_was_confident() -> None:
     for category_p, calls in [(0.6, 1), (0.4, 0)]:
         fake = FakeJev().noul(VERIFY, p=0.95)

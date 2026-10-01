@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from jevex.document import LOCALE_TAG
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from jevex.statements import Statement
 
 
 def utcnow() -> datetime:
@@ -78,11 +83,11 @@ class VerifiedExample(BaseModel):
     """A value that passed Jev verification (or came from a human reviewer).
 
     ``evidence`` is the ``(start, end)`` character span of the value in ``statement``.
-    ``context`` holds whatever the learner needs to replay it (heading trail, component
-    type, locale...). ``source`` is who verified it; ``document_source`` is where the
-    statement came from (:attr:`jevex.Document.source`), so the learner runs the
-    generators scoped to that source on it. ``None`` when unknown: then no
-    source-scoped generator runs on it.
+    ``context`` holds whatever the learner needs to replay it (:func:`example_context`:
+    heading trail, statement kind, the document's locale). ``source`` is who verified it;
+    ``document_source`` is where the statement came from (:attr:`jevex.Document.source`),
+    so the learner runs the generators scoped to that source on it. ``None`` when unknown:
+    then no source-scoped generator runs on it.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -97,6 +102,27 @@ class VerifiedExample(BaseModel):
     probability: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     document_source: str | None = None
+
+    @property
+    def locale(self) -> str | None:
+        """The locale of the document the statement came from (``context["locale"]``), or
+        ``None`` when it didn't say or the value isn't a language tag. The learner scopes
+        what it learns from the example to it."""
+        locale = self.context.get("locale")
+        return locale if isinstance(locale, str) and _LOCALE.fullmatch(locale) else None
+
+
+_LOCALE = re.compile(LOCALE_TAG)
+
+
+def example_context(statement: Statement, locale: str | None = None) -> dict[str, Any]:
+    """A :class:`VerifiedExample`'s ``context`` for a value from ``statement``: its heading
+    trail and kind, and ``locale``, the document's own (:attr:`Context.locale
+    <jevex.pipeline.Context.locale>`), when it has one."""
+    context: dict[str, Any] = {"heading_trail": statement.heading_trail, "kind": statement.kind}
+    if locale:
+        context["locale"] = locale
+    return context
 
 
 def example_id(field: str, statement: str, value: Any) -> str:

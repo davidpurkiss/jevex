@@ -49,9 +49,16 @@ from jevex.learn import (
     LearningSpend,
     LearnOutcome,
     draft_spec,
+    example_statement,
 )
 from jevex.llm import LLMError
-from jevex.normalise import BUILTIN_NORMALISERS, FunctionNormaliser, NormaliseStage, strip
+from jevex.normalise import (
+    BUILTIN_NORMALISERS,
+    FunctionNormaliser,
+    NormaliseStage,
+    normalise,
+    strip,
+)
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.statements import NormaliserStep
 from jevex.store import Store, open_store
@@ -264,6 +271,38 @@ def test_draft_specs_get_a_content_id_and_provenance() -> None:
     assert spec.provenance.synthesised_by == "generator_llm"
     assert spec.provenance.created is not None
     assert GeneratorSpec.from_yaml(spec.to_yaml()) == spec
+
+
+def test_a_draft_from_a_document_with_a_locale_is_scoped_and_written_for_it() -> None:
+    draft = GeneratorDraft.model_validate(
+        {
+            "regex": r"(\d+(?:,\d+)?) Sekunden am (\d+\.\d+\.\d+)",
+            "group": 1,
+            "normalise": ["parse_number", {"parse_number": {"decimal": "."}}, "parse_date"],
+        }
+    )
+    unscoped = draft_spec(draft, FIELD, "ex-1")
+    german = draft_spec(draft, FIELD, "ex-1", "de-DE")
+    assert unscoped.scope.locale is None
+    assert german.scope.locale == "de-DE"
+    # localise_steps adds what de-DE needs and keeps what the draft set itself.
+    assert german.to_data()["normalise"] == [
+        {"parse_number": {"decimal": ","}},
+        {"parse_number": {"decimal": "."}},
+        "parse_date",
+    ]
+    # en-US reads numeric dates month first.
+    assert draft_spec(draft, FIELD, "ex-1", "en-US").to_data()["normalise"] == [
+        "parse_number",
+        {"parse_number": {"decimal": "."}},
+        {"parse_date": {"order": "mdy"}},
+    ]
+    assert german.to_data()["scope"] == {"locale": "de-DE"}
+    assert GeneratorSpec.from_yaml(german.to_yaml()) == german
+    # Learned on pages that write numbers differently, the same draft is two generators.
+    ids = {unscoped.id, german.id, draft_spec(draft, FIELD, "ex-2", "en-GB").id}
+    assert len(ids) == 3
+    assert draft_spec(draft, FIELD, "ex-2", "de-DE").id == german.id
 
 
 def test_the_draft_schema_offers_only_built_in_normalisers() -> None:
@@ -856,10 +895,13 @@ async def test_the_stage_hands_the_document_to_the_housekeeper_without_a_learner
 class Categorised:
     """Leaves one statement categorised as the 0-62 time, as the stages before would."""
 
+    text: str = TEXT
     name: str = "categorise"
 
     async def run(self, ctx: Context) -> None:
-        statement = Statement(id="s1", text=TEXT, kind="sentence", component_id="c1", location=LOC)
+        statement = Statement(
+            id="s1", text=self.text, kind="sentence", component_id="c1", location=LOC
+        )
         done = ctx_with(statement)
         ctx.parsed = done.parsed
         ctx.schemas["Car"].scopes = done.schemas["Car"].scopes
@@ -869,10 +911,10 @@ class Categorised:
 VERIFY = "The statement states that the 0-62 mph time (s) is 9.1."
 
 
-def pipeline() -> Pipeline:
+def pipeline(text: str = TEXT) -> Pipeline:
     return Pipeline(
         [
-            Categorised(),
+            Categorised(text),
             CandidateStage(registry=GeneratorRegistry()),
             SelectStage(),
             NormaliseStage(),
@@ -915,6 +957,41 @@ async def test_the_extractor_learns_from_the_fallback_and_later_documents_use_it
         store = await extractor.store()
         assert store is not None
         assert [e.field for e in await store.examples(FIELD)] == [FIELD]
+
+
+async def test_a_generator_learned_on_a_german_page_doesnt_run_on_an_english_one() -> None:
+    fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9,1"})
+    generator_llm = FakeLLM(lambda _p, _s: GERMAN_DRAFT)
+    fake = FakeJev().noul(VERIFY, p=0.95).choice(None, pick("9,1"))
+    de = Document.from_bytes(b'<html lang="de-DE"><p/></html>')
+    uk = Document.from_bytes(b"<p/>", locale="en-GB")
+    async with Extractor(
+        [Car],
+        jev=fake.client(),
+        pipeline=pipeline(GERMAN),
+        extraction_llm=fallback_llm,
+        generator_llm=generator_llm,
+    ) as extractor:
+        await extractor.extract(de)
+        await extractor.wait_for_learning()
+        lrn = await extractor.learner()
+        assert lrn is not None
+        [outcome] = lrn.outcomes
+        assert outcome.status == "accepted"
+        assert outcome.spec is not None
+        assert outcome.spec.scope.locale == "de-DE"
+
+        again = (await extractor.extract(de)).one(Car).meta.zero_to_62_s
+        assert (again.method, again.generator_id) == ("generator", outcome.spec.id)
+        assert again.value == 9.1
+
+        english = (await extractor.extract(uk)).one(Car).meta.zero_to_62_s
+        assert english.method == "llm"
+        assert english.generator_id is None
+        assert len(fallback_llm.calls) == 2
+        # The English page's example is tested under en-GB, where "9,1" isn't 9.1.
+        await extractor.wait_for_learning()
+        assert [o.status for o in lrn.outcomes] == ["accepted", "missed_trigger"]
 
 
 async def test_answers_below_the_learn_threshold_arent_learned() -> None:
@@ -1085,6 +1162,93 @@ async def test_generators_are_run_with_the_learners_locale() -> None:
     assert unknown.status != "covered"
     uk = await learned(FakeJev(), FakeLLM([]), example(), base=base, locale="en-GB")
     assert uk.status == "covered"
+
+
+GERMAN = "Von 0 auf 100 in 9,1 Sekunden"
+GERMAN_DRAFT = {"regex": r"(\d+(?:,\d+)?) Sekunden", "group": 1, "normalise": ["parse_number"]}
+
+
+def german(locale: str | None = "de-DE", **kw: Any) -> VerifiedExample:
+    context: dict[str, Any] = {"heading_trail": [], "kind": "sentence"}
+    if locale is not None:
+        context["locale"] = locale
+    return example(
+        GERMAN, 9.1, evidence=(GERMAN.index("9,1"), GERMAN.index("9,1") + 3), context=context, **kw
+    )
+
+
+async def test_an_example_with_a_locale_gives_a_generator_scoped_to_it() -> None:
+    store = open_store(":memory:")
+    fake = FakeJev(strict=True).choice("Which of these is the 0-62 mph time (s)?", pick("9,1"))
+    lrn = learner(fake, FakeLLM([GERMAN_DRAFT]), store=store)
+    outcome = await lrn.learn(german())
+    assert outcome.status == "accepted"
+    assert outcome.spec is not None
+    assert outcome.spec.scope.locale == "de-DE"
+    assert outcome.spec.to_data()["normalise"] == [{"parse_number": {"decimal": ","}}]
+    [record] = await store.generators()
+    assert GeneratorSpec.parse(record.spec) == outcome.spec
+    # It runs on German pages, reading "12,5" as they write it, and nowhere else.
+    registry = lrn.snapshot.registry
+    field = SPEC.field("zero_to_62_s")
+    statement = example_statement(example("Von 0 auf 100 in 12,5 Sekunden", 12.5))
+    assert len(registry.generate(statement, field, schema="Car", locale="de_de")) == 1
+    for locale in ("en-GB", "de", "de-AT", None):
+        assert registry.generate(statement, field, schema="Car", locale=locale) == []
+    [found] = registry.generate(statement, field, schema="Car", locale="de-DE")
+    assert normalise(found.raw, found.normalise, field) == 12.5
+
+
+async def test_an_example_without_a_locale_gives_an_unscoped_generator() -> None:
+    outcome = await learned(FakeJev().choice(None, pick("9.1")), FakeLLM([DRAFT]), example())
+    assert outcome.status == "accepted"
+    assert outcome.spec is not None
+    assert outcome.spec.scope.locale is None
+    assert outcome.spec.to_data()["normalise"] == ["parse_number"]
+
+
+@pytest.mark.parametrize(("locale", "status"), [("de-DE", "accepted"), (None, "missed_trigger")])
+async def test_the_trigger_is_read_by_the_examples_locale(locale: str | None, status: str) -> None:
+    # Unlocalised, parse_number reads "9,1" as 9 (or 91), not the example's 9.1.
+    fake = FakeJev().choice(None, pick("9,1"))
+    outcome = await learned(fake, FakeLLM([GERMAN_DRAFT]), german(locale))
+    assert outcome.status == status
+
+
+async def test_the_examples_locale_scopes_the_generators_it_is_tested_with() -> None:
+    # A de-DE generator covers the German example, whatever the learner's
+    # own locale; on an example with no locale, the learner's is used.
+    scoped = RegexGenerator(
+        id="de",
+        pattern=r"(\d+,\d+) Sekunden",
+        group=1,
+        normalise=(NormaliserStep(name="parse_number"),),
+        scope=Scope(locale="de-DE"),
+    )
+    base = GeneratorRegistry([scoped])
+    for lrn_locale in (None, "en-GB"):
+        outcome = await learned(FakeJev(), FakeLLM([]), german(), base=base, locale=lrn_locale)
+        assert outcome.status == "covered"
+    uk = await learned(
+        FakeJev().choice(None, pick("9,1")), FakeLLM([GERMAN_DRAFT]), german("en-GB"), base=base
+    )
+    assert uk.status != "covered"
+    unknown = await learned(FakeJev(), FakeLLM([]), german(None), base=base, locale="de-DE")
+    assert unknown.status == "covered"
+
+
+async def test_stored_examples_are_tested_under_their_own_locales() -> None:
+    # The new de-DE generator would change the candidates on both stored statements, but
+    # runs only on the German one: the English one costs no question.
+    old_german = "Von 0 auf 100 in 7,5 Sekunden"
+    english = example("0-62 takes 7,5 Sekunden", 7.5, eid="uk", context={"locale": "en-GB"})
+    other = example(old_german, 7.5, eid="de-old", context={"locale": "de-DE"})
+    store = await stored(open_store(":memory:"), english, other)
+    fake = FakeJev(strict=True).choice(None, lambda q: next(o for o in q.options if o != "none"))
+    outcome = await learned(fake, FakeLLM([GERMAN_DRAFT]), german(), store=store)
+    assert outcome.status == "accepted"
+    states = [c.state for c in fake.calls]
+    assert sorted(states, key=str) == [{"statement": old_german}, {"statement": GERMAN}]
 
 
 @pytest.mark.parametrize("document_source", [CARS, "www.Cars.Example.com"])

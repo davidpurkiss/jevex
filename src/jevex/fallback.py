@@ -50,7 +50,7 @@ from jevex.normalise import NormaliseError, normalise
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.select import field_statements, statement_state, unique_spans
 from jevex.statements import Span
-from jevex.store import VerifiedExample, example_id
+from jevex.store import VerifiedExample, example_context, example_id
 
 if TYPE_CHECKING:
     from jevex.interfaces import LLMExtractor
@@ -343,7 +343,7 @@ class FallbackStage:
             ask.kept = [v for i, v in enumerate(ask.values) if i in passed]
             if ask.kept:
                 ask.p = min(ask.item_p[i] for i in passed)
-                ctx.verified.extend(_examples(ask, ctx.document.source))
+                ctx.verified.extend(_examples(ask, ctx.document.source, ctx.locale))
             ask.rejected = [
                 _rejected(ctx, ask, v, ask.item_p[i])
                 for i, v in enumerate(ask.values)
@@ -468,8 +468,9 @@ def _rejected(ctx: Context, ask: _Ask, value: Any, p: float) -> Alternative:
     return Alternative(value=value, raw=evidence, p=p)
 
 
-def _examples(ask: _Ask, document_source: str | None) -> list[VerifiedExample]:
-    """The verified answer as an example for the learner, one per value."""
+def _examples(ask: _Ask, document_source: str | None, locale: str | None) -> list[VerifiedExample]:
+    """The verified answer as an example for the learner, one per value. ``locale`` is the
+    document's own (none when it doesn't say), which the learner scopes generators to."""
     statement = ask.statement
     field_key = f"{ask.run.name}.{ask.spec.name}"
     evidence = (ask.span.start, ask.span.end) if ask.span else None
@@ -482,7 +483,7 @@ def _examples(ask: _Ask, document_source: str | None) -> list[VerifiedExample]:
                 statement=statement.text,
                 value=value,
                 evidence=evidence,
-                context={"heading_trail": statement.heading_trail, "kind": statement.kind},
+                context=example_context(statement, locale),
                 source="llm",
                 probability=ask.p,
                 document_source=document_source,

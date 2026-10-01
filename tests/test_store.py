@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from jevex.layout import DomLocation
+from jevex.statements import Statement
 from jevex.store import (
     DocumentEvent,
     DocumentStat,
@@ -21,6 +23,7 @@ from jevex.store import (
     StoreError,
     ValueStat,
     VerifiedExample,
+    example_context,
     open_store,
 )
 from jevex.store.sqlite import _SCHEMA, SCHEMA_VERSION  # pyright: ignore[reportPrivateUsage]
@@ -369,6 +372,49 @@ async def test_an_examples_document_source_is_kept_and_replaced(store: Store) ->
     human = example.model_copy(update={"source": "human", "document_source": None})
     await store.add_example(human)
     assert await store.examples("S.f") == [human]
+
+
+async def test_an_examples_locale_round_trips_in_its_context(store: Store) -> None:
+    example = VerifiedExample(
+        id="ex", field="S.f", statement="s", value=1, context={"locale": "de-DE"}
+    )
+    await store.add_example(example)
+    [back] = await store.examples("S.f")
+    assert back.locale == "de-DE"
+
+
+@pytest.mark.parametrize(
+    ("context", "locale"),
+    [
+        ({"locale": "de-DE"}, "de-DE"),
+        ({"locale": "en_GB"}, "en_GB"),
+        ({}, None),
+        ({"locale": ""}, None),
+        ({"locale": "English"}, None),  # not a language tag: not a scope either
+        ({"locale": "de-DE\n"}, None),
+        ({"locale": 7}, None),
+    ],
+)
+def test_an_examples_locale_is_its_contexts_language_tag(
+    context: dict[str, object], locale: str | None
+) -> None:
+    example = VerifiedExample(id="ex", field="S.f", statement="s", value=1, context=context)
+    assert example.locale == locale
+
+
+def test_an_example_context_has_the_locale_only_when_the_document_has_one() -> None:
+    statement = Statement(
+        id="s1",
+        text="9,1 s",
+        kind="list_item",
+        component_id="c1",
+        location=DomLocation(dom_path="/p"),
+        heading_trail=["Leistung"],
+    )
+    plain = {"heading_trail": ["Leistung"], "kind": "list_item"}
+    assert example_context(statement) == plain
+    assert example_context(statement, None) == plain
+    assert example_context(statement, "de-DE") == {**plain, "locale": "de-DE"}
 
 
 # --- stats ---------------------------------------------------------------------------

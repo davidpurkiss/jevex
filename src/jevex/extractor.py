@@ -834,6 +834,7 @@ class Extractor:
                 statements=_statements(ctx),
                 url=document.url,
                 document_source=document.source,
+                locale=ctx.locale,
             )
             if items:
                 await self.review_sink.send(items)
