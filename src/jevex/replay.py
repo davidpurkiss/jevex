@@ -366,7 +366,7 @@ def _chart(report: ReplayReport, batches: list[ReplayBatch], metric: _Metric) ->
     values: list[float | None] = [getattr(b, metric.key) for b in batches]
     present = [v for v in values if v is not None]
     ticks = (
-        [0.0, 0.25, 0.5, 0.75, 1.0] if metric.top == 1.0 else nice_ticks(max(present, default=0.0))
+        nice_ticks(metric.top) if metric.top is not None else nice_ticks(max(present, default=0.0))
     )
     y_top = ticks[-1]
     plot_w = _WIDTH - _LEFT - _RIGHT
