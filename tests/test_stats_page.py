@@ -1,6 +1,10 @@
 import json
+import re
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from jevex.stats import (
     Event,
@@ -12,6 +16,8 @@ from jevex.stats import (
     render_page,
     to_json,
 )
+from jevex.stats.charts import PALETTE_CSS
+from jevex.stats.page import MARK_CSS, MARK_SVG
 
 T0 = datetime(2026, 9, 30, 8, 0, tzinfo=UTC)
 
@@ -92,7 +98,7 @@ def test_a_live_page_has_every_view_and_reloads_itself() -> None:
     assert "replays only" in page
     assert "of a $1.000 budget" in page
     # Both axes, time first for a store; the documents view hidden until picked.
-    assert page.count("<svg") == 6
+    assert page.count('<svg class="chart') == 6
     assert page.index('data-axis="time"') < page.index('data-axis="docs"')
     assert '<div data-axis="docs" hidden>' in page
     assert '<button type="button" data-pick="time" aria-pressed="true">time</button>' in page
@@ -145,7 +151,7 @@ def test_a_report_has_one_axis_and_no_reload() -> None:
     page = render_page(stats, title="Replay", generated="10 documents")
     assert "data-refresh" not in page
     assert '<div class="toggle"' not in page
-    assert page.count("<svg") == 3
+    assert page.count('<svg class="chart') == 3
     assert "<title>Replay</title>" in page
     assert "10 documents" in page
 
@@ -155,4 +161,61 @@ def test_empty_views_say_why() -> None:
     assert "No generators yet" in page
     assert "No field values yet" in page
     assert "No budget hits, stopped documents or errors." in page
-    assert page.count("<svg") == 3
+    assert page.count('<svg class="chart') == 3
+
+
+BRAND = Path(__file__).parent.parent / "docs" / "brand"
+SVG_NS = "{http://www.w3.org/2000/svg}"
+
+
+def shapes(svg: ET.Element) -> list[dict[str, str]]:
+    """Each rect and circle's geometry, in order, without its colours."""
+    keep = ("x", "y", "width", "height", "rx", "cx", "cy", "r")
+    return [
+        {k: v for k, v in el.attrib.items() if k in keep}
+        for el in svg.iter()
+        if el.tag.removeprefix(SVG_NS) in ("rect", "circle")
+    ]
+
+
+def fills(svg: ET.Element) -> list[str]:
+    """Each rect and circle's colour: its fill, or its stroke for an outline."""
+    return [
+        (el.get("stroke" if el.get("fill") == "none" else "fill") or "").lower()
+        for el in svg.iter()
+        if el.tag.removeprefix(SVG_NS) in ("rect", "circle")
+    ]
+
+
+def test_the_header_carries_the_jevex_mark_in_both_themes() -> None:
+    page = render_page(store_stats())
+    assert f"<header><h1>{MARK_SVG}jevex · stats</h1>" in page
+    mark = ET.fromstring(MARK_SVG)
+    assert shapes(mark) == shapes(ET.parse(BRAND / "jevex-mark.svg").getroot())
+    light = fills(ET.parse(BRAND / "jevex-mark.svg").getroot())
+    dark = fills(ET.parse(BRAND / "jevex-mark-dark.svg").getroot())
+    css = MARK_CSS.split("@media")
+    for i in range(4):  # the bars, as the brand's light and dark marks colour them
+        assert f"--bar-{i + 1}: {light[i]};" in css[0]
+        assert f"--bar-{i + 1}: {dark[i]};" in css[1]
+    assert light[4:] == dark[4:] == ["#34d399", "#34d399"]
+    for theme, file in ((css[0], "jevex-mark.svg"), (css[1], "jevex-mark-dark.svg")):
+        ring = list(ET.parse(BRAND / file).getroot().iter(f"{SVG_NS}circle"))[-1]
+        assert f"--ring: {ring.get('opacity')};" in theme
+    assert ".mark .value { fill: #34d399; }" in MARK_CSS
+    assert f"{PALETTE_CSS}{MARK_CSS}" in page
+
+
+def test_the_favicon_is_inline_and_the_page_makes_no_requests() -> None:
+    page = render_page(store_stats(), live=True)
+    icon = re.search(
+        r'<link rel="icon" type="image/svg\+xml" href="data:image/svg\+xml,([^"]+)">', page
+    )
+    assert icon is not None
+    favicon = ET.fromstring(unquote(icon.group(1)))
+    brand = ET.parse(BRAND / "favicon.svg").getroot()
+    assert shapes(favicon) == shapes(brand)
+    assert fills(favicon) == fills(brand)
+    assert favicon.get("viewBox") == brand.get("viewBox")
+    for request in ("src=", 'href="http', "url(http", "@import", "@font-face"):
+        assert request not in page

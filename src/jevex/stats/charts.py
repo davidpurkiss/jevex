@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from jevex.stats.data import CURVE_POINTS, METHODS, curve, shares
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from jevex.stats.data import Point, Stats, XAxis
 
@@ -31,55 +31,75 @@ WIDTH = 720
 _LEFT, _RIGHT, _TOP, _BOTTOM = 72, 96, 34, 30
 _PANEL = 170
 
-PALETTE_CSS = """\
-.viz-root {
-  color-scheme: light;
-  --surface-1: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6b6a65;
-  --grid: #e1e0d9;
-  --axis: #c3c2b7;
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
+LIGHT: Mapping[str, str] = {
+    "surface-1": "#ffffff",
+    "text-primary": "#1e1b4b",  # ink
+    "text-secondary": "#4c4878",
+    "text-muted": "#6b6893",
+    "grid": "#ede9fe",
+    "axis": "#c4b5fd",
+    "accent": "#7c3aed",  # violet
+    "series-1": "#818cf8",
+    "series-2": "#7c3aed",
+    "series-3": "#10b981",
+    "series-4": "#f59e0b",  # amber
+    "series-5": "#4338ca",
 }
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .viz-root,
-  :root.viz-root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --surface-1: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #a3a29a;
-    --grid: #2c2c2a;
-    --axis: #383835;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-  }
+"""The light theme's colour roles, from the brand palette (``docs/brand/README.md``): ink
+text, violet for accents, and the categorical slots in method order (structured, jev,
+generator, llm, vision). Only the generator slot is mint: values resolved without an LLM.
+The LLM slot is amber so the two contrast."""
+
+DARK: Mapping[str, str] = {
+    "surface-1": "#0f0d24",  # night
+    "text-primary": "#f5f3ff",  # lavender
+    "text-secondary": "#c4b5fd",
+    "text-muted": "#9a95c2",
+    "grid": "#1e1b4b",
+    "axis": "#3b3775",
+    "accent": "#a78bfa",
+    "series-1": "#7c86fe",
+    "series-2": "#7c3aed",
+    "series-3": "#14ac7a",
+    "series-4": "#c7800e",
+    "series-5": "#5149e8",
 }
-:root[data-theme="dark"] .viz-root, :root[data-theme="dark"].viz-root {
-  color-scheme: dark;
-  --surface-1: #1a1a19;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #a3a29a;
-  --grid: #2c2c2a;
-  --axis: #383835;
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-}
-"""
-"""The colour roles, light and dark. The categorical slots follow the method order (the
-generator band is the aqua "mint" reserved for values resolved without an LLM)."""
+"""The dark theme's colour roles: night surface, lavender text, and its own steps of the
+same hues. Categorical slots in both themes are steps of the brand's hues chosen to pass
+the dataviz palette checks against their surface (lightness band, chroma floor,
+colour-blind separation of neighbouring bands), so the mint and amber are darker steps
+than the brand's ``#34D399`` and ``#F59E0B``, which are too light for a dark chart."""
+
+
+def theme_css(light: Mapping[str, str], dark: Mapping[str, str]) -> str:
+    """CSS custom properties on ``.viz-root``: ``light`` by default, ``dark`` when the
+    reader prefers it, and either when the document root says ``data-theme``."""
+
+    def block(selector: str, scheme: str, roles: Mapping[str, str], indent: str) -> str:
+        lines = [f"{indent}color-scheme: {scheme};"]
+        lines += [f"{indent}--{name}: {value};" for name, value in roles.items()]
+        return f"{selector} {{\n" + "\n".join(lines) + f"\n{indent[:-2]}}}\n"
+
+    dark_auto = (
+        ':root:where(:not([data-theme="light"])) .viz-root,\n'
+        '  :root.viz-root:where(:not([data-theme="light"]))'
+    )
+    return (
+        block(".viz-root", "light", light, "  ")
+        + "@media (prefers-color-scheme: dark) {\n  "
+        + block(dark_auto, "dark", dark, "    ")
+        + "}\n"
+        + block(
+            ':root[data-theme="dark"] .viz-root, :root[data-theme="dark"].viz-root',
+            "dark",
+            dark,
+            "  ",
+        )
+    )
+
+
+PALETTE_CSS = theme_css(LIGHT, DARK)
+"""The colour roles, light and dark (:data:`LIGHT`, :data:`DARK`)."""
 
 CHART_CSS = """\
 svg.chart { display: block; max-width: 100%; height: auto; overflow: visible;
@@ -91,11 +111,11 @@ svg.chart text.muted { fill: var(--text-muted); }
 svg.chart .grid { stroke: var(--grid); stroke-width: 1; }
 svg.chart .axis { stroke: var(--axis); stroke-width: 1; }
 svg.chart .wave { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
-svg.chart .learned { stroke: var(--series-3); stroke-width: 2; }
+svg.chart .learned { stroke: var(--text-primary); stroke-width: 2; }
 svg.chart .budget { stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 6 4; }
-svg.chart .line { fill: none; stroke: var(--series-1); stroke-width: 2;
+svg.chart .line { fill: none; stroke: var(--accent); stroke-width: 2;
   stroke-linejoin: round; stroke-linecap: round; }
-svg.chart .dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+svg.chart .dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; }
 svg.chart .hit { fill: transparent; }
 svg.chart .point:hover .dot { stroke: var(--text-primary); }
 svg.chart .band { stroke: var(--surface-1); stroke-width: 2; stroke-linejoin: round; }
