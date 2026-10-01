@@ -73,7 +73,7 @@ class Conflict(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     value: Any
-    method: Method
+    method: Method | None = None
     confidence: float | None = None
     source: Source | None = None
 

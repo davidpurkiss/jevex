@@ -9,7 +9,7 @@ from jevex.entities import EntityScope
 from jevex.interfaces import CandidateSelector, ParsedDocument
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
-from jevex.results import FieldMeta
+from jevex.results import Conflict, FieldMeta
 from jevex.select import (
     CandidateStage,
     JevCandidateSelector,
@@ -388,6 +388,21 @@ async def test_values_from_other_routes_are_not_overwritten() -> None:
     await run_both(ctx)
     meta = ctx.schemas["Car"].fields["doc"]["fuel_type"]
     assert (meta.value, meta.method) == ("petrol", "structured")
+    assert fake.calls == []  # nothing is asked about a field another route found
+
+
+async def test_merge_asks_about_found_fields_and_records_the_losing_value() -> None:
+    fake = FakeJev().choice("What is the fuel type", "diesel", confidence=0.9)
+    ctx = context(fake, [st("s1", "Runs on diesel")], {"s1": "fuel_type"})
+    run = ctx.schemas["Car"]
+    run.merge = True
+    run.set_field(
+        "doc", "fuel_type", FieldMeta(value="petrol", confidence=0.6, method="structured")
+    )
+    await run_both(ctx)
+    meta = run.fields["doc"]["fuel_type"]
+    assert (meta.value, meta.method, meta.confidence) == ("diesel", "jev", 0.9)
+    assert meta.conflicts == [Conflict(value="petrol", method="structured", confidence=0.6)]
 
 
 # --- batching --------------------------------------------------------------------------

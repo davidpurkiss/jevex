@@ -19,7 +19,7 @@ from jevex.jev import (
     ScoreAnswer,
 )
 from jevex.pipeline import SchemaRun, Stage, for_each_scope
-from jevex.results import FieldMeta
+from jevex.results import Conflict, FieldMeta, Source
 from jevex.schema import NONE_OPTION
 
 
@@ -151,6 +151,103 @@ async def test_run_stops_when_no_schema_is_active() -> None:
     assert log == []
     assert ctx.stopped
     assert ctx.active == []
+
+
+@dataclass
+class FinishAll:
+    name: str = "finish"
+
+    async def run(self, ctx: Context) -> None:
+        for run in ctx.active:
+            run.finish()
+
+
+async def test_finished_schemas_end_the_run_without_stopping_it() -> None:
+    log: list[str] = []
+    ctx = ctx_for(Car, Book)
+    ctx.schemas["Book"].deactivate()
+    ctx = await Pipeline([FinishAll(), *stages("later", log=log)]).run(ctx)
+    assert log == []
+    assert ctx.active == []
+    assert not ctx.stopped
+    assert ctx.events == []
+
+
+async def test_a_finished_schema_leaves_active_but_keeps_its_record() -> None:
+    @dataclass
+    class FinishCar:
+        name: str = "finish_car"
+
+        async def run(self, ctx: Context) -> None:
+            car = ctx.schemas["Car"]
+            car.set_field("only", "model", FieldMeta(value="Golf", method="structured"))
+            car.finish()
+
+    seen: list[list[str]] = []
+
+    @dataclass
+    class Look:
+        name: str = "look"
+
+        async def run(self, ctx: Context) -> None:
+            seen.append([run.name for run in ctx.active])
+
+    result = await extractor(FinishCar(), Look()).extract(doc())
+    assert seen == [["Book"]]
+    assert result.values == {"Car": {"only": {"model": "Golf"}}}
+    assert result.meta.active_schemas == ["Car", "Book"]  # finished isn't gated out
+
+
+# --- Routes: needs and offer_field ------------------------------------------------------
+
+
+def test_without_merge_the_first_found_value_stays() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car))
+    assert run.needs("doc", "model")
+    run.offer_field("doc", "model", FieldMeta(method="jev", error="no value"))
+    assert run.needs("doc", "model")  # an error isn't a value
+    run.offer_field("doc", "model", FieldMeta(value="Golf", method="structured"))
+    assert not run.needs("doc", "model")
+    run.offer_field("doc", "model", FieldMeta(value="Polo", confidence=0.99, method="jev"))
+    meta = run.fields["doc"]["model"]
+    assert (meta.value, meta.method, meta.conflicts) == ("Golf", "structured", [])
+
+
+def test_merge_keeps_the_more_confident_value_and_records_the_other() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.offer_field("doc", "model", FieldMeta(value="Golf", confidence=0.6, method="structured"))
+    assert run.needs("doc", "model")  # merged routes look for every field
+    source = Source(statement="The Polo SE", statement_id="s1")
+    run.offer_field(
+        "doc", "model", FieldMeta(value="Polo", confidence=0.9, method="jev", source=source)
+    )
+    meta = run.fields["doc"]["model"]
+    assert (meta.value, meta.method) == ("Polo", "jev")
+    assert meta.conflicts == [Conflict(value="Golf", method="structured", confidence=0.6)]
+
+
+def test_merge_counts_a_value_without_confidence_as_certain() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.offer_field("doc", "model", FieldMeta(value="Golf", method="structured"))
+    source = Source(statement="The Polo SE", statement_id="s1")
+    run.offer_field(
+        "doc", "model", FieldMeta(value="Polo", confidence=0.99, method="jev", source=source)
+    )
+    meta = run.fields["doc"]["model"]
+    assert (meta.value, meta.method) == ("Golf", "structured")
+    assert meta.conflicts == [Conflict(value="Polo", method="jev", confidence=0.99, source=source)]
+
+
+def test_merge_ties_keep_the_earlier_route_and_agreement_is_no_conflict() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.offer_field("doc", "model", FieldMeta(value="Golf", confidence=0.8, method="structured"))
+    run.offer_field("doc", "model", FieldMeta(value="Polo", confidence=0.8, method="jev"))
+    run.offer_field("doc", "model", FieldMeta(value="Golf", confidence=0.95, method="generator"))
+    run.offer_field("doc", "model", FieldMeta(method="llm", error="nothing found"))
+    meta = run.fields["doc"]["model"]
+    # The agreeing generator value wins on confidence and inherits the earlier conflict.
+    assert (meta.value, meta.method, meta.confidence) == ("Golf", "generator", 0.95)
+    assert meta.conflicts == [Conflict(value="Polo", method="jev", confidence=0.8)]
 
 
 async def test_timing_recorded_even_when_stage_fails() -> None:

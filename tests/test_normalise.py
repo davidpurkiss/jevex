@@ -371,6 +371,28 @@ async def test_stage_skips_none_picks_and_never_overwrites_found_values() -> Non
     assert run.fields["doc"]["price"].method == "structured"
 
 
+async def test_in_merge_mode_a_disagreeing_value_from_embedded_data_is_a_conflict() -> None:
+    a = statement("s1", "Price £18,495")
+    ctx = context(a)
+    run = ctx.schemas["Car"]
+    run.merge = True
+    run.selections[("doc", "price", "s1")] = pick(
+        a, "£18,495", 0.9, {"parse_money": {"currency": "GBP"}}
+    )
+    run.set_field("doc", "price", FieldMeta(value=Decimal(17000), method="structured"))
+    await NormaliseStage().run(ctx)
+    meta = run.fields["doc"]["price"]
+    assert (meta.value, meta.method) == (Decimal(17000), "structured")  # no confidence: certain
+    [conflict] = meta.conflicts
+    assert (conflict.value, conflict.method, conflict.confidence) == (
+        Decimal(18495),
+        "generator",
+        0.9,
+    )
+    assert conflict.source is not None
+    assert conflict.source.statement == "Price £18,495"
+
+
 async def test_stage_is_in_the_default_pipeline() -> None:
     from jevex.extractor import default_pipeline
 
