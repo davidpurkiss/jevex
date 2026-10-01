@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from jevex import Context, Document, DomLocation, Field, SchemaSpec, Statement
 from jevex.entities import EntityScope
-from jevex.interfaces import CandidateSelector, ParsedDocument
+from jevex.generators import GeneratorRegistry, RegexGenerator
+from jevex.interfaces import CandidateSelector, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
 from jevex.results import Conflict, FieldMeta
@@ -174,6 +175,23 @@ async def test_candidates_are_generated_for_fields_that_need_them() -> None:
         "9.1 s",
     ]
     assert ("s2", "fuel_type") not in run.candidates  # enums need no candidates
+
+
+async def test_the_candidate_stage_records_the_generators_it_ran() -> None:
+    a = st("s1", "0-62 mph in 9.1 s")
+    ctx = context(FakeJev(), [a], {"s1": "zero_to_62_s"})
+    timed = RegexGenerator(
+        id="timed", pattern=r"(\d+) s", scope=Scope(fields=frozenset({"zero_to_62_s"}))
+    )
+    named = RegexGenerator(id="named", pattern=r"\w+", scope=Scope(fields=frozenset({"model"})))
+    await CandidateStage(registry=GeneratorRegistry([timed, named])).run(ctx)
+    assert ctx.generators_ran == {"timed"}
+
+
+async def test_no_generator_runs_without_a_statement_for_its_field() -> None:
+    ctx = context(FakeJev(), [st("s1", "Runs on diesel")], {"s1": "fuel_type"})
+    await CandidateStage().run(ctx)
+    assert ctx.generators_ran == set()
 
 
 def test_statement_state_caps_the_heading_trail() -> None:

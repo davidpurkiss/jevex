@@ -143,6 +143,18 @@ mode, it needs a `store=`); a periodic `jevex learn` then also puts the generato
 inline that the pack lacks into the diff. In Python, `await extractor.compile_pack(pack)`
 returns the same `PackDiff`.
 
+With a store, every document adds to each generator's stats: documents it ran on, hits
+(it gave a candidate) and wins (its candidate became a value that stood). A learned
+generator with no wins after `prune_after` documents (50 by default; `None` turns this off)
+is disabled, not deleted. `await extractor.dedupe_generators()` disables stored generators
+that give the same candidates as an older one on every stored example of their field.
+
+```python
+store = await extractor.store()
+stats = await store.generator_stats("gen-0f3a9c")
+print(stats.hit_rate, stats.win_rate)
+```
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the

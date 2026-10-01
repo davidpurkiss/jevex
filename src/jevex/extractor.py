@@ -18,6 +18,7 @@ from jevex.component_gate import ComponentGateStage
 from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
 from jevex.generators import GeneratorRegistry
+from jevex.housekeeping import PRUNE_AFTER, DuplicateGenerator, Housekeeper
 from jevex.images import ImageStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient, JevRequestCapError
@@ -369,6 +370,7 @@ class Extractor:
         generator_llm: LLM | None = None,
         learn_threshold: float = LEARN_THRESHOLD,
         learn_mode: LearnMode = "inline",
+        prune_after: int | None = PRUNE_AFTER,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -396,7 +398,11 @@ class Extractor:
         ``"compile"`` mode documents only log those examples to the store, with or without a
         ``generator_llm``, and :meth:`compile_pack` (``jevex learn``) learns from them
         later. ``"hybrid"`` learns inline like ``"inline"``; :meth:`compile_pack` then
-        gathers what was learned into a reviewable pack diff. Both need a ``store``."""
+        gathers what was learned into a reviewable pack diff. Both need a ``store``.
+
+        With a store, each document's generator counts are added to its stats
+        (:mod:`jevex.housekeeping`), and a learned generator with no wins after
+        ``prune_after`` scoped documents is disabled (``None``: never)."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -438,6 +444,10 @@ class Extractor:
             )
         if not 0 <= learn_threshold <= 1:
             raise ValueError(f"learn_threshold must be between 0 and 1, got {learn_threshold}")
+        if prune_after is not None and prune_after < 1:
+            raise ValueError(f"prune_after must be at least 1, got {prune_after}")
+        self.prune_after = prune_after
+        self._housekeeper: Housekeeper | None = None
 
     @property
     def jev(self) -> JevClient:
@@ -482,6 +492,27 @@ class Extractor:
                 await learned.load()
                 self._learned, self._learner = learned, None
         return self._learned
+
+    async def housekeeper(self) -> Housekeeper | None:
+        """The housekeeper documents report their generator counts to (``None`` without a
+        store). Its ``pruned`` lists the generators it disabled."""
+        learned = await self.learned_generators()
+        if learned is None or learned.store is None:
+            return None
+        keeper = self._housekeeper
+        if keeper is None or keeper.store is not learned.store or keeper.generators is not learned:
+            keeper = Housekeeper(learned.store, learned, prune_after=self.prune_after)
+            self._housekeeper = keeper
+        return keeper
+
+    async def dedupe_generators(self) -> list[DuplicateGenerator]:
+        """Disable stored generators that duplicate another (same field, scope and
+        candidates on every stored example; :meth:`~jevex.housekeeping.Housekeeper.dedupe`)
+        and return them. Later documents don't run them. Needs a ``store``."""
+        keeper = await self.housekeeper()
+        if keeper is None:
+            raise ValueError("dedupe_generators needs a store: pass store=")
+        return await keeper.dedupe()
 
     async def learner(self) -> GeneratorLearner | None:
         """The inline learner (created on first use), or ``None`` without a
@@ -559,6 +590,7 @@ class Extractor:
             ctx.learner = learner
         learned = await self.learned_generators()
         ctx.generators = learned.current if learned else None
+        ctx.housekeeper = await self.housekeeper()
         try:
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")
@@ -596,6 +628,7 @@ class Extractor:
         """Stop the learner (examples still queued stay in the store, unlearned; call
         :meth:`wait_for_learning` first to finish them), then close Jev and the store."""
         learner, self._learner, self._learned, self._learn_lock = self._learner, None, None, None
+        self._housekeeper = None
         try:
             if learner is not None:
                 await learner.aclose()

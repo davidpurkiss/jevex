@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from jevex.housekeeping import Housekeeper
     from jevex.interfaces import CandidateSelector, Learner, Selection
     from jevex.jev import Answer, JevClient
     from jevex.llm import LLM
@@ -156,6 +157,18 @@ class LearnedGenerators:
         self.current = GeneratorSnapshot(
             self.current.version + 1, self.current.registry.with_generator(spec.to_generator())
         )
+        return self.current
+
+    def withdraw(self, generator_ids: Sequence[str]) -> GeneratorSnapshot:
+        """Make a new snapshot without these generators (housekeeping disabled them in the
+        store). Ids it doesn't hold are ignored; with none held, the snapshot stays."""
+        registry = self.current.registry
+        held = [gid for gid in generator_ids if gid in registry]
+        if not held:
+            return self.current
+        for gid in held:
+            registry = registry.without(gid)
+        self.current = GeneratorSnapshot(self.current.version + 1, registry)
         return self.current
 
 
@@ -384,7 +397,7 @@ class GeneratorLearner:
 
     async def _learn(self, example: VerifiedExample, jev: JevClient) -> LearnOutcome:
         schema, spec = self._field(example)
-        statement = _statement(example)
+        statement = example_statement(example)
         expected = self._expected(example, spec)
         current = self.snapshot.on(self.base)
         if self._finds(self._generate(current, statement, spec, schema), spec, expected):
@@ -484,7 +497,7 @@ class GeneratorLearner:
             if other.id == example.id or len(cases) == self.sample_size:
                 continue
             try:
-                cases.append((_statement(other), self._expected(other, spec)))
+                cases.append((example_statement(other), self._expected(other, spec)))
             except _Rejected:
                 continue  # a stored example this field can no longer read tests nothing
         results = await gather(
@@ -614,8 +627,9 @@ _KINDS: frozenset[str] = frozenset(get_args(StatementKind))
 _LOCATION = DomLocation(dom_path="")
 
 
-def _statement(example: VerifiedExample) -> Statement:
-    """The example's statement, rebuilt with the heading trail and kind it was seen with."""
+def example_statement(example: VerifiedExample) -> Statement:
+    """The example's statement, rebuilt with the heading trail and kind it was seen with
+    (what the learner tests generators on)."""
     kind = example.context.get("kind")
     trail: object = example.context.get("heading_trail")
     headings = (
@@ -775,19 +789,24 @@ async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] 
 
 @dataclass
 class LearnStage:
-    """Hands the document's verified examples (``ctx.verified``) to the learner.
+    """Hands the document's verified examples (``ctx.verified``) to the learner, then its
+    generator counts to the housekeeper (:mod:`jevex.housekeeping`).
 
     ``learner=None`` uses ``ctx.learner`` (the extractor's: a :class:`GeneratorLearner`
-    with a ``generator_llm``, or an :class:`ExampleLogger` in ``compile`` mode);
-    with neither, the stage does nothing.
+    with a ``generator_llm``, or an :class:`ExampleLogger` in ``compile`` mode), and
+    ``housekeeper=None`` uses ``ctx.housekeeper`` (the extractor's, when it has a store).
+    Without either, that part is skipped.
     """
 
     learner: Learner | None = None
+    housekeeper: Housekeeper | None = None
     name: str = "learn"
 
     async def run(self, ctx: Context) -> None:
         learner = self.learner if self.learner is not None else ctx.learner
-        if learner is None:
-            return
-        for example in ctx.verified:
-            await learner.submit(example)
+        if learner is not None:
+            for example in ctx.verified:
+                await learner.submit(example)
+        housekeeper = self.housekeeper if self.housekeeper is not None else ctx.housekeeper
+        if housekeeper is not None:
+            await housekeeper.record(ctx)

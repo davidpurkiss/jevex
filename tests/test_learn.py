@@ -19,6 +19,7 @@ from jevex import (
     GeneratorRecord,
     GeneratorRegistry,
     GeneratorSpec,
+    Housekeeper,
     LearnedGenerators,
     LearnStage,
     PackDiff,
@@ -515,6 +516,20 @@ def ctx_with(statement: Statement) -> Context:
     return ctx
 
 
+async def test_withdraw_makes_a_snapshot_without_the_generators() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    await store.put_generator(spec_record("gen-b"))
+    learned_gens = LearnedGenerators(store)
+    before = await learned_gens.load()
+    after = learned_gens.withdraw(["gen-a", "gen-unknown"])
+    assert (after.version, after.registry.ids) == (1, ["gen-b"])
+    assert before.registry.ids == ["gen-a", "gen-b"]  # in-flight documents keep theirs
+    assert learned_gens.withdraw(["gen-unknown"]) is after
+    # Only the snapshot changes: disabling is the store's (the housekeeper's) job.
+    assert [r.id for r in await store.generators()] == ["gen-a", "gen-b"]
+
+
 async def test_a_document_keeps_the_snapshot_it_started_with() -> None:
     learned_gens = LearnedGenerators()
     statement = Statement(id="s1", text=TEXT, kind="sentence", component_id="c1", location=LOC)
@@ -558,6 +573,15 @@ async def test_the_stage_submits_every_verified_example() -> None:
     ctx.verified.extend([example(eid="a"), example(eid="b")])
     await LearnStage(learner=Recorder()).run(ctx)
     assert [e.id for e in got] == ["a", "b"]
+
+
+async def test_the_stage_hands_the_document_to_the_housekeeper_without_a_learner() -> None:
+    store = open_store(":memory:")
+    ctx = Context.create(Document.from_bytes(b"<p/>"), [SPEC], FakeJev().client())
+    ctx.generators_ran.add("gen-a")
+    ctx.housekeeper = Housekeeper(store)
+    await LearnStage().run(ctx)
+    assert (await store.generator_stats("gen-a")).documents == 1
 
 
 @dataclass
