@@ -433,6 +433,7 @@ class LLMCassette:
         return response
 
     async def aclose(self) -> None:
+        """Close the inner LLM. An ``Extractor`` doesn't close LLMs it's given, so call it."""
         await _aclose(self._inner)
 
 
