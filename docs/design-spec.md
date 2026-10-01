@@ -446,7 +446,7 @@ class Document(BaseModel):
 | Scrapy | `jevex.contrib.scrapy.JevexPipeline`, an item pipeline that runs on Scrapy's asyncio reactor, plus a helper that turns a `Response` into a `Document` |
 | Built-in fetcher | `jevex.fetch.SimpleFetcher`: httpx, honours robots.txt, polite per-host delay, no JavaScript rendering |
 | Microservice | `jevex serve` (`jevex[server]`, FastAPI): `POST /extract` takes a document plus a schema name; schemas are registered by module path. Also `/health` and `/metrics`. |
-| CLI | `jevex extract`, `learn`, `pack`, `eval`, `testsite`, `serve` |
+| CLI | `jevex extract`, `learn`, `pack`, `eval`, `testsite`, `serve`, `stats` |
 
 **Car finder:** the Go app handles crawling and calls `jevex serve` over HTTP. `VehicleSpec` and `Listing` schemas live in a small Python package the service loads.
 
@@ -479,6 +479,91 @@ The eval harness has to prove the headline claim: accuracy holds while cost and 
 - **Learning demo:** template families are released in waves. Each wave spikes LLM calls, which then fall away as generators are learned. This chart goes in the README.
 
 **Real-world smoke test:** [books.toscrape.com](https://books.toscrape.com), which exists for scraping practice, with a small `Book` schema.
+
+## Stats UI
+
+The stats UI shows the headline claim happening: each run needs fewer LLM calls than the last, while accuracy holds. It runs live on a developer's machine, behind `jevex serve`, and in eval reports. The README's graphics are drawn from the same data by the same code, so the marketing *is* the measurement. Decided in #50; built in #51; README graphics in #59.
+
+**Audience and use cases**
+
+| Who | Where | What they want to know |
+| --- | --- | --- |
+| Developer tuning schemas | `jevex stats` locally, pointed at a store | Is extraction working? Which fields fall back to the LLM? Which generators earn their keep? |
+| Operator of `jevex serve` (the car finder) | `/stats` route on the service | Spend today against the budget, the LLM-call rate trend, budget events, errors |
+| Anyone evaluating jevex | `jevex eval --replay` HTML report, README | Does the learning curve bend? What does it cost against LLM-only extraction? |
+
+Out of scope: editing anything (review sinks are separate), multi-user auth (`jevex serve` sits behind the caller's own auth), and long-term metrics storage (export to Prometheus through `/metrics` instead).
+
+**Data sources**
+
+The UI reads data; it never runs extraction. There are two sources:
+
+1. **The store:** generator stats (documents, hits and wins), generator disables and the spend ledger (one row per charge, by kind and run). It's live, and the ledger is append-only. Per-document result meta and budget events aren't stored yet; #51 adds them to the store or keeps them in a run log.
+2. **Replay output** (`jevex eval --replay`): the per-batch CSV rows, which also carry the ground-truth accuracy the store doesn't have.
+
+Both are normalised into one set of tables that every view queries:
+
+```
+DocEvent:      ts, doc_id, url, schema, n_records, jev_requests, jev_questions, jev_tokens,
+               jev_cost, llm_calls, llm_cost, seconds, method_counts{structured, jev,
+               generator, llm, vision}, budget_events[], snapshot_version,
+               accuracy (replay only)
+GeneratorStat: generator_id, field, scope, hits, wins, disabled, created, learned_from
+FieldStat:     schema, field, n, mean_confidence, method_counts, fallback_rate
+```
+
+Stats are served as JSON from `GET /stats/api/*` (by `jevex stats` or `jevex serve`), so the page, the tests and the README exporter all use the same queries.
+
+**Views**
+
+1. **Learning curve (home).** Three lines on aligned y-axes: *LLM calls per document* (the hero, falling), *cost per document*, and *accuracy* (replay only; flat is good). Markers show test-site waves or new template families, where spikes are expected, and small ticks show when generators were learned.
+2. **Resolution mix.** A stacked area over the same x-axis: the share of field values resolved by structured, jev, generator, llm and vision. The llm band should shrink as the generator band grows. It's the most intuitive single picture of learning.
+3. **Cost.** Cumulative spend (Jev and LLM) against the budget line, today against the period cap, and optionally an LLM-only baseline cost line (#62).
+4. **Generators.** A sortable table: id, field, scope, hits, wins, win rate, age and status (active, disabled or pruned). Selecting a row shows its spec YAML and the example it was learned from.
+5. **Fields.** One row per schema field: mean confidence, fallback rate, the method mix as a sparkbar, and the lowest-confidence recent values. Which fields need attention, at a glance.
+6. **Budget and errors.** A timeline of budget events (LLM stopped, caps hit) and Jev and LLM errors.
+
+The x-axis is documents processed for replay and eval reports (the clearest learning story), and time for live stores (what operators need). Either can be toggled to the other.
+
+**Wireframe: home**
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ jevex · stats     store: sqlite:///jevex.db     [docs|time]  [7d ▾]      │
+├──────────────┬──────────────┬──────────────┬─────────────────────────────┤
+│ LLM calls/doc│ cost/doc     │ accuracy     │ generators learned          │
+│ 0.4  ▼ 92%   │ $0.0008 ▼71% │ 97.8%  ≈     │ 143  (+12 today)            │
+├──────────────┴──────────────┴──────────────┴─────────────────────────────┤
+│ LLM calls per doc                                                        │
+│ 3 ┤█▇                  wave 2 ↓                                          │
+│ 2 ┤  ▆▅▃               ▇▅▃                                               │
+│ 1 ┤     ▂▂▁▁▁▁           ▂▁▁▁▁▁                                          │
+│ 0 ┼──────────────────────────────────────────────── documents ──▶        │
+├──────────────────────────────────────────────────────────────────────────┤
+│ Resolution mix   ■ structured ■ jev ■ generator ■ llm ■ vision           │
+│ ████████████████████████████████████████████████████                     │
+│ (stacked area; the llm band shrinks, the generator band grows)           │
+├───────────────────────────────────┬──────────────────────────────────────┤
+│ Fields needing attention          │ Recent budget events                 │
+│ trim        conf .61  llm 34%     │ 14:02 LLM cap hit (doc 1203)         │
+│ fuel_type   conf .72  llm 12%     │ 13:40 run budget 80%                 │
+└───────────────────────────────────┴──────────────────────────────────────┘
+```
+
+**Technology**
+
+- **No front-end build step.** A single static HTML page with vanilla JS and one small charting library, [uPlot](https://github.com/leeoniya/uPlot) (MIT, about 50 KB), shipped inside the wheel. `jevex stats` serves it with the stdlib's `http.server`, so it needs no extra.
+- **`jevex serve`:** mounts the page and its API at `/stats`. It's **opt-in**, because it exposes URLs and spend.
+- **Report mode:** `jevex eval --replay --html` writes the same page with its JSON (and uPlot) inlined: a single file that works offline and can be attached to CI runs. Today's script-free SVG chart is its precursor.
+- **README export:** `jevex stats export --svg <view>` renders a view to an **animated SVG** (CSS keyframes inside the SVG), which GitHub renders in READMEs: the line draws itself and the resolution mix fills over time. Static SVG and PNG fallbacks come with it. The export uses the same JSON queries, so README graphics are always real data.
+- **Styling:** the brand palette (#57), with light and dark themes. The value mint is reserved for "resolved without an LLM".
+
+**Build order (#51)**
+
+1. The stats JSON queries over the store and replay CSV (pure Python, tested).
+2. `jevex stats export --svg` for views 1 and 2, which unblocks the README hero (#59).
+3. The static page with views 1–3, then `jevex stats` serving it.
+4. Views 4–6, the `/stats` mount in `jevex serve`, and report mode.
 
 ## Packaging and project
 
@@ -519,6 +604,7 @@ The project is `jevex`: Apache 2.0, Python 3.12+, Pydantic v2, fully typed (`py.
 | Name and license | jevex, Apache 2.0 |
 | Entity stage order (decided in #27) | Statements are split (stage 8) before entities are resolved (stage 9), so a resolver can assign single statements: a table's cells by column, or a sentence Jev says is about one trim. Splitting is CPU-only and already covered every component, so the swap costs nothing. `MultiEntity` also asks one Noul per proposed label ("Does "SE" name a separate vehicle spec?"), because structure alone can't tell trim sections from topic sections, or a table's trim columns from its trim rows. When accepted boundaries nest, the innermost wins (listing cards under a trim heading), and the priority order breaks ties at one level. |
 | Required fields (decided in #20) | Records are instances of a generated partial model: the same fields, all optional, keeping each field's constraints, `Annotated` validators and alias, but not model-level validators, computed fields or serializers, so a missing value never raises. It's a separate class with only the fields: `isinstance` against the user's model is false and the model's methods and properties aren't on it. `strict()` returns the real model, validating every found value, including any the type rejected. |
+| Stats UI (decided in #50) | A static page with vanilla JS and uPlot, no front-end build step, served by `jevex stats` and, opt-in, at `/stats` on `jevex serve`. The x-axis defaults to documents processed for replay and eval reports and to time for live stores. See **Stats UI**. |
 
 ## Open questions
 
