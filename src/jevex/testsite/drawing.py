@@ -5,7 +5,8 @@ left and text placed by its baseline. :func:`to_pdf` writes it as a one-page PDF
 text layer (Helvetica, WinAnsi), byte for byte the same every time: no dates, no IDs.
 :func:`to_png` and :func:`to_scanned_pdf` rasterise it with Pillow (the ``testsite``
 extra), the second as an image-only PDF with a scanner's tilt, paper tone, speckle and
-blur. Rasterised text is set in Pillow's bundled font, so it's a little narrower or wider
+blur. PNGs are byte for byte the same on every platform too (:func:`png_bytes`). Rasterised
+text is set in Pillow's bundled font, so it's a little narrower or wider
 than in the PDF; layouts leave room for that. That font has no ``£`` or en dash, so a
 drawing meant for rasterising is ``plain``: its text is ASCII (:func:`plain_text`).
 """
@@ -14,6 +15,8 @@ from __future__ import annotations
 
 import io
 import random
+import struct
+import zlib
 from dataclasses import dataclass, field
 from functools import cache, lru_cache
 from typing import TYPE_CHECKING
@@ -265,9 +268,40 @@ def to_scanned_pdf(drawing: Drawing, seed: str, dpi: float = 150) -> bytes:
 
 @lru_cache(maxsize=128)
 def _png(width: float, height: float, ops: tuple[Op, ...], dpi: float) -> bytes:
-    out = io.BytesIO()
-    rasterise(Drawing(width, height, ops=list(ops)), dpi).save(out, "PNG")
-    return out.getvalue()
+    return png_bytes(rasterise(Drawing(width, height, ops=list(ops)), dpi))
+
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def png_bytes(image: Image.Image) -> bytes:
+    """``image`` as an 8-bit RGB PNG whose bytes depend only on its pixels.
+
+    Pillow's own encoder deflates with the zlib-ng it bundles, whose output differs by CPU:
+    an x86 and an arm64 machine write different bytes for the same pixels, so a corpus
+    lock (:mod:`jevex.benchmarks`) couldn't hold across machines. The standard library's
+    zlib writes the same stream on each (it's classic zlib, not zlib-ng, in the Pythons uv
+    and CI use). Rows are unfiltered and there are no metadata chunks.
+    """
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    raw = rgb.tobytes()
+    stride = width * 3
+    rows = b"".join(b"\x00" + raw[y * stride : (y + 1) * stride] for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    return b"".join(
+        (
+            _PNG_SIGNATURE,
+            _png_chunk(b"IHDR", header),
+            _png_chunk(b"IDAT", zlib.compress(rows, 9)),
+            _png_chunk(b"IEND", b""),
+        )
+    )
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(kind + data)
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", crc)
 
 
 @lru_cache(maxsize=128)
