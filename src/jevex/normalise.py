@@ -468,10 +468,11 @@ class NormaliseStage:
             for (scope, field_name), picks in grouped.items():
                 if not run.needs(scope, field_name):
                     continue
-                meta = self._field_meta(
+                meta, generator_ids = self._field_meta(
                     ctx, run, field_name, picks, shared=run.shared_statements(scope)
                 )
                 run.offer_field(scope, field_name, meta)
+                run.value_generators[(scope, field_name)] = generator_ids
 
     def _field_meta(
         self,
@@ -481,7 +482,9 @@ class NormaliseStage:
         picks: list[tuple[str, Selection]],
         *,
         shared: set[str],
-    ) -> FieldMeta:
+    ) -> tuple[FieldMeta, set[str]]:
+        """The field's meta, and the ids of the generators whose candidates are in its
+        value."""
         field = run.spec.field(field_name)
         # The entity's own statements outrank those it shares with every entity.
         ranked = sorted(picks, key=lambda p: (p[0] in shared, -p[1].confidence))
@@ -507,14 +510,17 @@ class NormaliseStage:
 
         if not accepted:
             statement_id, selection = ranked[0]
-            return FieldMeta(
-                confidence=selection.confidence,
-                method=_method(ctx, statement_id),
-                generator_id=selection.candidate.generator_id if selection.candidate else None,
-                source=_source(ctx, statement_id, selection),
-                alternatives=_alternatives(ranked, []),
-                shared=statement_id in shared,
-                error="; ".join(errors),
+            return (
+                FieldMeta(
+                    confidence=selection.confidence,
+                    method=_method(ctx, statement_id),
+                    generator_id=selection.candidate.generator_id if selection.candidate else None,
+                    source=_source(ctx, statement_id, selection),
+                    alternatives=_alternatives(ranked, []),
+                    shared=statement_id in shared,
+                    error="; ".join(errors),
+                ),
+                set(),
             )
 
         best_id, best, _, best_value = accepted[0]
@@ -528,18 +534,22 @@ class NormaliseStage:
                     if item not in items:
                         items.append(item)
             best_value = items
-        return FieldMeta(
-            value=best_value,
-            confidence=best.confidence,
-            method=_method(ctx, best_id),
-            generator_id=best.candidate.generator_id if best.candidate else None,
-            source=_source(ctx, best_id, best),
-            alternatives=_alternatives(
-                ranked,
-                [] if field.many else [best_id],
-                accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
+        used = accepted if field.many else accepted[:1]
+        return (
+            FieldMeta(
+                value=best_value,
+                confidence=best.confidence,
+                method=_method(ctx, best_id),
+                generator_id=best.candidate.generator_id if best.candidate else None,
+                source=_source(ctx, best_id, best),
+                alternatives=_alternatives(
+                    ranked,
+                    [] if field.many else [best_id],
+                    accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
+                ),
+                shared=from_shared,
             ),
-            shared=from_shared,
+            {c.generator_id for _, _, c, _ in used},
         )
 
 

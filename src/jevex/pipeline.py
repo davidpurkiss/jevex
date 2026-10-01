@@ -77,6 +77,12 @@ class SchemaRun:
         default_factory=dict[str, dict[str, "FieldMeta"]]
     )
     """What was found, keyed by scope label, then field name. Records are built from this."""
+    value_generators: dict[tuple[str, str], set[str]] = field(
+        default_factory=dict[tuple[str, str], set[str]]
+    )
+    """Keyed by (scope label, field name): ids of the generators whose candidates are in
+    the value the normalise stage offered (every accepted pick for a list field). Whether
+    that value stood is up to :attr:`fields`."""
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     """Bare values by scope label, then field name, for stages with no metadata to give.
     Used only when ``fields`` has no entry for that field."""

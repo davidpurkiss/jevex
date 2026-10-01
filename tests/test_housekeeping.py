@@ -1,3 +1,5 @@
+import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +47,7 @@ FIELD = "Car.zero_to_62_s"
 class Car(BaseModel):
     zero_to_62_s: float = Field(description="0-62 mph time", unit="s")
     trims: list[str] = Field(default_factory=list, description="Trim names")
+    lap_times_s: list[float] = Field(default_factory=list, description="Lap times", unit="s")
 
 
 SPEC = SchemaSpec.from_model(Car)
@@ -85,6 +88,22 @@ def meta(gen_id: str | None, value: Any = 9.1, method: Any = "generator") -> Fie
     return FieldMeta(value=value, confidence=0.9, method=method, generator_id=gen_id)
 
 
+_opened: list[Store] = []
+
+
+def new_store() -> Store:
+    store = open_store(":memory:")
+    _opened.append(store)
+    return store
+
+
+@pytest.fixture(autouse=True)
+async def close_stores() -> AsyncIterator[None]:
+    yield
+    while _opened:
+        await _opened.pop().aclose()
+
+
 def bare_ctx() -> Context:
     return Context.create(Document.from_bytes(b"<p/>"), [SPEC], FakeJev().client())
 
@@ -119,17 +138,35 @@ def test_a_custom_stages_candidates_count_as_ran() -> None:
     assert generator_use(ctx).ran == {"custom"}
 
 
-def test_every_generator_a_list_value_took_a_pick_from_wins() -> None:
+async def test_every_generator_a_list_value_took_a_pick_from_wins() -> None:
     ctx = bare_ctx()
     run = ctx.schemas["Car"]
-    text = "SE and GT trims"
-    se, gt = candidate("first", 0, 2, text), candidate("second", 7, 9, text)
-    run.candidates[("s1", "trims")] = [se, gt]
-    run.selections[("doc", "trims", "s1")] = Selection(
-        candidate=se, confidence=0.9, accepted=[se, gt]
+    text = "laps of 9.1, 9.4 and abc"
+    picks = [
+        candidate("first", 8, 11, text),
+        candidate("second", 13, 16, text),
+        candidate("unfit", 21, 24, text),  # "abc" doesn't normalise to a float
+    ]
+    run.candidates[("s1", "lap_times_s")] = picks
+    run.selections[("doc", "lap_times_s", "s1")] = Selection(
+        candidate=picks[0], confidence=0.9, accepted=picks
     )
-    run.set_field("doc", "trims", meta("first", value=["SE", "GT"]))
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["lap_times_s"].value == [9.1, 9.4]
+    assert run.value_generators[("doc", "lap_times_s")] == {"first", "second"}
     assert generator_use(ctx).wins == {"first", "second"}
+
+
+async def test_a_scalar_wins_only_for_the_pick_it_took() -> None:
+    ctx = bare_ctx()
+    run = ctx.schemas["Car"]
+    best, other = candidate("best"), candidate("other", 0, 2)
+    run.candidates[("s1", "zero_to_62_s")] = [best, other]
+    run.selections[("doc", "zero_to_62_s", "s1")] = Selection(
+        candidate=best, confidence=0.9, accepted=[best, other]
+    )
+    await NormaliseStage().run(ctx)
+    assert generator_use(ctx).wins == {"best"}
 
 
 # --- stats and pruning --------------------------------------------------------------------
@@ -199,7 +236,7 @@ async def setup(store: Store, *specs: GeneratorSpec) -> LearnedGenerators:
 
 
 async def test_a_document_adds_to_each_generators_stats() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
     keeper = Housekeeper(store, learned)
     await run_document(keeper, learned)
@@ -213,7 +250,7 @@ async def test_a_document_adds_to_each_generators_stats() -> None:
 
 
 async def test_a_generator_that_ran_without_a_candidate_counts_a_document_only() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-km", r"(\d+) km"))
     await run_document(Housekeeper(store, learned), learned)
     stats = await store.generator_stats("gen-km")
@@ -222,14 +259,14 @@ async def test_a_generator_that_ran_without_a_candidate_counts_a_document_only()
 
 
 async def test_generators_scoped_elsewhere_arent_counted() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-de", r"(\d+) km", locale="de"))
     await run_document(Housekeeper(store, learned), learned)
     assert (await store.generator_stats("gen-de")).documents == 0
 
 
 async def test_a_learned_generator_with_no_wins_after_prune_after_documents_is_disabled() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
     keeper = Housekeeper(store, learned, prune_after=2)
     first = await run_document(keeper, learned)
@@ -255,8 +292,17 @@ async def test_a_learned_generator_with_no_wins_after_prune_after_documents_is_d
     assert third.events == []
 
 
+async def test_documents_finishing_together_prune_a_generator_once() -> None:
+    store = new_store()
+    learned = await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
+    keeper = Housekeeper(store, learned, prune_after=1)
+    docs = await asyncio.gather(*(run_document(keeper, learned) for _ in range(4)))
+    assert keeper.pruned == ["gen-mph"]
+    assert sum(len(ctx.events) for ctx in docs) == 1
+
+
 async def test_a_loser_with_earlier_wins_isnt_pruned() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
     await store.record_generator_stats("gen-mph", documents=5, hits=5, wins=1)
     keeper = Housekeeper(store, learned, prune_after=2)
@@ -266,7 +312,7 @@ async def test_a_loser_with_earlier_wins_isnt_pruned() -> None:
 
 
 async def test_built_in_generators_are_counted_but_never_pruned() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"))
     base = GeneratorRegistry([spec("stage-mph", r"(\d+) mph").to_generator()])
     keeper = Housekeeper(store, learned, prune_after=1)
@@ -276,7 +322,7 @@ async def test_built_in_generators_are_counted_but_never_pruned() -> None:
 
 
 async def test_prune_after_none_never_prunes() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     learned = await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
     keeper = Housekeeper(store, learned, prune_after=None)
     for _ in range(3):
@@ -286,7 +332,7 @@ async def test_prune_after_none_never_prunes() -> None:
 
 
 async def test_without_a_snapshot_nothing_is_pruned() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     ctx = bare_ctx()
     ctx.generators_ran.add("gen-x")
     keeper = Housekeeper(store, prune_after=1)
@@ -296,8 +342,8 @@ async def test_without_a_snapshot_nothing_is_pruned() -> None:
 
 def test_prune_after_must_be_positive() -> None:
     with pytest.raises(ValueError, match="prune_after must be at least 1, got 0"):
-        Housekeeper(open_store(":memory:"), prune_after=0)
-    assert Housekeeper(open_store(":memory:")).prune_after == PRUNE_AFTER
+        Housekeeper(new_store(), prune_after=0)
+    assert Housekeeper(new_store()).prune_after == PRUNE_AFTER
 
 
 # --- dedup --------------------------------------------------------------------------------
@@ -307,7 +353,7 @@ OTHER = "it does 0-62 in 7.4 seconds"
 
 
 async def dedupe_store(*specs: GeneratorSpec, examples: tuple[str, ...] = (TEXT, OTHER)) -> Store:
-    store = open_store(":memory:")
+    store = new_store()
     for s in specs:
         await store.put_generator(record(s))
     for i, text in enumerate(examples):
@@ -389,7 +435,7 @@ async def test_dedupe_raises_for_an_invalid_stored_spec() -> None:
 
 
 async def test_the_extractor_prunes_and_later_documents_dont_run_the_pruned() -> None:
-    store = open_store(":memory:")
+    store = new_store()
     await setup(store, spec("gen-time"), spec("gen-mph", r"(\d+) mph"))
     fake = FakeJev().choice(None, pick("9.1"))
     doc = Document.from_bytes(b"<p/>")

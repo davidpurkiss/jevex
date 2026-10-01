@@ -81,6 +81,7 @@ from jevex.learn import (
     LearnStage,
     PackDiff,
     compile_pack,
+    example_statement,
     pack_generators,
 )
 from jevex.normalise import (
@@ -279,6 +280,7 @@ __all__ = [
     "cut_statement",
     "default_registry",
     "evaluate",
+    "example_statement",
     "flatten",
     "gate_units",
     "gated_out_pages",

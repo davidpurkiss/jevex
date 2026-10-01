@@ -69,17 +69,12 @@ def generator_use(ctx: Context) -> GeneratorUse:
             for name, meta in metas.items():
                 if meta.method not in ("generator", "vision") or not meta.found:
                     continue
-                if meta.generator_id is not None:
+                used = run.value_generators.get((scope, name))
+                if used is not None:
+                    # A list holds the picks of every statement, not only the best one's.
+                    wins.update(used)
+                elif meta.generator_id is not None:
                     wins.add(meta.generator_id)
-                if not run.spec.field(name).many:
-                    continue
-                # A list holds the picks of every statement, not only the best one's.
-                for (s, f, _), selection in run.selections.items():
-                    if s == scope and f == name:
-                        picks = selection.accepted or (
-                            [selection.candidate] if selection.candidate else []
-                        )
-                        wins.update(c.generator_id for c in picks)
     return GeneratorUse(
         ran=frozenset(ctx.generators_ran | hits),
         hits=frozenset(hits),
@@ -138,6 +133,9 @@ class Housekeeper:
         stats = await gather(self.store.generator_stats(gid) for gid in suspects)
         pruned: list[str] = []
         for s in stats:
+            # Another document may have pruned it while this one read the stats.
+            if s.generator_id in self.pruned:
+                continue
             if s.wins == 0 and s.documents >= self.prune_after:
                 pruned.append(s.generator_id)
                 ctx.event(
@@ -148,8 +146,8 @@ class Housekeeper:
                     documents=s.documents,
                     hits=s.hits,
                 )
+        self.pruned.extend(pruned)  # before awaiting, so no other document claims them
         await self._disable(pruned)
-        self.pruned.extend(pruned)
         return pruned
 
     async def dedupe(self) -> list[DuplicateGenerator]:
