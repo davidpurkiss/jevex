@@ -61,6 +61,12 @@ run `#C4B5FD` → `#A78BFA` → `#7C3AED` → `#5B21B6`. On dark backgrounds the
 way, `#5B21B6` → `#7C3AED` → `#A78BFA` → `#DDD6FE`, so the dimmest bar is still the
 widest. On the ink icon tile they run `#7C3AED` → `#A78BFA` → `#C4B5FD` → `#EDE9FE`.
 
+Charts (the stats UI, `jevex.stats.charts.LIGHT` and `DARK`) use the same roles: ink or
+night surfaces, violet for the line, mint for values resolved without an LLM and amber
+for LLM calls. Their bands are steps of these hues that pass the colour-blind and
+lightness checks against each theme's surface, so a chart's mint is `#10B981` on light
+and `#14AC7A` on dark: `#34D399` is too light for a filled band.
+
 ## Type
 
 - **Wordmark:** custom drawn round-capped strokes (14 units on a 64-unit x-height), not

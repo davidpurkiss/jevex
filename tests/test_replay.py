@@ -409,7 +409,7 @@ def test_the_html_is_the_stats_report_with_waves_and_the_data() -> None:
         "learning cost $0 (0 generator LLM calls)"
     ) in page
     # Learning curve (LLM calls, cost, accuracy), resolution mix and cost: documents only.
-    assert page.count("<svg") == 3
+    assert page.count('<svg class="chart') == 3
     assert 'data-axis="time"' not in page
     titles = (
         "LLM calls per document",
@@ -429,7 +429,7 @@ def test_the_html_is_the_stats_report_with_waves_and_the_data() -> None:
 
 def test_an_empty_replay_still_renders() -> None:
     page = report([], [], 10).to_html()
-    assert page.count("<svg") == 3
+    assert page.count('<svg class="chart') == 3
     assert "<polyline" not in page
     assert report([], [], 10).to_csv() == ",".join(CSV_COLUMNS) + "\n"
 

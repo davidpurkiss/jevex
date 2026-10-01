@@ -14,10 +14,11 @@ import html
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import yaml
 
-from jevex.stats.charts import CHART_CSS, PALETTE_CSS, calls, chart_svg, pct, usd
+from jevex.stats.charts import CHART_CSS, PALETTE_CSS, calls, chart_svg, pct, theme_css, usd
 from jevex.stats.data import METHODS, method_shares, summary, to_json
 
 if TYPE_CHECKING:
@@ -28,12 +29,48 @@ if TYPE_CHECKING:
 LIVE_REFRESH_SECONDS = 30
 EVENT_LIMIT = 50
 
+MARK_SVG = (
+    '<svg class="mark" viewBox="0 0 160 160" width="32" height="32" aria-hidden="true">'
+    '<g transform="translate(18 7)">'
+    '<rect class="bar-1" x="0" y="0" width="124" height="20" rx="10"/>'
+    '<rect class="bar-2" x="18" y="30" width="88" height="20" rx="10"/>'
+    '<rect class="bar-3" x="34" y="60" width="56" height="20" rx="10"/>'
+    '<rect class="bar-4" x="46" y="90" width="32" height="20" rx="10"/>'
+    '<circle class="value" cx="62" cy="130" r="8"/>'
+    '<circle class="ring" cx="62" cy="130" r="14" fill="none" stroke-width="3"/></g></svg>'
+)
+"""The jevex mark (``docs/brand/jevex-mark.svg``) inline, coloured by :data:`MARK_CSS` so
+it follows the page's theme: four bars narrowing into the found value."""
+
+MARK_CSS = theme_css(
+    {"bar-1": "#c4b5fd", "bar-2": "#a78bfa", "bar-3": "#7c3aed", "bar-4": "#5b21b6"},
+    {"bar-1": "#5b21b6", "bar-2": "#7c3aed", "bar-3": "#a78bfa", "bar-4": "#ddd6fe"},
+) + (
+    ".mark .bar-1 { fill: var(--bar-1); } .mark .bar-2 { fill: var(--bar-2); }\n"
+    ".mark .bar-3 { fill: var(--bar-3); } .mark .bar-4 { fill: var(--bar-4); }\n"
+    ".mark .value { fill: #34d399; } .mark .ring { stroke: #34d399; opacity: 0.4; }\n"
+)
+"""The mark's bars in each theme, as in the brand's light and dark marks. The mint value
+is the brand's own."""
+
+FAVICON = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="7" fill="#1E1B4B"/>'
+    '<rect x="4" y="4" width="24" height="4" rx="2" fill="#8B5CF6"/>'
+    '<rect x="8" y="10" width="16" height="4" rx="2" fill="#C4B5FD"/>'
+    '<rect x="12" y="16" width="8" height="4" rx="2" fill="#EDE9FE"/>'
+    '<circle cx="16" cy="26" r="4" fill="#34D399"/></svg>'
+)
+"""``docs/brand/favicon.svg``, served as a ``data:`` URI so the page makes no requests."""
+
 _PAGE_CSS = """\
 body.viz-root { background: var(--surface-1); color: var(--text-primary); margin: 0;
   padding: 24px; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
-h1 { font-size: 20px; margin: 0; }
+header { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+h1, h2 { font-family: Nunito, ui-rounded, system-ui, sans-serif; font-weight: 800; }
+h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
 h2 { font-size: 15px; margin: 28px 0 8px; }
+.mark { flex: none; }
 section.chart-only { margin-top: 28px; }
 .source { color: var(--text-secondary); }
 .toggle { margin-left: auto; display: flex; gap: 4px; }
@@ -167,8 +204,10 @@ def render_page(
     return (
         '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{_esc(title)}</title><style>{PALETTE_CSS}{CHART_CSS}{_PAGE_CSS}</style></head>"
-        f'<body class="viz-root"{refresh}><header><h1>{_esc(title)}</h1>'
+        f'<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,{quote(FAVICON)}">'
+        f"<title>{_esc(title)}</title>"
+        f"<style>{PALETTE_CSS}{MARK_CSS}{CHART_CSS}{_PAGE_CSS}</style></head>"
+        f'<body class="viz-root"{refresh}><header><h1>{MARK_SVG}{_esc(title)}</h1>'
         f'<span class="source">{stats.kind}: {_esc(stats.source)}{note}</span>{toggle}</header>'
         f"{_tiles(stats)}{charts}"
         f"<section><h2>Generators</h2>{_generators(stats.generators)}</section>"
