@@ -29,6 +29,11 @@ Expected failures (a budget saying no, an LLM or Jev error, an invalid spec, a f
 test) are outcomes, not exceptions. Anything else stops the worker; the error is raised
 by the next :meth:`~GeneratorLearner.submit`, :meth:`~GeneratorLearner.drain` or
 :meth:`~GeneratorLearner.aclose`.
+
+That is the ``inline`` mode (:data:`LearnMode`). In ``compile`` mode documents only log
+examples (:class:`ExampleLogger`), and :func:`compile_pack` (``jevex learn``) runs steps 2
+to 5 over them in a batch. It publishes nothing: the generators it accepts, plus any the
+store learned inline (``hybrid`` mode), become a :class:`PackDiff` written out for review.
 """
 
 from __future__ import annotations
@@ -63,8 +68,9 @@ from jevex.store import GeneratorRecord, StoreError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
-    from jevex.interfaces import CandidateGenerator, CandidateSelector, Learner, Selection
+    from jevex.interfaces import CandidateSelector, Learner, Selection
     from jevex.jev import Answer, JevClient
     from jevex.llm import LLM
     from jevex.pipeline import Context
@@ -102,32 +108,47 @@ class LearnedGenerators:
 
     ``store`` is the local learned layer: :meth:`load` reads its enabled generators, and
     :meth:`publish` writes there before swapping the snapshot. Generators other processes
-    publish later aren't picked up until the next load.
+    publish later aren't picked up until the next load. With ``persist=False``,
+    :meth:`publish` only swaps the snapshot: a batch compile (:func:`compile_pack`) reads
+    the store but leaves what it learns for review.
     """
 
-    def __init__(self, store: Store | None = None) -> None:
+    def __init__(self, store: Store | None = None, *, persist: bool = True) -> None:
         self.store = store
+        self.persist = persist
         self.current = GeneratorSnapshot(0, GeneratorRegistry())
 
-    async def load(self) -> GeneratorSnapshot:
-        """Replace the snapshot with the store's enabled generators (oldest first).
+    async def load(self, also: Sequence[GeneratorSpec] = ()) -> GeneratorSnapshot:
+        """Replace the snapshot with the store's enabled generators (oldest first), then
+        ``also`` (a pack's generators; a stored id wins over a pack's).
+
+        Raises :class:`~jevex.store.StoreError` for a stored spec that doesn't validate.
+        """
+        specs = await self.stored() if self.store is not None else []
+        registry = GeneratorRegistry([s.to_generator() for s in specs])
+        registry = registry.extended(s.to_generator() for s in also)
+        self.current = GeneratorSnapshot(self.current.version, registry)
+        return self.current
+
+    async def stored(self) -> list[GeneratorSpec]:
+        """The store's enabled generator specs, oldest first (none without a store).
 
         Raises :class:`~jevex.store.StoreError` for a stored spec that doesn't validate.
         """
         if self.store is None:
-            return self.current
-        generators: list[CandidateGenerator] = []
+            return []
+        specs: list[GeneratorSpec] = []
         for record in await self.store.generators():
             try:
-                generators.append(GeneratorSpec.parse(record.spec).to_generator())
+                specs.append(GeneratorSpec.parse(record.spec))
             except InvalidGeneratorError as exc:
                 raise StoreError(f"stored generator {record.id!r} is invalid: {exc}") from exc
-        self.current = GeneratorSnapshot(self.current.version, GeneratorRegistry(generators))
-        return self.current
+        return specs
 
     async def publish(self, spec: GeneratorSpec) -> GeneratorSnapshot:
-        """Store ``spec`` and make a new snapshot holding it (replacing one with its id)."""
-        if self.store is not None:
+        """Store ``spec`` (unless ``persist`` is off) and make a new snapshot holding it
+        (replacing one with its id)."""
+        if self.store is not None and self.persist:
             scope = {"locale": spec.scope.locale} if spec.scope.locale else {}
             await self.store.put_generator(
                 GeneratorRecord(id=spec.id, field=spec.field, spec=spec.to_data(), scope=scope)
@@ -307,9 +328,7 @@ class GeneratorLearner:
     def wants(self, example: VerifiedExample) -> bool:
         """Whether ``example`` is learned from: a human's, or verified with
         ``probability >= learn_threshold``."""
-        if example.source == "human":
-            return True
-        return example.probability is not None and example.probability >= self.learn_threshold
+        return _wants(example, self.learn_threshold)
 
     async def submit(self, example: VerifiedExample) -> None:
         """Store and queue ``example`` if :meth:`wants` it; return without waiting."""
@@ -614,6 +633,143 @@ def _statement(example: VerifiedExample) -> Statement:
     )
 
 
+# --- modes and batch compiles -------------------------------------------------------------
+
+LearnMode = Literal["inline", "compile", "hybrid"]
+"""When learning runs (spec: *Learning loop*). ``inline`` (default): the extractor's
+:class:`GeneratorLearner` learns in the background and documents use what it accepts.
+``compile``: documents only log verified examples (:class:`ExampleLogger`); ``jevex
+learn`` (:func:`compile_pack`) synthesises and tests them in a batch and writes a pack
+diff for review. ``hybrid``: documents learn inline into the store (the local layer), and
+periodic ``jevex learn`` runs compile that layer, plus anything still unlearned, into a
+reviewable pack diff."""
+
+
+def _wants(example: VerifiedExample, learn_threshold: float) -> bool:
+    if example.source == "human":
+        return True
+    return example.probability is not None and example.probability >= learn_threshold
+
+
+@dataclass
+class ExampleLogger:
+    """The ``compile`` mode's :class:`~jevex.interfaces.Learner`: stores the examples a
+    :class:`GeneratorLearner` would learn from, and learns nothing.
+
+    :func:`compile_pack` (``jevex learn``) learns from them later, in a batch.
+    """
+
+    store: Store
+    learn_threshold: float = LEARN_THRESHOLD
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.learn_threshold <= 1:
+            raise ValueError(f"learn_threshold must be between 0 and 1, got {self.learn_threshold}")
+
+    def wants(self, example: VerifiedExample) -> bool:
+        """The same rule as :meth:`GeneratorLearner.wants`."""
+        return _wants(example, self.learn_threshold)
+
+    async def submit(self, example: VerifiedExample) -> None:
+        """Store ``example`` if :meth:`wants` it."""
+        if self.wants(example):
+            await self.store.add_example(example)
+
+
+PACK_GENERATORS = "generators"
+"""The directory in a pack (and a pack diff) holding one ``<id>.yaml`` per generator."""
+
+
+class PackDiff(BaseModel):
+    """What a batch compile proposes adding to a pack, for review.
+
+    ``generators``: the local layer's generators the pack doesn't have (what ``hybrid``
+    mode learned inline), then the ones this compile accepted. ``outcomes``: what became
+    of each example it learned from.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    generators: list[GeneratorSpec]
+    outcomes: list[LearnOutcome]
+
+    def write(self, directory: Path) -> list[Path]:
+        """Write each generator to ``directory/generators/<id>.yaml`` and return the paths.
+
+        ``directory`` must not exist or be empty, so a review never picks up files from an
+        earlier diff (:class:`FileExistsError` otherwise).
+        """
+        if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
+            raise FileExistsError(f"{directory} already exists and isn't an empty directory")
+        folder = directory / PACK_GENERATORS
+        folder.mkdir(parents=True, exist_ok=True)
+        paths: list[Path] = []
+        for spec in self.generators:
+            path = folder / f"{spec.id}.yaml"
+            path.write_text(spec.to_yaml(), encoding="utf-8")
+            paths.append(path)
+        return paths
+
+
+def pack_generators(directory: Path) -> list[GeneratorSpec]:
+    """The generators in a pack directory: every ``generators/*.yaml``, by file name.
+
+    A pack without a ``generators`` directory has none. Raises :class:`FileNotFoundError`
+    when ``directory`` doesn't exist, and :class:`InvalidGeneratorError` (naming the file)
+    for a spec that doesn't validate or an id two files share.
+    """
+    if not directory.is_dir():
+        raise FileNotFoundError(f"no such pack directory: {directory}")
+    specs: dict[str, GeneratorSpec] = {}
+    for path in sorted((directory / PACK_GENERATORS).glob("*.yaml")):
+        try:
+            spec = GeneratorSpec.from_yaml(path.read_text(encoding="utf-8"))
+        except InvalidGeneratorError as exc:
+            raise InvalidGeneratorError(f"{path}: {exc}") from None
+        if spec.id in specs:
+            raise InvalidGeneratorError(f"{path}: another file already has id {spec.id!r}")
+        specs[spec.id] = spec
+    return list(specs.values())
+
+
+async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] = ()) -> PackDiff:
+    """Learn from the store's verified examples in one batch (``jevex learn``) and return
+    what to add to ``pack``.
+
+    ``learner.generators`` must be ``LearnedGenerators(store, persist=False)``: the store
+    gives the examples and the local layer's generators, and nothing is published to it.
+    The learner runs on the store's generators plus ``pack``'s (less those the store
+    disables), so an example they already find costs nothing, and each generator accepted
+    is in use for the examples after it. It learns from the schemas' candidate fields'
+    examples that it :meth:`~GeneratorLearner.wants`, oldest first. Running it again is
+    safe: covered examples are skipped without an LLM call, but ones rejected before are
+    tried again.
+    """
+    learned = learner.generators
+    store = learned.store
+    if store is None or learned.persist:
+        raise ValueError(
+            "compile_pack needs a learner with LearnedGenerators(store, persist=False)"
+        )
+    disabled = await store.disabled_generator_ids()
+    in_pack = {spec.id for spec in pack}
+    stored = await learned.stored()
+    await learned.load(also=[spec for spec in pack if spec.id not in disabled])
+    outcomes: list[LearnOutcome] = []
+    for schema in learner.schemas:
+        for spec in schema.fields:
+            if not spec.needs_candidates:
+                continue
+            for example in reversed(await store.examples(f"{schema.name}.{spec.name}")):
+                if learner.wants(example):
+                    outcomes.append(await learner.learn(example))
+    added: dict[str, GeneratorSpec] = {s.id: s for s in stored if s.id not in in_pack}
+    for outcome in outcomes:
+        if outcome.status == "accepted" and outcome.spec and outcome.spec.id not in in_pack:
+            added.setdefault(outcome.spec.id, outcome.spec)
+    return PackDiff(generators=list(added.values()), outcomes=outcomes)
+
+
 # --- the stage ---------------------------------------------------------------------------
 
 
@@ -621,7 +777,8 @@ def _statement(example: VerifiedExample) -> Statement:
 class LearnStage:
     """Hands the document's verified examples (``ctx.verified``) to the learner.
 
-    ``learner=None`` uses ``ctx.learner`` (set by an extractor with a ``generator_llm``);
+    ``learner=None`` uses ``ctx.learner`` (the extractor's: a :class:`GeneratorLearner`
+    with a ``generator_llm``, or an :class:`ExampleLogger` in ``compile`` mode);
     with neither, the stage does nothing.
     """
 

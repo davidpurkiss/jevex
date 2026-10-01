@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any, Literal
 
 import pytest
@@ -11,6 +12,7 @@ from jevex import (
     Context,
     Document,
     DomLocation,
+    ExampleLogger,
     Extractor,
     Field,
     GeneratorLearner,
@@ -19,17 +21,20 @@ from jevex import (
     GeneratorSpec,
     LearnedGenerators,
     LearnStage,
+    PackDiff,
     Pipeline,
     SchemaSpec,
     Statement,
     StoreError,
     VerifiedExample,
+    compile_pack,
+    pack_generators,
 )
 from jevex.budgets import RunBudget, RunLedger
 from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.fallback import FallbackStage
-from jevex.generators import RegexGenerator, default_registry
+from jevex.generators import InvalidGeneratorError, RegexGenerator, default_registry
 from jevex.interfaces import Learner, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevBackendError
 from jevex.layout import Component
@@ -721,3 +726,244 @@ async def test_the_extractors_learner_tests_as_the_pipeline_runs() -> None:
         assert lrn.normalisers is norm
         assert lrn.fallback_threshold == 0.7
         assert lrn.learn_threshold == 0.9
+
+
+# --- learning modes ----------------------------------------------------------------------
+
+
+async def test_compile_mode_only_logs_examples() -> None:
+    fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9.1"})
+    generator_llm = FakeLLM([])
+    fake = FakeJev().noul(VERIFY, p=0.95).choice(None, pick("9.1"))
+    store = open_store(":memory:")
+    async with Extractor(
+        [Car],
+        jev=fake.client(),
+        pipeline=pipeline(),
+        store=store,
+        extraction_llm=fallback_llm,
+        generator_llm=generator_llm,
+        learn_mode="compile",
+    ) as extractor:
+        assert await extractor.learner() is None
+        first = await extractor.extract(Document.from_bytes(b"<p/>"))
+        await extractor.wait_for_learning()
+        second = await extractor.extract(Document.from_bytes(b"<p/>"))
+        [logged] = await store.examples(FIELD)  # the same statement: one example
+    assert first.one(Car).meta.zero_to_62_s.method == "llm"
+    assert second.one(Car).meta.zero_to_62_s.method == "llm"  # nothing was learned
+    assert generator_llm.calls == []
+    assert await store.generators() == []
+    assert (logged.field, logged.value, logged.statement) == (FIELD, 9.1, TEXT)
+
+
+async def test_compile_mode_logs_only_examples_at_the_learn_threshold() -> None:
+    store = open_store(":memory:")
+    log = ExampleLogger(store, learn_threshold=0.9)
+    await log.submit(example(eid="low", p=0.89))
+    await log.submit(example(eid="unknown", p=None))
+    await log.submit(example(eid="at", p=0.9))
+    await log.submit(example(eid="human", p=None, source="human"))
+    assert {e.id for e in await store.examples(FIELD)} == {"at", "human"}
+    assert isinstance(log, Learner)
+    with pytest.raises(ValueError, match="learn_threshold"):
+        ExampleLogger(store, learn_threshold=-0.1)
+
+
+async def test_hybrid_mode_learns_inline() -> None:
+    async with Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        store=":memory:",
+        generator_llm=FakeLLM([]),
+        learn_mode="hybrid",
+    ) as extractor:
+        assert isinstance(await extractor.learner(), GeneratorLearner)
+
+
+def test_the_extractor_checks_the_learn_mode() -> None:
+    with pytest.raises(ValueError, match="learn_mode must be one of"):
+        Extractor([Car], learn_mode="batch")  # pyright: ignore[reportArgumentType]
+    with pytest.raises(ValueError, match="learn_mode='compile' keeps what it learns"):
+        Extractor([Car], generator_llm=FakeLLM([]), learn_mode="compile")
+    with pytest.raises(ValueError, match="learn_mode='hybrid' keeps what it learns"):
+        Extractor([Car], generator_llm=FakeLLM([]), learn_mode="hybrid")
+    with pytest.raises(ValueError, match="learn_threshold"):
+        Extractor([Car], store=":memory:", learn_mode="compile", learn_threshold=2)
+
+
+async def test_a_learner_that_doesnt_persist_publishes_only_in_memory() -> None:
+    store = open_store(":memory:")
+    learned = LearnedGenerators(store, persist=False)
+    spec = GeneratorSpec.parse(spec_record("gen-a").spec)
+    snapshot = await learned.publish(spec)
+    assert snapshot.registry.ids == ["gen-a"]
+    assert await store.generators() == []
+
+
+# --- batch compiles ----------------------------------------------------------------------
+
+
+def compiler(fake: FakeJev, llm: FakeLLM, store: Store, **kwargs: Any) -> GeneratorLearner:
+    return GeneratorLearner(
+        [SPEC],
+        llm,
+        fake.client(),
+        generators=LearnedGenerators(store, persist=False),
+        base=GeneratorRegistry(),
+        **kwargs,
+    )
+
+
+def pack_spec(gen_id: str, regex: str = r"(\d+(?:\.\d+)?) seconds") -> GeneratorSpec:
+    return GeneratorSpec.parse(spec_record(gen_id, regex).spec)
+
+
+async def test_compile_pack_learns_from_stored_examples_and_publishes_nothing() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example(eid="ex-1"))
+    await store.add_example(example("0-62 in 8.4 seconds", 8.4, eid="ex-2"))
+    llm = FakeLLM([DRAFT])
+    diff = await compile_pack(compiler(FakeJev().choice(None, pick("9.1")), llm, store))
+    [accepted, covered] = diff.outcomes
+    assert (accepted.example_id, accepted.status) == ("ex-1", "accepted")
+    # ex-2 is newer: the generator learned from ex-1 is already in use for it.
+    assert (covered.example_id, covered.status) == ("ex-2", "covered")
+    assert len(llm.calls) == 1
+    assert accepted.spec is not None
+    assert diff.generators == [accepted.spec]
+    assert diff.generators[0].provenance.learned_from == ["ex-1"]
+    assert await store.generators() == []
+
+
+async def test_compile_pack_skips_examples_a_pack_already_covers() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example())
+    llm = FakeLLM([])
+    pack = [pack_spec("pack-gen")]
+    diff = await compile_pack(compiler(FakeJev(), llm, store), pack)
+    assert [o.status for o in diff.outcomes] == ["covered"]
+    assert diff.generators == []
+    assert llm.calls == []
+
+
+async def test_a_pack_generator_the_store_disables_isnt_in_use() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example())
+    await store.set_generator_enabled("pack-gen", False)
+    llm = FakeLLM([DRAFT])
+    pack = [pack_spec("pack-gen")]
+    diff = await compile_pack(compiler(FakeJev().choice(None, pick("9.1")), llm, store), pack)
+    assert [o.status for o in diff.outcomes] == ["accepted"]
+    assert len(llm.calls) == 1
+
+
+async def test_compile_pack_adds_the_local_layers_generators_the_pack_lacks() -> None:
+    # hybrid mode: generators learned inline sit in the store until a compile proposes them.
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-inline", r"(\d+) secs"))
+    await store.put_generator(spec_record("gen-reviewed", r"(\d+) s\b"))
+    diff = await compile_pack(
+        compiler(FakeJev(), FakeLLM([]), store), [pack_spec("gen-reviewed", r"(\d+) s\b")]
+    )
+    assert diff.outcomes == []
+    assert [s.id for s in diff.generators] == ["gen-inline"]
+
+
+async def test_compile_pack_takes_only_wanted_examples_of_candidate_fields() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example(eid="low", p=0.5))
+    await store.add_example(example(eid="enum", field="Car.gearbox", value="manual"))
+    await store.add_example(example(eid="human", p=None, source="human"))
+    diff = await compile_pack(
+        compiler(FakeJev().choice(None, pick("9.1")), FakeLLM([DRAFT]), store, learn_threshold=0.9)
+    )
+    assert [(o.example_id, o.status) for o in diff.outcomes] == [("human", "accepted")]
+
+
+async def test_compile_pack_reports_rejected_examples_and_writes_no_generator() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example())
+    llm = FakeLLM([{"regex": r"(\d+) mph", "group": 1, "normalise": ["parse_number"]}])
+    diff = await compile_pack(compiler(FakeJev(), llm, store))
+    assert [o.status for o in diff.outcomes] == ["missed_trigger"]
+    assert diff.generators == []
+
+
+async def test_compile_pack_needs_a_store_it_wont_publish_to() -> None:
+    with pytest.raises(ValueError, match="persist=False"):
+        await compile_pack(learner(FakeJev(), FakeLLM([])))
+    no_store = GeneratorLearner(
+        [SPEC], FakeLLM([]), FakeJev().client(), generators=LearnedGenerators(persist=False)
+    )
+    with pytest.raises(ValueError, match="persist=False"):
+        await compile_pack(no_store)
+
+
+async def test_the_extractor_compiles_a_stores_examples() -> None:
+    store = open_store(":memory:")
+    await store.add_example(example())
+    fake = FakeJev().choice(None, pick("9.1"))
+    async with Extractor(
+        [Car], jev=fake.client(), pipeline=pipeline(), store=store, generator_llm=FakeLLM([DRAFT])
+    ) as extractor:
+        diff = await extractor.compile_pack()
+        result = await extractor.extract(Document.from_bytes(b"<p/>"))
+    assert [o.status for o in diff.outcomes] == ["accepted"]
+    assert await store.generators() == []
+    # Documents don't use unreviewed generators: there's nothing to find the value with.
+    assert result.meta.generator_snapshot == 0
+    assert result.records == []
+
+
+async def test_the_extractor_compiles_only_with_a_generator_llm_and_a_store() -> None:
+    async with Extractor([Car], jev=FakeJev().client(), store=":memory:") as extractor:
+        with pytest.raises(ValueError, match="needs a generator_llm"):
+            await extractor.compile_pack()
+    async with Extractor([Car], jev=FakeJev().client(), generator_llm=FakeLLM([])) as extractor:
+        await extractor.learner()  # opens the extractor's own in-memory store
+        with pytest.raises(ValueError, match="pass store="):
+            await extractor.compile_pack()
+
+
+# --- pack diffs ----------------------------------------------------------------------------
+
+
+def test_a_pack_diff_writes_one_yaml_file_per_generator(tmp_path: Path) -> None:
+    specs = [pack_spec("gen-a"), pack_spec("gen-b", r"(\d+) secs")]
+    out = tmp_path / "diff"
+    paths = PackDiff(generators=specs, outcomes=[]).write(out)
+    assert paths == [out / "generators" / "gen-a.yaml", out / "generators" / "gen-b.yaml"]
+    assert pack_generators(out) == specs
+
+
+def test_a_pack_diff_goes_only_into_a_new_or_empty_directory(tmp_path: Path) -> None:
+    diff = PackDiff(generators=[pack_spec("gen-a")], outcomes=[])
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    diff.write(empty)
+    with pytest.raises(FileExistsError, match="isn't an empty directory"):
+        diff.write(empty)
+    afile = tmp_path / "file"
+    afile.write_text("")
+    with pytest.raises(FileExistsError):
+        diff.write(afile)
+
+
+def test_pack_generators_reads_a_packs_generators(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="no such pack directory"):
+        pack_generators(tmp_path / "missing")
+    assert pack_generators(tmp_path) == []  # no generators directory
+    folder = tmp_path / "generators"
+    folder.mkdir()
+    (folder / "b.yaml").write_text(pack_spec("gen-b").to_yaml())
+    (folder / "a.yaml").write_text(pack_spec("gen-a").to_yaml())
+    (folder / "notes.txt").write_text("not a spec")
+    assert [s.id for s in pack_generators(tmp_path)] == ["gen-a", "gen-b"]
+
+    (folder / "c.yaml").write_text(pack_spec("gen-a").to_yaml())
+    with pytest.raises(InvalidGeneratorError, match=r"c\.yaml: another file already has id"):
+        pack_generators(tmp_path)
+    (folder / "c.yaml").write_text("id: bad id\n")
+    with pytest.raises(InvalidGeneratorError, match=r"c\.yaml: "):
+        pack_generators(tmp_path)

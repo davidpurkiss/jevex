@@ -127,6 +127,22 @@ print([(o.status, o.spec.id if o.spec else None) for o in learner.outcomes])
 Learning stops when the extractor is closed; examples still queued then stay in the store.
 A store's learned generators are used whether or not a `generator_llm` is set.
 
+That is the default `learn_mode="inline"`. To review generators before any document uses
+them, use `learn_mode="compile"`: documents only log their verified examples to the store,
+and `jevex learn` synthesises and tests generators from them in a batch, then writes the
+ones it accepts as a pack diff (`OUT/generators/<id>.yaml`) without publishing anything:
+
+```sh
+jevex learn --schema cars:VehicleSpec --store sqlite:///jevex.db --out review/ \
+    --pack packs/cars --llm anthropic --max-spend 2
+```
+
+`--pack` is the pack the diff is against: its generators count as learned, so examples
+they already find cost nothing. `learn_mode="hybrid"` learns inline as usual (like compile
+mode, it needs a `store=`); a periodic `jevex learn` then also puts the generators learned
+inline that the pack lacks into the diff. In Python, `await extractor.compile_pack(pack)`
+returns the same `PackDiff`.
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the

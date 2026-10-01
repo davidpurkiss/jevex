@@ -21,3 +21,9 @@ class Outer(BaseModel):
         name: str = Field(description="Name")
 
     inner: Inner | None = None
+
+
+class Car(BaseModel):
+    """A car, for ``jevex learn``."""
+
+    zero_to_62_s: float = Field(description="0-62 mph time", unit="s")

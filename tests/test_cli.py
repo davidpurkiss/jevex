@@ -1,14 +1,23 @@
+import asyncio
 import io
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from jevex import Context
-from jevex.cli import CliError, load_schema, main
+from jevex import Context, GeneratorRecord, GeneratorSpec, VerifiedExample, cli
+from jevex.cli import CliError, load_llm, load_schema, main
+from jevex.generators import GeneratorRegistry
+from jevex.jev import Choice
+from jevex.llm import ANTHROPIC_MODEL
+from jevex.llm.anthropic import AnthropicLLM
+from jevex.normalise import NormaliseStage
 from jevex.results import FieldMeta
-from jevex.testing import FakeJev
+from jevex.select import CandidateStage, SelectStage
+from jevex.store import open_store
+from jevex.testing import FakeJev, FakeLLM
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SCHEMA = f"{FIXTURES / 'cli_schemas.py'}:Book"
@@ -102,7 +111,7 @@ def test_schema_by_module_path_and_by_file() -> None:
     assert load_schema(SCHEMA).__name__ == "Book"
 
 
-@pytest.mark.parametrize("command", ["learn", "pack", "testsite", "serve"])
+@pytest.mark.parametrize("command", ["pack", "testsite", "serve"])
 def test_planned_commands_say_so(command: str) -> None:
     code, _, err = run_cli(command)
     assert code == 2
@@ -282,3 +291,202 @@ def test_the_jev_client_is_closed(page: Path) -> None:
     )
     assert code == 0
     assert closed == [True]
+
+
+# --- jevex learn ---------------------------------------------------------------------------
+
+CAR = f"{FIXTURES / 'cli_schemas.py'}:Car"
+CAR_TEXT = "62 mph takes 9.1 seconds"
+CAR_DRAFT = {"regex": r"(\d+(?:\.\d+)?) seconds", "group": 1, "normalise": ["parse_number"]}
+
+
+def pick_91(q: Choice) -> str:
+    return "9.1" if "9.1" in q.options else "none"
+
+
+@pytest.fixture
+def logged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A SQLite store holding one logged example for Car.zero_to_62_s. The pipeline has no
+    built-in generators, which would already find the value."""
+    import jevex.extractor as extractor
+
+    stages = (CandidateStage(registry=GeneratorRegistry()), SelectStage(), NormaliseStage())
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", stages)
+    url = f"sqlite:///{tmp_path / 'jevex.db'}"
+
+    async def fill() -> None:
+        store = open_store(url)
+        await store.add_example(
+            VerifiedExample(
+                id="ex-1",
+                field="Car.zero_to_62_s",
+                statement=CAR_TEXT,
+                value=9.1,
+                evidence=(13, 16),
+                context={"heading_trail": [], "kind": "sentence"},
+                probability=0.95,
+            )
+        )
+        await store.aclose()
+
+    asyncio.run(fill())
+    return url
+
+
+def run_learn(*argv: str, llm: FakeLLM, fake: FakeJev | None = None) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    jev = (fake or FakeJev().choice(None, pick_91)).client()
+    code = main(["learn", *argv], jev=jev, llm=llm, out=out, err=err)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_learn_writes_a_pack_diff_and_publishes_nothing(logged: str, tmp_path: Path) -> None:
+    out = tmp_path / "diff"
+    llm = FakeLLM([CAR_DRAFT])
+    code, stdout, err = run_learn("--schema", CAR, "--store", logged, "--out", str(out), llm=llm)
+    assert (code, err) == (0, "")
+    [path] = sorted((out / "generators").iterdir())
+    spec = GeneratorSpec.from_yaml(path.read_text())
+    assert path.name == f"{spec.id}.yaml"
+    assert spec.field == "Car.zero_to_62_s"
+    assert spec.provenance.learned_from == ["ex-1"]
+    assert stdout == (
+        "examples: 1 (accepted 1)\n"
+        f"wrote 1 generator(s) to {out / 'generators'}\n"
+        f"  {spec.id}  Car.zero_to_62_s  {CAR_DRAFT['regex']}\n"
+    )
+
+    async def stored() -> list[GeneratorRecord]:
+        store = open_store(logged)
+        try:
+            return await store.generators()
+        finally:
+            await store.aclose()
+
+    assert asyncio.run(stored()) == []
+
+
+def test_learn_diffs_against_a_pack(logged: str, tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    assert (
+        run_learn(
+            "--schema", CAR, "--store", logged, "--out", str(first), llm=FakeLLM([CAR_DRAFT])
+        )[0]
+        == 0
+    )
+    llm = FakeLLM([])
+    code, stdout, _ = run_learn(
+        "--schema", CAR, "--store", logged, "--out", str(tmp_path / "second"),
+        "--pack", str(first), "--json", llm=llm,
+    )  # fmt: skip
+    assert code == 0
+    payload = json.loads(stdout)
+    assert payload["generators"] == []
+    assert [o["status"] for o in payload["outcomes"]] == ["covered"]
+    assert llm.calls == []
+
+
+def test_learn_refuses_a_used_out_directory_before_spending(logged: str, tmp_path: Path) -> None:
+    (tmp_path / "used").mkdir()
+    (tmp_path / "used" / "old.yaml").write_text("")
+    llm = FakeLLM([])
+    code, _, err = run_learn(
+        "--schema", CAR, "--store", logged, "--out", str(tmp_path / "used"), llm=llm
+    )
+    assert code == 1
+    assert "isn't an empty directory" in err
+    assert llm.calls == []
+
+
+def test_learn_reports_a_bad_pack_cleanly(logged: str, tmp_path: Path) -> None:
+    out = str(tmp_path / "out")
+    code, _, err = run_learn(
+        "--schema", CAR, "--store", logged, "--out", out, "--pack", str(tmp_path / "nope"),
+        llm=FakeLLM([]),
+    )  # fmt: skip
+    assert code == 1
+    assert "no such pack directory" in err
+    (tmp_path / "pack" / "generators").mkdir(parents=True)
+    (tmp_path / "pack" / "generators" / "x.yaml").write_text("id: [\n")
+    code, _, err = run_learn(
+        "--schema", CAR, "--store", logged, "--out", out, "--pack", str(tmp_path / "pack"),
+        llm=FakeLLM([]),
+    )  # fmt: skip
+    assert code == 1
+    assert "x.yaml: spec isn't valid YAML" in err
+
+
+def test_learn_needs_a_jev_key(
+    logged: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["learn", "--schema", CAR, "--store", logged, "--out", str(tmp_path / "o")]
+    code = main(argv, llm=FakeLLM([]), out=out, err=err)
+    assert code == 1
+    assert "TYPESAFE_API_KEY is not set" in err.getvalue()
+
+
+def test_learn_with_spend_caps_records_a_budget_outcome(logged: str, tmp_path: Path) -> None:
+    llm = FakeLLM([CAR_DRAFT])
+    code, stdout, _ = run_learn(
+        "--schema", CAR, "--store", logged, "--out", str(tmp_path / "o"),
+        "--max-spend", "0", "--json", llm=llm,
+    )  # fmt: skip
+    assert code == 0
+    assert [o["status"] for o in json.loads(stdout)["outcomes"]] == ["budget"]
+    assert llm.calls == []
+
+
+def test_learn_spend_caps_cant_be_negative(logged: str) -> None:
+    with pytest.raises(SystemExit):
+        main(["learn", "--schema", CAR, "--store", logged, "--out", "o", "--max-spend", "-1"],
+             err=io.StringIO())  # fmt: skip
+
+
+def test_load_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(CliError, match="must start with one of"):
+        load_llm("mistral:large")
+    with pytest.raises(CliError, match="needs a model, as openai:<model>"):
+        load_llm("openai")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    llm = load_llm("anthropic")
+    assert isinstance(llm, AnthropicLLM)
+    assert llm.model == ANTHROPIC_MODEL
+    monkeypatch.setitem(sys.modules, "jevex.llm.gemini", None)  # as if the extra is missing
+    with pytest.raises(CliError, match="needs the gemini extra"):
+        load_llm("gemini:gemini-3-flash")
+
+
+def test_load_llm_reports_a_client_that_wont_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_key(*_: object, **__: object) -> None:
+        raise RuntimeError("no API key")
+
+    monkeypatch.setattr(AnthropicLLM, "__init__", no_key)
+    with pytest.raises(CliError, match="--llm anthropic:claude-opus-5-5: no API key"):
+        load_llm("anthropic:claude-opus-5-5")
+
+
+def test_learn_closes_the_llm_it_builds(
+    logged: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ClosingLLM(FakeLLM):
+        closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    built = ClosingLLM([{"regex": "(", "group": 0, "normalise": []}])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    argv = ["learn", "--schema", CAR, "--store", logged, "--out", str(tmp_path / "o")]
+    code = main(argv, jev=FakeJev().client(), out=io.StringIO(), err=io.StringIO())
+    assert code == 0
+    assert built.closed
+    injected = ClosingLLM([{"regex": "(", "group": 0, "normalise": []}])
+    main([*argv[:-1], str(tmp_path / "o2")], jev=FakeJev().client(), llm=injected,
+         out=io.StringIO(), err=io.StringIO())  # fmt: skip
+    assert not injected.closed  # the caller's to close

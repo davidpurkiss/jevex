@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, Self, get_args, overload
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,7 +23,16 @@ from jevex.interfaces import GateDecision
 from jevex.jev import JevClient, JevRequestCapError
 from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
-from jevex.learn import LEARN_THRESHOLD, GeneratorLearner, LearnedGenerators, LearnStage
+from jevex.learn import (
+    LEARN_THRESHOLD,
+    ExampleLogger,
+    GeneratorLearner,
+    LearnedGenerators,
+    LearnMode,
+    LearnStage,
+    PackDiff,
+    compile_pack,
+)
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
@@ -38,6 +47,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from jevex.document import Document
+    from jevex.generators import GeneratorSpec
     from jevex.llm import LLM
     from jevex.pipeline import SchemaRun, Stage
 
@@ -358,6 +368,7 @@ class Extractor:
         extraction_llm: LLM | None = None,
         generator_llm: LLM | None = None,
         learn_threshold: float = LEARN_THRESHOLD,
+        learn_mode: LearnMode = "inline",
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -379,7 +390,13 @@ class Extractor:
         verified with probability ``>= learn_threshold`` are turned into generators in
         the background, and documents started after one is accepted use it. Learned
         generators and examples go to the store (an in-memory one if none is given); a
-        store's learned generators are used whether or not learning is on."""
+        store's learned generators are used whether or not learning is on.
+
+        ``learn_mode`` says when learning runs (:data:`~jevex.learn.LearnMode`). In
+        ``"compile"`` mode documents only log those examples to the store, with or without a
+        ``generator_llm``, and :meth:`compile_pack` (``jevex learn``) learns from them
+        later. ``"hybrid"`` learns inline like ``"inline"``; :meth:`compile_pack` then
+        gathers what was learned into a reviewable pack diff. Both need a ``store``."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -411,7 +428,15 @@ class Extractor:
         self._learned: LearnedGenerators | None = None
         self._learner: GeneratorLearner | None = None
         self._learn_lock: asyncio.Lock | None = None
-        if generator_llm is not None and not 0 <= learn_threshold <= 1:
+        self.learn_mode: LearnMode = learn_mode
+        if learn_mode not in get_args(LearnMode):
+            raise ValueError(f"learn_mode must be one of {get_args(LearnMode)}, got {learn_mode!r}")
+        if learn_mode != "inline" and store is None:
+            # Without one, the examples and generators would be lost with the process.
+            raise ValueError(
+                f"learn_mode={learn_mode!r} keeps what it learns in a store: pass store="
+            )
+        if not 0 <= learn_threshold <= 1:
             raise ValueError(f"learn_threshold must be between 0 and 1, got {learn_threshold}")
 
     @property
@@ -459,34 +484,58 @@ class Extractor:
         return self._learned
 
     async def learner(self) -> GeneratorLearner | None:
-        """The learner (created on first use), or ``None`` without a ``generator_llm``.
+        """The inline learner (created on first use), or ``None`` without a
+        ``generator_llm`` or in ``"compile"`` mode.
 
         Its ``outcomes`` say what became of each queued example. It tests generators as
         the pipeline's default candidate, select, normalise and fallback stages would run
         them (their generators, locale, selector, normalisers and fallback threshold).
         """
-        if self.generator_llm is None:
+        if self.generator_llm is None or self.learn_mode == "compile":
             return None
         learned = await self.learned_generators()
         if self._learner is None:
-            candidates = _stage(self.pipeline, "candidates", CandidateStage)
-            select = _stage(self.pipeline, "select", SelectStage)
-            norm = _stage(self.pipeline, "normalise", NormaliseStage)
-            fallback = _stage(self.pipeline, "fallback", FallbackStage)
-            self._learner = GeneratorLearner(
-                self.schemas,
-                self.generator_llm,
-                self.jev,
-                generators=learned or LearnedGenerators(),
-                ledger=await self.ledger(),
-                base=candidates.registry if candidates else GeneratorRegistry(),
-                locale=candidates.locale if candidates else None,
-                selector=select.selector if select else JevCandidateSelector(),
-                normalisers=norm.registry if norm else BUILTIN_NORMALISERS,
-                fallback_threshold=fallback.fallback_threshold if fallback else FALLBACK_THRESHOLD,
-                learn_threshold=self.learn_threshold,
+            self._learner = await self._new_learner(
+                self.generator_llm, learned or LearnedGenerators()
             )
         return self._learner
+
+    async def _new_learner(self, llm: LLM, generators: LearnedGenerators) -> GeneratorLearner:
+        candidates = _stage(self.pipeline, "candidates", CandidateStage)
+        select = _stage(self.pipeline, "select", SelectStage)
+        norm = _stage(self.pipeline, "normalise", NormaliseStage)
+        fallback = _stage(self.pipeline, "fallback", FallbackStage)
+        return GeneratorLearner(
+            self.schemas,
+            llm,
+            self.jev,
+            generators=generators,
+            ledger=await self.ledger(),
+            base=candidates.registry if candidates else GeneratorRegistry(),
+            locale=candidates.locale if candidates else None,
+            selector=select.selector if select else JevCandidateSelector(),
+            normalisers=norm.registry if norm else BUILTIN_NORMALISERS,
+            fallback_threshold=fallback.fallback_threshold if fallback else FALLBACK_THRESHOLD,
+            learn_threshold=self.learn_threshold,
+        )
+
+    async def compile_pack(self, pack: Sequence[GeneratorSpec] = ()) -> PackDiff:
+        """Learn from the store's logged examples in one batch and return what to add to
+        ``pack`` for review (:func:`~jevex.learn.compile_pack`; ``jevex learn``).
+
+        Needs a ``store`` and a ``generator_llm``. Generators are tested as the inline
+        learner would test them, but nothing is published to the store or used by this
+        extractor's documents: they reach documents once the reviewed diff is imported.
+        """
+        if self.generator_llm is None:
+            raise ValueError("compile_pack needs a generator_llm")
+        if self._store_source is None and (self._store is None or self._owns_store):
+            # Not the in-memory store an extractor opens for itself: it has no examples.
+            raise ValueError("compile_pack learns from a store's examples: pass store=")
+        store = await self.store()
+        assert store is not None
+        learned = LearnedGenerators(store, persist=False)
+        return await compile_pack(await self._new_learner(self.generator_llm, learned), pack)
 
     async def wait_for_learning(self) -> None:
         """Wait until every example queued so far has been learned from (or rejected)."""
@@ -501,7 +550,13 @@ class Extractor:
         ctx.budget = budget
         ctx.store = await self.store()
         ctx.extraction_llm = self.extraction_llm
-        ctx.learner = await self.learner()
+        learner = await self.learner()
+        if learner is None and self.learn_mode == "compile":
+            store = await self.store()
+            assert store is not None  # checked in __init__
+            ctx.learner = ExampleLogger(store, self.learn_threshold)
+        else:
+            ctx.learner = learner
         learned = await self.learned_generators()
         ctx.generators = learned.current if learned else None
         try:
