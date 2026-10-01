@@ -26,10 +26,11 @@ if TYPE_CHECKING:
     from jevex.entities import EntityScope
     from jevex.interfaces import GateDecision, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
+    from jevex.llm import LLM
     from jevex.results import FieldMeta
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Statement
-    from jevex.store import Store
+    from jevex.store import Store, VerifiedExample
 
 
 @runtime_checkable
@@ -205,6 +206,11 @@ class Context:
     pipeline: Pipeline | None = None
     """The pipeline running this context (set by :meth:`Pipeline.run`), for a stage whose
     work depends on how a later stage is configured. ``None`` when stages are run by hand."""
+    extraction_llm: LLM | None = None
+    """The extractor's ``extraction_llm``: the fallback stage asks it where Jev's selection
+    failed. ``None`` turns the fallback off."""
+    verified: list[VerifiedExample] = field(default_factory=list["VerifiedExample"])
+    """LLM answers that passed Jev verification on this document, queued for learning."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:

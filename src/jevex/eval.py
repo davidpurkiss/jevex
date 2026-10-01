@@ -377,7 +377,7 @@ class DocumentRun:
     jev_questions: int
     jev_cost: float
     llm_calls: int
-    """LLM calls for this document. Always 0 until the LLM fallback (#33) reports them."""
+    """LLM calls for this document (``meta.llm.calls``: the fallback's)."""
     llm_cost: float
     methods: Counter[str]
     fields: dict[str, FieldScore]
@@ -585,8 +585,8 @@ async def evaluate(
             jev_requests=result.meta.jev.requests,
             jev_questions=result.meta.jev.questions,
             jev_cost=result.meta.jev.cost,
-            llm_calls=0,
-            llm_cost=0.0,
+            llm_calls=result.meta.llm.calls,
+            llm_cost=result.meta.llm.cost,
             methods=methods,
             fields=score_document(item, result, resolved),
         )

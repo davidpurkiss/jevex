@@ -68,6 +68,32 @@ pipeline = default_pipeline().replace(
 A vision model plugs in as another `ImageProcessor` passed to `ImageStage(processors=[...])`;
 the statements it returns are tagged `vision`, and so are the values taken from them.
 
+## LLM fallback
+
+An LLM is optional. With one set as `extraction_llm`, jevex asks it about a field only
+where Jev's selection failed: no candidate values were found, Jev chose "none" for a
+statement it had categorised as that field, or Jev's pick had low confidence. The LLM
+must return the value and the exact words of the statement that state it. Jev then checks
+the answer ("The statement states that the 0-62 mph time (s) is 9.1."). A verified
+answer is used with `method="llm"` and `verified=True`. A rejected one is dropped, the
+field keeps Jev's best answer, and the rejected value is listed in `meta.alternatives`.
+
+```python
+from jevex import Budgets, DocBudget, Extractor, FallbackStage
+from jevex.extractor import default_pipeline
+from jevex.llm.anthropic import AnthropicLLM
+
+extractor = Extractor(
+    schemas=[VehicleSpec],
+    extraction_llm=AnthropicLLM(model="claude-sonnet-5-5"),
+    budgets=Budgets(per_document=DocBudget(max_llm_calls=5)),
+    # Optional: tune when the LLM is asked and what Jev must confirm.
+    pipeline=default_pipeline().replace(
+        "fallback", FallbackStage(fallback_threshold=0.6, verify_threshold=0.85)
+    ),
+)
+```
+
 ## Development
 
 ```sh

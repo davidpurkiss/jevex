@@ -15,6 +15,7 @@ from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
+from jevex.fallback import FallbackStage
 from jevex.gate import DocumentGateStage
 from jevex.images import ImageStage
 from jevex.interfaces import GateDecision
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from jevex.document import Document
+    from jevex.llm import LLM
     from jevex.pipeline import SchemaRun, Stage
 
 # The spec's stage order (see jevex.interfaces). Default stages must use these names; they
@@ -72,6 +74,7 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     CandidateStage(),
     SelectStage(),
     NormaliseStage(),
+    FallbackStage(),
 )
 
 
@@ -340,6 +343,7 @@ class Extractor:
         budgets: Budgets | None = None,
         store: Store | str | Path | None = None,
         run_id: str | None = None,
+        extraction_llm: LLM | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -351,7 +355,11 @@ class Extractor:
         state and the spend ledger that shares the run budget across workers; a URL is
         opened on first use and closed by ``aclose``. With a run budget but no store, the
         ledger is kept in memory. ``run_id`` labels this run's ledger entries; workers
-        that should share a ``period="run"`` budget pass the same one."""
+        that should share a ``period="run"`` budget pass the same one.
+
+        ``extraction_llm`` turns on the LLM fallback (:mod:`jevex.fallback`): where Jev's
+        selection fails, the LLM is asked for the value and its evidence, and Jev verifies
+        the answer before it is used. Off (``None``) by default."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -377,6 +385,7 @@ class Extractor:
         self._store: Store | None = None if isinstance(store, str | Path) else store
         self._owns_store = False
         self._store_lock: asyncio.Lock | None = None
+        self.extraction_llm = extraction_llm
 
     @property
     def jev(self) -> JevClient:
@@ -415,6 +424,7 @@ class Extractor:
         ctx = Context.create(document, self.schemas, jev)
         ctx.budget = budget
         ctx.store = await self.store()
+        ctx.extraction_llm = self.extraction_llm
         try:
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")

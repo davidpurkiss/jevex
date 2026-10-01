@@ -41,6 +41,7 @@ from jevex.statements import Candidate, Statement
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from jevex.budgets import DocumentBudget
     from jevex.categorise import ToClassify
     from jevex.entities import EntityScope
     from jevex.images import ImageData, ImageReading
@@ -317,7 +318,18 @@ class Normaliser(Protocol):
 
 @runtime_checkable
 class LLMExtractor(Protocol):
-    async def extract(self, statement: Statement, field: FieldSpec) -> LLMAnswer | None: ...
+    """Asks an LLM for one field's value in one statement (the fallback stage's plugin).
+
+    Returns the value and its verbatim evidence, or ``None`` when the statement doesn't
+    state the field or ``budget`` refused the call. Make LLM calls through
+    ``budget.call_llm`` so the document's and run's budgets apply; raise
+    :class:`~jevex.llm.LLMError` for a failed call. The stage checks the evidence, validates
+    the value against the field and verifies it with Jev.
+    """
+
+    async def extract(
+        self, statement: Statement, field: FieldSpec, budget: DocumentBudget
+    ) -> LLMAnswer | None: ...
 
 
 @runtime_checkable

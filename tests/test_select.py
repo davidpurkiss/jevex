@@ -134,6 +134,15 @@ def test_a_statement_also_goes_to_fields_with_enough_category_probability() -> N
     assert field_statements(ctx, run, run.scopes[0]) == []
 
 
+def test_found_fields_are_left_out_unless_asked_for() -> None:
+    ctx = context(FakeJev(), [st("s1", "0-62 mph in 9.1 s")], {"s1": "zero_to_62_s"})
+    run = ctx.schemas["Car"]
+    run.set_field("doc", "zero_to_62_s", FieldMeta(value=9.1, confidence=0.2))
+    assert field_statements(ctx, run, run.scopes[0]) == []
+    pairs = field_statements(ctx, run, run.scopes[0], include_found=True)
+    assert [f.name for _, f in pairs] == ["zero_to_62_s"]
+
+
 async def test_a_second_field_route_never_makes_a_bool_false() -> None:
     about = st("s1", "Automatic gearbox as standard")
     other = st("s2", "Diesel engine, manual option")
