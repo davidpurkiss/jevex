@@ -25,13 +25,13 @@ def build(seed: int = 42, out_dir: str | Path = "testsite/build") -> dict[str, A
 
     If ``out_dir`` holds an earlier build, its files (the pages its ``truth.json`` lists,
     ``index.html`` and ``truth.json``) are removed first, so no stale pages survive. Any
-    other non-empty directory is refused, and nothing else in it is ever deleted.
+    other non-empty directory is refused, and nothing else in it is ever deleted. The
+    earlier build stays if rendering fails (e.g. ``ImportError`` without Pillow).
     """
     out = Path(out_dir)
+    pages = render(generate(seed))
     if out.exists() and any(out.iterdir()):
         _remove_previous_build(out)
-    dataset = generate(seed)
-    pages = render(dataset)
     for page in pages:
         target = out / page.path
         target.parent.mkdir(parents=True, exist_ok=True)

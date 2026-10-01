@@ -5,15 +5,19 @@ from pathlib import Path
 
 import pytest
 
+from jevex import testsite
 from jevex.document import sniff_content_type
-from jevex.testsite import build, digest, generate, render
+from jevex.testsite import Dataset, Page, build, digest, drawing, generate, render
 from jevex.testsite.schemas import Listing, VehicleSpec
 
 SCHEMAS = {"VehicleSpec": VehicleSpec, "Listing": Listing}
 
 
 def test_same_seed_same_site_different_seed_different_site() -> None:
-    assert digest(render(generate(42))) == digest(render(generate(42)))
+    first = digest(render(generate(42)))
+    drawing._png.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    drawing._scanned_pdf.cache_clear()  # pyright: ignore[reportPrivateUsage]
+    assert digest(render(generate(42))) == first  # rasterised again, not from the cache
     assert digest(render(generate(42))) != digest(render(generate(7)))
 
 
@@ -213,6 +217,21 @@ def test_build_refuses_a_foreign_truth_json_and_keeps_its_files(tmp_path: Path) 
         build(42, tmp_path)
     assert (tmp_path / "docs" / "report.pdf").exists()
     assert (tmp_path / "truth.json").read_text() == '{"records": []}'
+
+
+def test_a_failed_render_keeps_the_earlier_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    build(42, tmp_path)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+    def no_pillow(dataset: Dataset) -> list[Page]:
+        raise ImportError("install jevex[testsite]")
+
+    monkeypatch.setattr(testsite, "render", no_pillow)
+    with pytest.raises(ImportError):
+        build(7, tmp_path)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 
 def test_rebuild_keeps_files_it_did_not_write(tmp_path: Path) -> None:

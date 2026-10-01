@@ -7,7 +7,16 @@ import sys
 import pytest
 
 from jevex.testsite import generate
-from jevex.testsite.drawing import Drawing, plain_text, rasterise, to_pdf, to_png, to_scanned_pdf
+from jevex.testsite.drawing import (
+    Drawing,
+    _png,  # pyright: ignore[reportPrivateUsage]
+    _scanned_pdf,  # pyright: ignore[reportPrivateUsage]
+    plain_text,
+    rasterise,
+    to_pdf,
+    to_png,
+    to_scanned_pdf,
+)
 from jevex.testsite.render import CELL_SIZE, spec_sheet
 
 
@@ -70,11 +79,14 @@ def test_pngs_and_scans() -> None:
     pdfium = pytest.importorskip("pypdfium2")
     drawing = sample("Plain text")
     png = to_png(drawing)
+    _png.cache_clear()
+    assert to_png(drawing) == png
     with image_module.open(io.BytesIO(png)) as image:
         assert image.size == (600, 400)  # 144 dpi
         assert image.getpixel((100, 50)) == (51, 76, 102)  # inside the box
     scan = to_scanned_pdf(drawing, "seed-1")
-    assert scan == to_scanned_pdf(drawing, "seed-1")
+    _scanned_pdf.cache_clear()
+    assert scan == to_scanned_pdf(drawing, "seed-1")  # drawn again, not from the cache
     assert scan != to_scanned_pdf(drawing, "seed-2")
     page = pdfium.PdfDocument(scan)[0]
     assert page.get_size() == (300, 200)
