@@ -157,6 +157,13 @@ async def test_key_mappings_replace_by_fingerprint_schema_and_path(store: Store)
     assert mappings[1].normalisers == ["parse_money", {"unit": {"from": "GBP", "to": "GBP"}}]
     assert mappings[1].schema_name == "Listing"
     assert await store.key_mappings("unknown") == []
+    # Without a fingerprint: every mapping, by fingerprint then path.
+    assert [(m.fingerprint, m.path) for m in await store.key_mappings()] == [
+        ("fp1", "$.name"),
+        ("fp1", "$.offers.price"),
+        ("fp2", "$.name"),
+    ]
+    assert [m.fingerprint for m in await store.key_mappings(schema="Book")] == ["fp2"]
 
 
 async def test_key_mappings_per_schema_and_none_answers(store: Store) -> None:
@@ -266,6 +273,10 @@ async def test_examples_newest_first_with_limit(store: Store) -> None:
         "ex2",
         "ex1",
     ]
+    # Without a field: every field's, still newest first.
+    assert [e.id for e in await store.examples()][:2] == ["other", "ex2"]
+    assert len(await store.examples()) == 4
+    assert len(await store.examples(limit=3)) == 3
 
 
 async def test_example_values_come_back_in_json_form(store: Store) -> None:

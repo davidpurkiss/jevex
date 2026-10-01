@@ -35,6 +35,7 @@ from jevex.learn import (
     compile_pack,
 )
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
+from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.generators import GeneratorSpec
     from jevex.llm import LLM
+    from jevex.packs import Pack
     from jevex.pipeline import SchemaRun, Stage
 
 # The spec's stage order (see jevex.interfaces). Default stages must use these names; they
@@ -371,6 +373,8 @@ class Extractor:
         learn_threshold: float = LEARN_THRESHOLD,
         learn_mode: LearnMode = "inline",
         prune_after: int | None = PRUNE_AFTER,
+        packs: Sequence[Pack | str | Path] = (),
+        community_packs: bool | Sequence[str] = True,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -402,7 +406,14 @@ class Extractor:
 
         With a store, each document's generator counts are added to its stats
         (:mod:`jevex.housekeeping`), and a learned generator with no wins after
-        ``prune_after`` scoped documents is disabled (``None``: never)."""
+        ``prune_after`` scoped documents is disabled (``None``: never).
+
+        ``packs`` are project packs (:mod:`jevex.packs`: a :class:`~jevex.packs.Pack`, a
+        directory, or an installed pack's name), in priority order, and
+        ``community_packs`` the installed ones below them: all (``True``, the default),
+        none (``False``) or those named. Their generators are used under the store's: the
+        first layer with an id wins, and a layer can disable a lower one's generators.
+        Packs are loaded on first use."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -448,6 +459,9 @@ class Extractor:
             raise ValueError(f"prune_after must be at least 1, got {prune_after}")
         self.prune_after = prune_after
         self._housekeeper: Housekeeper | None = None
+        self._pack_sources = list(packs)
+        self._community_packs = community_packs
+        self._packs: list[Pack] | None = None
 
     @property
     def jev(self) -> JevClient:
@@ -479,16 +493,33 @@ class Extractor:
             )
         return self._ledger
 
+    async def packs(self) -> list[Pack]:
+        """The project packs, then the community packs, loaded on first use (off the event
+        loop). Raises :class:`~jevex.packs.PackError` for one that doesn't load."""
+        if self._packs is None:
+            self._packs = await asyncio.to_thread(self._load_packs)
+        return self._packs
+
+    def _load_packs(self) -> list[Pack]:
+        packs = [load_pack(source) for source in self._pack_sources]
+        if self._community_packs is True:
+            packs += community_packs()
+        elif self._community_packs is not False:
+            packs += community_packs(list(self._community_packs))
+        return packs
+
     async def learned_generators(self) -> LearnedGenerators | None:
-        """The store's learned generators, loaded on first use (``None`` without a store)."""
+        """The store's learned generators over the packs' (:meth:`packs`), loaded on first
+        use (``None`` with neither a store nor a pack)."""
         store = await self.store()
-        if store is None:
-            return None
         if self._learn_lock is None:
             self._learn_lock = asyncio.Lock()
         async with self._learn_lock:
+            packs = await self.packs()
+            if store is None and not packs:
+                return None
             if self._learned is None or self._learned.store is not store:
-                learned = LearnedGenerators(store)
+                learned = LearnedGenerators(store, packs=packs)
                 await learned.load()
                 self._learned, self._learner = learned, None
         return self._learned
@@ -555,8 +586,9 @@ class Extractor:
         ``pack`` for review (:func:`~jevex.learn.compile_pack`; ``jevex learn``).
 
         Needs a ``store`` and a ``generator_llm``. Generators are tested as the inline
-        learner would test them, but nothing is published to the store or used by this
-        extractor's documents: they reach documents once the reviewed diff is imported.
+        learner would test them, over the store's and the packs' (:meth:`packs`), but
+        nothing is published to the store or used by this extractor's documents: they
+        reach documents once the reviewed diff is in a pack (or imported into the store).
         """
         if self.generator_llm is None:
             raise ValueError("compile_pack needs a generator_llm")
@@ -565,7 +597,7 @@ class Extractor:
             raise ValueError("compile_pack learns from a store's examples: pass store=")
         store = await self.store()
         assert store is not None
-        learned = LearnedGenerators(store, persist=False)
+        learned = LearnedGenerators(store, persist=False, packs=await self.packs())
         return await compile_pack(await self._new_learner(self.generator_llm, learned), pack)
 
     async def wait_for_learning(self) -> None:

@@ -356,7 +356,7 @@ class GeneratorSpec(BaseModel):
                 f"spec is {len(text)} characters; the limit is {MAX_SPEC_CHARS}"
             )
         try:
-            data = _load(text)
+            data = load_yaml(text)
         except yaml.YAMLError as exc:
             raise InvalidGeneratorError(f"spec isn't valid YAML: {exc}") from None
         except RecursionError:
@@ -379,7 +379,7 @@ class GeneratorSpec(BaseModel):
         if self.provenance.created:  # a YAML date, not a quoted string
             data["provenance"]["created"] = self.provenance.created
         text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
-        if _load(text) != data:
+        if load_yaml(text) != data:
             text = yaml.safe_dump(data, sort_keys=False, allow_unicode=False, width=100)
         return text
 
@@ -399,7 +399,8 @@ class GeneratorSpec(BaseModel):
         )
 
 
-def _load(text: str) -> object:
+def load_yaml(text: str) -> object:
+    """Parse YAML safely: no Python tags, aliases or duplicate keys (packs use it too)."""
     return yaml.load(text, Loader=_SpecLoader)
 
 

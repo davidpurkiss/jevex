@@ -14,9 +14,10 @@ from jevex.jev import Choice
 from jevex.llm import ANTHROPIC_MODEL
 from jevex.llm.anthropic import AnthropicLLM
 from jevex.normalise import NormaliseStage
+from jevex.packs import Pack, PackError, generator_record
 from jevex.results import FieldMeta
 from jevex.select import CandidateStage, SelectStage
-from jevex.store import open_store
+from jevex.store import KeyMapping, open_store
 from jevex.testing import FakeJev, FakeLLM
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -111,7 +112,7 @@ def test_schema_by_module_path_and_by_file() -> None:
     assert load_schema(SCHEMA).__name__ == "Book"
 
 
-@pytest.mark.parametrize("command", ["pack", "testsite", "serve"])
+@pytest.mark.parametrize("command", ["testsite", "serve"])
 def test_planned_commands_say_so(command: str) -> None:
     code, _, err = run_cli(command)
     assert code == 2
@@ -490,3 +491,146 @@ def test_learn_closes_the_llm_it_builds(
     main([*argv[:-1], str(tmp_path / "o2")], jev=FakeJev().client(), llm=injected,
          out=io.StringIO(), err=io.StringIO())  # fmt: skip
     assert not injected.closed  # the caller's to close
+
+
+# --- jevex pack ---------------------------------------------------------------------------
+
+
+def car_spec(gid: str, regex: str = r"(\d+) secs") -> GeneratorSpec:
+    return GeneratorSpec.parse(
+        {"id": gid, "field": "Car.zero_to_62_s", "match": {"regex": regex, "group": 1}}
+    )
+
+
+@pytest.fixture
+def filled(tmp_path: Path) -> str:
+    """A SQLite store with two generators (one disabled), a key mapping and an example."""
+    url = f"sqlite:///{tmp_path / 'learned.db'}"
+
+    async def fill() -> None:
+        store = open_store(url)
+        await store.put_generator(generator_record(car_spec("gen-a")))
+        await store.put_generator(generator_record(car_spec("gen-b")))
+        await store.set_generator_enabled("gen-b", False)
+        await store.put_key_mapping(
+            KeyMapping(fingerprint="fp1", schema="Car", path="$.price", field="price")
+        )
+        await store.add_example(
+            VerifiedExample(id="ex-1", field="Car.zero_to_62_s", statement=CAR_TEXT, value=9.1)
+        )
+        await store.aclose()
+
+    asyncio.run(fill())
+    return url
+
+
+def test_pack_export_import_and_diff(filled: str, tmp_path: Path) -> None:
+    out = tmp_path / "pack"
+    code, stdout, err = run_cli(
+        "pack", "export", "--store", filled, "--out", str(out), "--name", "cars", "--examples"
+    )
+    assert (code, err) == (0, "")
+    assert stdout == (
+        f"exported pack cars 0.1.0 (1 generator, 1 key mapping, 1 example, 1 disable) to {out}\n"
+    )
+    pack = Pack.load(out)
+    assert [g.id for g in pack.generators] == ["gen-a"]
+    assert pack.manifest.disables == ["gen-b"]
+
+    target = f"sqlite:///{tmp_path / 'fresh.db'}"
+    code, stdout, _ = run_cli("pack", "import", str(out), "--store", target)
+    assert code == 0
+    assert stdout == (
+        f"imported pack cars 0.1.0 (1 generator, 1 key mapping, 1 example, 1 disable) "
+        f"into {target}\n"
+    )
+
+    async def check() -> None:
+        store = open_store(target)
+        assert [r.id for r in await store.generators()] == ["gen-a"]
+        assert await store.disabled_generator_ids() == {"gen-b"}
+        assert [m.field for m in await store.key_mappings("fp1")] == ["price"]
+        assert [e.id for e in await store.examples()] == ["ex-1"]
+        await store.aclose()
+
+    asyncio.run(check())
+    code, stdout, _ = run_cli("pack", "diff", filled, target, "--examples")
+    assert (code, stdout) == (0, "no changes\n")
+
+
+def test_pack_diff_shows_what_changes(filled: str, tmp_path: Path) -> None:
+    run_cli("pack", "export", "--store", filled, "--out", str(tmp_path / "v1"), "--name", "cars")
+    v1 = Pack.load(tmp_path / "v1")
+    v2 = v1.model_copy(
+        update={
+            "manifest": v1.manifest.model_copy(update={"version": "0.2.0", "disables": []}),
+            "generators": [car_spec("gen-a", r"(\d+) seconds"), car_spec("gen-c")],
+            "key_mappings": [],
+        }
+    )
+    v2.write(tmp_path / "v2")
+    code, stdout, _ = run_cli("pack", "diff", str(tmp_path / "v1"), str(tmp_path / "v2"))
+    assert code == 0
+    assert stdout == (
+        "manifest: version '0.1.0' -> '0.2.0'\n"
+        "generators:\n"
+        "  + gen-c  Car.zero_to_62_s  (\\d+) secs\n"
+        "  ~ gen-a  Car.zero_to_62_s  (\\d+) seconds\n"
+        "key mappings:\n"
+        "  - fp1  Car  $.price -> price\n"
+        "disables:\n"
+        "  - gen-b\n"
+    )
+    code, stdout, _ = run_cli("pack", "diff", str(tmp_path / "v1"), str(tmp_path / "v2"), "--json")
+    data = json.loads(stdout)
+    assert data["manifest"] == {"version": ["0.1.0", "0.2.0"]}
+    assert [g["id"] for g in data["generators"]["added"]] == ["gen-c"]
+    # Against a store, the manifest isn't compared: the store has none.
+    code, stdout, _ = run_cli("pack", "diff", filled, str(tmp_path / "v2"))
+    assert not stdout.startswith("manifest:")
+    assert "  + gen-c" in stdout
+
+
+def test_pack_export_refuses_bad_arguments_before_writing(filled: str, tmp_path: Path) -> None:
+    out = tmp_path / "pack"
+    code, _, err = run_cli("pack", "export", "--store", filled, "--out", str(out), "--name", "../x")
+    assert code == 1
+    assert "jevex: error: --name: String should match pattern" in err
+    missing = f"sqlite:///{tmp_path / 'missing.db'}"
+    code, _, err = run_cli("pack", "export", "--store", missing, "--out", str(out), "--name", "x")
+    assert (code, err) == (1, f"jevex: error: no such store: {missing}\n")
+    assert not (tmp_path / "missing.db").exists()  # reading never creates a database
+    out.mkdir()
+    (out / "old.yaml").write_text("")
+    code, _, err = run_cli("pack", "export", "--store", filled, "--out", str(out), "--name", "x")
+    assert "isn't an empty directory" in err
+
+
+def test_pack_import_and_diff_report_bad_packs_cleanly(filled: str, tmp_path: Path) -> None:
+    (tmp_path / "bad").mkdir()
+    code, _, err = run_cli("pack", "import", str(tmp_path / "bad"), "--store", filled)
+    assert (code, err) == (1, f"jevex: error: {tmp_path / 'bad'} has no manifest.yaml\n")
+    code, _, err = run_cli("pack", "diff", "no-such-pack", filled)
+    assert code == 1
+    assert "no installed pack named 'no-such-pack'" in err
+
+
+def test_pack_needs_a_subcommand() -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("pack")
+    assert exc.value.code == 2
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_a_broken_community_pack_is_a_clean_error(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor
+
+    def broken(names: list[str] | None = None) -> list[Pack]:
+        raise PackError("installed pack 'cars' (cars_pack) failed to load: boom")
+
+    monkeypatch.setattr(extractor, "community_packs", broken)
+    code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert (code, out) == (1, "")
+    assert err == "jevex: error: pack: installed pack 'cars' (cars_pack) failed to load: boom\n"

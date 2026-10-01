@@ -183,9 +183,13 @@ class Store(Protocol):
         ...
 
     async def key_mappings(
-        self, fingerprint: str, *, schema: str | None = None
+        self, fingerprint: str | None = None, *, schema: str | None = None
     ) -> list[KeyMapping]:
-        """Mappings for one fingerprint, by path, optionally for one schema."""
+        """Mappings for one fingerprint, by path, optionally for one schema.
+
+        ``fingerprint=None`` lists every fingerprint's, by fingerprint then path (exporting
+        a pack, #41).
+        """
         ...
 
     async def count_unsure_key_paths(
@@ -204,8 +208,10 @@ class Store(Protocol):
         """Insert or replace by ``id``."""
         ...
 
-    async def examples(self, field: str, *, limit: int | None = None) -> list[VerifiedExample]:
-        """Examples for one field, newest first."""
+    async def examples(
+        self, field: str | None = None, *, limit: int | None = None
+    ) -> list[VerifiedExample]:
+        """Examples for one field (every field's with ``None``), newest first."""
         ...
 
     # Generator stats

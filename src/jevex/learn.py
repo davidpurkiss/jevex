@@ -62,9 +62,14 @@ from jevex.jev import JevBudgetExceededError, JevError
 from jevex.layout import DomLocation, section_text
 from jevex.llm import LLMError
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliserRegistry, normalise
+from jevex.packs import (
+    PACK_GENERATORS,
+    generator_record,
+    layered_generators,
+    stored_generators,
+)
 from jevex.select import JevCandidateSelector, statement_state, unique_spans
 from jevex.statements import Statement, StatementKind
-from jevex.store import GeneratorRecord, StoreError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -74,6 +79,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import CandidateSelector, Learner, Selection
     from jevex.jev import Answer, JevClient
     from jevex.llm import LLM
+    from jevex.packs import Pack
     from jevex.pipeline import Context
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate
@@ -112,20 +118,30 @@ class LearnedGenerators:
     publish later aren't picked up until the next load. With ``persist=False``,
     :meth:`publish` only swaps the snapshot: a batch compile (:func:`compile_pack`) reads
     the store but leaves what it learns for review.
+
+    ``packs`` are the layers below the store: project packs, then community packs
+    (:func:`~jevex.packs.layered_generators`). The store's disable list applies to them.
     """
 
-    def __init__(self, store: Store | None = None, *, persist: bool = True) -> None:
+    def __init__(
+        self, store: Store | None = None, *, persist: bool = True, packs: Sequence[Pack] = ()
+    ) -> None:
         self.store = store
         self.persist = persist
+        self.packs = list(packs)
         self.current = GeneratorSnapshot(0, GeneratorRegistry())
 
     async def load(self, also: Sequence[GeneratorSpec] = ()) -> GeneratorSnapshot:
         """Replace the snapshot with the store's enabled generators (oldest first), then
-        ``also`` (a pack's generators; a stored id wins over a pack's).
+        the packs' (through the layers), then ``also`` (a pack diff's base; an id already
+        in wins).
 
         Raises :class:`~jevex.store.StoreError` for a stored spec that doesn't validate.
         """
-        specs = await self.stored() if self.store is not None else []
+        specs = await self.stored()
+        if self.packs:
+            disabled = await self.store.disabled_generator_ids() if self.store else set[str]()
+            specs = layered_generators(specs, disabled, self.packs)
         registry = GeneratorRegistry([s.to_generator() for s in specs])
         registry = registry.extended(s.to_generator() for s in also)
         self.current = GeneratorSnapshot(self.current.version, registry)
@@ -136,24 +152,13 @@ class LearnedGenerators:
 
         Raises :class:`~jevex.store.StoreError` for a stored spec that doesn't validate.
         """
-        if self.store is None:
-            return []
-        specs: list[GeneratorSpec] = []
-        for record in await self.store.generators():
-            try:
-                specs.append(GeneratorSpec.parse(record.spec))
-            except InvalidGeneratorError as exc:
-                raise StoreError(f"stored generator {record.id!r} is invalid: {exc}") from exc
-        return specs
+        return await stored_generators(self.store) if self.store is not None else []
 
     async def publish(self, spec: GeneratorSpec) -> GeneratorSnapshot:
         """Store ``spec`` (unless ``persist`` is off) and make a new snapshot holding it
         (replacing one with its id)."""
         if self.store is not None and self.persist:
-            scope = {"locale": spec.scope.locale} if spec.scope.locale else {}
-            await self.store.put_generator(
-                GeneratorRecord(id=spec.id, field=spec.field, spec=spec.to_data(), scope=scope)
-            )
+            await self.store.put_generator(generator_record(spec))
         self.current = GeneratorSnapshot(
             self.current.version + 1, self.current.registry.with_generator(spec.to_generator())
         )
@@ -690,10 +695,6 @@ class ExampleLogger:
             await self.store.add_example(example)
 
 
-PACK_GENERATORS = "generators"
-"""The directory in a pack (and a pack diff) holding one ``<id>.yaml`` per generator."""
-
-
 class PackDiff(BaseModel):
     """What a batch compile proposes adding to a pack, for review.
 
@@ -723,27 +724,6 @@ class PackDiff(BaseModel):
             path.write_text(spec.to_yaml(), encoding="utf-8")
             paths.append(path)
         return paths
-
-
-def pack_generators(directory: Path) -> list[GeneratorSpec]:
-    """The generators in a pack directory: every ``generators/*.yaml``, by file name.
-
-    A pack without a ``generators`` directory has none. Raises :class:`FileNotFoundError`
-    when ``directory`` doesn't exist, and :class:`InvalidGeneratorError` (naming the file)
-    for a spec that doesn't validate or an id two files share.
-    """
-    if not directory.is_dir():
-        raise FileNotFoundError(f"no such pack directory: {directory}")
-    specs: dict[str, GeneratorSpec] = {}
-    for path in sorted((directory / PACK_GENERATORS).glob("*.yaml")):
-        try:
-            spec = GeneratorSpec.from_yaml(path.read_text(encoding="utf-8"))
-        except InvalidGeneratorError as exc:
-            raise InvalidGeneratorError(f"{path}: {exc}") from None
-        if spec.id in specs:
-            raise InvalidGeneratorError(f"{path}: another file already has id {spec.id!r}")
-        specs[spec.id] = spec
-    return list(specs.values())
 
 
 async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] = ()) -> PackDiff:

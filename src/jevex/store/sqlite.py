@@ -374,14 +374,20 @@ class SQLiteStore:
         await self._call(run)
 
     async def key_mappings(
-        self, fingerprint: str, *, schema: str | None = None
+        self, fingerprint: str | None = None, *, schema: str | None = None
     ) -> list[KeyMapping]:
-        sql = "SELECT * FROM key_mappings WHERE fingerprint = ?"
-        params: tuple[Any, ...] = (fingerprint,)
+        where: list[str] = []
+        params: tuple[Any, ...] = ()
+        if fingerprint is not None:
+            where.append("fingerprint = ?")
+            params += (fingerprint,)
         if schema is not None:
-            sql += " AND schema_name = ?"
-            params = (fingerprint, schema)
-        sql += " ORDER BY path, schema_name"
+            where.append("schema_name = ?")
+            params += (schema,)
+        sql = "SELECT * FROM key_mappings"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY fingerprint, path, schema_name"
 
         def run() -> list[KeyMapping]:
             return [
@@ -447,12 +453,18 @@ class SQLiteStore:
 
         await self._call(run)
 
-    async def examples(self, field: str, *, limit: int | None = None) -> list[VerifiedExample]:
-        sql = "SELECT * FROM examples WHERE field = ? ORDER BY created_at DESC, id"
-        params: tuple[Any, ...] = (field,)
+    async def examples(
+        self, field: str | None = None, *, limit: int | None = None
+    ) -> list[VerifiedExample]:
+        sql = "SELECT * FROM examples"
+        params: tuple[Any, ...] = ()
+        if field is not None:
+            sql += " WHERE field = ?"
+            params += (field,)
+        sql += " ORDER BY created_at DESC, id"
         if limit is not None:
             sql += " LIMIT ?"
-            params = (field, limit)
+            params += (limit,)
 
         def run() -> list[VerifiedExample]:
             return [

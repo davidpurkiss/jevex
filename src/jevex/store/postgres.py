@@ -415,14 +415,17 @@ class PostgresStore:
         await self._run(op)
 
     async def key_mappings(
-        self, fingerprint: str, *, schema: str | None = None
+        self, fingerprint: str | None = None, *, schema: str | None = None
     ) -> list[KeyMapping]:
-        query: LiteralString = "SELECT * FROM {s}.key_mappings WHERE fingerprint = %s"
-        params: tuple[Any, ...] = (fingerprint,)
+        query: LiteralString = "SELECT * FROM {s}.key_mappings WHERE TRUE"
+        params: tuple[Any, ...] = ()
+        if fingerprint is not None:
+            query += " AND fingerprint = %s"
+            params += (fingerprint,)
         if schema is not None:
             query += " AND schema_name = %s"
-            params = (fingerprint, schema)
-        query += f" ORDER BY path {_C}, schema_name {_C}"
+            params += (schema,)
+        query += f" ORDER BY fingerprint {_C}, path {_C}, schema_name {_C}"
         return [
             KeyMapping(
                 fingerprint=r["fingerprint"],
@@ -490,9 +493,14 @@ class PostgresStore:
 
         await self._run(op)
 
-    async def examples(self, field: str, *, limit: int | None = None) -> list[VerifiedExample]:
-        # LIMIT NULL is no limit.
-        query = "SELECT * FROM {s}.examples WHERE field = %s ORDER BY created_at DESC, id "
+    async def examples(
+        self, field: str | None = None, *, limit: int | None = None
+    ) -> list[VerifiedExample]:
+        # LIMIT NULL is no limit; so is a NULL field.
+        query = (
+            "SELECT * FROM {s}.examples WHERE (%s::text IS NULL OR field = %s) "
+            "ORDER BY created_at DESC, id "
+        )
         return [
             VerifiedExample(
                 id=r["id"],
@@ -509,7 +517,7 @@ class PostgresStore:
                 probability=r["probability"],
                 created_at=_utc(r["created_at"]),
             )
-            for r in await self._rows(self._q(query + _C + " LIMIT %s"), (field, limit))
+            for r in await self._rows(self._q(query + _C + " LIMIT %s"), (field, field, limit))
         ]
 
     # -- generator stats --------------------------------------------------------------

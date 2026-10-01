@@ -1,8 +1,9 @@
 """The ``jevex`` command line (spec: *Integration › CLI*).
 
 ``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
-``jevex eval`` scores a corpus, and ``jevex learn`` compiles logged examples into a pack
-diff. The other commands are placeholders until their issues land. Uses only the standard library
+``jevex eval`` scores a corpus, ``jevex learn`` compiles logged examples into a pack diff,
+and ``jevex pack export|import|diff`` moves learned state between stores and packs. The
+other commands are placeholders until their issues land. Uses only the standard library
 (argparse), so the CLI adds nothing to a core install.
 """
 
@@ -19,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from jevex import __version__
 from jevex.budgets import Budgets, RunBudget
@@ -29,10 +30,20 @@ from jevex.extractor import Extractor
 from jevex.fetch import FetchError, SimpleFetcher
 from jevex.generators import InvalidGeneratorError
 from jevex.jev import JevError
-from jevex.learn import LEARN_THRESHOLD, PACK_GENERATORS, PackDiff, pack_generators
+from jevex.learn import LEARN_THRESHOLD, PackDiff
 from jevex.llm import ANTHROPIC_MODEL
+from jevex.packs import (
+    PACK_GENERATORS,
+    PackError,
+    PackManifest,
+    diff_packs,
+    export_pack,
+    import_pack,
+    load_pack,
+    pack_generators,
+)
 from jevex.schema import UnsupportedFieldError
-from jevex.store import StoreError
+from jevex.store import StoreError, open_store
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,13 +51,14 @@ if TYPE_CHECKING:
     from jevex.generators import GeneratorSpec
     from jevex.jev import JevClient
     from jevex.llm import LLM
+    from jevex.packs import Pack, PackChanges
+    from jevex.store import Store
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 
 PLANNED = {
-    "pack": ("Export, import and diff generator packs", 41),
     "testsite": ("Build and serve the synthetic test site", 45),
     "serve": ("Run the extraction microservice", 53),
 }
@@ -135,6 +147,8 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
             result = await extractor.extract(document)
         except JevError as exc:
             raise CliError(f"Jev: {exc}") from exc
+        except PackError as exc:  # an installed community pack that doesn't load
+            raise CliError(f"pack: {exc}") from exc
     if args.meta:
         return result.to_dict()
     return {
@@ -208,8 +222,7 @@ def load_llm(spec: str) -> LLM:
 def _learn_files(out: Path, pack: str | None) -> list[GeneratorSpec]:
     """Check ``--out`` before anything is spent (``PackDiff.write`` checks again), and read
     the ``--pack`` generators."""
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
-        raise CliError(f"--out {out} already exists and isn't an empty directory")
+    _check_out(out)
     try:
         return pack_generators(Path(pack)) if pack else []
     except (FileNotFoundError, InvalidGeneratorError) as exc:
@@ -263,8 +276,170 @@ async def _compile(
             return await extractor.compile_pack(pack)
         except StoreError as exc:
             raise CliError(f"store: {exc}") from exc
+        except PackError as exc:
+            raise CliError(f"pack: {exc}") from exc
         except JevError as exc:
             raise CliError(f"Jev: {exc}") from exc
+
+
+_MEMORY_STORES = (":memory:", "sqlite://", "sqlite://:memory:", "sqlite:///:memory:")
+
+
+def _store_file(url: str) -> Path | None:
+    """The SQLite file a store URL names (``None`` for in-memory and other backends)."""
+    if url in _MEMORY_STORES:
+        return None
+    if url.startswith("sqlite:///"):
+        return Path(url.removeprefix("sqlite:///"))
+    return None if "://" in url else Path(url)
+
+
+async def _open_store(url: str, *, must_exist: bool) -> Store:
+    """Open a store; reading one (``must_exist``) never creates an empty database."""
+    path = _store_file(url)
+    if must_exist and path is not None and not await asyncio.to_thread(path.is_file):
+        raise CliError(f"no such store: {url}")
+    try:
+        return await asyncio.to_thread(open_store, url)
+    except StoreError as exc:
+        raise CliError(f"store: {exc}") from exc
+
+
+def _is_store(source: str) -> bool:
+    return "://" in source or Path(source).is_file()
+
+
+async def _load_pack(source: str) -> Pack:
+    try:
+        return await asyncio.to_thread(load_pack, source)
+    except PackError as exc:
+        raise CliError(str(exc)) from exc
+
+
+def _check_out(out: Path) -> None:
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise CliError(f"--out {out} already exists and isn't an empty directory")
+
+
+async def _pack_export(args: argparse.Namespace) -> str:
+    try:
+        PackManifest(name=args.name, version=args.version)
+    except ValidationError as exc:
+        problems = "; ".join(f"--{e['loc'][0]}: {e['msg']}" for e in exc.errors())
+        raise CliError(problems) from exc
+    out = Path(args.out)
+    await asyncio.to_thread(_check_out, out)
+    store = await _open_store(args.store, must_exist=True)
+    try:
+        pack = await export_pack(
+            store,
+            args.name,
+            args.version,
+            schemas=args.schema or (),
+            locales=args.locale or (),
+            description=args.description,
+            examples=args.examples,
+        )
+    except StoreError as exc:
+        raise CliError(f"store: {exc}") from exc
+    finally:
+        await store.aclose()
+    try:
+        await asyncio.to_thread(pack.write, out)
+    except OSError as exc:
+        raise CliError(str(exc)) from exc
+    return f"exported {_describe(pack)} to {out}\n"
+
+
+async def _pack_import(args: argparse.Namespace) -> str:
+    pack = await _load_pack(args.source)
+    store = await _open_store(args.store, must_exist=False)
+    try:
+        await import_pack(pack, store, examples=not args.no_examples)
+    except StoreError as exc:
+        raise CliError(f"store: {exc}") from exc
+    finally:
+        await store.aclose()
+    return f"imported {_describe(pack, examples=not args.no_examples)} into {args.store}\n"
+
+
+async def _diff_side(source: str, examples: bool) -> tuple[Pack, bool]:
+    """A pack, or a store's state as one (``True``: it's a store)."""
+    if not await asyncio.to_thread(_is_store, source):
+        return await _load_pack(source), False
+    store = await _open_store(source, must_exist=True)
+    try:
+        return await export_pack(store, "store", "-", examples=examples), True
+    except StoreError as exc:
+        raise CliError(f"store: {exc}") from exc
+    finally:
+        await store.aclose()
+
+
+async def _pack_diff(args: argparse.Namespace) -> PackChanges:
+    old, old_store = await _diff_side(args.old, args.examples)
+    new, new_store = await _diff_side(args.new, args.examples)
+    return diff_packs(old, new, manifest=not (old_store or new_store), examples=args.examples)
+
+
+def _describe(pack: Pack, *, examples: bool = True) -> str:
+    m = pack.manifest
+    parts = [
+        _count(len(pack.generators), "generator"),
+        _count(len(pack.key_mappings), "key mapping"),
+    ]
+    if examples:
+        parts.append(_count(len(pack.examples), "example"))
+    parts.append(_count(len(m.disables), "disable"))
+    return f"pack {m.name} {m.version} ({', '.join(parts)})"
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" + ("" if n == 1 else "s")
+
+
+def format_changes(changes: PackChanges) -> str:
+    """A plain-text summary of :func:`~jevex.packs.diff_packs`: ``+`` added, ``-`` removed,
+    ``~`` changed (shown as it is in the new pack)."""
+    if changes.empty:
+        return "no changes\n"
+    lines = [f"manifest: {key} {old!r} -> {new!r}" for key, (old, new) in changes.manifest.items()]
+
+    def section(title: str, rows: list[tuple[str, str]]) -> None:
+        if rows:
+            lines.append(f"{title}:")
+            lines.extend(f"  {sign} {text}" for sign, text in rows)
+
+    g = changes.generators
+    section(
+        "generators",
+        [
+            (sign, f"{s.id}  {s.field}  {s.match.regex}")
+            for sign, items in (("+", g.added), ("-", g.removed), ("~", g.changed))
+            for s in items
+        ],
+    )
+    k = changes.key_mappings
+    section(
+        "key mappings",
+        [
+            (sign, f"{m.fingerprint}  {m.schema_name}  {m.path} -> {m.field or 'none'}")
+            for sign, items in (("+", k.added), ("-", k.removed), ("~", k.changed))
+            for m in items
+        ],
+    )
+    e = changes.examples
+    section(
+        "examples",
+        [
+            (sign, f"{x.id}  {x.field}  {json.dumps(x.value, ensure_ascii=False)}")
+            for sign, items in (("+", e.added), ("-", e.removed), ("~", e.changed))
+            for x in items
+        ],
+    )
+    d = changes.disables
+    section("disables", [("+", i) for i in d.added] + [("-", i) for i in d.removed])
+    return "\n".join(lines) + "\n"
 
 
 def format_diff(diff: PackDiff, out: str) -> str:
@@ -412,6 +587,58 @@ def build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--max-jev-spend", type=_usd, help="Stop calling Jev after this many USD")
     learn.add_argument("--json", action="store_true", help="Print the diff and outcomes as JSON")
 
+    pack = commands.add_parser(
+        "pack",
+        help="Export, import and diff packs of learned state",
+        description="Packs are reviewable YAML: a manifest.yaml plus generators, key "
+        "mappings and optional examples. A pack is a directory or an installed pack's name "
+        "(jevex.packs entry point).",
+    )
+    pack_commands = pack.add_subparsers(dest="pack_command", metavar="<pack command>")
+    pack_commands.required = True
+    export = pack_commands.add_parser(
+        "export",
+        help="Write a store's learned state as a pack",
+        description="Write a store's enabled generators, key mappings and disable list "
+        "(and, with --examples, its verified examples) to a new pack directory.",
+    )
+    export.add_argument("--store", required=True, help="The store, e.g. sqlite:///jevex.db")
+    export.add_argument("--out", required=True, help="A new or empty directory for the pack")
+    export.add_argument("--name", required=True, help="The pack's name, e.g. automotive-uk")
+    export.add_argument("--version", default="0.1.0", help="The pack's version (default 0.1.0)")
+    export.add_argument("--description", help="A line saying what the pack is for")
+    export.add_argument(
+        "--schema",
+        action="append",
+        metavar="NAME",
+        help="Export only this schema's state, by schema name (repeatable; default: all)",
+    )
+    export.add_argument(
+        "--locale",
+        action="append",
+        help="A locale the pack is for (repeatable; default: the generators' locales)",
+    )
+    export.add_argument("--examples", action="store_true", help="Include verified examples")
+    imp = pack_commands.add_parser(
+        "import",
+        help="Copy a pack into a store",
+        description="Copy a pack's generators, key mappings, examples and disables into a "
+        "store, its top layer: they replace entries with the same keys.",
+    )
+    imp.add_argument("source", help="A pack directory or an installed pack's name")
+    imp.add_argument("--store", required=True, help="The store, e.g. sqlite:///jevex.db")
+    imp.add_argument("--no-examples", action="store_true", help="Leave the pack's examples out")
+    diff = pack_commands.add_parser(
+        "diff",
+        help="Show what changes from one pack (or store) to another",
+        description="Compare two packs. Either side may be a store URL (or SQLite file), "
+        "which is compared as its exported state.",
+    )
+    diff.add_argument("old", help="A pack directory, an installed pack's name or a store")
+    diff.add_argument("new", help="A pack directory, an installed pack's name or a store")
+    diff.add_argument("--examples", action="store_true", help="Compare verified examples too")
+    diff.add_argument("--json", action="store_true", help="Print the changes as JSON")
+
     for name, (summary, issue) in PLANNED.items():
         commands.add_parser(name, help=f"{summary} (not implemented yet, #{issue})")
     return parser
@@ -456,6 +683,18 @@ def main(
                 print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
             # A run with failed documents isn't a clean measurement, even though it's scored.
             return EXIT_ERROR if report.failed else EXIT_OK
+        if args.command == "pack":
+            if args.pack_command == "diff":
+                changes = asyncio.run(_pack_diff(args))
+                if args.json:
+                    json.dump(changes.model_dump(mode="json"), stdout, indent=2, ensure_ascii=False)
+                    stdout.write("\n")
+                else:
+                    stdout.write(format_changes(changes))
+                return EXIT_OK
+            run = _pack_export if args.pack_command == "export" else _pack_import
+            stdout.write(asyncio.run(run(args)))
+            return EXIT_OK
         if args.command == "learn":
             diff = asyncio.run(_learn(args, jev, llm))
             if args.json:
