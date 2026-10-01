@@ -141,6 +141,7 @@ from jevex.learn import (
     compile_pack,
     example_statement,
 )
+from jevex.locales import LocaleConventions, locale_conventions, localise_steps
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -324,6 +325,7 @@ __all__ = [
     "LearnedGenerators",
     "LearningSpend",
     "LearningStoppedError",
+    "LocaleConventions",
     "Location",
     "LockCheck",
     "MatchSpec",
@@ -432,6 +434,8 @@ __all__ = [
     "load_corpus",
     "load_pack",
     "load_prompt",
+    "locale_conventions",
+    "localise_steps",
     "lock_corpus",
     "normalise",
     "open_store",

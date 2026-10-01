@@ -9,6 +9,7 @@ from jevex import DomLocation, Field, NormaliserStep, SchemaSpec, Statement
 from jevex.generators import (
     DateGenerator,
     GeneratorRegistry,
+    GeneratorSpec,
     InvalidGeneratorError,
     KeyValue,
     Money,
@@ -21,7 +22,12 @@ from jevex.generators import (
     default_registry,
 )
 from jevex.generators.regex import MAX_PATTERN_LENGTH
-from jevex.interfaces import CandidateGenerator, FieldAwareGenerator, Scope
+from jevex.interfaces import (
+    CandidateGenerator,
+    FieldAwareGenerator,
+    LocaleAwareGenerator,
+    Scope,
+)
 from jevex.normalise import NormaliseError, normalise
 
 
@@ -545,3 +551,168 @@ def test_extended_appends_new_ids_and_keeps_its_own() -> None:
 def test_builtins_satisfy_the_protocol() -> None:
     for gen in default_registry():
         assert isinstance(gen, CandidateGenerator)
+
+
+# --- locales (#56) ---------------------------------------------------------------------
+
+
+class Angebot(BaseModel):
+    gewicht_kg: float = Field(description="Kerb weight", unit="kg")
+    hubraum_l: float = Field(description="Engine size", unit="l")
+    preis: Decimal = Field(description="Price", unit="EUR")
+    verbrauch: list[float] = Field(default_factory=list, description="Economy", unit="l/100km")
+    zugelassen: date = Field(description="First registered")
+    sitze: int = Field(description="Seats")
+
+
+ANGEBOT = SchemaSpec.from_model(Angebot)
+
+
+def values_in(locale: str | None, text: str, field: str) -> dict[str, object]:
+    """Every candidate the default registry proposes, normalised: raw → value (or the error)."""
+    spec = ANGEBOT.field(field)
+    out: dict[str, object] = {}
+    for cand in default_registry().generate(st(text), spec, schema="Angebot", locale=locale):
+        try:
+            out[cand.raw] = normalise(cand.raw, cand.normalise, spec)
+        except NormaliseError:
+            out[cand.raw] = "error"
+    return out
+
+
+def test_german_numbers_with_units_read_a_decimal_comma() -> None:
+    found = values_in("de-DE", "Leergewicht 1.234,5 kg, Hubraum 1,4 l", "gewicht_kg")
+    assert found["1.234,5 kg"] == 1234.5
+    assert values_in("de-DE", "Hubraum 1,4 Liter", "hubraum_l") == {"1,4 Liter": 1.4}
+    # The same text read as en-GB has no 1234.5 in it.
+    assert 1234.5 not in values_in(None, "Leergewicht 1.234,5 kg", "gewicht_kg").values()
+
+
+def test_number_chains_carry_the_decimal_mark() -> None:
+    [cand] = NumberWithUnit().generate_in(st("9,1 s"), SPEC.field("zero_to_62_s"), "de-DE")
+    assert [s.model_dump() for s in cand.normalise] == [
+        {"parse_number": {"decimal": ","}},
+        {"unit": {"from": "s"}},
+    ]
+
+
+def test_german_amounts_put_the_symbol_after_the_number() -> None:
+    found = values_in("de-DE", "Preis: 18.495 € inkl. MwSt.", "preis")
+    assert found["18.495 €"] == Decimal(18495)
+    assert values_in("de-DE", "nur 1.299,99 €", "preis")["1.299,99 €"] == Decimal("1299.99")
+    # A symbol after the number isn't an amount in en-GB text.
+    assert "18,495 €" not in values_in(None, "only 18,495 €", "preis")
+
+
+def test_german_dates_and_month_names() -> None:
+    found = values_in("de-DE", "Erstzulassung am 12. März 2024", "zugelassen")
+    assert found["12. März 2024"] == date(2024, 3, 12)
+    assert found["März 2024"] == date(2024, 3, 1)  # Jev chooses between the spans
+    found = values_in("de-DE", "Erstzulassung: 01.12.2023", "zugelassen")
+    assert found["01.12.2023"] == date(2023, 12, 1)
+    assert values_in("de-DE", "Lieferbar ab Mai 2025", "zugelassen")["Mai 2025"] == date(2025, 5, 1)
+    # English month names still match on a German page; German ones don't on an English one.
+    assert values_in("de", "seit March 2024", "zugelassen")["March 2024"] == date(2024, 3, 1)
+    assert "März 2024" not in values_in(None, "seit März 2024", "zugelassen")
+
+
+def test_german_ranges() -> None:
+    assert values_in("de-DE", "Verbrauch 4,8–5,6 l/100km", "verbrauch")["4,8–5,6 l/100km"] == [
+        4.8,
+        5.6,
+    ]
+
+
+def test_german_key_value_chains() -> None:
+    def kv(text: str, field: str) -> list[object]:
+        [cand] = KeyValue().generate_in(st(text), ANGEBOT.field(field), "de-DE")
+        return [s.model_dump() for s in cand.normalise]
+
+    assert kv("Leergewicht: 1.234,5 kg", "gewicht_kg") == [
+        {"parse_number": {"decimal": ","}},
+        {"unit": {"from": "kg"}},
+    ]
+    assert kv("Preis: 18.495 €", "preis") == [{"parse_money": {"currency": "EUR", "decimal": ","}}]
+    assert kv("Verbrauch: 4,8–5,6 l/100km", "verbrauch") == [
+        {"parse_range": {"decimal": ","}},
+        {"unit": {"from": "l/100km"}},
+    ]
+    assert kv("Erstzulassung: 12. März 2024", "zugelassen") == [{"parse_date": {"order": "dmy"}}]
+    assert values_in("de-DE", "Sitze: 5", "sitze") == {"5": 5}
+
+
+def test_us_dates_are_month_first_and_mpg_is_us_gallons() -> None:
+    us = values_in("en-US", "Registered 03/12/2024", "zugelassen")
+    uk = values_in("en-GB", "Registered 03/12/2024", "zugelassen")
+    assert us["03/12/2024"] == date(2024, 3, 12)
+    assert uk["03/12/2024"] == date(2024, 12, 3)
+    us = values_in("en-US", "Economy: 35 mpg", "verbrauch")
+    uk = values_in("en-GB", "Economy: 35 mpg", "verbrauch")
+    assert us["35 mpg"] == pytest.approx(6.720417)
+    assert uk["35 mpg"] == pytest.approx(8.070884)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "0-62 mph in 9.1 seconds, £18,495, 12 March 2024, 380 to 1,237 litres",
+        "Price: £18,495 on the road",
+        "Registered: 12/03/2024.",
+    ],
+)
+@pytest.mark.parametrize("field", ["zero_to_62_s", "first_registered"])
+def test_an_unknown_locale_is_read_as_en_gb(text: str, field: str) -> None:
+    spec = SPEC.field(field)
+    for gen in (NumberWithUnit(), Money(), DateGenerator(), Range(), KeyValue()):
+        default = (
+            gen.generate_for(st(text), spec)
+            if isinstance(gen, KeyValue)
+            else gen.generate(st(text))
+        )
+        assert gen.generate_in(st(text), spec, None) == default
+        assert gen.generate_in(st(text), spec, "en-GB") == default
+
+
+def test_locale_scoped_learned_generators_read_their_locales_numbers() -> None:
+    spec = GeneratorSpec.parse(
+        {
+            "id": "gen-de",
+            "field": "Angebot.gewicht_kg",
+            "scope": {"locale": "de-DE"},
+            "match": {"regex": r"Leergewicht\s+([\d.,]+)\s*kg", "group": 1},
+            "normalise": ["parse_number"],
+        }
+    )
+    field = ANGEBOT.field("gewicht_kg")
+    text = st("Leergewicht 1.234,5 kg")
+    [cand] = GeneratorRegistry([spec.to_generator()]).generate(
+        text, field, schema="Angebot", locale="de-DE"
+    )
+    assert [s.model_dump() for s in cand.normalise] == [{"parse_number": {"decimal": ","}}]
+    assert normalise(cand.raw, cand.normalise, field) == 1234.5
+    # Its spec keeps the chain as written.
+    assert [s.model_dump() for s in spec.normalise] == ["parse_number"]
+
+
+def test_unscoped_and_explicit_learned_chains_are_used_as_written() -> None:
+    field = ANGEBOT.field("gewicht_kg")
+    text = st("Leergewicht 1.234 kg")
+    unscoped = RegexGenerator(
+        id="u", pattern=r"([\d.,]+) kg", group=1, normalise=(NormaliserStep(name="parse_number"),)
+    )
+    explicit = RegexGenerator(
+        id="e",
+        pattern=r"([\d.,]+) kg",
+        group=1,
+        normalise=(NormaliserStep(name="parse_number", args={"decimal": "."}),),
+        scope=Scope(locale="de-DE"),
+    )
+    [u] = unscoped.generate(text)
+    [e] = explicit.generate(text)
+    assert normalise(u.raw, u.normalise, field) == 1.234
+    assert normalise(e.raw, e.normalise, field) == 1.234
+
+
+def test_builtins_that_depend_on_the_locale_are_locale_aware() -> None:
+    aware = {g.id for g in default_registry() if isinstance(g, LocaleAwareGenerator)}
+    assert aware == {"number_with_unit", "money", "date", "range", "key_value"}

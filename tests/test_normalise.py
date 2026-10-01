@@ -141,6 +141,98 @@ def test_parse_range(raw: str, value: list[int]) -> None:
     assert parse_range(raw) == value
 
 
+# --- decimal commas and other locales (#56) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("1.234,5", 1234.5),
+        ("18.495", 18495),
+        ("9,1 s", 9.1),
+        ("1\u00a0234,5 kg", 1234.5),
+        ("1\u202f234", 1234),
+        ("-0,5", -0.5),
+        (",5", 0.5),
+        ("1.234.567", 1234567),
+    ],
+)
+def test_parse_number_with_a_decimal_comma(raw: str, value: float) -> None:
+    assert parse_number(raw, decimal=",") == value
+
+
+def test_parse_number_reads_a_decimal_point_by_default() -> None:
+    assert parse_number("1.234,5") == 1.234  # en-GB: the first number is "1.234"
+
+
+@pytest.mark.parametrize("decimal", [";", "", "·"])
+def test_a_decimal_mark_other_than_point_or_comma_is_refused(decimal: str) -> None:
+    with pytest.raises(NormaliseError, match="decimal must be"):
+        parse_number("1,5", decimal=decimal)
+    with pytest.raises(NormaliseError, match="decimal must be"):
+        parse_money("1,5 €", decimal=decimal)
+    with pytest.raises(NormaliseError, match="decimal must be"):
+        parse_range("1,5-2,5", decimal=decimal)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("18.495 €", Decimal(18495)),
+        ("18.495,50 €", Decimal("18495.50")),
+        ("€ 1.299,99", Decimal("1299.99")),
+        ("EUR 30.000", Decimal(30000)),
+        ("2,5k EUR", Decimal(2500)),
+    ],
+)
+def test_parse_money_with_a_decimal_comma(raw: str, value: Decimal) -> None:
+    assert parse_money(raw, decimal=",") == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [("1,4–2,0", [1.4, 2.0]), ("1.200 bis 1.500 kg", [1200, 1500]), ("5-7", [5, 7])],
+)
+def test_parse_range_with_a_decimal_comma(raw: str, value: list[float]) -> None:
+    assert parse_range(raw, decimal=",") == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "args", "value"),
+    [
+        ("12. März 2024", {"order": "dmy"}, date(2024, 3, 12)),
+        ("1. Dezember 2023", {}, date(2023, 12, 1)),
+        ("3. Jänner 2025", {}, date(2025, 1, 3)),
+        ("Mai 2024", {"precision": "month"}, date(2024, 5, 1)),
+        ("Okt. 2024", {"precision": "month"}, date(2024, 10, 1)),
+        ("12.03.2024", {"order": "dmy"}, date(2024, 3, 12)),
+        # A four-digit first number is the year, whatever the locale's order says.
+        ("2024-03-12", {"order": "mdy"}, date(2024, 3, 12)),
+        ("2024-03-12", {"order": "dmy"}, date(2024, 3, 12)),
+    ],
+)
+def test_parse_date_in_other_locales(raw: str, args: dict[str, Any], value: date) -> None:
+    assert parse_date(raw, **args) == value
+
+
+def test_decimal_comma_chains_validate_against_the_field() -> None:
+    chain = steps({"parse_number": {"decimal": ","}}, {"unit": {"from": "l", "to": "l"}})
+    assert normalise("Kofferraum: 1.234,5 l", [*chain[:1]], f("power_kw")) == 1234.5
+    assert normalise("1,4 Liter", chain, f("boot_litres")) == 1.4
+    price = steps({"parse_money": {"currency": "EUR", "decimal": ","}})
+    with pytest.raises(NormaliseError, match="EUR"):  # still no currency conversion
+        normalise("18.495 €", price, f("price"))
+
+
+def test_us_gallons_convert_mpg_differently() -> None:
+    uk = normalise("35 mpg", steps("parse_number", {"unit": {"from": "mpg"}}), f("economy"))
+    us = normalise(
+        "35 mpg", steps("parse_number", {"unit": {"from": "mpg", "gallon": "us"}}), f("economy")
+    )
+    assert uk == pytest.approx(8.070884)
+    assert us == pytest.approx(6.720417)
+
+
 # --- units -----------------------------------------------------------------------------
 
 

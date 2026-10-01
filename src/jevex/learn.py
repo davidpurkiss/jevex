@@ -239,7 +239,8 @@ class LearnedGenerators:
 
 NORMALISERS = """\
   - strip: trim whitespace and surrounding punctuation (text values)
-  - parse_number: the first number in the text ("1,395" -> 1395)
+  - parse_number: the first number in the text ("1,395" -> 1395); {decimal: ","} when the
+    text writes a decimal comma ("1.395,5" -> 1395.5; parse_range and parse_money take it too)
   - parse_range: a range of numbers ("5-7" -> [5, 7])
   - unit: {from: <unit in the text>, to: <unit wanted>} converts a number; omit "to" to
     convert to the field's unit

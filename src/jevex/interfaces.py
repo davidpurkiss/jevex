@@ -280,6 +280,22 @@ class FieldAwareGenerator(CandidateGenerator, Protocol):
 
 
 @runtime_checkable
+class LocaleAwareGenerator(CandidateGenerator, Protocol):
+    """A generator whose patterns and chains depend on the document's locale.
+
+    ``GeneratorRegistry.generate`` calls ``generate_in`` when a generator has it, ahead of
+    ``generate_for``. ``locale`` is the document's BCP 47 tag, ``None`` when unknown
+    (read it as en-GB, :func:`jevex.locales.locale_conventions`). The built-in number,
+    money, range, date and key-value generators are locale-aware: "1.234,5" is one number
+    on a ``de-DE`` page and none on an ``en-GB`` one.
+    """
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]: ...
+
+
+@runtime_checkable
 class CandidateSelector(Protocol):
     """Chooses among candidate spans, in two steps so the stage can batch every question
     about a statement into one Jev request: ``questions`` says what to ask, ``selection``

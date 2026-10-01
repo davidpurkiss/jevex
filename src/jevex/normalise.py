@@ -8,6 +8,10 @@ are the only ones the learner may use in generated specs.
 Unit conversion is by dimension: each unit has a factor to its dimension's base unit
 (power → kW, speed → km/h ...). Fuel economy is the exception: l/100km is *inverse* to mpg.
 mpg means UK (imperial) gallons unless a step says ``{"gallon": "us"}``.
+
+Numbers are read with a decimal point unless a step says ``{"decimal": ","}``; then "." and
+no-break spaces group thousands ("1.234,5" → 1234.5). :mod:`jevex.locales` adds these
+arguments for a locale.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 from pydantic import TypeAdapter, ValidationError
 
 from jevex.generators.units import spellings
+from jevex.locales import ALL_MONTH_NAMES, THOUSANDS_AFTER_DECIMAL_COMMA
 from jevex.results import Alternative, FieldMeta, Source
 
 if TYPE_CHECKING:
@@ -53,20 +58,42 @@ class FunctionNormaliser:
 # --- numbers ---------------------------------------------------------------------------
 
 _NUMBER = re.compile(r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|[-+]?\.\d+")
+_GROUP = f"[{THOUSANDS_AFTER_DECIMAL_COMMA}]"
+_NUMBER_DECIMAL_COMMA = re.compile(
+    rf"[-+]?(?:\d{{1,3}}(?:{_GROUP}\d{{3}})+|\d+)(?:,\d+)?|[-+]?,\d+"
+)
 
 
-def parse_number(value: Any) -> int | float:
-    """The first number in ``value``: "18,495" → 18495, "9.1 s" → 9.1, "150PS" → 150."""
+def _number_pattern(decimal: str) -> re.Pattern[str]:
+    if decimal == ".":
+        return _NUMBER
+    if decimal == ",":
+        return _NUMBER_DECIMAL_COMMA
+    raise NormaliseError(f"decimal must be '.' or ',', not {decimal!r}")
+
+
+def _plain_number(text: str, decimal: str) -> str:
+    """A matched number with its grouping removed and a decimal point: "1.234,5" → "1234.5"."""
+    if decimal == ".":
+        return text.replace(",", "")
+    return re.sub(_GROUP, "", text).replace(",", ".")
+
+
+def parse_number(value: Any, *, decimal: str = ".") -> int | float:
+    """The first number in ``value``: "18,495" → 18495, "9.1 s" → 9.1, "150PS" → 150.
+
+    With ``decimal=","``: "18.495" → 18495, "9,1 s" → 9.1.
+    """
     if isinstance(value, bool):
         raise NormaliseError(f"not a number: {value!r}")
     if isinstance(value, int | float):
         return value
     if isinstance(value, Decimal):
         return float(value)
-    m = _NUMBER.search(str(value))
+    m = _number_pattern(decimal).search(str(value))
     if not m:
         raise NormaliseError(f"no number in {value!r}")
-    text = m.group().replace(",", "")
+    text = _plain_number(m.group(), decimal)
     return float(text) if "." in text else int(text)
 
 
@@ -165,17 +192,23 @@ _MULTIPLIERS = {
     "bn": 10**9,
     "billion": 10**9,
 }
-_MONEY = re.compile(
-    r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?"
-    r"(?P<mult>(?i:bn|billion|million|thousand|mn)|[kKmM](?![a-zA-Z]))?"
+_MONEY_MULTIPLIER = r"(?P<mult>(?i:bn|billion|million|thousand|mn)|[kKmM](?![a-zA-Z]))?"
+_MONEY = re.compile(r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?" + _MONEY_MULTIPLIER)
+_MONEY_DECIMAL_COMMA = re.compile(
+    rf"(?P<num>\d{{1,3}}(?:{_GROUP}\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?)\s?" + _MONEY_MULTIPLIER
 )
 _CURRENCY_UNITS = {"GBP", "USD", "EUR", "JPY", "CHF", "AUD", "CAD"}
 
 
 def parse_money(
-    value: Any, *, field: FieldSpec | None = None, currency: str | None = None
+    value: Any,
+    *,
+    field: FieldSpec | None = None,
+    currency: str | None = None,
+    decimal: str = ".",
 ) -> Decimal:
-    """An amount as ``Decimal``: "£18,495" → 18495, "£1.5m" / "£1.5 million" → 1500000.
+    """An amount as ``Decimal``: "£18,495" → 18495, "£1.5m" / "£1.5 million" → 1500000;
+    with ``decimal=","``, "18.495,50 €" → 18495.50.
 
     If the field's unit is a currency code, the amount must be in that currency; jevex
     doesn't convert between currencies.
@@ -183,11 +216,13 @@ def parse_money(
     if isinstance(value, int | float | Decimal) and not isinstance(value, bool):
         amount = Decimal(str(value))
     else:
-        m = _MONEY.search(str(value))
+        _number_pattern(decimal)  # rejects a bad decimal mark
+        pattern = _MONEY if decimal == "." else _MONEY_DECIMAL_COMMA
+        m = pattern.search(str(value))
         if not m:
             raise NormaliseError(f"no amount in {value!r}")
         try:
-            amount = Decimal(m.group("num").replace(",", ""))
+            amount = Decimal(_plain_number(m.group("num"), decimal))
         except InvalidOperation as exc:
             raise NormaliseError(f"bad amount in {value!r}") from exc
         if m.group("mult"):
@@ -201,28 +236,7 @@ def parse_money(
 
 # --- dates -----------------------------------------------------------------------------
 
-_MONTHS = {
-    name: i
-    for i, names in enumerate(
-        [
-            ("january", "jan"),
-            ("february", "feb"),
-            ("march", "mar"),
-            ("april", "apr"),
-            ("may",),
-            ("june", "jun"),
-            ("july", "jul"),
-            ("august", "aug"),
-            ("september", "sept", "sep"),
-            ("october", "oct"),
-            ("november", "nov"),
-            ("december", "dec"),
-        ],
-        start=1,
-    )
-    for name in names
-}
-_WORDS = re.compile(r"[A-Za-z]+|\d+")
+_WORDS = re.compile(r"[^\W\d_]+|\d+")
 
 
 def parse_date(
@@ -234,9 +248,11 @@ def parse_date(
 ) -> date | int:
     """Dates in the forms the date/year generators find.
 
-    ``order`` is ``ymd``/``dmy``/``mdy`` for all-numeric dates (default ``dmy``, en-GB).
-    ``precision="month"`` gives the 1st of the month; ``"year"`` gives an ``int`` year for
-    number fields, or 1 January for date fields.
+    ``order`` is ``ymd``/``dmy``/``mdy`` for all-numeric dates (default ``dmy``, en-GB); a
+    four-digit first number is always the year. Month names may be in any language in
+    :data:`~jevex.locales.MONTH_NAMES` ("12. März 2024"). ``precision="month"`` gives the
+    1st of the month; ``"year"`` gives an ``int`` year for number fields, or 1 January for
+    date fields.
     """
     if isinstance(value, datetime):
         return value.date()
@@ -244,20 +260,20 @@ def parse_date(
         return value
     parts = _WORDS.findall(str(value))
     numbers = [int(p) for p in parts if p.isdigit()]
-    month_names = [p.lower() for p in parts if not p.isdigit() and p.lower() in _MONTHS]
+    month_names = [p.lower() for p in parts if not p.isdigit() and p.lower() in ALL_MONTH_NAMES]
     try:
         if precision == "year":
             year = next(n for n in numbers if 1000 <= n <= 9999)
             return year if field is not None and field.kind == "number" else date(year, 1, 1)
         if month_names:
-            month = _MONTHS[month_names[0]]
+            month = ALL_MONTH_NAMES[month_names[0]]
             year = next(n for n in numbers if n >= 1000)
             day_numbers = [n for n in numbers if n < 1000]
             day = 1 if precision == "month" or not day_numbers else day_numbers[0]
             return date(year, month, day)
         if len(numbers) >= 3:
             a, b, c = numbers[:3]
-            resolved = order or ("ymd" if a >= 1000 else "dmy")
+            resolved = "ymd" if a >= 1000 else order or "dmy"
             if resolved == "ymd" and a < 100:
                 a = _four_digit_year(a)
             elif resolved in ("dmy", "mdy") and c < 100:
@@ -282,14 +298,17 @@ def _four_digit_year(yy: int) -> int:
     return 2000 + yy if yy < 70 else 1900 + yy
 
 
-def parse_range(value: Any) -> list[int | float]:
-    """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]."""
+def parse_range(value: Any, *, decimal: str = ".") -> list[int | float]:
+    """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]; with
+    ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0]."""
     if isinstance(value, list | tuple):
         return [parse_number(v) for v in value]  # pyright: ignore[reportUnknownVariableType]
-    numbers = [m.group() for m in _NUMBER.finditer(str(value).replace("–", " ").replace("—", " "))]
+    text = str(value).replace("–", " ").replace("—", " ")
+    numbers = [m.group() for m in _number_pattern(decimal).finditer(text)]
     if len(numbers) < 2:
         raise NormaliseError(f"not a range: {value!r}")
-    lo, hi = parse_number(numbers[0].lstrip("+-")), parse_number(numbers[1].lstrip("+-"))
+    lo = parse_number(numbers[0].lstrip("+-"), decimal=decimal)
+    hi = parse_number(numbers[1].lstrip("+-"), decimal=decimal)
     return [lo, hi]
 
 

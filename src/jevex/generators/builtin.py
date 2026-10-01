@@ -14,23 +14,29 @@ Normaliser steps these generators emit:
 - ``{parse_date: {order?, precision?}}``: dates, month-years and years
 - ``parse_range``: "5–7" → [5, 7]
 - ``strip``: trim whitespace and trailing punctuation
+
+The number, money, range, date and key-value generators match the way the document's
+locale writes numbers and dates (:mod:`jevex.locales`): on a ``de-DE`` page "1.234,5 kg"
+is one number, "18.495 €" an amount and "12. März 2024" a date, and their chains carry
+``decimal: ","``; on an ``en-US`` page "03/12/2024" is read month first and mpg in US
+gallons. An unknown locale is read as en-GB.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import cache
 from typing import TYPE_CHECKING
 
 from jevex.generators.units import spellings
 from jevex.interfaces import Scope
+from jevex.locales import EN_GB, MONTH_NAMES, locale_conventions, localise_steps
 from jevex.statements import Candidate, NormaliserStep, Span, Statement
 
 if TYPE_CHECKING:
+    from jevex.locales import LocaleConventions
     from jevex.schema import FieldSpec
-
-_NUM = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
-_NUMBER = re.compile(rf"(?<![\w.,])(?:{_NUM})(?![\w]|[.,]\d)")
 
 
 def _unit_alternation() -> str:
@@ -45,9 +51,6 @@ _UNIT_TO_CANONICAL = {
     (spelling if case_sensitive else spelling.lower()): canonical
     for spelling, canonical, case_sensitive in spellings()
 }
-_NUMBER_WITH_UNIT = re.compile(
-    rf"(?<![\w.,])(?P<num>{_NUM})\s?(?P<unit>{_unit_alternation()})(?![A-Za-z0-9])"
-)
 
 
 def _canonical_unit(found: str) -> str:
@@ -67,38 +70,6 @@ def _step(name: str, **args: object) -> NormaliserStep:
     return NormaliserStep(name=name, args=dict(args))
 
 
-@dataclass(frozen=True)
-class NumberWithUnit:
-    """Numbers with a unit from the lexicon ("150PS", "9.1 s"), plus bare numbers."""
-
-    id: str = "number_with_unit"
-    scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"number"})))
-
-    def generate(self, statement: Statement) -> list[Candidate]:
-        text = statement.text
-        out: list[Candidate] = []
-        covered: set[int] = set()
-        for m in _NUMBER_WITH_UNIT.finditer(text):
-            unit = _canonical_unit(m.group("unit"))
-            out.append(
-                _candidate(
-                    statement,
-                    m.start(),
-                    m.end(),
-                    self.id,
-                    _step("parse_number"),
-                    _step("unit", **{"from": unit}),
-                )
-            )
-            covered.add(m.start("num"))
-        for m in _NUMBER.finditer(text):
-            if m.start() not in covered:
-                out.append(
-                    _candidate(statement, m.start(), m.end(), self.id, _step("parse_number"))
-                )
-        return sorted(out, key=lambda c: c.span.start)
-
-
 _CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
 # "£25k", "£1.5m", "€2bn", and spelled or spaced: "£1.5 million", "EUR 3 bn", "£2 m".
@@ -107,11 +78,134 @@ _MULTIPLIER = r"(?:bn|[kKmM](?![a-zA-Z])|\s?(?i:million|billion|thousand|mn|bn|m
 # truncated (and silently wrong) "£18,495" / "£1.5". A period suffix may follow
 # directly: "£299pm", "£1,200pcm", "£45pw", "£30,000pa".
 _END = r"(?:(?![\w]|[.,]\d)|(?=p(?:cm|m|a|w)\b))"
-_MONEY = re.compile(
-    rf"(?P<sym>[£$€¥])\s?(?:{_NUM}){_MULTIPLIER}?{_END}"
-    rf"|(?<![\w.,])(?:{_NUM}){_MULTIPLIER}?\s?(?P<c2>{_CODES})\b"
-    rf"|\b(?P<c3>{_CODES})\s?(?:{_NUM}){_MULTIPLIER}?{_END}"
+_MONTH = (
+    r"January|February|March|April|May|June|July|August|September|October|November|December"
+    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
 )
+
+DatePatterns = tuple[tuple[re.Pattern[str], dict[str, object]], ...]
+
+
+@dataclass(frozen=True)
+class _Patterns:
+    """One locale's compiled patterns."""
+
+    conventions: LocaleConventions
+    number: re.Pattern[str]
+    number_with_unit: re.Pattern[str]
+    money: re.Pattern[str]
+    dates: DatePatterns
+    range: re.Pattern[str]
+
+    def steps(self, *steps: NormaliserStep) -> list[NormaliserStep]:
+        """An en-GB chain with the arguments this locale needs."""
+        return localise_steps(steps, self.conventions)
+
+
+def _num(conventions: LocaleConventions) -> str:
+    if conventions.decimal == ".":
+        return r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+    group = f"[{conventions.thousands}]"
+    return rf"\d{{1,3}}(?:{group}\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?"
+
+
+def _months(language: str) -> str:
+    """English month names, then the language's own (longest first)."""
+    extra = set(MONTH_NAMES.get(language, {})) - set(MONTH_NAMES["en"])
+    if not extra:
+        return _MONTH
+    return "|".join([_MONTH, *(re.escape(n) for n in sorted(extra, key=lambda n: (-len(n), n)))])
+
+
+@cache
+def _patterns(conventions: LocaleConventions) -> _Patterns:
+    num = _num(conventions)
+    units = _unit_alternation()
+    money = (
+        rf"(?P<sym>[£$€¥])\s?(?:{num}){_MULTIPLIER}?{_END}"
+        rf"|(?<![\w.,])(?:{num}){_MULTIPLIER}?\s?(?P<c2>{_CODES})\b"
+        rf"|\b(?P<c3>{_CODES})\s?(?:{num}){_MULTIPLIER}?{_END}"
+    )
+    if conventions.currency_after:  # "18.495 €", "18.495,50 €"
+        money += rf"|(?<![\w.,])(?:{num})\s?(?P<sym2>[£$€¥])"
+    month = _months(conventions.language)
+    # German writes the day as an ordinal with a dot: "12. März 2024".
+    ordinal = "(?:st|nd|rd|th)?" if conventions.language == "en" else r"(?:st|nd|rd|th|\.)?"
+    return _Patterns(
+        conventions=conventions,
+        number=re.compile(rf"(?<![\w.,])(?:{num})(?![\w]|[.,]\d)"),
+        number_with_unit=re.compile(
+            rf"(?<![\w.,])(?P<num>{num})\s?(?P<unit>{units})(?![A-Za-z0-9])"
+        ),
+        money=re.compile(money),
+        dates=(
+            (re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)"), {"order": "ymd"}),
+            (
+                re.compile(r"(?<!\d)\d{1,2}[/.]\d{1,2}[/.]\d{4}(?!\d)"),
+                {"order": conventions.date_order},
+            ),
+            (
+                re.compile(rf"(?<!\d)\d{{1,2}}{ordinal}\s+(?i:{month})\.?,?\s+\d{{4}}(?!\d)"),
+                {"order": "dmy"},
+            ),
+            (
+                re.compile(rf"\b(?i:{month})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,\s+\d{{4}}(?!\d)"),
+                {"order": "mdy"},
+            ),
+            (re.compile(rf"\b(?i:{month})\.?\s+\d{{4}}(?!\d)"), {"precision": "month"}),
+        ),
+        range=re.compile(
+            rf"(?<![\w.,/-])(?P<lo>{num})\s*(?:[-–—]|to)\s*(?P<hi>{num})(?!\w|[.,/–-]\d)"
+            rf"(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
+            rf"|\b(?i:between)\s+(?P<lo2>{num})\s+(?i:and)\s+(?P<hi2>{num})"
+        ),
+    )
+
+
+def _for_locale(locale: str | None) -> _Patterns:
+    return _patterns(locale_conventions(locale))
+
+
+_EN_GB = _patterns(EN_GB)
+
+
+def _currency(m: re.Match[str]) -> str:
+    if m.group("sym"):
+        return _CURRENCY_SYMBOLS[m.group("sym")]
+    if "sym2" in m.re.groupindex and m.group("sym2"):
+        return _CURRENCY_SYMBOLS[m.group("sym2")]
+    return m.group("c2") or m.group("c3")
+
+
+@dataclass(frozen=True)
+class NumberWithUnit:
+    """Numbers with a unit from the lexicon ("150PS", "9.1 s"), plus bare numbers."""
+
+    id: str = "number_with_unit"
+    scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"number"})))
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        return self._generate(statement, _EN_GB)
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]:
+        return self._generate(statement, _for_locale(locale))
+
+    def _generate(self, statement: Statement, patterns: _Patterns) -> list[Candidate]:
+        text = statement.text
+        out: list[Candidate] = []
+        covered: set[int] = set()
+        for m in patterns.number_with_unit.finditer(text):
+            unit = _canonical_unit(m.group("unit"))
+            steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))
+            out.append(_candidate(statement, m.start(), m.end(), self.id, *steps))
+            covered.add(m.start("num"))
+        for m in patterns.number.finditer(text):
+            if m.start() not in covered:
+                steps = patterns.steps(_step("parse_number"))
+                out.append(_candidate(statement, m.start(), m.end(), self.id, *steps))
+        return sorted(out, key=lambda c: c.span.start)
 
 
 @dataclass(frozen=True)
@@ -122,41 +216,24 @@ class Money:
     scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"number"})))
 
     def generate(self, statement: Statement) -> list[Candidate]:
-        out: list[Candidate] = []
-        for m in _MONEY.finditer(statement.text):
-            if m.group("sym"):
-                currency = _CURRENCY_SYMBOLS[m.group("sym")]
-            else:
-                currency = m.group("c2") or m.group("c3")
-            out.append(
-                _candidate(
-                    statement,
-                    m.start(),
-                    m.end(),
-                    self.id,
-                    _step("parse_money", currency=currency),
-                )
+        return self._generate(statement, _EN_GB)
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]:
+        return self._generate(statement, _for_locale(locale))
+
+    def _generate(self, statement: Statement, patterns: _Patterns) -> list[Candidate]:
+        return [
+            _candidate(
+                statement,
+                m.start(),
+                m.end(),
+                self.id,
+                *patterns.steps(_step("parse_money", currency=_currency(m))),
             )
-        return out
-
-
-_MONTH = (
-    r"January|February|March|April|May|June|July|August|September|October|November|December"
-    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
-)
-_DATE_PATTERNS: tuple[tuple[re.Pattern[str], dict[str, object]], ...] = (
-    (re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)"), {"order": "ymd"}),
-    (re.compile(r"(?<!\d)\d{1,2}[/.]\d{1,2}[/.]\d{4}(?!\d)"), {"order": "dmy"}),
-    (
-        re.compile(rf"(?<!\d)\d{{1,2}}(?:st|nd|rd|th)?\s+(?i:{_MONTH})\.?,?\s+\d{{4}}(?!\d)"),
-        {"order": "dmy"},
-    ),
-    (
-        re.compile(rf"\b(?i:{_MONTH})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,\s+\d{{4}}(?!\d)"),
-        {"order": "mdy"},
-    ),
-    (re.compile(rf"\b(?i:{_MONTH})\.?\s+\d{{4}}(?!\d)"), {"precision": "month"}),
-)
+            for m in patterns.money.finditer(statement.text)
+        ]
 
 
 @dataclass(frozen=True)
@@ -167,9 +244,17 @@ class DateGenerator:
     scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"date"})))
 
     def generate(self, statement: Statement) -> list[Candidate]:
+        return self._generate(statement, _EN_GB)
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]:
+        return self._generate(statement, _for_locale(locale))
+
+    def _generate(self, statement: Statement, patterns: _Patterns) -> list[Candidate]:
         out: list[Candidate] = []
         seen: set[tuple[int, int]] = set()
-        for pattern, args in _DATE_PATTERNS:
+        for pattern, args in patterns.dates:
             for m in pattern.finditer(statement.text):
                 if (m.start(), m.end()) in seen:
                     continue
@@ -200,11 +285,11 @@ class Year:
         ]
 
 
-_RANGE = re.compile(
-    rf"(?<![\w.,/-])(?P<lo>{_NUM})\s*(?:[-–—]|to)\s*(?P<hi>{_NUM})(?!\w|[.,/–-]\d)"
-    rf"(?:\s?(?P<unit>{_unit_alternation()})(?![A-Za-z0-9]))?"
-    rf"|\b(?i:between)\s+(?P<lo2>{_NUM})\s+(?i:and)\s+(?P<hi2>{_NUM})"
-)
+def _range_steps(m: re.Match[str], patterns: _Patterns) -> list[NormaliserStep]:
+    steps = [_step("parse_range")]
+    if m.group("unit"):
+        steps.append(_step("unit", **{"from": _canonical_unit(m.group("unit"))}))
+    return patterns.steps(*steps)
 
 
 @dataclass(frozen=True)
@@ -215,13 +300,18 @@ class Range:
     scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"number"})))
 
     def generate(self, statement: Statement) -> list[Candidate]:
-        out: list[Candidate] = []
-        for m in _RANGE.finditer(statement.text):
-            steps = [_step("parse_range")]
-            if m.group("unit"):
-                steps.append(_step("unit", **{"from": _canonical_unit(m.group("unit"))}))
-            out.append(_candidate(statement, m.start(), m.end(), self.id, *steps))
-        return out
+        return self._generate(statement, _EN_GB)
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]:
+        return self._generate(statement, _for_locale(locale))
+
+    def _generate(self, statement: Statement, patterns: _Patterns) -> list[Candidate]:
+        return [
+            _candidate(statement, m.start(), m.end(), self.id, *_range_steps(m, patterns))
+            for m in patterns.range.finditer(statement.text)
+        ]
 
 
 _KEY_VALUE = re.compile(r":\s+(?=\S)")
@@ -229,38 +319,33 @@ _TRAILING = " \t\r\n.;,"
 _DIGIT = re.compile(r"\d")
 
 
-def _number_chain(value: str) -> list[NormaliserStep] | None:
+def _number_chain(value: str, patterns: _Patterns) -> list[NormaliserStep] | None:
     """The chain for the first quantity in ``value``: a range, money, a number with a unit or
     a bare number, in that order when two start at the same place."""
     found: list[tuple[int, int, list[NormaliserStep] | None]] = []
-    if m := _RANGE.search(value):
-        steps = [_step("parse_range")]
-        if m.group("unit"):
-            steps.append(_step("unit", **{"from": _canonical_unit(m.group("unit"))}))
-        found.append((m.start(), 0, steps))
-    if m := _MONEY.search(value):
-        currency = (
-            _CURRENCY_SYMBOLS[m.group("sym")] if m.group("sym") else m.group("c2") or m.group("c3")
-        )
-        found.append((m.start(), 1, [_step("parse_money", currency=currency)]))
-    if m := _NUMBER_WITH_UNIT.search(value):
-        steps = [_step("parse_number"), _step("unit", **{"from": _canonical_unit(m.group("unit"))})]
+    if m := patterns.range.search(value):
+        found.append((m.start(), 0, _range_steps(m, patterns)))
+    if m := patterns.money.search(value):
+        found.append((m.start(), 1, patterns.steps(_step("parse_money", currency=_currency(m)))))
+    if m := patterns.number_with_unit.search(value):
+        unit = _canonical_unit(m.group("unit"))
+        steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))
         found.append((m.start(), 2, steps))
-    if m := _NUMBER.search(value):
+    if m := patterns.number.search(value):
         # A bare number with more after it ("1.5 TSI 150PS") could be any of them: skip it.
-        bare = None if _DIGIT.search(value, m.end()) else [_step("parse_number")]
+        bare = None if _DIGIT.search(value, m.end()) else patterns.steps(_step("parse_number"))
         found.append((m.start(), 3, bare))
     return _first(value, found)
 
 
-def _date_chain(value: str) -> list[NormaliserStep] | None:
+def _date_chain(value: str, patterns: _Patterns) -> list[NormaliserStep] | None:
     """The chain for the first date in ``value``, longest form first; a bare year last."""
     found: list[tuple[int, int, list[NormaliserStep] | None]] = []
-    for rank, (pattern, args) in enumerate(_DATE_PATTERNS):
+    for rank, (pattern, args) in enumerate(patterns.dates):
         if m := pattern.search(value):
             found.append((m.start(), rank, [_step("parse_date", **args)]))
     if m := _YEAR.search(value):
-        found.append((m.start(), len(_DATE_PATTERNS), [_step("parse_date", precision="year")]))
+        found.append((m.start(), len(patterns.dates), [_step("parse_date", precision="year")]))
     return _first(value, found)
 
 
@@ -295,14 +380,24 @@ class KeyValue:
         return [_candidate(statement, *span, self.id, _step("strip"))]
 
     def generate_for(self, statement: Statement, field: FieldSpec) -> list[Candidate]:
+        return self._generate(statement, field, _EN_GB)
+
+    def generate_in(
+        self, statement: Statement, field: FieldSpec, locale: str | None
+    ) -> list[Candidate]:
+        return self._generate(statement, field, _for_locale(locale))
+
+    def _generate(
+        self, statement: Statement, field: FieldSpec, patterns: _Patterns
+    ) -> list[Candidate]:
         span = _value_span(statement.text)
         if span is None:
             return []
         value = statement.text[span[0] : span[1]]
         if field.kind == "number":
-            steps = _number_chain(value)
+            steps = _number_chain(value, patterns)
         elif field.kind == "date":
-            steps = _date_chain(value)
+            steps = _date_chain(value, patterns)
         else:
             steps = [_step("strip")]
         if steps is None:
