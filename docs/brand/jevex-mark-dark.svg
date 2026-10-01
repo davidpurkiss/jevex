@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="jevex">
+  <title>jevex</title>
+  <!-- Mark for dark backgrounds: four bars narrowing into the found value. -->
+  <g transform="translate(18 7)">
+    <rect x="0" y="0" width="124" height="20" rx="10" fill="#5B21B6"/>
+    <rect x="18" y="30" width="88" height="20" rx="10" fill="#7C3AED"/>
+    <rect x="34" y="60" width="56" height="20" rx="10" fill="#A78BFA"/>
+    <rect x="46" y="90" width="32" height="20" rx="10" fill="#DDD6FE"/>
+    <circle cx="62" cy="130" r="8" fill="#34D399"/>
+    <circle cx="62" cy="130" r="14" fill="none" stroke="#34D399" stroke-width="3" opacity="0.45"/>
+  </g>
+</svg>

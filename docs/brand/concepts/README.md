@@ -1,5 +1,9 @@
 # Logo concepts (#57)
 
+**Decided:** A as the logo and C as the mascot. The final assets and the brand sheet are
+in [`docs/brand/`](../README.md). These are the original rough concepts, kept for the
+record.
+
 Three directions to choose from. They're all rough: the wordmark uses a system rounded
 font, and it gets converted to outlines once a direction is picked.
 

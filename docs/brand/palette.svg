@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 904 300" role="img" aria-label="jevex palette">
+  <title>jevex palette</title>
+  <g font-family="ui-monospace,Menlo,monospace" font-size="13" fill="#1E1B4B">
+    <rect x="0" y="0" width="904" height="300" rx="16" fill="#FFFFFF"/>
+    <g transform="translate(24 24)">
+      <rect width="96" height="96" rx="12" fill="#1E1B4B"/><text y="118">Ink</text><text y="136">#1E1B4B</text>
+      <rect x="112" width="96" height="96" rx="12" fill="#0F0D24"/><text x="112" y="118">Night</text><text x="112" y="136">#0F0D24</text>
+      <rect x="224" width="96" height="96" rx="12" fill="#7C3AED"/><text x="224" y="118">Violet</text><text x="224" y="136">#7C3AED</text>
+      <rect x="336" width="96" height="96" rx="12" fill="#34D399"/><text x="336" y="118">Mint (value)</text><text x="336" y="136">#34D399</text>
+      <rect x="448" width="96" height="96" rx="12" fill="#064E3B"/><text x="448" y="118">Deep mint</text><text x="448" y="136">#064E3B</text>
+      <rect x="560" width="96" height="96" rx="12" fill="#F59E0B"/><text x="560" y="118">Amber</text><text x="560" y="136">#F59E0B</text>
+      <rect x="672" width="96" height="96" rx="12" fill="#4F46E5"/><text x="672" y="118">Indigo</text><text x="672" y="136">#4F46E5</text>
+      <rect x="784" width="96" height="96" rx="12" fill="#F5F3FF" stroke="#DDD6FE"/><text x="784" y="118">Lavender</text><text x="784" y="136">#F5F3FF</text>
+    </g>
+    <g transform="translate(24 180)">
+      <text y="-10">Violet ramp (funnel bars, mascot, wordmark)</text>
+      <rect x="0" width="104" height="56" rx="10" fill="#5B21B6"/><text x="0" y="76">#5B21B6</text>
+      <rect x="118" width="104" height="56" rx="10" fill="#7C3AED"/><text x="118" y="76">#7C3AED</text>
+      <rect x="236" width="104" height="56" rx="10" fill="#8B5CF6"/><text x="236" y="76">#8B5CF6</text>
+      <rect x="354" width="104" height="56" rx="10" fill="#A78BFA"/><text x="354" y="76">#A78BFA</text>
+      <rect x="472" width="104" height="56" rx="10" fill="#C4B5FD"/><text x="472" y="76">#C4B5FD</text>
+      <rect x="590" width="104" height="56" rx="10" fill="#DDD6FE"/><text x="590" y="76">#DDD6FE</text>
+      <rect x="708" width="104" height="56" rx="10" fill="#EDE9FE" stroke="#DDD6FE"/><text x="708" y="76">#EDE9FE</text>
+    </g>
+  </g>
+</svg>
