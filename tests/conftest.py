@@ -2,13 +2,30 @@
 ``live`` and only run with ``--live`` or ``JEVEX_LIVE=1``. ``JEVEX_RECORD=1`` re-records
 Jev cassettes, so it also allows the network."""
 
+import importlib
+import importlib.util
 import os
+import shutil
+import tempfile
+import uuid
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
 # LiteLLM fetches its price map from GitHub at import time unless told to use the bundled
 # copy; set it before any test module imports litellm.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+
+def _disable_onnxruntime_telemetry() -> None:
+    # onnxruntime's telemetry thread (macOS builds) can race the interpreter's shutdown and
+    # abort it ("recursive_mutex lock failed"), failing a run whose tests all passed.
+    if importlib.util.find_spec("onnxruntime") is not None:
+        importlib.import_module("onnxruntime").disable_telemetry_events()
+
+
+_disable_onnxruntime_telemetry()
 
 
 SPEND_ENV = ("JEVEX_SPEND_LEDGER", "JEVEX_JEV_MAX_COST_USD", "JEVEX_LLM_MAX_COST_USD")
@@ -34,6 +51,40 @@ def typesafe_api_key() -> str:
     if not key:
         pytest.skip("TYPESAFE_API_KEY not set")
     return key
+
+
+@pytest.fixture(scope="session")
+def postgres_url() -> Iterator[str]:
+    """A Postgres server for the store tests: ``JEVEX_TEST_POSTGRES_URL`` if set, else a
+    bundled one (``pixeltable-pgserver``, a dev dependency) on a unix socket, which the
+    network block allows. Skips when neither is available.
+
+    The URL must be a throwaway database: tests create and drop schemas there, including
+    ``jevex``, the default schema's learned state."""
+    url = os.environ.get("JEVEX_TEST_POSTGRES_URL")
+    if url:
+        yield url
+        return
+    pgserver = pytest.importorskip("pixeltable_pgserver")
+    # A short path: the server's unix socket lives here, and socket paths are capped at
+    # ~100 characters.
+    data = Path(tempfile.mkdtemp(prefix="jxpg"))
+    server = pgserver.get_server(data, cleanup_mode="stop")
+    try:
+        yield server.get_uri()
+    finally:
+        server.cleanup()
+        shutil.rmtree(data, ignore_errors=True)
+
+
+@pytest.fixture
+def pg_schema(postgres_url: str) -> Iterator[str]:
+    """A fresh Postgres schema name for one test's store, dropped afterwards."""
+    psycopg = pytest.importorskip("psycopg")
+    name = f"test_{uuid.uuid4().hex[:12]}"
+    yield name
+    with psycopg.connect(postgres_url, autocommit=True) as conn:
+        conn.execute(f"DROP SCHEMA IF EXISTS {name} CASCADE")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

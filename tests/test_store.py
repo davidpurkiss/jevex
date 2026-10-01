@@ -25,10 +25,17 @@ from jevex.store.sqlite import _SCHEMA, SCHEMA_VERSION  # pyright: ignore[report
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
 
-# Every backend runs the shared suite below. The Postgres store (#36) adds a param here.
-@pytest.fixture(params=["sqlite-file", "sqlite-memory"])
+# Every backend runs the shared suite below.
+@pytest.fixture(params=["sqlite-file", "sqlite-memory", "postgres"])
 async def store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[Store]:
-    s = SQLiteStore(tmp_path / "jevex.db" if request.param == "sqlite-file" else ":memory:")
+    if request.param == "postgres":
+        pytest.importorskip("psycopg")
+        from jevex.store.postgres import PostgresStore
+
+        url: str = request.getfixturevalue("postgres_url")
+        s: Store = PostgresStore(url, db_schema=request.getfixturevalue("pg_schema"))
+    else:
+        s = SQLiteStore(tmp_path / "jevex.db" if request.param == "sqlite-file" else ":memory:")
     yield s
     await s.aclose()
 
@@ -76,6 +83,12 @@ async def test_generators_filter_by_field_and_enabled(store: Store) -> None:
     everything = await store.generators(include_disabled=True)
     assert {g.id for g in everything} == {"a", "b", "c", "d"}
     assert await store.disabled_generator_ids() == {"d"}
+
+
+async def test_generators_created_together_order_by_id_bytes(store: Store) -> None:
+    for gid in ("a", "B", "_x"):
+        await store.put_generator(gen(gid, created_at=T0))
+    assert [g.id for g in await store.generators()] == ["B", "_x", "a"]
 
 
 async def test_disable_and_enable_a_generator(store: Store) -> None:
@@ -215,6 +228,15 @@ def test_an_unsure_key_mapping_maps_to_no_field() -> None:
 
 
 # --- examples ------------------------------------------------------------------------
+
+
+async def test_json_values_come_back_as_written(store: Store) -> None:
+    value = {"big": 1e20, "huge_int": 2**70, "nul": "a\x00b", "nested": [1.0, None, "é"]}
+    await store.add_example(VerifiedExample(id="e1", field="S.f", statement="s", value=value))
+    [example] = await store.examples("S.f")
+    assert example.value == value
+    assert isinstance(example.value["big"], float)
+    assert isinstance(example.value["nested"][0], float)
 
 
 async def test_examples_newest_first_with_limit(store: Store) -> None:
@@ -408,8 +430,6 @@ async def test_open_store_urls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_open_store_rejects_other_urls() -> None:
-    with pytest.raises(StoreError, match="#36"):
-        open_store("postgresql://localhost/jevex")
     with pytest.raises(StoreError, match="unsupported"):
         open_store("redis://localhost")
 
