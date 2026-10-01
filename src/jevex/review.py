@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex.results import FieldMeta, threshold_for
-from jevex.store import VerifiedExample, example_id
+from jevex.store import VerifiedExample, example_context, example_id
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -40,7 +40,8 @@ class ReviewItem(BaseModel):
     in :class:`~jevex.store.VerifiedExample`. ``meta`` is everything known about the value,
     including its source statement and the alternatives. ``threshold`` is the review
     threshold it fell below. ``context`` is what the learner replays the statement with
-    (heading trail and statement kind). ``document_source`` is the document's
+    (:func:`~jevex.store.example_context`: heading trail, statement kind, the document's
+    locale). ``document_source`` is the document's
     :attr:`~jevex.Document.source`, which the example keeps for generator scoping. ``id`` is
     the same for the same value from the same statement (id and text) of the same entity
     and URL, so a sink can drop repeats.
@@ -129,11 +130,12 @@ def review_items(
     statements: Mapping[str, Statement] | None = None,
     url: str | None = None,
     document_source: str | None = None,
+    locale: str | None = None,
 ) -> list[ReviewItem]:
     """The records' (and their children's) found values with a confidence below the
     threshold: ``thresholds`` per field (keys as for the extractor's ``thresholds``), else
     ``threshold``. ``statements`` (by id) give each item its statement's ``context``;
-    ``url`` and ``document_source`` are the document's."""
+    ``url``, ``document_source`` and ``locale`` (its own) are the document's."""
     thresholds = thresholds or {}
     statements = statements or {}
     out: list[ReviewItem] = []
@@ -159,9 +161,7 @@ def review_items(
                     url=url,
                     meta=meta,
                     threshold=limit,
-                    context={"heading_trail": statement.heading_trail, "kind": statement.kind}
-                    if statement is not None
-                    else {},
+                    context=example_context(statement, locale) if statement is not None else {},
                     document_source=document_source,
                 )
             )
@@ -173,6 +173,7 @@ def review_items(
                 statements=statements,
                 url=url,
                 document_source=document_source,
+                locale=locale,
             )
     return out
 

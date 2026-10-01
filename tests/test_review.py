@@ -192,6 +192,17 @@ def test_confirming_the_value_reuses_its_span_and_the_fallbacks_example_id() -> 
     )
 
 
+def test_items_and_their_examples_keep_the_documents_locale() -> None:
+    record = build_extracted(SPEC, "doc", {"zero_to_62_s": meta(9.1, 0.6)})
+    [found] = review_items([record], statements={"s1": STATEMENT}, locale="de-DE")
+    context = {"heading_trail": ["Performance"], "kind": "list_item", "locale": "de-DE"}
+    assert found.context == context
+    assert found.example(9.1).locale == "de-DE"
+    [unknown] = review_items([record], statements={"s1": STATEMENT})
+    assert "locale" not in unknown.context
+    assert unknown.example(9.1).locale is None
+
+
 def test_the_example_keeps_the_documents_source() -> None:
     found = item().model_copy(update={"document_source": "cars.example.com"})
     assert found.example(9.1).document_source == "cars.example.com"
@@ -286,6 +297,21 @@ async def test_a_documents_site_is_the_items_and_the_feedbacks_source() -> None:
     assert review.document_source == "example-cars.co.uk"
     assert example.document_source == "example-cars.co.uk"
     assert await store.examples("Car.zero_to_62_s") == [example]
+
+
+async def test_the_items_have_the_documents_own_locale() -> None:
+    queue = ReviewQueue()
+    store = open_store(":memory:")
+    doc = Document.from_bytes(b'<html lang="de-DE"><p/></html>', url=URL)
+    async with extractor({"zero_to_62_s": meta(9.1, 0.6)}, review_sink=queue, store=store) as ex:
+        await ex.extract(doc)
+        await ex.extract(DOC)
+        german, unknown = queue.items
+        example = await ex.feedback(german, 9.1)
+    assert german.context["locale"] == "de-DE"
+    assert "locale" not in unknown.context
+    assert example.locale == "de-DE"
+    assert [e.locale for e in await store.examples("Car.zero_to_62_s")] == ["de-DE"]
 
 
 async def test_a_document_with_nothing_uncertain_isnt_sent() -> None:

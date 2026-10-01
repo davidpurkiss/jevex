@@ -210,6 +210,7 @@ from jevex.store import (
     StoreError,
     ValueStat,
     VerifiedExample,
+    example_context,
     example_id,
     open_store,
 )
@@ -423,6 +424,7 @@ __all__ = [
     "document_stat",
     "ensure_comparable",
     "evaluate",
+    "example_context",
     "example_id",
     "example_statement",
     "export_pack",
