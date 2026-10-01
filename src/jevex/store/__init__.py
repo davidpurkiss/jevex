@@ -8,6 +8,7 @@ Record                 Purpose                                      Used by
 =====================  ==========================================  =================
 ``GeneratorRecord``    learned candidate generators                 #37, #38, #41
 ``KeyMapping``         structured-data key path → field (or none)   #30
+unsure counts          unsure answers per key path, until "none"    #137
 ``VerifiedExample``    regression tests and eval corpus             #38, #42
 ``GeneratorStats``     hit and win counts, for pruning              #40
 spend ledger           run-level budgets shared across workers      #34

@@ -20,6 +20,7 @@ from jevex.store import (
     VerifiedExample,
     open_store,
 )
+from jevex.store.sqlite import _SCHEMA, SCHEMA_VERSION  # pyright: ignore[reportPrivateUsage]
 
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
@@ -163,6 +164,54 @@ async def test_key_mappings_per_schema_and_none_answers(store: Store) -> None:
     vehicle = await store.key_mappings("fp", schema="VehicleSpec")
     assert [(m.path, m.field) for m in vehicle] == [("$.name", "model")]
     assert len(await store.key_mappings("fp")) == 3
+
+
+async def test_unsure_key_path_counts_accumulate_per_fingerprint_schema_and_path(
+    store: Store,
+) -> None:
+    assert await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.b"]) == {
+        "$.a": 1,
+        "$.b": 1,
+    }
+    # A path named twice in one call counts once.
+    assert await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.a"]) == {"$.a": 2}
+    assert await store.count_unsure_key_paths("fp", "Book", ["$.a"]) == {"$.a": 1}
+    assert await store.count_unsure_key_paths("fp2", "Listing", ["$.a"]) == {"$.a": 1}
+    assert await store.count_unsure_key_paths("fp", "Listing", []) == {}
+
+
+async def test_putting_a_key_mapping_clears_its_unsure_count(store: Store) -> None:
+    await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.b"])
+    await store.put_key_mapping(
+        KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title")
+    )
+    assert await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.b"]) == {
+        "$.a": 1,
+        "$.b": 2,
+    }
+
+
+async def test_concurrent_unsure_counts_are_not_lost(store: Store) -> None:
+    await asyncio.gather(*(store.count_unsure_key_paths("fp", "S", ["$.a"]) for _ in range(20)))
+    assert await store.count_unsure_key_paths("fp", "S", ["$.a"]) == {"$.a": 21}
+
+
+async def test_an_unsure_none_round_trips_and_a_confident_mapping_replaces_it(
+    store: Store,
+) -> None:
+    unsure = KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field=None, unsure=True)
+    await store.put_key_mapping(unsure)
+    assert await store.key_mappings("fp") == [unsure]
+    await store.put_key_mapping(
+        KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title")
+    )
+    [mapping] = await store.key_mappings("fp")
+    assert (mapping.field, mapping.unsure) == ("title", False)
+
+
+def test_an_unsure_key_mapping_maps_to_no_field() -> None:
+    with pytest.raises(ValidationError, match="unsure key mapping maps to no field"):
+        KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title", unsure=True)
 
 
 # --- examples ------------------------------------------------------------------------
@@ -381,6 +430,28 @@ async def test_newer_schema_is_refused(tmp_path: Path) -> None:
     conn.close()
     with pytest.raises(StoreError, match="v99"):
         SQLiteStore(path)
+
+
+async def test_a_version_1_database_is_migrated(tmp_path: Path) -> None:
+    path = tmp_path / "v1.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(_SCHEMA)
+    conn.execute(
+        "INSERT INTO key_mappings VALUES ('fp', 'Listing', '$.a', NULL, '[]', ?)",
+        (T0.timestamp(),),
+    )
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    store = SQLiteStore(path)
+    assert await store.key_mappings("fp") == [
+        KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field=None, created_at=T0)
+    ]
+    assert await store.count_unsure_key_paths("fp", "Listing", ["$.b"]) == {"$.b": 1}
+    await store.aclose()
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    conn.close()
 
 
 def test_unopenable_path_is_a_store_error(tmp_path: Path) -> None:

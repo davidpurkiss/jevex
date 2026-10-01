@@ -49,8 +49,9 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
+# Version 1's tables; a new database runs this, then every migration.
 _SCHEMA = """
 CREATE TABLE generators (
     id TEXT PRIMARY KEY,
@@ -106,6 +107,21 @@ CREATE TABLE spend (
 );
 CREATE INDEX spend_at ON spend (at);
 """
+
+# Schema version → the statements that bring the version before it up to it.
+_MIGRATIONS = {
+    2: """
+ALTER TABLE key_mappings ADD COLUMN unsure INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE key_path_unsure (
+    fingerprint TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (fingerprint, schema_name, path)
+);
+""",
+}
 
 _NANO = 1_000_000_000
 _INT64_MAX = 2**63 - 1
@@ -199,11 +215,15 @@ class SQLiteStore:
                     f"{self.path} has store schema v{version}; this jevex reads up to "
                     f"v{SCHEMA_VERSION}. Upgrade jevex."
                 )
-            if version == 0:
-                for statement in _SCHEMA.split(";"):
+            if version == SCHEMA_VERSION:
+                return
+            scripts = [_SCHEMA] if version == 0 else []
+            scripts += [_MIGRATIONS[v] for v in range(max(version, 1) + 1, SCHEMA_VERSION + 1)]
+            for script in scripts:
+                for statement in script.split(";"):
                     if statement.strip():
                         cur.execute(statement)
-                cur.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            cur.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     # -- plumbing ---------------------------------------------------------------------
 
@@ -330,18 +350,25 @@ class SQLiteStore:
     # -- key mappings -----------------------------------------------------------------
 
     async def put_key_mapping(self, mapping: KeyMapping) -> None:
+        key = (mapping.fingerprint, mapping.schema_name, mapping.path)
+
         def run() -> None:
             with self._write() as cur:
                 cur.execute(
-                    "INSERT OR REPLACE INTO key_mappings VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT OR REPLACE INTO key_mappings (fingerprint, schema_name, path, "
+                    "field, normalisers, unsure, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        mapping.fingerprint,
-                        mapping.schema_name,
-                        mapping.path,
+                        *key,
                         mapping.field,
                         _json(mapping.normalisers),
+                        int(mapping.unsure),
                         _ts(mapping.created_at),
                     ),
+                )
+                cur.execute(
+                    "DELETE FROM key_path_unsure "
+                    "WHERE fingerprint = ? AND schema_name = ? AND path = ?",
+                    key,
                 )
 
         await self._call(run)
@@ -364,10 +391,34 @@ class SQLiteStore:
                     path=r["path"],
                     field=r["field"],
                     normalisers=json.loads(r["normalisers"]),
+                    unsure=bool(r["unsure"]),
                     created_at=_dt(r["created_at"]),
                 )
                 for r in self._rows(sql, params)
             ]
+
+        return await self._call(run)
+
+    async def count_unsure_key_paths(
+        self, fingerprint: str, schema: str, paths: list[str]
+    ) -> dict[str, int]:
+        def run() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            with self._write() as cur:
+                for path in dict.fromkeys(paths):
+                    cur.execute(
+                        "INSERT INTO key_path_unsure VALUES (?, ?, ?, 1) "
+                        "ON CONFLICT (fingerprint, schema_name, path) "
+                        "DO UPDATE SET count = count + 1",
+                        (fingerprint, schema, path),
+                    )
+                    row = cur.execute(
+                        "SELECT count FROM key_path_unsure "
+                        "WHERE fingerprint = ? AND schema_name = ? AND path = ?",
+                        (fingerprint, schema, path),
+                    ).fetchone()
+                    counts[path] = int(row[0])
+            return counts
 
         return await self._call(run)
 
