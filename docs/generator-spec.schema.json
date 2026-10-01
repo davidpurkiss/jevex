@@ -117,8 +117,8 @@
       "type": "string"
     },
     "field": {
-      "description": "Schema.field, e.g. VehicleSpec.price",
-      "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "Schema.field, e.g. VehicleSpec.price, or Schema.nested_field.field for a nested model's field, e.g. ModelPage.variants.price",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?\\.[A-Za-z_][A-Za-z0-9_]*$",
       "title": "Field",
       "type": "string"
     },

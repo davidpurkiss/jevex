@@ -263,6 +263,18 @@ def test_a_pack_holds_only_the_schemas_its_manifest_lists() -> None:
         )
 
 
+def test_a_nested_models_fields_belong_to_its_top_level_schema() -> None:
+    nested = "Car.trims.price"
+    p = Pack(
+        manifest=manifest(schemas=["Car"]),
+        generators=[spec(field=nested)],
+        examples=[ex(field=nested)],
+    )
+    assert ids(p.generators) == ["gen-a"]
+    with pytest.raises(ValidationError, match=r"schemas the manifest doesn't list: \['Van'\]"):
+        Pack(manifest=manifest(schemas=["Car"]), generators=[spec(field="Van.trims.price")])
+
+
 def test_duplicates_within_a_pack_are_refused() -> None:
     with pytest.raises(ValidationError, match="duplicate generator id"):
         pack(spec("gen-a"), spec("gen-a"))
@@ -424,6 +436,19 @@ async def test_export_writes_the_stores_state_as_a_pack() -> None:
     assert ids(cars.generators) == ["gen-a"]
     assert [m.schema_name for m in cars.key_mappings] == ["Car"]
     assert cars.examples == []  # only with examples=True
+    await store.aclose()
+
+
+async def test_export_keeps_a_nested_models_state_with_its_top_level_schema() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(generator_record(spec("gen-t", field="Car.trims.price")))
+    await store.put_generator(generator_record(spec("gen-v", field="Van.trims.price")))
+    await store.add_example(ex(field="Car.trims.price"))
+    everything = await export_pack(store, "all", "1", examples=True)
+    assert everything.manifest.schemas == ["Car", "Van"]
+    cars = await export_pack(store, "cars", "1", schemas=["Car"], examples=True)
+    assert ids(cars.generators) == ["gen-t"]
+    assert [e.id for e in cars.examples] == ["ex-1"]
     await store.aclose()
 
 
