@@ -125,7 +125,14 @@ print([(o.status, o.spec.id if o.spec else None) for o in learner.outcomes])
 ```
 
 Learning stops when the extractor is closed; examples still queued then stay in the store.
-A store's learned generators are used whether or not a `generator_llm` is set.
+A store's learned generators are used whether or not a `generator_llm` is set. Workers
+sharing a store (Scrapy, `jevex serve`) pick up the generators the others learn or disable:
+each extractor checks the store at most every `refresh_generators` seconds (30 by
+default; `None` turns this off), and documents that start after a check use what it found.
+
+With `extract_sync`, the learner runs only while a blocking call drives the extractor's
+private event loop. Call `extractor.wait_for_learning_sync()` after your last
+`extract_sync` to finish the queued examples.
 
 That is the default `learn_mode="inline"`. To review generators before any document uses
 them, use `learn_mode="compile"`: documents only log their verified examples to the store,

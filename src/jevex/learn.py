@@ -22,7 +22,8 @@ time, in the background:
    example) and the new set must be right at least as often.
 6. **Hot-swap.** An accepted spec is put in the store and published as a new
    :class:`GeneratorSnapshot`. A document takes the current snapshot when it starts and
-   keeps it to the end; later documents get the new one.
+   keeps it to the end; later documents get the new one. Other processes sharing the
+   store pick it up when they next refresh (:meth:`LearnedGenerators.refresh`).
 
 Every example ends in a :class:`LearnOutcome` on :attr:`GeneratorLearner.outcomes`.
 Expected failures (a budget saying no, an LLM or Jev error, an invalid spec, a failed
@@ -41,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, get_args
@@ -72,7 +74,7 @@ from jevex.select import JevCandidateSelector, statement_state, unique_spans
 from jevex.statements import Statement, StatementKind
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from jevex.housekeeping import Housekeeper
@@ -90,6 +92,9 @@ LEARN_THRESHOLD = 0.9
 the spec's open questions set the defaults from eval runs."""
 SAMPLE_SIZE = 20
 """How many of a field's stored examples a new generator is tested on (all, if fewer)."""
+REFRESH_GENERATORS = 30.0
+"""Default seconds between an extractor's checks for generators other processes sharing its
+store published or disabled (:meth:`LearnedGenerators.refresh`)."""
 
 
 # --- snapshots ---------------------------------------------------------------------------
@@ -99,7 +104,8 @@ SAMPLE_SIZE = 20
 class GeneratorSnapshot:
     """The learned generators at one moment. Never changes: publishing makes a new one.
 
-    ``version`` counts publishes in this process (0: what the store held at start).
+    ``version`` counts changes in this process (0: what the store held at start):
+    publishes, withdrawals, and refreshes that found the store changed.
     """
 
     version: int
@@ -114,22 +120,37 @@ class LearnedGenerators:
     """Holds the current :class:`GeneratorSnapshot`, loaded from and published to a store.
 
     ``store`` is the local learned layer: :meth:`load` reads its enabled generators, and
-    :meth:`publish` writes there before swapping the snapshot. Generators other processes
-    publish later aren't picked up until the next load. With ``persist=False``,
+    :meth:`publish` writes there before swapping the snapshot. With ``persist=False``,
     :meth:`publish` only swaps the snapshot: a batch compile (:func:`compile_pack`) reads
     the store but leaves what it learns for review.
+
+    Other processes sharing the store (Scrapy workers, ``jevex serve``) publish and
+    disable generators too. :meth:`refresh` reloads at most every ``refresh_after``
+    seconds (``None``: never) and swaps the snapshot if the store changed.
 
     ``packs`` are the layers below the store: project packs, then community packs
     (:func:`~jevex.packs.layered_generators`). The store's disable list applies to them.
     """
 
     def __init__(
-        self, store: Store | None = None, *, persist: bool = True, packs: Sequence[Pack] = ()
+        self,
+        store: Store | None = None,
+        *,
+        persist: bool = True,
+        packs: Sequence[Pack] = (),
+        refresh_after: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        if refresh_after is not None and refresh_after < 0:
+            raise ValueError(f"refresh_after must be at least 0, got {refresh_after}")
         self.store = store
         self.persist = persist
         self.packs = list(packs)
+        self.refresh_after = refresh_after
+        self.clock = clock
         self.current = GeneratorSnapshot(0, GeneratorRegistry())
+        self._loaded_at: float | None = None
+        self._refreshing = False
 
     async def load(self, also: Sequence[GeneratorSpec] = ()) -> GeneratorSnapshot:
         """Replace the snapshot with the store's enabled generators (oldest first), then
@@ -138,14 +159,49 @@ class LearnedGenerators:
 
         Raises :class:`~jevex.store.StoreError` for a stored spec that doesn't validate.
         """
+        self._loaded_at = self.clock()
+        registry = (await self._layered()).extended(s.to_generator() for s in also)
+        self.current = GeneratorSnapshot(self.current.version, registry)
+        return self.current
+
+    async def refresh(self) -> GeneratorSnapshot:
+        """Reload if ``refresh_after`` seconds have passed since the last load, and make a
+        new snapshot if the store (or a pack) now gives different generators: ones another
+        process published, or without ones it disabled. Documents already running keep
+        their snapshot. Returns the current snapshot.
+
+        Does nothing without a store, with ``persist`` off (the snapshot holds what
+        :meth:`publish` didn't store), with ``refresh_after=None``, or while another
+        refresh is running (the caller takes the current snapshot rather than wait). If
+        this process publishes or withdraws during the reload, the reload is dropped and
+        the next call tries again. Raises :class:`~jevex.store.StoreError` for a stored
+        spec that doesn't validate.
+        """
+        if self.store is None or not self.persist or self.refresh_after is None:
+            return self.current
+        now = self.clock()
+        due = self._loaded_at is None or now - self._loaded_at >= self.refresh_after
+        if not due or self._refreshing:
+            return self.current
+        self._refreshing = True
+        before = self.current
+        try:
+            registry = await self._layered()
+        finally:
+            self._refreshing = False
+        if self.current is not before:
+            return self.current  # stale: it may lack what was published meanwhile
+        self._loaded_at = now
+        if list(registry) != list(before.registry):
+            self.current = GeneratorSnapshot(before.version + 1, registry)
+        return self.current
+
+    async def _layered(self) -> GeneratorRegistry:
         specs = await self.stored()
         if self.packs:
             disabled = await self.store.disabled_generator_ids() if self.store else set[str]()
             specs = layered_generators(specs, disabled, self.packs)
-        registry = GeneratorRegistry([s.to_generator() for s in specs])
-        registry = registry.extended(s.to_generator() for s in also)
-        self.current = GeneratorSnapshot(self.current.version, registry)
-        return self.current
+        return GeneratorRegistry([s.to_generator() for s in specs])
 
     async def stored(self) -> list[GeneratorSpec]:
         """The store's enabled generator specs, oldest first (none without a store).

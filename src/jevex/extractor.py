@@ -26,6 +26,7 @@ from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
 from jevex.learn import (
     LEARN_THRESHOLD,
+    REFRESH_GENERATORS,
     ExampleLogger,
     GeneratorLearner,
     LearnedGenerators,
@@ -46,7 +47,7 @@ from jevex.split import StatementStage
 from jevex.store import Store, open_store
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Coroutine, Mapping, Sequence
     from types import TracebackType
 
     from jevex.document import Document
@@ -394,6 +395,7 @@ class Extractor:
         review_sink: ReviewSink | None = None,
         review_threshold: float = REVIEW_THRESHOLD,
         review_thresholds: Mapping[str, float] | None = None,
+        refresh_generators: float | None = REFRESH_GENERATORS,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -415,7 +417,10 @@ class Extractor:
         verified with probability ``>= learn_threshold`` are turned into generators in
         the background, and documents started after one is accepted use it. Learned
         generators and examples go to the store (an in-memory one if none is given); a
-        store's learned generators are used whether or not learning is on.
+        store's learned generators are used whether or not learning is on. Ones other
+        processes sharing the store learn or disable are picked up by documents that start
+        after the next refresh: at most every ``refresh_generators`` seconds (``None``:
+        only when the extractor first loads them).
 
         ``learn_mode`` says when learning runs (:data:`~jevex.learn.LearnMode`). In
         ``"compile"`` mode documents only log those examples to the store, with or without a
@@ -481,6 +486,9 @@ class Extractor:
         self._learned: LearnedGenerators | None = None
         self._learner: GeneratorLearner | None = None
         self._learn_lock: asyncio.Lock | None = None
+        if refresh_generators is not None and refresh_generators < 0:
+            raise ValueError(f"refresh_generators must be at least 0, got {refresh_generators}")
+        self.refresh_generators = refresh_generators
         self.learn_mode: LearnMode = learn_mode
         if learn_mode not in get_args(LearnMode):
             raise ValueError(f"learn_mode must be one of {get_args(LearnMode)}, got {learn_mode!r}")
@@ -555,7 +563,9 @@ class Extractor:
             if store is None and not packs:
                 return None
             if self._learned is None or self._learned.store is not store:
-                learned = LearnedGenerators(store, packs=packs)
+                learned = LearnedGenerators(
+                    store, packs=packs, refresh_after=self.refresh_generators
+                )
                 await learned.load()
                 self._learned, self._learner = learned, None
         return self._learned
@@ -684,6 +694,15 @@ class Extractor:
         if self._learner is not None:
             await self._learner.drain()
 
+    def wait_for_learning_sync(self) -> None:
+        """Blocking :meth:`wait_for_learning`, for ``extract_sync`` users.
+
+        The learner runs on ``extract_sync``'s private event loop, so it only makes
+        progress while a blocking call drives that loop: call this after the last
+        ``extract_sync`` to finish the examples still queued.
+        """
+        self._run_sync(self.wait_for_learning(), "wait_for_learning")
+
     async def extract(self, document: Document) -> ExtractionResult:
         """Run the pipeline over one document."""
         budget = DocumentBudget(self.budgets, await self.ledger())
@@ -700,7 +719,7 @@ class Extractor:
         else:
             ctx.learner = learner
         learned = await self.learned_generators()
-        ctx.generators = learned.current if learned else None
+        ctx.generators = await learned.refresh() if learned else None
         ctx.housekeeper = await self.housekeeper()
         try:
             if not await budget.start_document():
@@ -734,17 +753,23 @@ class Extractor:
     def extract_sync(self, document: Document) -> ExtractionResult:
         """Blocking wrapper for scripts and notebooks without a running event loop.
 
-        Reuses one private event loop so HTTP connections stay valid between calls.
+        Reuses one private event loop so HTTP connections stay valid between calls. The
+        learner runs in the background on that loop, so it only makes progress during
+        blocking calls; :meth:`wait_for_learning_sync` finishes what is queued.
         """
+        return self._run_sync(self.extract(document), "extract")
+
+    def _run_sync[T](self, coro: Coroutine[Any, Any, T], name: str) -> T:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             pass
         else:
-            raise RuntimeError("extract_sync() called inside an event loop; use await extract()")
+            coro.close()
+            raise RuntimeError(f"{name}_sync() called inside an event loop; use await {name}()")
         if self._sync_loop is None or self._sync_loop.is_closed():
             self._sync_loop = asyncio.new_event_loop()
-        return self._sync_loop.run_until_complete(self.extract(document))
+        return self._sync_loop.run_until_complete(coro)
 
     async def aclose(self) -> None:
         """Stop the learner (examples still queued stay in the store, unlearned; call
