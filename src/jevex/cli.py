@@ -1,7 +1,8 @@
 """The ``jevex`` command line (spec: *Integration › CLI*).
 
-``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON. The
-other commands are placeholders until their issues land. Uses only the standard library
+``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
+``jevex eval`` scores a corpus, and ``jevex learn`` compiles logged examples into a pack
+diff. The other commands are placeholders until their issues land. Uses only the standard library
 (argparse), so the CLI adds nothing to a core install.
 """
 
@@ -21,24 +22,30 @@ from typing import TYPE_CHECKING, Any, TextIO
 from pydantic import BaseModel
 
 from jevex import __version__
+from jevex.budgets import Budgets, RunBudget
 from jevex.document import Document
 from jevex.eval import EvalReport, evaluate, load_corpus
 from jevex.extractor import Extractor
 from jevex.fetch import FetchError, SimpleFetcher
+from jevex.generators import InvalidGeneratorError
 from jevex.jev import JevError
+from jevex.learn import LEARN_THRESHOLD, PACK_GENERATORS, PackDiff, pack_generators
+from jevex.llm import ANTHROPIC_MODEL
 from jevex.schema import UnsupportedFieldError
+from jevex.store import StoreError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from jevex.generators import GeneratorSpec
     from jevex.jev import JevClient
+    from jevex.llm import LLM
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 
 PLANNED = {
-    "learn": ("Synthesise and test generators from logged examples", 39),
     "pack": ("Export, import and diff generator packs", 41),
     "testsite": ("Build and serve the synthetic test site", 45),
     "serve": ("Run the extraction microservice", 53),
@@ -163,6 +170,98 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
             raise CliError(f"Jev: {exc}") from exc
 
 
+LLM_PROVIDERS = ("anthropic", "openai", "gemini", "litellm")
+
+
+def load_llm(spec: str) -> LLM:
+    """``provider[:model]``: an adapter from :data:`LLM_PROVIDERS` (each needs its extra).
+
+    Only ``anthropic`` has a default model (:data:`~jevex.llm.ANTHROPIC_MODEL`).
+    """
+    provider, _, model = spec.partition(":")
+    if provider not in LLM_PROVIDERS:
+        raise CliError(f"--llm must start with one of {', '.join(LLM_PROVIDERS)}, not {spec!r}")
+    if not model and provider != "anthropic":
+        raise CliError(f"--llm {provider} needs a model, as {provider}:<model>")
+    try:
+        if provider == "anthropic":
+            from jevex.llm.anthropic import AnthropicLLM
+
+            return AnthropicLLM(model or ANTHROPIC_MODEL)
+        if provider == "openai":
+            from jevex.llm.openai import OpenAILLM
+
+            return OpenAILLM(model)
+        if provider == "gemini":
+            from jevex.llm.gemini import GeminiLLM
+
+            return GeminiLLM(model)
+        from jevex.llm.litellm import LiteLLM
+
+        return LiteLLM(model)
+    except ImportError as exc:
+        raise CliError(f"--llm {provider} needs the {provider} extra: {exc}") from exc
+    except Exception as exc:  # e.g. the provider's client finds no API key
+        raise CliError(f"--llm {spec}: {exc}") from exc
+
+
+def _learn_files(out: Path, pack: str | None) -> list[GeneratorSpec]:
+    """Check ``--out`` before anything is spent (``PackDiff.write`` checks again), and read
+    the ``--pack`` generators."""
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise CliError(f"--out {out} already exists and isn't an empty directory")
+    try:
+        return pack_generators(Path(pack)) if pack else []
+    except (FileNotFoundError, InvalidGeneratorError) as exc:
+        raise CliError(str(exc)) from exc
+
+
+async def _learn(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> PackDiff:
+    schemas = [load_schema(s) for s in args.schema]
+    pack = await asyncio.to_thread(_learn_files, Path(args.out), args.pack)
+    if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
+        raise CliError("TYPESAFE_API_KEY is not set (jevex learn tests generators with Jev)")
+    generator_llm = llm or load_llm(args.llm)
+    run = None
+    if args.max_spend is not None or args.max_jev_spend is not None:
+        run = RunBudget(max_spend=args.max_spend, max_jev_spend=args.max_jev_spend, period="run")
+    try:
+        extractor = Extractor(
+            schemas,
+            jev=jev,
+            store=args.store,
+            generator_llm=generator_llm,
+            learn_threshold=args.learn_threshold,
+            budgets=Budgets(run=run),
+        )
+    except (ValueError, UnsupportedFieldError) as exc:
+        raise CliError(str(exc)) from exc
+    async with extractor:
+        try:
+            diff = await extractor.compile_pack(pack)
+        except StoreError as exc:
+            raise CliError(f"store: {exc}") from exc
+        except JevError as exc:
+            raise CliError(f"Jev: {exc}") from exc
+    try:
+        await asyncio.to_thread(diff.write, Path(args.out))
+    except OSError as exc:
+        raise CliError(str(exc)) from exc
+    return diff
+
+
+def format_diff(diff: PackDiff, out: str) -> str:
+    """A plain-text summary: outcomes by status, then the generators written."""
+    counts: dict[str, int] = {}
+    for outcome in diff.outcomes:
+        counts[outcome.status] = counts.get(outcome.status, 0) + 1
+    mix = ", ".join(f"{status} {n}" for status, n in sorted(counts.items())) or "none"
+    lines = [f"examples: {len(diff.outcomes)} ({mix})"]
+    lines.append(f"wrote {len(diff.generators)} generator(s) to {Path(out) / PACK_GENERATORS}")
+    lines += [f"  {spec.id}  {spec.field}  {spec.match.regex}" for spec in diff.generators]
+    return "\n".join(lines) + "\n"
+
+
 def format_report(report: EvalReport) -> str:
     """A plain-text summary: run metrics, then precision/recall per field."""
 
@@ -192,6 +291,13 @@ def format_report(report: EvalReport) -> str:
             f"{f.correct:>5} {f.wrong:>5} {f.missing:>5} {f.spurious:>5}"
         )
     return "\n".join(lines) + "\n"
+
+
+def _usd(text: str) -> float:
+    value = float(text)
+    if not value >= 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {text}")
+    return value
 
 
 def _probability(text: str) -> float:
@@ -250,6 +356,45 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--concurrency", type=int, default=4, help="Documents at a time")
     evaluate.add_argument("--json", action="store_true", help="Print the full report as JSON")
 
+    learn = commands.add_parser(
+        "learn",
+        help="Synthesise and test generators from logged examples; write a pack diff",
+        description="Learn generators from the verified examples a store logged (for "
+        "example in learn_mode='compile') and write the ones to add to a pack as "
+        "OUT/generators/<id>.yaml for review. Nothing is published to the store. Needs "
+        "TYPESAFE_API_KEY and the generator LLM's key.",
+    )
+    learn.add_argument(
+        "--schema",
+        action="append",
+        required=True,
+        metavar="MODULE:CLASS",
+        help="A Pydantic model whose examples to learn from (repeatable)",
+    )
+    learn.add_argument(
+        "--store", required=True, help="The store holding the examples, e.g. sqlite:///jevex.db"
+    )
+    learn.add_argument("--out", required=True, help="A new or empty directory for the pack diff")
+    learn.add_argument(
+        "--pack", help="The pack to diff against (its generators count as already learned)"
+    )
+    learn.add_argument(
+        "--llm",
+        default="anthropic",
+        metavar="PROVIDER[:MODEL]",
+        help=f"The generator LLM: {', '.join(LLM_PROVIDERS)} (default anthropic, "
+        f"{ANTHROPIC_MODEL})",
+    )
+    learn.add_argument(
+        "--learn-threshold",
+        type=_probability,
+        default=LEARN_THRESHOLD,
+        help=f"Verification probability an example needs (default {LEARN_THRESHOLD})",
+    )
+    learn.add_argument("--max-spend", type=_usd, help="Stop calling the LLM after this many USD")
+    learn.add_argument("--max-jev-spend", type=_usd, help="Stop calling Jev after this many USD")
+    learn.add_argument("--json", action="store_true", help="Print the diff and outcomes as JSON")
+
     for name, (summary, issue) in PLANNED.items():
         commands.add_parser(name, help=f"{summary} (not implemented yet, #{issue})")
     return parser
@@ -259,6 +404,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     jev: JevClient | None = None,
+    llm: LLM | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
 ) -> int:
@@ -267,7 +413,8 @@ def main(
     0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``),
     including ``jevex eval`` runs where any document failed (the report is still printed).
     2: a usage error, no command, or a command that isn't implemented yet.
-    ``jev``, ``out`` and ``err`` are injectable for tests.
+    ``jev``, ``llm`` (``jevex learn``'s generator LLM), ``out`` and ``err`` are injectable
+    for tests.
     """
     stdout: TextIO = out or sys.stdout
     stderr: TextIO = err or sys.stderr
@@ -292,6 +439,14 @@ def main(
                 print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
             # A run with failed documents isn't a clean measurement, even though it's scored.
             return EXIT_ERROR if report.failed else EXIT_OK
+        if args.command == "learn":
+            diff = asyncio.run(_learn(args, jev, llm))
+            if args.json:
+                json.dump(diff.model_dump(mode="json"), stdout, indent=2, ensure_ascii=False)
+                stdout.write("\n")
+            else:
+                stdout.write(format_diff(diff, args.out))
+            return EXIT_OK
         payload = asyncio.run(_extract(args, jev))
     except CliError as exc:
         print(f"jevex: error: {exc}", file=stderr)

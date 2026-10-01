@@ -71,11 +71,16 @@ from jevex.layout import (
 from jevex.layout_html import HtmlLayoutParser
 from jevex.layout_pdf import DoclingConverter, PdfLayoutError, PdfLayoutParser
 from jevex.learn import (
+    ExampleLogger,
     GeneratorLearner,
     GeneratorSnapshot,
     LearnedGenerators,
+    LearnMode,
     LearnOutcome,
     LearnStage,
+    PackDiff,
+    compile_pack,
+    pack_generators,
 )
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
@@ -167,6 +172,7 @@ __all__ = [
     "EntityScope",
     "EntityStage",
     "EvalReport",
+    "ExampleLogger",
     "Extracted",
     "ExtractionResult",
     "Extractor",
@@ -202,6 +208,7 @@ __all__ = [
     "LLMFieldExtractor",
     "LayoutStage",
     "Leaf",
+    "LearnMode",
     "LearnOutcome",
     "LearnStage",
     "LearnedGenerators",
@@ -216,6 +223,7 @@ __all__ = [
     "NoulDocumentGate",
     "OcrEngine",
     "OcrProcessor",
+    "PackDiff",
     "PageLocation",
     "ParentChild",
     "PdfLayoutError",
@@ -263,6 +271,7 @@ __all__ = [
     "VerifiedExample",
     "__version__",
     "blank_rows",
+    "compile_pack",
     "cut_statement",
     "default_registry",
     "evaluate",
@@ -275,6 +284,7 @@ __all__ = [
     "load_corpus",
     "normalise",
     "open_store",
+    "pack_generators",
     "row_roles",
     "run_chain",
     "section_text",
