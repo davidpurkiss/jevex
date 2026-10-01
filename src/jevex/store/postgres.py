@@ -41,6 +41,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic_core import to_jsonable_python
 
 from jevex.store.base import (
+    DocumentStat,
     GeneratorRecord,
     GeneratorStats,
     KeyMapping,
@@ -57,7 +58,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Version 1's tables. ``{s}`` is the store's Postgres schema.
 _SCHEMA: LiteralString = """
@@ -128,6 +129,15 @@ CREATE INDEX spend_at ON {s}.spend (at);
 # Schema version → the statements that bring the version before it up to it.
 _MIGRATIONS: dict[int, LiteralString] = {
     2: "ALTER TABLE {s}.examples ADD COLUMN document_source TEXT",
+    3: """
+CREATE TABLE {s}.documents (
+    id TEXT PRIMARY KEY,
+    run_id TEXT,
+    data JSON NOT NULL,
+    at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX documents_at ON {s}.documents (at);
+""",
 }
 
 # Serialises schema creation and migration across every process opening a store on the
@@ -650,6 +660,58 @@ class PostgresStore:
             return True
 
         return await self._run(op)
+
+    async def spend_entries(
+        self, *, since: datetime | None = None, kind: SpendKind | None = None
+    ) -> list[SpendEntry]:
+        where, params = self._spend_filter(since, kind, None)
+        query = self._q("SELECT * FROM {s}.spend" + where + " ORDER BY at, id")
+        return [
+            SpendEntry(
+                amount_usd=int(r["amount_nano_usd"]) / _NANO,
+                kind=r["kind"],
+                run_id=r["run_id"],
+                note=r["note"],
+                at=_utc(r["at"]),
+            )
+            for r in await self._rows(query, params)
+        ]
+
+    # -- document stats ---------------------------------------------------------------
+
+    async def record_document(self, stat: DocumentStat) -> None:
+        params = (
+            stat.id,
+            stat.run_id,
+            _json(stat.model_dump(mode="json", exclude={"at"})),
+            _aware(stat.at),
+        )
+
+        async def op(conn: AsyncConnection[Any]) -> None:
+            await conn.execute(
+                self._q(
+                    "INSERT INTO {s}.documents VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO "
+                    "UPDATE SET run_id = excluded.run_id, data = excluded.data, at = excluded.at"
+                ),
+                params,
+            )
+
+        await self._run(op)
+
+    async def documents(
+        self, *, since: datetime | None = None, limit: int | None = None
+    ) -> list[DocumentStat]:
+        # A NULL since and LIMIT NULL filter nothing.
+        query = self._q(
+            "SELECT * FROM {s}.documents WHERE (%s::timestamptz IS NULL OR at >= %s) "
+            "ORDER BY at DESC, id " + _C + " DESC LIMIT %s"
+        )
+        when = None if since is None else _aware(since)
+        rows = await self._rows(query, (when, when, limit))
+        return [
+            DocumentStat.model_validate(r["data"]).model_copy(update={"at": _utc(r["at"])})
+            for r in reversed(rows)
+        ]
 
     async def aclose(self) -> None:
         """Wait for operations still running, then close the pool. Closing twice is fine."""

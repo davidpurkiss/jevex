@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,7 +45,14 @@ from jevex.review import REVIEW_THRESHOLD, review_items
 from jevex.schema import FieldSpec, SchemaSpec
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import StatementStage
-from jevex.store import Store, open_store
+from jevex.store import (
+    MAX_STAT_VALUE_CHARS,
+    DocumentEvent,
+    DocumentStat,
+    Store,
+    ValueStat,
+    open_store,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Mapping, Sequence
@@ -358,6 +366,59 @@ def _has_values(metas: Mapping[str, FieldMeta]) -> bool:
     return any(m.found or m.alternatives for m in metas.values())
 
 
+def document_stat(
+    result: ExtractionResult, *, doc_id: str, run_id: str | None, seconds: float
+) -> DocumentStat:
+    """A finished document's numbers for the stats UI (:class:`~jevex.store.DocumentStat`):
+    every found value of its records and their children, its budget hits and whether a
+    stage stopped it."""
+    meta = result.meta
+    events = [
+        DocumentEvent(kind="budget", message=f"{e.scope} {e.limit}: {e.message}")
+        for e in meta.budget_events
+    ]
+    events += [
+        DocumentEvent(kind="stopped", message=f"{e.stage}: {e.message}")
+        for e in meta.events
+        if e.kind == "stopped"
+    ]
+    return DocumentStat(
+        id=doc_id,
+        run_id=run_id,
+        url=meta.url,
+        schemas=meta.active_schemas,
+        records=len(result.records),
+        jev_requests=meta.jev.requests,
+        jev_questions=meta.jev.questions,
+        jev_tokens=meta.jev.input_tokens,
+        jev_cost=meta.jev.cost,
+        llm_calls=meta.llm.calls,
+        llm_cost=meta.llm.cost,
+        seconds=seconds,
+        values=_value_stats(result.records),
+        events=events,
+        snapshot=meta.generator_snapshot,
+    )
+
+
+def _value_stats(records: Sequence[Extracted[BaseModel]]) -> list[ValueStat]:
+    out: list[ValueStat] = []
+    for r in records:
+        out += [
+            ValueStat(
+                field=f"{r.schema_name}.{name}",
+                method=m.method,
+                confidence=m.confidence,
+                value=str(m.value)[:MAX_STAT_VALUE_CHARS],
+            )
+            for name, m in r.meta.items()
+            if m.found
+        ]
+        for children in r.children.values():
+            out += _value_stats(children)
+    return out
+
+
 class Extractor:
     """Extracts records for the registered schemas from documents.
 
@@ -388,6 +449,7 @@ class Extractor:
         review_threshold: float = REVIEW_THRESHOLD,
         review_thresholds: Mapping[str, float] | None = None,
         refresh_generators: float | None = REFRESH_GENERATORS,
+        record_stats: bool = True,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -434,7 +496,13 @@ class Extractor:
         ``review_sink`` (:mod:`jevex.review`) receives each document's found values with a
         confidence below ``review_threshold`` (or ``review_thresholds``, keyed like
         ``thresholds``), whatever the record thresholds are. Answers given back through
-        :meth:`feedback` become verified examples."""
+        :meth:`feedback` become verified examples.
+
+        With ``record_stats`` (the default) and a store (not one the extractor keeps in
+        memory for itself), each document's numbers are added to it as a
+        :class:`~jevex.store.DocumentStat` (:func:`document_stat`), including one for a
+        document whose extraction raised, for the stats UI (:mod:`jevex.stats`,
+        ``jevex stats``)."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -498,6 +566,7 @@ class Extractor:
         self._pack_sources = list(packs)
         self._community_packs = community_packs
         self._packs: list[Pack] | None = None
+        self.record_stats = record_stats
 
     @property
     def jev(self) -> JevClient:
@@ -713,23 +782,36 @@ class Extractor:
         learned = await self.learned_generators()
         ctx.generators = await learned.refresh() if learned else None
         ctx.housekeeper = await self.housekeeper()
+        doc_id, started = uuid.uuid4().hex, time.perf_counter()
         try:
-            if not await budget.start_document():
-                ctx.stop("budget", "the run's Jev spend cap is reached")
-            else:
-                try:
-                    await self.pipeline.run(ctx)
-                except JevRequestCapError as exc:
-                    budget.record_hit("document", "max_jev_requests", str(exc))
-                    ctx.stop("budget", str(exc))
-        finally:
-            # Every branch has settled (fan-outs cancel on failure, and a request cancelled
-            # mid-flight is counted at its estimate), so this is the document's whole Jev
-            # spend, recorded even when a stage failed.
-            await budget.finish_document(ctx.jev.usage.cost)
+            try:
+                if not await budget.start_document():
+                    ctx.stop("budget", "the run's Jev spend cap is reached")
+                else:
+                    try:
+                        await self.pipeline.run(ctx)
+                    except JevRequestCapError as exc:
+                        budget.record_hit("document", "max_jev_requests", str(exc))
+                        ctx.stop("budget", str(exc))
+            finally:
+                # Every branch has settled (fan-outs cancel on failure, and a request
+                # cancelled mid-flight is counted at its estimate), so this is the
+                # document's whole Jev spend, recorded even when a stage failed.
+                await budget.finish_document(ctx.jev.usage.cost)
+        except Exception as exc:
+            if (stats := self._stats_store(ctx)) is not None:
+                await stats.record_document(
+                    self._failed_stat(ctx, exc, doc_id, time.perf_counter() - started)
+                )
+            raise
         result = ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
+        if (stats := self._stats_store(ctx)) is not None:
+            stat = document_stat(
+                result, doc_id=doc_id, run_id=self.run_id, seconds=time.perf_counter() - started
+            )
+            await stats.record_document(stat)
         if self.review_sink is not None:
             items = review_items(
                 result.records,
@@ -742,6 +824,31 @@ class Extractor:
             if items:
                 await self.review_sink.send(items)
         return result
+
+    def _stats_store(self, ctx: Context) -> Store | None:
+        """Where to record the document's stats: not in an in-memory store the extractor
+        opened for itself, which nothing else can read and which would only grow."""
+        if not self.record_stats or (self._owns_store and self._store_source is None):
+            return None
+        return ctx.store
+
+    def _failed_stat(
+        self, ctx: Context, exc: Exception, doc_id: str, seconds: float
+    ) -> DocumentStat:
+        usage = ctx.jev.usage
+        return DocumentStat(
+            id=doc_id,
+            run_id=self.run_id,
+            url=ctx.document.url,
+            jev_requests=usage.requests,
+            jev_questions=usage.questions,
+            jev_tokens=usage.input_tokens,
+            jev_cost=usage.cost,
+            llm_calls=ctx.budget.llm_calls if ctx.budget else 0,
+            llm_cost=ctx.budget.llm_spend if ctx.budget else 0.0,
+            seconds=seconds,
+            events=[DocumentEvent(kind="error", message=f"{type(exc).__name__}: {exc}")],
+        )
 
     def extract_sync(self, document: Document) -> ExtractionResult:
         """Blocking wrapper for scripts and notebooks without a running event loop.

@@ -11,12 +11,15 @@ import pytest
 from pydantic import ValidationError
 
 from jevex.store import (
+    DocumentEvent,
+    DocumentStat,
     GeneratorRecord,
     KeyMapping,
     SpendEntry,
     SQLiteStore,
     Store,
     StoreError,
+    ValueStat,
     VerifiedExample,
     open_store,
 )
@@ -408,6 +411,74 @@ async def test_spend_filters(store: Store) -> None:
     assert await store.spend(since=T0 + timedelta(days=1)) == 0.0
 
 
+async def test_spend_entries_oldest_first_with_filters(store: Store) -> None:
+    await store.record_spend(charge(0.5, run_id="r2", at=T0 + timedelta(hours=2), note="n"))
+    await store.record_spend(charge(0.25, "jev", run_id="r1", at=T0))
+    await store.record_spend(charge(1.0, run_id="r1", at=T0 + timedelta(hours=1)))
+
+    entries = await store.spend_entries()
+    assert [(e.amount_usd, e.kind, e.at) for e in entries] == [
+        (0.25, "jev", T0),
+        (1.0, "llm", T0 + timedelta(hours=1)),
+        (0.5, "llm", T0 + timedelta(hours=2)),
+    ]
+    assert (entries[2].note, entries[2].run_id) == ("n", "r2")
+    assert [e.amount_usd for e in await store.spend_entries(kind="llm")] == [1.0, 0.5]
+    assert [e.amount_usd for e in await store.spend_entries(since=T0 + timedelta(hours=1))] == [
+        1.0,
+        0.5,
+    ]
+    assert await store.spend_entries(since=T0 + timedelta(days=1)) == []
+
+
+def doc_stat(doc_id: str, at: datetime, **kw: object) -> DocumentStat:
+    return DocumentStat.model_validate({"id": doc_id, "at": at, **kw})
+
+
+async def test_document_stats_round_trip(store: Store) -> None:
+    stat = doc_stat(
+        "d1",
+        T0,
+        run_id="r1",
+        url="https://example.com/a",
+        schemas=["VehicleSpec"],
+        records=1,
+        jev_requests=3,
+        jev_questions=12,
+        jev_tokens=4000,
+        jev_cost=0.0002,
+        llm_calls=1,
+        llm_cost=0.003,
+        seconds=1.5,
+        values=[ValueStat(field="VehicleSpec.power_ps", method="llm", confidence=0.7, value="150")],
+        events=[DocumentEvent(kind="budget", message="document: max_llm_calls")],
+        snapshot=4,
+    )
+    await store.record_document(stat)
+    assert await store.documents() == [stat]
+
+
+async def test_documents_oldest_first_since_and_newest_limit(store: Store) -> None:
+    for i in (2, 0, 3, 1):
+        await store.record_document(doc_stat(f"d{i}", T0 + timedelta(minutes=i)))
+    assert [d.id for d in await store.documents()] == ["d0", "d1", "d2", "d3"]
+    assert [d.id for d in await store.documents(limit=2)] == ["d2", "d3"]
+    assert [d.id for d in await store.documents(since=T0 + timedelta(minutes=1))] == [
+        "d1",
+        "d2",
+        "d3",
+    ]
+    assert [d.id for d in await store.documents(since=T0 + timedelta(minutes=1), limit=1)] == ["d3"]
+    # Recording an id again replaces it.
+    await store.record_document(doc_stat("d0", T0 + timedelta(minutes=9), records=2))
+    assert [(d.id, d.records) for d in await store.documents(limit=1)] == [("d0", 2)]
+
+
+async def test_document_stats_need_aware_times(store: Store) -> None:
+    with pytest.raises(ValueError, match="naive"):
+        await store.record_document(doc_stat("d", datetime(2026, 1, 1)))
+
+
 async def test_tiny_jev_charges_add_up_exactly(store: Store) -> None:
     # Jev costs $0.042 per million tokens: ten tokens is 420 nano-dollars.
     for _ in range(100):
@@ -566,9 +637,13 @@ async def test_a_version_1_database_is_migrated(tmp_path: Path) -> None:
         VerifiedExample(id="new", field="S.f", statement="t", value=2, document_source="a.com")
     )
     assert [e.document_source for e in await store.examples(limit=1)] == ["a.com"]
+    # v4: document stats.
+    assert await store.documents() == []
+    await store.record_document(DocumentStat(id="d1", at=T0))
+    assert [d.id for d in await store.documents()] == ["d1"]
     await store.aclose()
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
     conn.close()
 
 

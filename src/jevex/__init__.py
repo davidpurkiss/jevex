@@ -18,7 +18,7 @@ from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate
 from jevex.document import Document
 from jevex.entities import EntityScope
 from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
-from jevex.extractor import ExtractionResult, Extractor
+from jevex.extractor import ExtractionResult, Extractor, document_stat
 from jevex.fallback import FallbackStage, LLMFieldExtractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
 from jevex.gate import (
@@ -142,7 +142,10 @@ from jevex.statements import (
     StatementKind,
     TableCellRef,
 )
+from jevex.stats import Stats, render_page, stats_server
 from jevex.store import (
+    DocumentEvent,
+    DocumentStat,
     GeneratorRecord,
     GeneratorStats,
     KeyMapping,
@@ -150,6 +153,7 @@ from jevex.store import (
     SQLiteStore,
     Store,
     StoreError,
+    ValueStat,
     VerifiedExample,
     example_id,
     open_store,
@@ -199,7 +203,9 @@ __all__ = [
     "DoclingConverter",
     "Document",
     "DocumentBudget",
+    "DocumentEvent",
     "DocumentGateStage",
+    "DocumentStat",
     "DocumentText",
     "DomLocation",
     "DuplicateGenerator",
@@ -304,6 +310,7 @@ __all__ = [
     "Statement",
     "StatementKind",
     "StatementStage",
+    "Stats",
     "Store",
     "StoreError",
     "StructuredBlob",
@@ -319,6 +326,7 @@ __all__ = [
     "UnreadableImageError",
     "UnreadablePdfError",
     "UnsupportedDocumentError",
+    "ValueStat",
     "VerifiedExample",
     "__version__",
     "blank_rows",
@@ -329,6 +337,7 @@ __all__ = [
     "cut_statement",
     "default_registry",
     "diff_packs",
+    "document_stat",
     "ensure_comparable",
     "evaluate",
     "example_id",
@@ -349,11 +358,13 @@ __all__ = [
     "normalise",
     "open_store",
     "pack_generators",
+    "render_page",
     "replay",
     "review_items",
     "row_roles",
     "run_chain",
     "section_text",
+    "stats_server",
     "stored_generators",
     "table_statements",
     "text_components",

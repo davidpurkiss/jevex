@@ -17,7 +17,7 @@ from jevex.normalise import NormaliseStage
 from jevex.packs import Pack, PackError, generator_record
 from jevex.results import FieldMeta
 from jevex.select import CandidateStage, SelectStage
-from jevex.store import KeyMapping, open_store
+from jevex.store import DocumentStat, KeyMapping, open_store
 from jevex.testing import FakeJev, FakeLLM
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -737,3 +737,159 @@ def test_testsite_needs_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None
         run_cli("testsite")
     assert exc.value.code == 2
     assert "testsite command" in capsys.readouterr().err
+
+
+# --- stats -----------------------------------------------------------------------------
+
+REPLAY_CSV = """\
+batch,documents,size,waves,accuracy,llm_calls_per_document,jev_cost_per_document,\
+llm_cost_per_document,errors,generators,values_llm
+1,2,2,1,1.0,2.0,0.001,0.02,0,1,3
+2,4,2,2,0.5,0.0,0.001,0.0,0,3,0
+"""
+
+
+def stats_store(path: Path) -> str:
+    async def fill() -> None:
+        store = open_store(path)
+        await store.record_document(DocumentStat(id="d1", llm_calls=2))
+        await store.aclose()
+
+    asyncio.run(fill())
+    return f"sqlite:///{path}"
+
+
+def test_stats_export_writes_an_animated_svg(tmp_path: Path) -> None:
+    (tmp_path / "curve.csv").write_text(REPLAY_CSV)
+    out = tmp_path / "learning.svg"
+    code, stdout, err = run_cli(
+        "stats",
+        "export",
+        "--replay",
+        str(tmp_path / "curve.csv"),
+        "--svg",
+        "learning",
+        "--out",
+        str(out),
+    )
+    assert (code, stdout, err) == (0, f"wrote {out}\n", "")
+    svg = out.read_text()
+    assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" class="chart viz-root animate"')
+    assert ">wave 2</text>" in svg  # a replay's default axis is documents
+
+
+def test_stats_export_static_from_a_store_with_a_budget(tmp_path: Path) -> None:
+    url = stats_store(tmp_path / "s.db")
+    out = tmp_path / "cost.svg"
+    code, _, err = run_cli(
+        "stats",
+        "export",
+        "--store",
+        url,
+        "--svg",
+        "cost",
+        "--out",
+        str(out),
+        "--static",
+        "--budget",
+        "2",
+        "--x",
+        "docs",
+    )
+    assert (code, err) == (0, "")
+    svg = out.read_text()
+    assert 'class="chart viz-root"' in svg
+    assert ">budget $2.000</text>" in svg
+    assert ">1 documents</text>" in svg
+
+
+def test_stats_export_errors_are_clean(tmp_path: Path) -> None:
+    (tmp_path / "bad.csv").write_text("a,b\n1,2\n")
+    code, out, err = run_cli(
+        "stats",
+        "export",
+        "--replay",
+        str(tmp_path / "bad.csv"),
+        "--svg",
+        "mix",
+        "--out",
+        str(tmp_path / "mix.svg"),
+    )
+    assert (code, out) == (1, "")
+    assert err == (
+        "jevex: error: not a jevex replay CSV: no documents, jev_cost_per_document, "
+        "llm_calls_per_document, size column\n"
+    )
+    (tmp_path / "ok.csv").write_text(REPLAY_CSV)
+    code, _, err = run_cli(
+        "stats",
+        "export",
+        "--replay",
+        str(tmp_path / "ok.csv"),
+        "--svg",
+        "mix",
+        "--x",
+        "time",
+        "--out",
+        str(tmp_path / "mix.svg"),
+    )
+    assert code == 1
+    assert "use the documents axis" in err
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["stats"], "one of the arguments --store --replay is required"),
+        (["stats", "--store", "a", "--replay", "b"], "not allowed with argument"),
+        (["stats", "export", "--replay", "c.csv"], "jevex stats export needs --svg and --out"),
+        (["stats", "--replay", "c.csv", "--svg", "mix"], "--svg only apply to jevex stats export"),
+        (["stats", "--replay", "c.csv", "--static"], "--static only apply to jevex stats export"),
+        (["stats", "export", "--replay", "c.csv", "--svg", "pie"], "invalid choice: 'pie'"),
+    ],
+)
+def test_stats_usage_errors(
+    argv: list[str], message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli(*argv)
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_stats_serves_until_interrupted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = stats_store(tmp_path / "s.db")
+    served: list[tuple[str, int]] = []
+
+    class FakeServer:
+        server_address = ("127.0.0.1", 8765)
+        closed = False
+
+        def __enter__(self) -> "FakeServer":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self.closed = True
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+    fake = FakeServer()
+
+    def fake_server(load: object, host: str, port: int) -> FakeServer:
+        assert callable(load)
+        served.append((host, port))
+        return fake
+
+    monkeypatch.setattr(cli, "stats_server", fake_server)
+    code, out, err = run_cli("stats", "--store", url)
+    assert (code, err) == (0, "")
+    assert served == [("127.0.0.1", 8765)]
+    assert out == "serving stats at http://127.0.0.1:8765/stats/ (Ctrl-C to stop)\n"
+    assert fake.closed
+
+
+def test_stats_serve_checks_the_source_first(tmp_path: Path) -> None:
+    code, out, err = run_cli("stats", "--replay", str(tmp_path / "nope.csv"))
+    assert (code, out) == (1, "")
+    assert err.startswith("jevex: error: [Errno 2] No such file or directory")

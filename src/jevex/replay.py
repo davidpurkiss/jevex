@@ -9,25 +9,24 @@ resolution mix and the learned generators in use. That is the headline claim's e
 accuracy holds while cost and the LLM-call rate fall as generators are learned.
 
 :meth:`ReplayReport.to_csv` gives one row per batch (:data:`CSV_COLUMNS`), and
-:meth:`ReplayReport.to_html` a self-contained page charting accuracy, cost per document
-and LLM calls per document over documents processed, with the test site's waves marked.
+:meth:`ReplayReport.to_html` the stats page (:mod:`jevex.stats`) as a self-contained report
+charting them over documents processed, with the test site's waves marked.
 """
 
 from __future__ import annotations
 
 import csv
-import html
 import io
-import json
-import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Any
 
 from jevex.eval import EvalReport, check_schemas, resolve_tolerances, run_document
-from jevex.results import Method
+from jevex.stats.charts import pct
+from jevex.stats.data import METHODS, from_replay
+from jevex.stats.page import render_page
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from jevex.eval import CorpusItem, DocumentRun, Tolerance
     from jevex.extractor import Extractor
@@ -40,8 +39,6 @@ class LearningStoppedError(Exception):
     """The learner failed during a replay. The documents after it would learn nothing, so
     the curve would stop measuring learning: the replay ends instead."""
 
-
-METHODS: tuple[str, ...] = get_args(Method)
 
 CSV_COLUMNS: tuple[str, ...] = (
     "batch",
@@ -191,11 +188,20 @@ class ReplayReport:
         return buffer.getvalue()
 
     def to_html(self, title: str = "jevex replay") -> str:
-        """A self-contained page (no scripts, works offline): accuracy, cost per document
-        and LLM calls per document over documents processed, one chart each on a shared
-        x-axis, with every wave's start marked, then the batches as a table. The data is
-        inlined as JSON (``<script type="application/json" id="replay-data">``)."""
-        return _render_html(self, title)
+        """The stats page in report mode (:func:`~jevex.stats.render_page`): a single file
+        that works offline, charting LLM calls per document, cost per document and
+        accuracy, the resolution mix and cumulative cost over documents processed, with
+        every wave's start marked. Its data is inlined as JSON
+        (``<script type="application/json" id="stats-data">``)."""
+        return render_page(from_replay(self), title=title, generated=self._lede())
+
+    def _lede(self) -> str:
+        s = self.report.summary()
+        accuracy = "–" if s["accuracy"] is None else pct(s["accuracy"])
+        return (
+            f"{s['documents']} documents from an empty store in batches of {self.batch_size}; "
+            f"accuracy {accuracy} overall"
+        )
 
 
 async def replay(
@@ -258,236 +264,4 @@ async def _holds_learned_state(store: Store) -> bool:
         or await store.disabled_generator_ids()
         or await store.key_mappings()
         or await store.examples(limit=1)
-    )
-
-
-# --- HTML ------------------------------------------------------------------------------
-
-_WIDTH, _HEIGHT = 720, 180
-_LEFT, _RIGHT, _TOP, _BOTTOM = 64, 80, 22, 30
-
-_STYLE = """\
-.viz-root {
-  color-scheme: light;
-  --surface-1: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #6b6a65;
-  --grid: #e4e3df;
-  --series-1: #2a78d6;
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
-  margin: 0;
-  padding: 24px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .viz-root {
-    color-scheme: dark;
-    --surface-1: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #a3a29a;
-    --grid: #33332f;
-    --series-1: #3987e5;
-  }
-}
-:root[data-theme="dark"] .viz-root {
-  color-scheme: dark;
-  --surface-1: #1a1a19;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #a3a29a;
-  --grid: #33332f;
-  --series-1: #3987e5;
-}
-h1 { font-size: 20px; margin: 0 0 4px; }
-h2 { font-size: 15px; margin: 24px 0 4px; }
-p.lede { color: var(--text-secondary); margin: 0 0 8px; }
-svg { display: block; max-width: 100%; height: auto; overflow: visible; }
-svg text { fill: var(--text-secondary); font-size: 12px; }
-svg .muted { fill: var(--text-muted); }
-svg .grid { stroke: var(--grid); stroke-width: 1; }
-svg .wave { stroke: var(--text-muted); stroke-width: 1; opacity: 0.6; }
-svg .line { fill: none; stroke: var(--series-1); stroke-width: 2;
-  stroke-linejoin: round; stroke-linecap: round; }
-svg .dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
-svg .hit { fill: transparent; }
-svg .hit:hover + .dot, svg .point:hover .dot { stroke: var(--text-primary); }
-table { border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
-th, td { padding: 4px 10px; text-align: right; border-bottom: 1px solid var(--grid); }
-th { color: var(--text-secondary); font-weight: 600; }
-"""
-
-
-@dataclass(frozen=True)
-class _Metric:
-    key: str
-    title: str
-    fmt: Callable[[float], str]
-    top: float | None = None
-    """A fixed top for the y-axis (accuracy's 100%); otherwise from the data."""
-
-
-def _pct(x: float) -> str:
-    return f"{x * 100:.1f}%"
-
-
-def _usd(x: float) -> str:
-    text = f"{x:.5f}".rstrip("0").rstrip(".") if abs(x) < 0.01 else f"{x:.3f}"
-    return f"${text}"
-
-
-def _calls(x: float) -> str:
-    return f"{x:.2f}"
-
-
-_METRICS = (
-    _Metric("accuracy", "Accuracy", _pct, top=1.0),
-    _Metric("cost_per_document", "Cost per document (USD)", _usd),
-    _Metric("llm_calls_per_document", "LLM calls per document", _calls),
-)
-
-
-def nice_ticks(top: float) -> list[float]:
-    """Ticks from 0 to the smallest 1, 2, 2.5 or 5 × 10ⁿ step multiple at or above ``top``,
-    three to five of them (``[0, 1]`` for a ``top`` of 0 or less)."""
-    if top <= 0:
-        return [0.0, 1.0]
-    raw = top / 4
-    power = 10 ** math.floor(math.log10(raw))
-    step = next(m * power for m in (1, 2, 2.5, 5, 10) if m * power >= raw)
-    count = math.ceil(top / step - 1e-9)
-    return [round(i * step, 12) for i in range(count + 1)]
-
-
-def _chart(report: ReplayReport, batches: list[ReplayBatch], metric: _Metric) -> str:
-    total = max(len(report.report.documents), 1)
-    values: list[float | None] = [getattr(b, metric.key) for b in batches]
-    present = [v for v in values if v is not None]
-    ticks = (
-        nice_ticks(metric.top) if metric.top is not None else nice_ticks(max(present, default=0.0))
-    )
-    y_top = ticks[-1]
-    plot_w = _WIDTH - _LEFT - _RIGHT
-    plot_h = _HEIGHT - _TOP - _BOTTOM
-
-    def x(documents: float) -> float:
-        return _LEFT + plot_w * documents / total
-
-    def y(value: float) -> float:
-        return _TOP + plot_h * (1 - value / y_top)
-
-    parts = [
-        f'<svg viewBox="0 0 {_WIDTH} {_HEIGHT}" role="img" '
-        f'aria-label="{html.escape(metric.title)} over documents processed">'
-    ]
-    for t in ticks:
-        parts.append(
-            f'<line class="grid" x1="{_LEFT}" x2="{_WIDTH - _RIGHT}" '
-            f'y1="{y(t):.1f}" y2="{y(t):.1f}"/>'
-            f'<text x="{_LEFT - 8}" y="{y(t) + 4:.1f}" text-anchor="end">'
-            f"{html.escape(metric.fmt(t))}</text>"
-        )
-    for documents, wave in report.wave_starts():
-        parts.append(
-            f'<line class="wave" x1="{x(documents):.1f}" x2="{x(documents):.1f}" '
-            f'y1="{_TOP - 6}" y2="{_TOP + plot_h}"/>'
-            f'<text class="muted" x="{x(documents) + 4:.1f}" y="{_TOP - 8}">wave {wave}</text>'
-        )
-    parts.append(
-        f'<text x="{_LEFT}" y="{_HEIGHT - 6}" text-anchor="start">0</text>'
-        f'<text x="{_WIDTH - _RIGHT}" y="{_HEIGHT - 6}" text-anchor="end">'
-        f"{total} documents</text>"
-    )
-    for segment in _segments(batches, values):
-        points = " ".join(f"{x(b.documents):.1f},{y(v):.1f}" for b, v in segment)
-        if len(segment) > 1:
-            parts.append(f'<polyline class="line" points="{points}"/>')
-    for batch, value in zip(batches, values, strict=True):
-        if value is None:
-            continue
-        label = (
-            f"batch {batch.number}: documents {batch.documents - batch.size + 1}–"
-            f"{batch.documents}\n{metric.title}: {metric.fmt(value)}"
-        )
-        cx, cy = x(batch.documents), y(value)
-        parts.append(
-            f'<g class="point"><title>{html.escape(label)}</title>'
-            f'<circle class="hit" cx="{cx:.1f}" cy="{cy:.1f}" r="12"/>'
-            f'<circle class="dot" cx="{cx:.1f}" cy="{cy:.1f}" r="4"/></g>'
-        )
-    found = [(b, v) for b, v in zip(batches, values, strict=True) if v is not None]
-    if found:
-        last = found[-1]
-        parts.append(
-            f'<text x="{x(last[0].documents) + 10:.1f}" y="{y(last[1]) + 4:.1f}">'
-            f"{html.escape(metric.fmt(last[1]))}</text>"
-        )
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-def _segments(
-    batches: list[ReplayBatch], values: list[float | None]
-) -> list[list[tuple[ReplayBatch, float]]]:
-    """Runs of batches with a value: the line breaks where a batch has none."""
-    segments: list[list[tuple[ReplayBatch, float]]] = [[]]
-    for batch, value in zip(batches, values, strict=True):
-        if value is None:
-            segments.append([])
-        else:
-            segments[-1].append((batch, value))
-    return [s for s in segments if s]
-
-
-def _requests(x: float) -> str:
-    return f"{x:.1f}"
-
-
-_TABLE: tuple[tuple[str, str, Callable[[Any], str]], ...] = (
-    ("batch", "Batch", str),
-    ("documents", "Documents", str),
-    ("waves", "Waves", str),
-    ("accuracy", "Accuracy", _pct),
-    ("cost_per_document", "Cost/doc", _usd),
-    ("llm_calls_per_document", "LLM calls/doc", _calls),
-    ("jev_requests_per_document", "Jev requests/doc", _requests),
-    ("generators", "Generators", str),
-    ("errors", "Errors", str),
-)
-
-
-def _table_row(row: Mapping[str, Any]) -> str:
-    cells = (
-        "–" if row[key] in (None, "") else html.escape(fmt(row[key])) for key, _, fmt in _TABLE
-    )
-    return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
-
-
-def _render_html(report: ReplayReport, title: str) -> str:
-    batches = report.batches()
-    summary = report.report.summary()
-    lede = (
-        f"{summary['documents']} documents from an empty store in batches of "
-        f"{report.batch_size}; accuracy "
-        f"{'–' if summary['accuracy'] is None else _pct(summary['accuracy'])} overall, "
-        f"{summary['llm_calls_per_document']:.2f} LLM calls and "
-        f"{_usd(summary['cost_per_document'])} per document."
-    )
-    charts = "".join(
-        f"<h2>{html.escape(m.title)}</h2>{_chart(report, batches, m)}" for m in _METRICS
-    )
-    rows = "".join(_table_row(b.row()) for b in batches)
-    head = "".join(f"<th>{html.escape(name)}</th>" for _, name, _ in _TABLE)
-    data = json.dumps(report.to_dict(), ensure_ascii=False).replace("</", "<\\/")
-    return (
-        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head>"
-        f'<body class="viz-root"><h1>{html.escape(title)}</h1>'
-        f'<p class="lede">{html.escape(lede)}</p>{charts}'
-        f"<h2>Batches</h2><table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
-        f'<script type="application/json" id="replay-data">{data}</script>'
-        "</body></html>\n"
     )

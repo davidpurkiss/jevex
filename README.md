@@ -234,6 +234,29 @@ names to use):
 automotive-uk = "jevex_pack_automotive_uk"  # the package directory holding manifest.yaml
 ```
 
+## Stats
+
+With a store, each document's numbers are recorded in it (`Extractor(record_stats=False)`
+turns that off): Jev and LLM calls and cost, how each value was resolved, budget hits and
+errors. `jevex stats` serves a page over them, or over a replay's CSV: the learning curve
+(LLM calls and cost per document, and accuracy for a replay), the resolution mix, cumulative
+spend against an optional budget, the generators with their hits and wins, the fields that
+fall back to the LLM most, and budget events. The page reads the store again on every load
+and reloads itself, and the same numbers are JSON at `/stats/api/<view>`
+(`summary`, `learning`, `mix`, `cost`, `generators`, `fields`, `events` or `all`).
+
+```sh
+jevex stats --store sqlite:///jevex.db --budget 5     # http://127.0.0.1:8765/stats/
+jevex stats --replay curve.csv
+jevex stats export --replay curve.csv --svg learning --out learning.svg   # animated
+jevex stats export --store sqlite:///jevex.db --svg mix --out mix.svg --static
+```
+
+`export` writes one chart (`learning`, `mix` or `cost`) as an SVG file with its own light
+and dark styles. Unless `--static`, its lines draw themselves and its areas fill in (CSS
+animation, which GitHub shows in READMEs). The x-axis is time for a store and documents
+processed for a replay; `--x` picks the other.
+
 ## Development
 
 ```sh
@@ -263,8 +286,8 @@ out of `--waves` aren't built.
 `jevex eval` scores extraction against a build (or any directory with a `truth.json`).
 `--replay` draws the learning curve: it starts from an empty in-memory store, runs the
 pages one at a time in order (letting learning finish after each), and reports accuracy,
-cost per document and LLM calls per document per batch, as CSV and as a self-contained
-HTML chart with the waves marked. `--llm` turns on the LLM fallback and learning; without
+cost per document and LLM calls per document per batch, as CSV and as the stats page in
+report mode (a single HTML file that works offline) with the waves marked. `--llm` turns on the LLM fallback and learning; without
 it the replay runs on Jev alone. On a plain run, `--llm` turns on only the fallback. The
 curve counts what documents spend; what the learner spends between them isn't counted
 yet.

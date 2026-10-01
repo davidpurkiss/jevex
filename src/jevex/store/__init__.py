@@ -12,6 +12,7 @@ unsure counts          unsure answers per key path, until "none"    #137
 ``VerifiedExample``    regression tests and eval corpus             #38, #42
 ``GeneratorStats``     hit and win counts, for pruning              #40
 spend ledger           run-level budgets shared across workers      #34
+``DocumentStat``       each document's cost, methods and events     #51 (stats UI)
 =====================  ==========================================  =================
 
 Generator specs are stored as JSON objects. Their format and validation are #37, and the
@@ -28,6 +29,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from jevex.store.base import (
+    MAX_STAT_VALUE_CHARS,
+    DocumentEvent,
+    DocumentStat,
     GeneratorRecord,
     GeneratorStats,
     KeyMapping,
@@ -35,6 +39,7 @@ from jevex.store.base import (
     SpendKind,
     Store,
     StoreError,
+    ValueStat,
     VerifiedExample,
     example_id,
 )
@@ -70,6 +75,9 @@ def open_store(url: str | Path) -> Store:
 
 
 __all__ = [
+    "MAX_STAT_VALUE_CHARS",
+    "DocumentEvent",
+    "DocumentStat",
     "GeneratorRecord",
     "GeneratorStats",
     "KeyMapping",
@@ -78,6 +86,7 @@ __all__ = [
     "SpendKind",
     "Store",
     "StoreError",
+    "ValueStat",
     "VerifiedExample",
     "example_id",
     "open_store",
