@@ -141,7 +141,13 @@ from jevex.learn import (
     compile_pack,
     example_statement,
 )
-from jevex.locales import LocaleConventions, locale_conventions, localise_steps
+from jevex.locales import (
+    LocaleConventions,
+    document_locale,
+    html_language,
+    locale_conventions,
+    localise_steps,
+)
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -413,6 +419,7 @@ __all__ = [
     "cut_statement",
     "default_registry",
     "diff_packs",
+    "document_locale",
     "document_stat",
     "ensure_comparable",
     "evaluate",
@@ -427,6 +434,7 @@ __all__ = [
     "generator_spec_json_schema",
     "generator_use",
     "header_prefix",
+    "html_language",
     "import_pack",
     "infer_headers",
     "layered_generators",

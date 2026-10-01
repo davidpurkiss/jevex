@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from jevex import Context, Document, EntityScope, Extractor, Field, Pipeline, SchemaSpec
+from jevex.clean import BoilerplateCleaner
 from jevex.interfaces import GateDecision
 from jevex.jev import (
     Choice,
@@ -376,3 +377,13 @@ async def test_default_pipeline_is_used_when_none_given() -> None:
         result = await ex.extract(doc())
     assert result.values == {}
     assert result.meta.active_schemas == ["Car"]
+
+
+def test_the_context_locale_is_the_documents_and_survives_cleaning() -> None:
+    page = b'<html lang="de-DE"><body><nav>Menu</nav><p>9,1 s</p></body></html>'
+    ctx = Context.create(
+        Document.from_bytes(page), [SchemaSpec.from_model(Car)], JevClient(YesBackend())
+    )
+    ctx.document = BoilerplateCleaner().clean(ctx.document)
+    assert ctx.locale == "de-DE"
+    assert Context.create(Document.from_bytes(b"<p/>"), [], JevClient(YesBackend())).locale is None

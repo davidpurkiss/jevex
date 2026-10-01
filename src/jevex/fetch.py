@@ -114,6 +114,7 @@ class SimpleFetcher:
                 url=response.url,
                 content_type=response.headers.get("content-type") or None,
                 fetched_at=datetime.now(UTC),
+                content_language=response.headers.get("content-language") or None,
             )
         raise FetchError(f"{url} redirected more than {MAX_REDIRECTS} times")
 

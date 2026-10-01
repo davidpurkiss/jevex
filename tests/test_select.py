@@ -244,6 +244,88 @@ async def test_without_a_locale_a_decimal_comma_is_not_one_number() -> None:
     assert "9,1 s" not in raws
 
 
+def page(
+    lang: str | None = None, *, content_language: str | None = None, locale: str | None = None
+) -> Document:
+    """An HTML page, with ``<html lang>`` when ``lang`` is given."""
+    attr = f' lang="{lang}"' if lang else ""
+    markup = f"<!doctype html><html{attr}><body><p>0-100 km/h in 9,1 s</p></body></html>"
+    return Document.from_bytes(
+        markup.encode(),
+        url="https://example.com/car",
+        content_language=content_language,
+        locale=locale,
+    )
+
+
+async def test_a_de_de_page_is_read_by_its_own_locale_without_a_stage_locale() -> None:
+    fake = FakeJev().choice("Which of these is the 0-62 mph time", "9,1 s", confidence=0.8)
+    ctx = context(
+        fake, [st("s1", "0-100 km/h in 9,1 s")], {"s1": "zero_to_62_s"}, document=page("de-DE")
+    )
+    await CandidateStage().run(ctx)
+    run = ctx.schemas["Car"]
+    assert ctx.locale == "de-DE"
+    assert "9,1 s" in [c.raw for c in run.candidates[("s1", "zero_to_62_s")]]
+    await SelectStage().run(ctx)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["zero_to_62_s"].value == 9.1
+
+
+@pytest.mark.parametrize(
+    ("document", "stage_locale", "comma"),
+    [
+        (page(), None, False),  # nothing says: en-GB
+        (page(), "de-DE", True),  # the stage's locale is the fallback
+        (page("en-GB"), "de-DE", False),  # the page's own locale wins over the stage's
+        (page(content_language="de-AT"), None, True),
+        (page("en-GB", locale="de-DE"), None, True),  # the caller's wins over the page's
+    ],
+)
+async def test_the_stage_locale_is_only_the_fallback(
+    document: Document, stage_locale: str | None, comma: bool
+) -> None:
+    ctx = context(
+        FakeJev(), [st("s1", "0-100 km/h in 9,1 s")], {"s1": "zero_to_62_s"}, document=document
+    )
+    await CandidateStage(locale=stage_locale).run(ctx)
+    raws = [c.raw for c in ctx.schemas["Car"].candidates[("s1", "zero_to_62_s")]]
+    assert ("9,1 s" in raws) is comma
+
+
+GERMAN = GeneratorSpec.from_yaml(
+    """
+id: gen-de
+field: Car.zero_to_62_s
+scope: {locale: de}
+match: {regex: 'in (\\d+(?:,\\d+)?) s', group: 1}
+"""
+)
+
+
+@pytest.mark.parametrize(
+    ("document", "runs"),
+    [
+        (page("de-DE"), True),
+        (page("de_at"), True),
+        (page(content_language="de-CH"), True),
+        (page("en-GB"), False),
+        (page(), False),  # no language info: a locale-scoped generator mustn't guess
+    ],
+)
+async def test_locale_scoped_learned_generators_run_by_the_pages_locale(
+    document: Document, runs: bool
+) -> None:
+    ctx = context(
+        FakeJev(), [st("s1", "0-100 km/h in 9,1 s")], {"s1": "zero_to_62_s"}, document=document
+    )
+    ctx.generators = GeneratorSnapshot(1, GeneratorRegistry([GERMAN.to_generator()]))
+    await CandidateStage(registry=GeneratorRegistry()).run(ctx)
+    found = ctx.schemas["Car"].candidates[("s1", "zero_to_62_s")]
+    assert [(c.raw, c.generator_id) for c in found] == ([("9,1", "gen-de")] if runs else [])
+    assert ctx.generators_ran == ({"gen-de"} if runs else set())
+
+
 async def test_no_generator_runs_without_a_statement_for_its_field() -> None:
     ctx = context(FakeJev(), [st("s1", "Runs on diesel")], {"s1": "fuel_type"})
     await CandidateStage().run(ctx)

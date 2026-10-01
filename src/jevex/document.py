@@ -7,11 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 HTML = "text/html"
 PDF = "application/pdf"
 OCTET_STREAM = "application/octet-stream"
+
+LOCALE_TAG = r"^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$"
+"""What jevex accepts as a locale: a BCP 47 language tag (``de``, ``de-DE``, ``en_GB``)."""
 
 _MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"%PDF-", PDF),
@@ -27,6 +30,10 @@ class Document(BaseModel):
 
     ``site`` names where the document came from when its URL doesn't say (a local file, or
     several hosts that are one site); it overrides the URL's host as :attr:`source`.
+
+    ``content_language`` is the HTTP ``Content-Language`` header as the server sent it.
+    ``locale`` is the caller's word on the page's locale; it overrides what the page and
+    the header say (see :func:`jevex.locales.document_locale`).
     """
 
     # Bytes travel as base64 in JSON (e.g. the `jevex serve` API).
@@ -37,6 +44,8 @@ class Document(BaseModel):
     url: str | None = None
     fetched_at: datetime | None = None
     site: str | None = None
+    content_language: str | None = None
+    locale: str | None = Field(default=None, pattern=LOCALE_TAG)
 
     @classmethod
     def from_bytes(
@@ -47,6 +56,8 @@ class Document(BaseModel):
         content_type: str | None = None,
         fetched_at: datetime | None = None,
         site: str | None = None,
+        content_language: str | None = None,
+        locale: str | None = None,
     ) -> Document:
         """Build a document, sniffing the content type from the bytes if not given."""
         return cls(
@@ -59,17 +70,24 @@ class Document(BaseModel):
             url=url,
             fetched_at=fetched_at,
             site=site,
+            content_language=content_language,
+            locale=locale,
         )
 
     @classmethod
     def from_path(
-        cls, path: str | Path, *, url: str | None = None, site: str | None = None
+        cls,
+        path: str | Path,
+        *,
+        url: str | None = None,
+        site: str | None = None,
+        locale: str | None = None,
     ) -> Document:
         """Read a local file, using its extension when the bytes don't say what it is."""
         path = Path(path)
         content = path.read_bytes()
         content_type = sniff_content_type(content) or mimetypes.guess_type(path)[0]
-        return cls.from_bytes(content, url=url, content_type=content_type, site=site)
+        return cls.from_bytes(content, url=url, content_type=content_type, site=site, locale=locale)
 
     @property
     def source(self) -> str | None:

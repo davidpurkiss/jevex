@@ -183,9 +183,10 @@ class CandidateStage:
     """Generates candidate spans for every categorised statement whose field needs them.
 
     ``registry`` holds the stage's own generators; the document's learned ones
-    (``ctx.generators``) run after them. Generators are scoped by ``locale`` and the
-    document's :attr:`~jevex.Document.source`. Every generator it runs is added to
-    ``ctx.generators_ran``.
+    (``ctx.generators``) run after them. Generators are scoped by the document's locale
+    (:attr:`Context.locale <jevex.pipeline.Context.locale>`, else the stage's ``locale``)
+    and its :attr:`~jevex.Document.source`; locale-aware ones read numbers and dates by
+    that locale too. Every generator it runs is added to ``ctx.generators_ran``.
     """
 
     registry: GeneratorRegistry = field(default_factory=default_registry)
@@ -197,6 +198,7 @@ class CandidateStage:
         if ctx.generators is not None:
             registry = ctx.generators.on(registry)
         source = ctx.document.source
+        locale = ctx.locale or self.locale
         for run in ctx.active:
             counted: set[str] = set()
             for scope in run.scopes:
@@ -204,14 +206,14 @@ class CandidateStage:
                     key = (statement.id, spec.name)
                     if spec.needs_candidates and key not in run.candidates:
                         run.candidates[key] = registry.generate(
-                            statement, spec, schema=run.name, locale=self.locale, source=source
+                            statement, spec, schema=run.name, locale=locale, source=source
                         )
                         if spec.name not in counted:
                             counted.add(spec.name)
                             ctx.generators_ran.update(
                                 g.id
                                 for g in registry.for_field(
-                                    spec, schema=run.name, locale=self.locale, source=source
+                                    spec, schema=run.name, locale=locale, source=source
                                 )
                             )
 
