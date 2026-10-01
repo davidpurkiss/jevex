@@ -194,7 +194,11 @@ def test_a_minimal_pack_is_only_a_manifest(tmp_path: Path) -> None:
         ({}, "has no manifest.yaml"),
         ({"manifest.yaml": "name: [unclosed"}, "manifest.yaml isn't valid YAML"),
         (
-            {"manifest.yaml": "name: cars\nversion: 1.0\n"},
+            {"manifest.yaml": "name: cars\nversion: 1.10\n"},
+            "version: .*quote it, as version: '1.1'",
+        ),
+        (
+            {"manifest.yaml": "name: cars\nversion: [1]\n"},
             "version: Input should be a valid string",
         ),
         ({"manifest.yaml": "name: cars\nversion: '1'\nowner: me\n"}, "owner: Extra inputs"),

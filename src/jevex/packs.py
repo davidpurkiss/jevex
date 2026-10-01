@@ -33,10 +33,17 @@ import re
 from importlib.metadata import entry_points
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from jevex.generators import GeneratorSpec, InvalidGeneratorError
 from jevex.generators.spec import load_yaml
@@ -81,6 +88,14 @@ class PackManifest(BaseModel):
     schemas: list[str] = Field(default_factory=list[str])
     locales: list[str] = Field(default_factory=list[str])
     disables: list[str] = Field(default_factory=list[str])
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _quoted(cls, value: object) -> object:
+        # YAML reads `version: 1.10` as the number 1.1: say so rather than guess.
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            raise ValueError(f"must be a string: quote it, as version: '{value}'")
+        return value
 
 
 class Pack(BaseModel):
@@ -370,8 +385,10 @@ def _entry_point_directory(ep: EntryPoint) -> Path:
                 "package directory"
             )
         return Path(paths[0])
-    if isinstance(target, str | os.PathLike):
-        return Path(target)  # pyright: ignore[reportUnknownArgumentType]
+    if isinstance(target, str):
+        return Path(target)
+    if isinstance(target, os.PathLike):
+        return Path(os.fspath(cast("os.PathLike[str]", target)))
     raise PackError(
         f"installed pack {ep.name!r} ({ep.value}) is a {type(target).__name__}, not a "
         "package, a path or a function returning a path"

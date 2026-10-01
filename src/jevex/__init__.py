@@ -93,6 +93,7 @@ from jevex.normalise import (
     run_chain,
 )
 from jevex.packs import (
+    ENTRY_POINT_GROUP,
     Changes,
     Pack,
     PackChanges,
@@ -101,10 +102,12 @@ from jevex.packs import (
     community_packs,
     diff_packs,
     export_pack,
+    generator_record,
     import_pack,
     layered_generators,
     load_pack,
     pack_generators,
+    stored_generators,
 )
 from jevex.pipeline import Context, Pipeline, Stage
 from jevex.resolve import (
@@ -158,6 +161,7 @@ __version__ = "0.0.1"
 
 __all__ = [
     "BUILTIN_NORMALISERS",
+    "ENTRY_POINT_GROUP",
     "BBox",
     "BoilerplateCleaner",
     "BudgetEvent",
@@ -305,6 +309,7 @@ __all__ = [
     "flatten",
     "gate_units",
     "gated_out_pages",
+    "generator_record",
     "generator_spec_json_schema",
     "generator_use",
     "header_prefix",
@@ -319,6 +324,7 @@ __all__ = [
     "row_roles",
     "run_chain",
     "section_text",
+    "stored_generators",
     "table_statements",
     "text_components",
 ]

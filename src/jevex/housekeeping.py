@@ -13,7 +13,8 @@ ran there (:func:`generator_use`):
   standing is what "correct" means.
 
 So ``hit_rate`` is hits per document and ``win_rate`` wins per hit. A learned generator
-(one in the document's :class:`~jevex.learn.GeneratorSnapshot`) with no wins after
+(one in the document's :class:`~jevex.learn.GeneratorSnapshot`: the store's or a pack's,
+:mod:`jevex.packs`) with no wins after
 ``prune_after`` documents is pruned: added to the store's disable list (kept, not deleted)
 and dropped from the snapshot later documents take. Built-in and stage generators are
 counted but never pruned.

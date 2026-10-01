@@ -147,6 +147,8 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
             result = await extractor.extract(document)
         except JevError as exc:
             raise CliError(f"Jev: {exc}") from exc
+        except PackError as exc:  # an installed community pack that doesn't load
+            raise CliError(f"pack: {exc}") from exc
     if args.meta:
         return result.to_dict()
     return {
@@ -274,6 +276,8 @@ async def _compile(
             return await extractor.compile_pack(pack)
         except StoreError as exc:
             raise CliError(f"store: {exc}") from exc
+        except PackError as exc:
+            raise CliError(f"pack: {exc}") from exc
         except JevError as exc:
             raise CliError(f"Jev: {exc}") from exc
 

@@ -14,7 +14,7 @@ from jevex.jev import Choice
 from jevex.llm import ANTHROPIC_MODEL
 from jevex.llm.anthropic import AnthropicLLM
 from jevex.normalise import NormaliseStage
-from jevex.packs import Pack, generator_record
+from jevex.packs import Pack, PackError, generator_record
 from jevex.results import FieldMeta
 from jevex.select import CandidateStage, SelectStage
 from jevex.store import KeyMapping, open_store
@@ -619,3 +619,18 @@ def test_pack_needs_a_subcommand() -> None:
     with pytest.raises(SystemExit) as exc:
         run_cli("pack")
     assert exc.value.code == 2
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_a_broken_community_pack_is_a_clean_error(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor
+
+    def broken(names: list[str] | None = None) -> list[Pack]:
+        raise PackError("installed pack 'cars' (cars_pack) failed to load: boom")
+
+    monkeypatch.setattr(extractor, "community_packs", broken)
+    code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert (code, out) == (1, "")
+    assert err == "jevex: error: pack: installed pack 'cars' (cars_pack) failed to load: boom\n"
