@@ -114,7 +114,11 @@ ORDER = [
 
 
 def book_site(
-    *, robots: str = "", seen: list[str] | None = None, broken: str | None = None
+    *,
+    robots: str = "",
+    seen: list[str] | None = None,
+    broken: str | None = None,
+    pages: dict[str, str] = CATALOGUE,
 ) -> SimpleFetcher:
     def handler(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
@@ -122,8 +126,8 @@ def book_site(
             seen.append(path)
         if path == "/robots.txt":
             return httpx2.Response(200, text=robots) if robots else httpx2.Response(404)
-        if path in CATALOGUE:
-            return httpx2.Response(200, text=CATALOGUE[path])
+        if path in pages:
+            return httpx2.Response(200, text=pages[path])
         slug = path.removeprefix("/catalogue/").removesuffix("/index.html")
         if slug == broken:
             return httpx2.Response(200, text="<html><body><h1>Gone</h1></body></html>")
@@ -216,18 +220,34 @@ async def test_books_corpus_writes_a_labelled_locked_sample(tmp_path: Path) -> N
         "labels": "markup",
     }
     slugs = [Path(p["path"]).stem for p in truth["pages"]]
-    assert len(slugs) == 3
-    assert slugs == [s for s in ORDER if s in slugs]  # catalogue order
+    # Seed 42's three, in catalogue order.
+    assert slugs == [
+        "a-light-in-the-attic_1000",
+        "soumission_998",
+        "sapiens-a-brief-history-of-humankind_996",
+    ]
     first = truth["pages"][0]
-    assert first["url"] == f"{BOOKS_URL}catalogue/{slugs[0]}/index.html"
+    assert first["url"] == f"{BOOKS_URL}catalogue/a-light-in-the-attic_1000/index.html"
     assert first["schema"] == "Book"
     assert first["content_type"] == "text/html"
-    assert len(first["records"]) == 1
-    assert first["records"][0]["entity"] == "document"
+    soumission = EXTRA_BOOKS["soumission_998"]
+    expected = {
+        "a-light-in-the-attic_1000": REAL_BOOKS["a-light-in-the-attic_1000"],
+        "soumission_998": book_values(product_page(*soumission)),
+        "sapiens-a-brief-history-of-humankind_996": REAL_BOOKS[
+            "sapiens-a-brief-history-of-humankind_996"
+        ],
+    }
+    for page, slug in zip(truth["pages"], slugs, strict=True):
+        assert page["records"] == [{"entity": "document", "values": expected[slug]}]
     # Pages are saved byte for byte, and only the sampled ones were fetched.
-    if slugs[0] in REAL_BOOKS:
-        saved = (out / first["path"]).read_bytes()
-        assert saved == (BOOK_FIXTURES / f"{slugs[0]}.html").read_bytes()
+    for page, slug in zip(truth["pages"], slugs, strict=True):
+        served = (
+            (BOOK_FIXTURES / f"{slug}.html").read_bytes()
+            if slug in REAL_BOOKS
+            else product_page(*EXTRA_BOOKS[slug]).encode()
+        )
+        assert (out / page["path"]).read_bytes() == served
     fetched = [p.removeprefix("/catalogue/").removesuffix("/index.html") for p in seen]
     assert sorted(s for s in fetched if s in ORDER) == sorted(slugs)
     assert seen[0] == "/robots.txt"
@@ -256,6 +276,15 @@ async def test_books_corpus_honours_robots_txt(tmp_path: Path) -> None:
     fetcher = book_site(robots="User-agent: *\nDisallow: /catalogue/\n")
     with pytest.raises(RobotsDisallowedError):
         await books_corpus(tmp_path / "books", sample=1, fetcher=fetcher)
+    assert not (tmp_path / "books").exists()
+
+
+async def test_a_catalogue_that_loops_is_refused(tmp_path: Path) -> None:
+    last = catalogue(["sapiens-a-brief-history-of-humankind_996"], "page-1.html")
+    looping = CATALOGUE | {"/catalogue/page-3.html": last}
+    stopped = r"stopped walking the catalogue at \S+/page-1\.html after 3 pages"
+    with pytest.raises(ValueError, match=stopped):
+        await books_corpus(tmp_path / "books", sample=1, fetcher=book_site(pages=looping))
     assert not (tmp_path / "books").exists()
 
 

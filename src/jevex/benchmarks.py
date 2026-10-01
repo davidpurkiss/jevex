@@ -347,7 +347,8 @@ async def books_corpus(
     ``fetcher`` defaults to a :class:`~jevex.fetch.SimpleFetcher` (robots.txt, one request
     a second), closed afterwards; a fetcher passed in is left open. ``out`` must be empty
     or not exist. Raises ``ValueError`` if the catalogue has fewer than ``sample`` books,
-    :class:`BookPageError` naming a page that can't be labelled, and
+    if its "next" links loop or run past :data:`MAX_CATALOGUE_PAGES`, :class:`BookPageError`
+    naming a page that can't be labelled, and
     :class:`~jevex.fetch.FetchError` (or its ``RobotsDisallowedError``) from fetching.
     Nothing is written until every page is fetched and labelled.
     """
@@ -366,6 +367,8 @@ async def books_corpus(
             document = await client.fetch(url)
             products, url = catalogue_page(html_text_of(document.content), document.url or url)
             catalogue.extend(products)
+        if url is not None:  # a loop or a runaway catalogue: sampling it would mislead
+            raise ValueError(f"stopped walking the catalogue at {url} after {len(seen)} pages")
         catalogue = list(dict.fromkeys(catalogue))  # a book listed twice counts once
         if len(catalogue) < sample:
             raise ValueError(f"the catalogue has {len(catalogue)} books, fewer than {sample}")

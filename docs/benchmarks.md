@@ -138,6 +138,9 @@ One command: `uv run benchmarks/run.py --all` (#63). It stops at the budget cap.
 - Hard caps via `JEVEX_JEV_MAX_COST_USD` and `JEVEX_LLM_MAX_COST_USD` (#32 and #72).
   Point `JEVEX_SPEND_LEDGER` at a file to make them cover every process in the run. The
   first full run is capped at **$25**; LLM-only strong takes most of it.
+- The runner passes each `PinnedModel`'s prices to its adapter (`prices=`), keyed by the
+  model the API reports as serving the call, so the cap counts every call. Without that,
+  a dated ID the library's price table lacks would be costed at nothing.
 - Live runs happen only under #72's rules. Results files never contain keys.
 - A dry run with `FakeJev` and a fake LLM checks the whole pipeline for free.
 - **Cadence:** on demand, not on every release. Rerun when a change is expected to move
