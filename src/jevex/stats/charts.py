@@ -111,7 +111,7 @@ svg.chart text.muted { fill: var(--text-muted); }
 svg.chart .grid { stroke: var(--grid); stroke-width: 1; }
 svg.chart .axis { stroke: var(--axis); stroke-width: 1; }
 svg.chart .wave { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
-svg.chart .learned { stroke: var(--series-3); stroke-width: 2; }
+svg.chart .learned { stroke: var(--text-primary); stroke-width: 2; }
 svg.chart .budget { stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 6 4; }
 svg.chart .line { fill: none; stroke: var(--accent); stroke-width: 2;
   stroke-linejoin: round; stroke-linecap: round; }

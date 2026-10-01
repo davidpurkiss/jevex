@@ -357,7 +357,9 @@ def test_mint_is_only_for_values_resolved_without_an_llm(theme: str) -> None:
 
     mint = {role for role, c in THEMES[theme].items() if minty(c)}
     assert mint == {f"series-{METHODS.index('generator') + 1}"}
-    assert "svg.chart .m-generator { fill: var(--series-3); }" in CHART_CSS
+    slot = f"var(--series-{METHODS.index('generator') + 1})"
+    rules = [rule for rule in CHART_CSS.split("\n") if slot in rule]
+    assert rules == ["svg.chart .m-generator { fill: var(--series-3); }"]
 
 
 def test_theme_css_puts_dark_behind_the_media_query_and_data_theme() -> None:

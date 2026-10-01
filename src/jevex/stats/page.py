@@ -43,15 +43,27 @@ MARK_SVG = (
 it follows the page's theme: four bars narrowing into the found value."""
 
 MARK_CSS = theme_css(
-    {"bar-1": "#c4b5fd", "bar-2": "#a78bfa", "bar-3": "#7c3aed", "bar-4": "#5b21b6"},
-    {"bar-1": "#5b21b6", "bar-2": "#7c3aed", "bar-3": "#a78bfa", "bar-4": "#ddd6fe"},
+    {
+        "bar-1": "#c4b5fd",
+        "bar-2": "#a78bfa",
+        "bar-3": "#7c3aed",
+        "bar-4": "#5b21b6",
+        "ring": "0.35",
+    },
+    {
+        "bar-1": "#5b21b6",
+        "bar-2": "#7c3aed",
+        "bar-3": "#a78bfa",
+        "bar-4": "#ddd6fe",
+        "ring": "0.45",
+    },
 ) + (
     ".mark .bar-1 { fill: var(--bar-1); } .mark .bar-2 { fill: var(--bar-2); }\n"
     ".mark .bar-3 { fill: var(--bar-3); } .mark .bar-4 { fill: var(--bar-4); }\n"
-    ".mark .value { fill: #34d399; } .mark .ring { stroke: #34d399; opacity: 0.4; }\n"
+    ".mark .value { fill: #34d399; } .mark .ring { stroke: #34d399; opacity: var(--ring); }\n"
 )
-"""The mark's bars in each theme, as in the brand's light and dark marks. The mint value
-is the brand's own."""
+"""The mark's bars and the opacity of the value's ring in each theme, as in the brand's
+light and dark marks. The mint value is the brand's own."""
 
 FAVICON = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'

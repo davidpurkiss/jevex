@@ -199,6 +199,9 @@ def test_the_header_carries_the_jevex_mark_in_both_themes() -> None:
         assert f"--bar-{i + 1}: {light[i]};" in css[0]
         assert f"--bar-{i + 1}: {dark[i]};" in css[1]
     assert light[4:] == dark[4:] == ["#34d399", "#34d399"]
+    for theme, file in ((css[0], "jevex-mark.svg"), (css[1], "jevex-mark-dark.svg")):
+        ring = list(ET.parse(BRAND / file).getroot().iter(f"{SVG_NS}circle"))[-1]
+        assert f"--ring: {ring.get('opacity')};" in theme
     assert ".mark .value { fill: #34d399; }" in MARK_CSS
     assert f"{PALETTE_CSS}{MARK_CSS}" in page
 
