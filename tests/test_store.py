@@ -422,7 +422,7 @@ async def test_spend_entries_oldest_first_with_filters(store: Store) -> None:
         (1.0, "llm", T0 + timedelta(hours=1)),
         (0.5, "llm", T0 + timedelta(hours=2)),
     ]
-    assert entries[2].note == "n" and entries[2].run_id == "r2"
+    assert (entries[2].note, entries[2].run_id) == ("n", "r2")
     assert [e.amount_usd for e in await store.spend_entries(kind="llm")] == [1.0, 0.5]
     assert [e.amount_usd for e in await store.spend_entries(since=T0 + timedelta(hours=1))] == [
         1.0,
@@ -476,7 +476,7 @@ async def test_documents_oldest_first_since_and_newest_limit(store: Store) -> No
 
 async def test_document_stats_need_aware_times(store: Store) -> None:
     with pytest.raises(ValueError, match="naive"):
-        await store.record_document(doc_stat("d", datetime(2026, 1, 1)))  # noqa: DTZ001
+        await store.record_document(doc_stat("d", datetime(2026, 1, 1)))
 
 
 async def test_tiny_jev_charges_add_up_exactly(store: Store) -> None:
