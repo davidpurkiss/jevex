@@ -1,6 +1,16 @@
 """jevex: extract typed records from web pages and PDFs using Jev."""
 
 from jevex._pdfium import UnreadablePdfError
+from jevex.baseline import (
+    Baseline,
+    BaselineError,
+    Check,
+    GateResult,
+    GateTolerances,
+    check_baseline,
+    corpus_digest,
+    ensure_comparable,
+)
 from jevex.budgets import BudgetEvent, Budgets, DocBudget, DocumentBudget, RunBudget, RunLedger
 from jevex.categorise import CategoriseStage, JevStatementClassifier, ToClassify
 from jevex.clean import BoilerplateCleaner, CleanStage
@@ -166,6 +176,8 @@ __all__ = [
     "BUILTIN_NORMALISERS",
     "ENTRY_POINT_GROUP",
     "BBox",
+    "Baseline",
+    "BaselineError",
     "BoilerplateCleaner",
     "BudgetEvent",
     "Budgets",
@@ -173,6 +185,7 @@ __all__ = [
     "CandidateStage",
     "CategoriseStage",
     "Changes",
+    "Check",
     "ChildFieldError",
     "CleanStage",
     "Component",
@@ -207,6 +220,8 @@ __all__ = [
     "FieldSpec",
     "FlatBlob",
     "FunctionNormaliser",
+    "GateResult",
+    "GateTolerances",
     "GateUnit",
     "GeneratorLearner",
     "GeneratorRecord",
@@ -307,11 +322,14 @@ __all__ = [
     "VerifiedExample",
     "__version__",
     "blank_rows",
+    "check_baseline",
     "community_packs",
     "compile_pack",
+    "corpus_digest",
     "cut_statement",
     "default_registry",
     "diff_packs",
+    "ensure_comparable",
     "evaluate",
     "example_id",
     "example_statement",

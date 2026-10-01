@@ -265,13 +265,26 @@ out of `--waves` aren't built.
 pages one at a time in order (letting learning finish after each), and reports accuracy,
 cost per document and LLM calls per document per batch, as CSV and as a self-contained
 HTML chart with the waves marked. `--llm` turns on the LLM fallback and learning; without
-it the replay runs on Jev alone. The curve counts what documents spend; what the learner
-spends between them isn't counted yet.
+it the replay runs on Jev alone. On a plain run, `--llm` turns on only the fallback. The
+curve counts what documents spend; what the learner spends between them isn't counted
+yet.
+
+`--gate BASELINE` turns any run into a regression check: it exits 1 if overall accuracy,
+or any field's accuracy, fell, or LLM calls per document rose, by more than the
+baseline's tolerances. `--write-baseline PATH` records a run as the baseline (a JSON file
+with the numbers, a digest of the corpus, and the tolerances). The default tolerances
+are 0.02 for accuracy, 0.05 per field and 0.1 LLM calls per document;
+`--max-accuracy-drop`, `--max-field-drop` (`none` turns it off) and `--max-llm-rise`
+change them. A baseline only gates runs of the same corpus and mode (plain or
+`--replay`). jevex's own CI gates a small test-site corpus replayed from recorded Jev and
+LLM answers (`tests/test_baseline.py`).
 
 ```sh
 jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing
 jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing \
     --replay --batch-size 20 --llm anthropic --csv curve.csv --html curve.html
+jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing \
+    --llm anthropic --write-baseline baseline.json   # then, later: --gate baseline.json
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the

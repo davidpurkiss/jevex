@@ -1,7 +1,8 @@
 """The ``jevex`` command line (spec: *Integration › CLI*).
 
 ``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
-``jevex eval`` scores a corpus (``--replay``: learning curves), ``jevex learn`` compiles
+``jevex eval`` scores a corpus (``--replay``: learning curves; ``--gate``: a regression
+gate against a baseline), ``jevex learn`` compiles
 logged examples into a pack diff, ``jevex pack export|import|diff`` moves learned state
 between stores and packs, and ``jevex testsite build|serve`` writes and serves the
 synthetic test site. The other commands are placeholders until their issues land. Uses
@@ -17,17 +18,27 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 from pydantic import BaseModel, ValidationError
 
 from jevex import __version__
+from jevex.baseline import (
+    Baseline,
+    BaselineError,
+    GateTolerances,
+    check_baseline,
+    corpus_digest,
+    ensure_comparable,
+)
 from jevex.budgets import Budgets, RunBudget
 from jevex.document import Document
-from jevex.eval import EvalReport, evaluate, load_corpus
+from jevex.eval import evaluate, load_corpus
 from jevex.extractor import Extractor
 from jevex.fetch import FetchError, SimpleFetcher
 from jevex.generators import InvalidGeneratorError
@@ -53,6 +64,8 @@ from jevex.testsite.waves import DEFAULT_WAVES, format_waves, parse_waves
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from jevex.baseline import EvalMode, GateResult
+    from jevex.eval import EvalReport
     from jevex.generators import GeneratorSpec
     from jevex.jev import JevClient
     from jevex.llm import LLM
@@ -171,7 +184,7 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
     }
 
 
-async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
+async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> EvalReport:
     schemas = [load_schema(s) for s in args.schema]
     try:
         corpus = load_corpus(args.corpus)
@@ -179,18 +192,25 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
         raise CliError(str(exc)) from exc
     if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
+    model = (llm or load_llm(args.llm)) if args.llm else None
     try:
-        extractor = Extractor(schemas, jev=jev)
-    except (ValueError, UnsupportedFieldError) as exc:
-        raise CliError(str(exc)) from exc
-    async with extractor:
         try:
-            concurrency = EVAL_CONCURRENCY if args.concurrency is None else args.concurrency
-            return await evaluate(extractor, corpus, concurrency=max(1, concurrency))
-        except ValueError as exc:
+            extractor = Extractor(schemas, jev=jev, extraction_llm=model)
+        except (ValueError, UnsupportedFieldError) as exc:
             raise CliError(str(exc)) from exc
-        except JevError as exc:  # the spend cap or the API itself: the run can't be scored
-            raise CliError(f"Jev: {exc}") from exc
+        async with extractor:
+            try:
+                concurrency = EVAL_CONCURRENCY if args.concurrency is None else args.concurrency
+                return await evaluate(extractor, corpus, concurrency=max(1, concurrency))
+            except ValueError as exc:
+                raise CliError(str(exc)) from exc
+            except JevError as exc:  # the spend cap or the API itself: the run can't be scored
+                raise CliError(f"Jev: {exc}") from exc
+    finally:
+        # The extractor doesn't close an LLM it's given; an adapter built here is ours.
+        close = getattr(model, "aclose", None) if llm is None else None
+        if close is not None:
+            await close()
 
 
 async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> ReplayReport:
@@ -245,6 +265,85 @@ def _write_replay(args: argparse.Namespace, replayed: ReplayReport) -> list[str]
             raise CliError(str(exc)) from exc
         written.append(f"wrote {out}")
     return written
+
+
+TOLERANCE_FLAGS = {
+    "max_accuracy_drop": ("--max-accuracy-drop", "accuracy_drop"),
+    "max_field_drop": ("--max-field-drop", "field_accuracy_drop"),
+    "max_llm_rise": ("--max-llm-rise", "llm_rate_rise"),
+}
+"""argparse dest → (flag, :class:`~jevex.baseline.GateTolerances` field)."""
+
+
+@dataclass(frozen=True)
+class _GatePlan:
+    """What ``--gate`` or ``--write-baseline`` will do after the run, worked out before it
+    so a bad baseline or path fails before anything is spent."""
+
+    corpus: str
+    mode: EvalMode
+    tolerances: GateTolerances
+    baseline: Baseline | None
+    """The baseline to gate against (``--gate``); ``None`` when writing one."""
+
+
+def _plan_gate(args: argparse.Namespace) -> _GatePlan | None:
+    if args.gate is None and args.write_baseline is None:
+        return None
+    mode: EvalMode = "replay" if args.replay else "eval"
+    try:
+        corpus = corpus_digest(args.corpus)
+    except (OSError, ValueError) as exc:
+        raise CliError(str(exc)) from exc
+    overrides = {
+        field: getattr(args, dest)
+        for dest, (_, field) in TOLERANCE_FLAGS.items()
+        if hasattr(args, dest)
+    }
+    try:
+        if args.gate is not None:
+            baseline = Baseline.load(args.gate)
+            tolerances = baseline.tolerances.model_copy(update=overrides)
+            ensure_comparable(baseline, corpus=corpus, mode=mode)
+            return _GatePlan(corpus, mode, tolerances, baseline)
+        target = Path(args.write_baseline)
+        if not target.parent.is_dir():
+            raise CliError(f"no such directory for {target}")
+        # Re-recording a baseline keeps the tolerances the old one set.
+        previous = Baseline.load(target).tolerances if target.exists() else GateTolerances()
+    except BaselineError as exc:
+        raise CliError(str(exc)) from exc
+    return _GatePlan(corpus, mode, previous.model_copy(update=overrides), None)
+
+
+def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, err: TextIO) -> int:
+    """Check or write the baseline; print what happened to ``err``. Returns the exit code."""
+    if plan.baseline is None:
+        if report.failed:
+            raise CliError("not writing a baseline: documents failed (see above)")
+        baseline = Baseline.from_report(
+            report, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+        )
+        try:
+            baseline.write(args.write_baseline)
+        except OSError as exc:
+            raise CliError(str(exc)) from exc
+        print(f"jevex: wrote baseline {args.write_baseline}", file=err)
+        return EXIT_OK
+    result = check_baseline(
+        report, plan.baseline, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+    )
+    print(format_gate(result, args.gate), file=err, end="")
+    return EXIT_OK if result.passed else EXIT_ERROR
+
+
+def format_gate(result: GateResult, baseline: str) -> str:
+    """One line for a passed gate; for a failed one, a line per regression."""
+    if result.passed:
+        return f"jevex: gate passed against {baseline} ({len(result.checks)} checks)\n"
+    lines = [f"jevex: error: gate failed against {baseline}:"]
+    lines += [f"  {c.describe()}" for c in result.regressions]
+    return "\n".join(lines) + "\n"
 
 
 LLM_PROVIDERS = ("anthropic", "openai", "gemini", "litellm")
@@ -601,6 +700,17 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _rate(text: str) -> float:
+    value = float(text)
+    if not (math.isfinite(value) and value >= 0):
+        raise argparse.ArgumentTypeError(f"must be a number, 0 or more, not {text}")
+    return value
+
+
+def _field_drop(text: str) -> float | None:
+    return None if text.strip().lower() == "none" else _probability(text)
+
+
 def _probability(text: str) -> float:
     value = float(text)
     if not 0.0 <= value <= 1.0:
@@ -681,10 +791,51 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument(
         "--llm",
         metavar="PROVIDER[:MODEL]",
-        help="Replay with this LLM for the fallback and learning: "
+        help="Use this LLM for the fallback (and, with --replay, for learning): "
         f"{', '.join(LLM_PROVIDERS)} (anthropic defaults to {ANTHROPIC_MODEL}). "
-        "Without it the replay runs on Jev alone",
+        "Without it the run uses Jev alone",
     )
+    baseline = evaluate.add_mutually_exclusive_group()
+    baseline.add_argument(
+        "--gate",
+        metavar="BASELINE",
+        help="Fail (exit 1) if accuracy drops or the LLM-call rate rises beyond the "
+        "baseline's tolerances; the result goes to stderr",
+    )
+    baseline.add_argument(
+        "--write-baseline",
+        metavar="PATH",
+        help="Write this run as the baseline for --gate (an existing one keeps its "
+        "tolerances unless the flags below change them)",
+    )
+    defaults = GateTolerances()
+    for dest, (flag, _), help_text in (
+        (
+            "max_accuracy_drop",
+            TOLERANCE_FLAGS["max_accuracy_drop"],
+            "Overall accuracy may fall this much, as a fraction "
+            f"(default {defaults.accuracy_drop})",
+        ),
+        (
+            "max_field_drop",
+            TOLERANCE_FLAGS["max_field_drop"],
+            "Each field's accuracy may fall this much; 'none' checks only the overall "
+            f"(default {defaults.field_accuracy_drop})",
+        ),
+        (
+            "max_llm_rise",
+            TOLERANCE_FLAGS["max_llm_rise"],
+            f"LLM calls per document may rise this much (default {defaults.llm_rate_rise})",
+        ),
+    ):
+        evaluate.add_argument(
+            flag,
+            dest=dest,
+            type={"max_field_drop": _field_drop, "max_llm_rise": _rate}.get(dest, _probability),
+            default=argparse.SUPPRESS,
+            metavar="X",
+            help=f"{help_text}; with --gate it overrides the baseline's",
+        )
 
     learn = commands.add_parser(
         "learn",
@@ -829,11 +980,11 @@ def main(
     """Run the CLI and return its exit code.
 
     0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``),
-    including ``jevex eval`` runs (and replays) where any document failed (the report is
-    still printed).
+    including ``jevex eval`` runs (and replays) where any document failed or ``--gate``
+    found a regression (the report is still printed).
     2: a usage error, no command, or a command that isn't implemented yet.
-    ``jev``, ``llm`` (``jevex learn``'s generator LLM), ``out`` and ``err`` are injectable
-    for tests.
+    ``jev``, ``llm`` (the ``--llm`` of ``jevex learn`` and ``jevex eval``), ``out`` and
+    ``err`` are injectable for tests.
     """
     stdout: TextIO = out or sys.stdout
     stderr: TextIO = err or sys.stderr
@@ -855,13 +1006,17 @@ def main(
                 ("--batch-size", args.batch_size),
                 ("--csv", args.csv),
                 ("--html", args.html),
-                ("--llm", args.llm),
             )
             if value is not None
         ]
         if given:
             parser.error(f"{', '.join(given)} only apply with --replay")
+    if args.command == "eval" and args.gate is None and args.write_baseline is None:
+        given = [flag for dest, (flag, _) in TOLERANCE_FLAGS.items() if hasattr(args, dest)]
+        if given:
+            parser.error(f"{', '.join(given)} only apply with --gate or --write-baseline")
     try:
+        plan = _plan_gate(args) if args.command == "eval" else None
         if args.command == "eval" and args.replay:
             if args.batch_size is None:
                 args.batch_size = REPLAY_BATCH_SIZE
@@ -876,9 +1031,10 @@ def main(
                 stdout.write(format_report(replayed.report) + "\n".join(written) + "\n")
             for doc in replayed.failed:
                 print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
-            return EXIT_ERROR if replayed.failed else EXIT_OK
+            gated = EXIT_OK if plan is None else _finish_gate(args, plan, replayed.report, stderr)
+            return EXIT_ERROR if replayed.failed else gated
         if args.command == "eval":
-            report = asyncio.run(_eval(args, jev))
+            report = asyncio.run(_eval(args, jev, llm))
             if args.json:
                 json.dump(report.to_dict(), stdout, indent=2, ensure_ascii=False)
                 stdout.write("\n")
@@ -886,8 +1042,9 @@ def main(
                 stdout.write(format_report(report))
             for doc in report.failed:
                 print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
+            gated = EXIT_OK if plan is None else _finish_gate(args, plan, report, stderr)
             # A run with failed documents isn't a clean measurement, even though it's scored.
-            return EXIT_ERROR if report.failed else EXIT_OK
+            return EXIT_ERROR if report.failed else gated
         if args.command == "pack":
             if args.pack_command == "diff":
                 changes = asyncio.run(_pack_diff(args))

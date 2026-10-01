@@ -502,9 +502,7 @@ def test_cli_replay_json(site: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert data["summary"]["accuracy"] == 1.0
 
 
-@pytest.mark.parametrize(
-    "flags", [["--csv", "x.csv"], ["--html", "x.html"], ["--batch-size", "3"], ["--llm", "openai"]]
-)
+@pytest.mark.parametrize("flags", [["--csv", "x.csv"], ["--html", "x.html"], ["--batch-size", "3"]])
 def test_cli_replay_flags_need_replay(
     site: Path, monkeypatch: pytest.MonkeyPatch, flags: list[str]
 ) -> None:
