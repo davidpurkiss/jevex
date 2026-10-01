@@ -268,6 +268,17 @@ async def test_a_confident_answer_after_unsure_ones_is_stored_and_resets_the_cou
     assert await store.count_unsure_key_paths(fp, "Car", ["model"]) == {"model": 1}
 
 
+async def test_without_a_store_a_confident_answer_resets_the_unsure_count() -> None:
+    mapper = KeyPathMapper()
+    for _ in range(2):
+        await extract(mapper, mapping_jev(confidence=0.4))
+    key = (flatten(page_blob(CAR)).fingerprint, "Car")
+    counts = mapper._unsure[key]  # pyright: ignore[reportPrivateUsage]
+    assert counts["model"] == 2
+    await extract(mapper, mapping_jev(confidence=0.9))
+    assert counts == {}  # every path is mapped now
+
+
 async def test_unsure_counts_are_per_schema() -> None:
     class Other(BaseModel):
         """Something else on the page."""
