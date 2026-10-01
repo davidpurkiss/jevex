@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from jevex import __version__
 from jevex._pdfium import UnreadablePdfError
-from jevex.document import Document
+from jevex.document import LOCALE_TAG, Document
 from jevex.extractor import Extractor, document_stat
 from jevex.images import UnreadableImageError
 from jevex.jev import JevBudgetExceededError, JevClient, JevError
@@ -76,7 +76,9 @@ class UnknownSchemaError(ValueError):
 class DocumentIn(BaseModel):
     """A document as ``POST /extract`` takes it. ``content`` is base64; without a
     ``content_type`` it's sniffed from the bytes (:meth:`Document.from_bytes`, which also
-    drops parameters such as ``; charset=utf-8``)."""
+    drops parameters such as ``; charset=utf-8``). ``content_language`` is the page's
+    ``Content-Language`` header and ``locale`` the caller's override (see
+    :class:`~jevex.Document`)."""
 
     model_config = ConfigDict(frozen=True, val_json_bytes="base64")
 
@@ -85,6 +87,8 @@ class DocumentIn(BaseModel):
     url: str | None = None
     fetched_at: datetime | None = None
     site: str | None = None
+    content_language: str | None = None
+    locale: str | None = Field(default=None, pattern=LOCALE_TAG)
 
     def to_document(self) -> Document:
         return Document.from_bytes(
@@ -93,6 +97,8 @@ class DocumentIn(BaseModel):
             content_type=self.content_type,
             fetched_at=self.fetched_at,
             site=self.site,
+            content_language=self.content_language,
+            locale=self.locale,
         )
 
 

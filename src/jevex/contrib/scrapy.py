@@ -67,7 +67,8 @@ class AsyncioRequiredError(RuntimeError):
 
 
 def document_from_response(response: Response, *, site: str | None = None) -> Document:
-    """The response as a :class:`~jevex.document.Document`: its body, URL and media type.
+    """The response as a :class:`~jevex.document.Document`: its body, URL, media type and
+    ``Content-Language``.
 
     The media type comes from the ``Content-Type`` header. Without one, or when it's
     ``application/octet-stream`` (as servers often send PDFs), it's sniffed from the bytes,
@@ -82,12 +83,14 @@ def document_from_response(response: Response, *, site: str | None = None) -> Do
             or mimetypes.guess_type(response.url)[0]
             or content_type
         )
+    language = response.headers.get(b"Content-Language")
     return Document.from_bytes(
         response.body,
         url=response.url,
         content_type=content_type or None,
         fetched_at=datetime.now(UTC),
         site=site,
+        content_language=language.decode("latin-1") if language else None,
     )
 
 

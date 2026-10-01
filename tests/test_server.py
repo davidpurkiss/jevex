@@ -172,6 +172,7 @@ def test_unknown_schemas_are_422(client: TestClient, payload: dict[str, Any], de
         {"document": {"content": "not base64!"}, "schema": "Book"},
         {"document": {"content": "PGh0bWw+"}},
         {"schema": "Book"},
+        body(locale="German"),
     ],
 )
 def test_bad_requests_are_422(client: TestClient, payload: dict[str, Any]) -> None:
@@ -370,3 +371,12 @@ def test_request_model_takes_one_name_or_several() -> None:
     assert one.schema_names() == ["Book"]
     assert several.schema_names() == ["Author", "Book"]
     assert one.document.to_document().content == b"<html>"
+
+
+def test_a_documents_language_reaches_the_extractor() -> None:
+    request = ExtractRequest.model_validate(
+        body(content_language="de-DE, en", locale="de-AT", content_type="text/html")
+    )
+    document = request.document.to_document()
+    assert (document.content_language, document.locale) == ("de-DE, en", "de-AT")
+    assert DocumentIn(content=HTML).to_document().locale is None

@@ -144,6 +144,17 @@ def test_document_from_response_falls_back_to_the_url_extension() -> None:
     assert document_from_response(response).content_type == "application/pdf"
 
 
+def test_document_from_response_takes_the_content_language() -> None:
+    response = HtmlResponse(
+        url="https://books.example/dune",
+        body=HTML,
+        headers={"Content-Type": "text/html", "Content-Language": "de-DE"},
+    )
+    assert document_from_response(response).content_language == "de-DE"
+    plain = HtmlResponse(url="https://books.example/dune", body=HTML)
+    assert document_from_response(plain).content_language is None
+
+
 def test_document_from_response_keeps_octet_stream_when_nothing_says_more() -> None:
     response = Response(
         url="https://books.example/blob",

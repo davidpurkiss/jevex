@@ -78,6 +78,14 @@ async def test_fetch_returns_a_document() -> None:
     assert doc.fetched_at is not None
 
 
+async def test_fetch_keeps_the_content_language() -> None:
+    german = httpx2.Response(200, content=b"<p>Hallo</p>", headers={"content-language": "de-DE"})
+    doc = await fetcher(site(extra={"example.com/de": german})).fetch("https://example.com/de")
+    assert doc.content_language == "de-DE"
+    plain = await fetcher(site()).fetch("https://example.com/page")
+    assert plain.content_language is None
+
+
 async def test_non_2xx_raises() -> None:
     with pytest.raises(FetchError, match="HTTP 404"):
         await fetcher(site()).fetch("https://example.com/missing")
