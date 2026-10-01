@@ -393,10 +393,10 @@ class Extractor:
         store's learned generators are used whether or not learning is on.
 
         ``learn_mode`` says when learning runs (:data:`~jevex.learn.LearnMode`). In
-        ``"compile"`` mode documents only log those examples to the store (which must be
-        given), with or without a ``generator_llm``, and :meth:`compile_pack` (``jevex
-        learn``) learns from them later. ``"hybrid"`` learns inline like ``"inline"``;
-        :meth:`compile_pack` then gathers what was learned into a reviewable pack diff."""
+        ``"compile"`` mode documents only log those examples to the store, with or without a
+        ``generator_llm``, and :meth:`compile_pack` (``jevex learn``) learns from them
+        later. ``"hybrid"`` learns inline like ``"inline"``; :meth:`compile_pack` then
+        gathers what was learned into a reviewable pack diff. Both need a ``store``."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -431,8 +431,11 @@ class Extractor:
         self.learn_mode: LearnMode = learn_mode
         if learn_mode not in get_args(LearnMode):
             raise ValueError(f"learn_mode must be one of {get_args(LearnMode)}, got {learn_mode!r}")
-        if learn_mode == "compile" and store is None:
-            raise ValueError("learn_mode='compile' logs examples to a store: pass store=")
+        if learn_mode != "inline" and store is None:
+            # Without one, the examples and generators would be lost with the process.
+            raise ValueError(
+                f"learn_mode={learn_mode!r} keeps what it learns in a store: pass store="
+            )
         if not 0 <= learn_threshold <= 1:
             raise ValueError(f"learn_threshold must be between 0 and 1, got {learn_threshold}")
 

@@ -213,8 +213,9 @@ class Context:
     verified: list[VerifiedExample] = field(default_factory=list["VerifiedExample"])
     """LLM answers that passed Jev verification on this document, queued for learning."""
     learner: Learner | None = None
-    """The extractor's learner (set with a ``generator_llm``): the learn stage hands it
-    :attr:`verified`. ``None`` turns learning off."""
+    """The extractor's learner (a ``GeneratorLearner`` with a ``generator_llm``, or an
+    ``ExampleLogger`` in ``compile`` mode): the learn stage hands it :attr:`verified`.
+    ``None`` turns learning off."""
     generators: GeneratorSnapshot | None = None
     """The learned generators this document runs with, taken when it starts: generators
     learned meanwhile are for later documents. ``None``: only the stages' own."""

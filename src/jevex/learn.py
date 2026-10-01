@@ -777,7 +777,8 @@ async def compile_pack(learner: GeneratorLearner, pack: Sequence[GeneratorSpec] 
 class LearnStage:
     """Hands the document's verified examples (``ctx.verified``) to the learner.
 
-    ``learner=None`` uses ``ctx.learner`` (set by an extractor with a ``generator_llm``);
+    ``learner=None`` uses ``ctx.learner`` (the extractor's: a :class:`GeneratorLearner`
+    with a ``generator_llm``, or an :class:`ExampleLogger` in ``compile`` mode);
     with neither, the stage does nothing.
     """
 

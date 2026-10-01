@@ -221,10 +221,32 @@ async def _learn(args: argparse.Namespace, jev: JevClient | None, llm: LLM | Non
     pack = await asyncio.to_thread(_learn_files, Path(args.out), args.pack)
     if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex learn tests generators with Jev)")
-    generator_llm = llm or load_llm(args.llm)
     run = None
     if args.max_spend is not None or args.max_jev_spend is not None:
         run = RunBudget(max_spend=args.max_spend, max_jev_spend=args.max_jev_spend, period="run")
+    generator_llm = llm or load_llm(args.llm)
+    try:
+        diff = await _compile(args, schemas, pack, jev, generator_llm, Budgets(run=run))
+    finally:
+        # The extractor doesn't close an LLM it's given; an adapter built here is ours.
+        close = getattr(generator_llm, "aclose", None) if llm is None else None
+        if close is not None:
+            await close()
+    try:
+        await asyncio.to_thread(diff.write, Path(args.out))
+    except OSError as exc:
+        raise CliError(str(exc)) from exc
+    return diff
+
+
+async def _compile(
+    args: argparse.Namespace,
+    schemas: list[type[BaseModel]],
+    pack: list[GeneratorSpec],
+    jev: JevClient | None,
+    generator_llm: LLM,
+    budgets: Budgets,
+) -> PackDiff:
     try:
         extractor = Extractor(
             schemas,
@@ -232,22 +254,17 @@ async def _learn(args: argparse.Namespace, jev: JevClient | None, llm: LLM | Non
             store=args.store,
             generator_llm=generator_llm,
             learn_threshold=args.learn_threshold,
-            budgets=Budgets(run=run),
+            budgets=budgets,
         )
     except (ValueError, UnsupportedFieldError) as exc:
         raise CliError(str(exc)) from exc
     async with extractor:
         try:
-            diff = await extractor.compile_pack(pack)
+            return await extractor.compile_pack(pack)
         except StoreError as exc:
             raise CliError(f"store: {exc}") from exc
         except JevError as exc:
             raise CliError(f"Jev: {exc}") from exc
-    try:
-        await asyncio.to_thread(diff.write, Path(args.out))
-    except OSError as exc:
-        raise CliError(str(exc)) from exc
-    return diff
 
 
 def format_diff(diff: PackDiff, out: str) -> str:

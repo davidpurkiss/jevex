@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from jevex import Context, GeneratorRecord, GeneratorSpec, VerifiedExample
+from jevex import Context, GeneratorRecord, GeneratorSpec, VerifiedExample, cli
 from jevex.cli import CliError, load_llm, load_schema, main
 from jevex.generators import GeneratorRegistry
 from jevex.jev import Choice
@@ -465,3 +465,28 @@ def test_load_llm_reports_a_client_that_wont_start(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(AnthropicLLM, "__init__", no_key)
     with pytest.raises(CliError, match="--llm anthropic:claude-opus-5-5: no API key"):
         load_llm("anthropic:claude-opus-5-5")
+
+
+def test_learn_closes_the_llm_it_builds(
+    logged: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class ClosingLLM(FakeLLM):
+        closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    built = ClosingLLM([{"regex": "(", "group": 0, "normalise": []}])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    argv = ["learn", "--schema", CAR, "--store", logged, "--out", str(tmp_path / "o")]
+    code = main(argv, jev=FakeJev().client(), out=io.StringIO(), err=io.StringIO())
+    assert code == 0
+    assert built.closed
+    injected = ClosingLLM([{"regex": "(", "group": 0, "normalise": []}])
+    main([*argv[:-1], str(tmp_path / "o2")], jev=FakeJev().client(), llm=injected,
+         out=io.StringIO(), err=io.StringIO())  # fmt: skip
+    assert not injected.closed  # the caller's to close

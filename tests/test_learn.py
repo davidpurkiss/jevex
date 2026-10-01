@@ -772,7 +772,11 @@ async def test_compile_mode_logs_only_examples_at_the_learn_threshold() -> None:
 
 async def test_hybrid_mode_learns_inline() -> None:
     async with Extractor(
-        [Car], jev=FakeJev().client(), generator_llm=FakeLLM([]), learn_mode="hybrid"
+        [Car],
+        jev=FakeJev().client(),
+        store=":memory:",
+        generator_llm=FakeLLM([]),
+        learn_mode="hybrid",
     ) as extractor:
         assert isinstance(await extractor.learner(), GeneratorLearner)
 
@@ -780,8 +784,10 @@ async def test_hybrid_mode_learns_inline() -> None:
 def test_the_extractor_checks_the_learn_mode() -> None:
     with pytest.raises(ValueError, match="learn_mode must be one of"):
         Extractor([Car], learn_mode="batch")  # pyright: ignore[reportArgumentType]
-    with pytest.raises(ValueError, match="pass store="):
+    with pytest.raises(ValueError, match="learn_mode='compile' keeps what it learns"):
         Extractor([Car], generator_llm=FakeLLM([]), learn_mode="compile")
+    with pytest.raises(ValueError, match="learn_mode='hybrid' keeps what it learns"):
+        Extractor([Car], generator_llm=FakeLLM([]), learn_mode="hybrid")
     with pytest.raises(ValueError, match="learn_threshold"):
         Extractor([Car], store=":memory:", learn_mode="compile", learn_threshold=2)
 
