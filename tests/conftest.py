@@ -57,7 +57,10 @@ def typesafe_api_key() -> str:
 def postgres_url() -> Iterator[str]:
     """A Postgres server for the store tests: ``JEVEX_TEST_POSTGRES_URL`` if set, else a
     bundled one (``pixeltable-pgserver``, a dev dependency) on a unix socket, which the
-    network block allows. Skips when neither is available."""
+    network block allows. Skips when neither is available.
+
+    The URL must be a throwaway database: tests create and drop schemas there, including
+    ``jevex``, the default schema's learned state."""
     url = os.environ.get("JEVEX_TEST_POSTGRES_URL")
     if url:
         yield url

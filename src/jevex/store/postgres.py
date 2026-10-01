@@ -18,9 +18,12 @@ waits for it. So a charge recorded by a document being cancelled still counts.
 The store's connection pool belongs to the event loop that first used it: use a store
 from one event loop, and open one per process (don't share it across a fork).
 
-Limits: Postgres text can't hold NUL characters, so a record containing one (in a
-statement, or a string inside a JSON value) is refused with a :class:`StoreError`.
-JSON values are stored as ``jsonb``, so NaN and infinite floats are refused too.
+JSON values (specs, scopes, example values and context, normaliser chains) are stored
+as ``json``, which keeps the text as written, so they come back as SQLite returns them.
+
+Limits: Postgres text can't hold NUL characters, so a record with one in a text column
+(a statement, an id, a field name...) is refused with a :class:`StoreError`, as is a
+JSON value holding a NaN or infinite float.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from typing import TYPE_CHECKING, Any, LiteralString
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
+from psycopg.types.json import Json
 from psycopg_pool import AsyncConnectionPool
 from pydantic_core import to_jsonable_python
 
@@ -61,8 +64,8 @@ _SCHEMA: LiteralString = """
 CREATE TABLE {s}.generators (
     id TEXT PRIMARY KEY,
     field TEXT NOT NULL,
-    spec JSONB NOT NULL,
-    scope JSONB NOT NULL,
+    spec JSON NOT NULL,
+    scope JSON NOT NULL,
     created_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX generators_field ON {s}.generators (field, created_at);
@@ -76,7 +79,7 @@ CREATE TABLE {s}.key_mappings (
     schema_name TEXT NOT NULL,
     path TEXT NOT NULL,
     field TEXT,
-    normalisers JSONB NOT NULL,
+    normalisers JSON NOT NULL,
     unsure BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (fingerprint, schema_name, path)
@@ -94,10 +97,10 @@ CREATE TABLE {s}.examples (
     id TEXT PRIMARY KEY,
     field TEXT NOT NULL,
     statement TEXT NOT NULL,
-    value JSONB NOT NULL,
+    value JSON NOT NULL,
     evidence_start INTEGER,
     evidence_end INTEGER,
-    context JSONB NOT NULL,
+    context JSON NOT NULL,
     source TEXT NOT NULL,
     probability DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL
@@ -157,8 +160,8 @@ def _nano_cap(usd: float) -> int:
     return min(round(usd * _NANO), _INT64_MAX)
 
 
-def _jsonb(value: Any) -> Jsonb:
-    return Jsonb(to_jsonable_python(value))
+def _json(value: Any) -> Json:
+    return Json(to_jsonable_python(value))
 
 
 def _settle(task: asyncio.Task[Any]) -> None:
@@ -258,6 +261,9 @@ class PostgresStore:
                     min_size=self._min_size,
                     max_size=self._max_size,
                     timeout=self._timeout_s,
+                    # Replaces connections dropped while idle (a server restart, a proxy's
+                    # idle timeout) instead of failing the next operation on them.
+                    check=AsyncConnectionPool.check_connection,
                     name=f"jevex-store-{self.db_schema}",
                     open=False,
                 )
@@ -307,8 +313,8 @@ class PostgresStore:
         params = (
             generator.id,
             generator.field,
-            _jsonb(generator.spec),
-            _jsonb(generator.scope),
+            _json(generator.spec),
+            _json(generator.scope),
             _aware(generator.created_at),
         )
 
@@ -382,7 +388,7 @@ class PostgresStore:
         params = (
             *key,
             mapping.field,
-            _jsonb(mapping.normalisers),
+            _json(mapping.normalisers),
             mapping.unsure,
             _aware(mapping.created_at),
         )
@@ -458,10 +464,10 @@ class PostgresStore:
             example.id,
             example.field,
             example.statement,
-            _jsonb(example.value),
+            _json(example.value),
             start,
             end,
-            _jsonb(example.context),
+            _json(example.context),
             example.source,
             example.probability,
             _aware(example.created_at),

@@ -230,6 +230,15 @@ def test_an_unsure_key_mapping_maps_to_no_field() -> None:
 # --- examples ------------------------------------------------------------------------
 
 
+async def test_json_values_come_back_as_written(store: Store) -> None:
+    value = {"big": 1e20, "huge_int": 2**70, "nul": "a\x00b", "nested": [1.0, None, "é"]}
+    await store.add_example(VerifiedExample(id="e1", field="S.f", statement="s", value=value))
+    [example] = await store.examples("S.f")
+    assert example.value == value
+    assert isinstance(example.value["big"], float)
+    assert isinstance(example.value["nested"][0], float)
+
+
 async def test_examples_newest_first_with_limit(store: Store) -> None:
     for i in range(3):
         await store.add_example(

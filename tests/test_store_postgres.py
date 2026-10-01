@@ -155,7 +155,8 @@ def test_an_unreachable_server_is_a_store_error_without_the_password() -> None:
 async def test_times_come_back_in_utc_whatever_the_session_zone(
     postgres_url: str, pg_schema: str
 ) -> None:
-    url = f"{postgres_url}&options=-c%20TimeZone%3DAsia%2FTokyo"
+    sep = "&" if "?" in postgres_url else "?"
+    url = f"{postgres_url}{sep}options=-c%20TimeZone%3DAsia%2FTokyo"
     store = PostgresStore(url, db_schema=pg_schema)
     await store.put_key_mapping(
         KeyMapping(fingerprint="fp", schema="S", path="$.a", field="a", created_at=T0)
@@ -174,8 +175,8 @@ async def test_a_failed_write_rolls_back_and_the_store_keeps_working(
     with pytest.raises(StoreError, match="NUL"):
         await store.add_example(bad)
     assert await store.examples("S.f") == []
-    with pytest.raises(StoreError, match="0000"):  # jsonb refuses NUL too
-        await store.put_generator(gen("g1", spec={"regex": "\x00"}))
+    with pytest.raises(StoreError):
+        await store.put_generator(gen("g1", spec={"bad": float("nan")}))
     assert await store.get_generator("g1") is None
     await store.add_example(VerifiedExample(id="e2", field="S.f", statement="9.1 s", value=9.1))
     assert [e.id for e in await store.examples("S.f")] == ["e2"]
