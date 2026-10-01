@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,7 +23,11 @@ _MAGIC: tuple[tuple[bytes, str], ...] = (
 
 
 class Document(BaseModel):
-    """A fetched document. jevex takes documents, not URLs, so any crawler can supply them."""
+    """A fetched document. jevex takes documents, not URLs, so any crawler can supply them.
+
+    ``site`` names where the document came from when its URL doesn't say (a local file, or
+    several hosts that are one site); it overrides the URL's host as :attr:`source`.
+    """
 
     # Bytes travel as base64 in JSON (e.g. the `jevex serve` API).
     model_config = ConfigDict(frozen=True, ser_json_bytes="base64", val_json_bytes="base64")
@@ -31,6 +36,7 @@ class Document(BaseModel):
     content_type: str
     url: str | None = None
     fetched_at: datetime | None = None
+    site: str | None = None
 
     @classmethod
     def from_bytes(
@@ -40,6 +46,7 @@ class Document(BaseModel):
         url: str | None = None,
         content_type: str | None = None,
         fetched_at: datetime | None = None,
+        site: str | None = None,
     ) -> Document:
         """Build a document, sniffing the content type from the bytes if not given."""
         return cls(
@@ -51,15 +58,37 @@ class Document(BaseModel):
             ),
             url=url,
             fetched_at=fetched_at,
+            site=site,
         )
 
     @classmethod
-    def from_path(cls, path: str | Path, *, url: str | None = None) -> Document:
+    def from_path(
+        cls, path: str | Path, *, url: str | None = None, site: str | None = None
+    ) -> Document:
         """Read a local file, using its extension when the bytes don't say what it is."""
         path = Path(path)
         content = path.read_bytes()
         content_type = sniff_content_type(content) or mimetypes.guess_type(path)[0]
-        return cls.from_bytes(content, url=url, content_type=content_type)
+        return cls.from_bytes(content, url=url, content_type=content_type, site=site)
+
+    @property
+    def source(self) -> str | None:
+        """Where the document came from, as generator scopes name it (``Scope.sources``).
+
+        ``site`` if given, else the URL's host; both pass through :func:`normalise_source`,
+        so ``https://WWW.Example.com:8080/a`` is ``example.com``. Subdomains are distinct
+        sources (``shop.example.com`` isn't ``example.com``). ``None`` when neither is
+        known (an unparseable URL has no host), and then no source-scoped generator runs.
+        """
+        if self.site and self.site.strip():
+            return normalise_source(self.site)
+        if not self.url:
+            return None
+        try:
+            host = urlsplit(self.url).hostname
+        except ValueError:  # e.g. unbalanced IPv6 brackets
+            return None
+        return normalise_source(host) if host else None
 
     @property
     def is_html(self) -> bool:
@@ -72,6 +101,12 @@ class Document(BaseModel):
     @property
     def is_image(self) -> bool:
         return self.content_type.startswith("image/")
+
+
+def normalise_source(source: str) -> str:
+    """A source as scopes compare it: trimmed, lower-cased, without a leading ``www.``
+    or trailing dot."""
+    return source.strip().lower().rstrip(".").removeprefix("www.")
 
 
 def sniff_content_type(content: bytes) -> str | None:

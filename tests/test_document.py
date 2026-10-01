@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from jevex import Document
-from jevex.document import sniff_content_type
+from jevex.document import normalise_source, sniff_content_type
 
 
 @pytest.mark.parametrize(
@@ -64,3 +64,40 @@ def test_document_is_immutable_and_round_trips() -> None:
     assert '"content":"iVBORw0KGgo="' in doc.model_dump_json()
     with pytest.raises(ValidationError):
         doc.url = "https://example.com"  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.mark.parametrize(
+    ("url", "site", "expected"),
+    [
+        ("https://WWW.Example.com:8080/cars/1?x=y", None, "example.com"),
+        ("https://shop.example.com/a", None, "shop.example.com"),
+        ("https://example.com./a", None, "example.com"),
+        ("https://example.com/a", "Acme-Motors", "acme-motors"),
+        (None, "www.Example.com", "example.com"),
+        ("https://example.com/a", "  ", "example.com"),
+        ("file:///tmp/a.html", None, None),
+        ("example.com/a", None, None),  # no scheme, so no host
+        ("http://[bad/a", None, None),  # unparseable
+        (None, None, None),
+    ],
+)
+def test_source_is_the_site_or_the_urls_host(
+    url: str | None, site: str | None, expected: str | None
+) -> None:
+    assert Document.from_bytes(b"<p/>", url=url, site=site).source == expected
+
+
+def test_from_path_takes_a_site(tmp_path: Path) -> None:
+    path = tmp_path / "a.html"
+    path.write_bytes(b"<html></html>")
+    doc = Document.from_path(path, site="example.com")
+    assert doc.source == "example.com"
+    assert Document.model_validate_json(doc.model_dump_json()) == doc
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(" WWW.Example.COM. ", "example.com"), ("www2.example.com", "www2.example.com")],
+)
+def test_normalise_source(raw: str, expected: str) -> None:
+    assert normalise_source(raw) == expected

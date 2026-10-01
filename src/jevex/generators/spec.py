@@ -255,7 +255,11 @@ class SpecScope(BaseModel):
 
     locale: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$")
     sources: list[str] = Field(
-        default_factory=list[str], description="Document sources (e.g. site hosts)."
+        default_factory=list[str],
+        description=(
+            "Document sources: a URL's host without www. (e.g. example.com) or the "
+            "document's site id. Case-insensitive; subdomains don't match."
+        ),
     )
 
 

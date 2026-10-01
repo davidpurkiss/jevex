@@ -183,7 +183,8 @@ class CandidateStage:
     """Generates candidate spans for every categorised statement whose field needs them.
 
     ``registry`` holds the stage's own generators; the document's learned ones
-    (``ctx.generators``) run after them. Every generator it runs is added to
+    (``ctx.generators``) run after them. Generators are scoped by ``locale`` and the
+    document's :attr:`~jevex.Document.source`. Every generator it runs is added to
     ``ctx.generators_ran``.
     """
 
@@ -195,6 +196,7 @@ class CandidateStage:
         registry = self.registry
         if ctx.generators is not None:
             registry = ctx.generators.on(registry)
+        source = ctx.document.source
         for run in ctx.active:
             counted: set[str] = set()
             for scope in run.scopes:
@@ -202,14 +204,14 @@ class CandidateStage:
                     key = (statement.id, spec.name)
                     if spec.needs_candidates and key not in run.candidates:
                         run.candidates[key] = registry.generate(
-                            statement, spec, schema=run.name, locale=self.locale
+                            statement, spec, schema=run.name, locale=self.locale, source=source
                         )
                         if spec.name not in counted:
                             counted.add(spec.name)
                             ctx.generators_ran.update(
                                 g.id
                                 for g in registry.for_field(
-                                    spec, schema=run.name, locale=self.locale
+                                    spec, schema=run.name, locale=self.locale, source=source
                                 )
                             )
 
