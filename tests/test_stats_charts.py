@@ -79,6 +79,21 @@ def test_the_learning_curve_has_a_panel_per_metric_with_waves_and_ticks() -> Non
     assert ">30 documents</text>" in svg
 
 
+def test_cost_titles_say_when_they_include_the_learners_spend() -> None:
+    stats = replay_stats()
+    stats.points[0] = point(10, size=10, llm=3.0, learning_jev_cost_per_document=0.002)
+    titles = re.findall(r'<text class="title"[^>]*>([^<]*)</text>', learning_svg(stats))
+    assert titles[1] == "Cost per document, learning included (USD)"
+    assert (
+        "Cost per document, learning included (USD)"
+        in parse(learning_svg(stats)).attrib["aria-label"]
+    )
+    cost = cost_svg(stats)
+    assert ">Cumulative spend, learning included (USD)</text>" in cost
+    assert "learning included" in parse(cost).attrib["aria-label"]
+    assert "learning included" not in cost_svg(replay_stats())
+
+
 def test_a_store_has_no_accuracy_panel_and_a_time_axis() -> None:
     svg = learning_svg(store_stats(), "time")
     assert "Accuracy" not in svg

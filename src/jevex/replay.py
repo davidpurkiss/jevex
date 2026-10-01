@@ -4,9 +4,10 @@
 at a time, in the corpus's order. After each document it waits for the learner to finish
 what the document queued, so every document sees what the ones before it taught (and a
 replay with recorded answers gives the same curve every time). It reports per batch of
-documents (:class:`ReplayBatch`): accuracy, cost per document, LLM calls per document, the
-resolution mix and the learned generators in use. That is the headline claim's evidence:
-accuracy holds while cost and the LLM-call rate fall as generators are learned.
+documents (:class:`ReplayBatch`): accuracy, cost per document, LLM calls per document, what
+the learner spent learning from the documents' examples, the resolution mix and the learned
+generators in use. That is the headline claim's evidence: accuracy holds while cost
+(learning included) and the LLM-call rate fall as generators are learned.
 
 :meth:`ReplayReport.to_csv` gives one row per batch (:data:`CSV_COLUMNS`), and
 :meth:`ReplayReport.to_html` the stats page (:mod:`jevex.stats`) as a self-contained report
@@ -17,11 +18,12 @@ from __future__ import annotations
 
 import csv
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from jevex.eval import EvalReport, check_schemas, resolve_tolerances, run_document
-from jevex.stats.charts import pct
+from jevex.learn import LearningSpend
+from jevex.stats.charts import pct, usd
 from jevex.stats.data import METHODS, from_replay
 from jevex.stats.page import render_page
 
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 
     from jevex.eval import CorpusItem, DocumentRun, Tolerance
     from jevex.extractor import Extractor
+    from jevex.learn import GeneratorLearner
     from jevex.store import Store
 
 REPLAY_BATCH_SIZE = 10
@@ -52,6 +55,9 @@ CSV_COLUMNS: tuple[str, ...] = (
     "jev_cost_per_document",
     "llm_cost_per_document",
     "llm_calls_per_document",
+    "learning_jev_cost_per_document",
+    "learning_llm_cost_per_document",
+    "learning_llm_calls_per_document",
     "jev_requests_per_document",
     "jev_questions_per_document",
     "seconds_per_document",
@@ -62,7 +68,10 @@ CSV_COLUMNS: tuple[str, ...] = (
 """The CSV's columns. ``documents`` is how many documents were processed by the batch's
 end (the x-axis), ``waves`` the test-site waves its documents came from, ``generators``
 the learned generators enabled in the store after it, and ``values_<method>`` how many
-values each method resolved in it."""
+values each method resolved in it. The cost and LLM-call columns are the documents' own
+(their ``meta``); the ``learning_*`` columns are what the learner spent learning from
+their examples (``generator_llm`` calls and the Jev requests testing drafts), so a
+batch's whole bill is ``cost_per_document`` plus the two ``learning_*_cost`` columns."""
 
 
 @dataclass(frozen=True)
@@ -82,12 +91,19 @@ class ReplayBatch:
     jev_cost_per_document: float
     llm_cost_per_document: float
     llm_calls_per_document: float
+    learning_jev_cost_per_document: float
+    learning_llm_cost_per_document: float
+    learning_llm_calls_per_document: float
     jev_requests_per_document: float
     jev_questions_per_document: float
     seconds_per_document: float | None
     errors: int
     generators: int
     methods: dict[str, int]
+
+    @property
+    def learning_cost_per_document(self) -> float:
+        return self.learning_jev_cost_per_document + self.learning_llm_cost_per_document
 
     def row(self) -> dict[str, Any]:
         """The batch as a flat dict keyed by :data:`CSV_COLUMNS` (JSON types)."""
@@ -103,6 +119,9 @@ class ReplayBatch:
             "jev_cost_per_document": self.jev_cost_per_document,
             "llm_cost_per_document": self.llm_cost_per_document,
             "llm_calls_per_document": self.llm_calls_per_document,
+            "learning_jev_cost_per_document": self.learning_jev_cost_per_document,
+            "learning_llm_cost_per_document": self.learning_llm_cost_per_document,
+            "learning_llm_calls_per_document": self.learning_llm_calls_per_document,
             "jev_requests_per_document": self.jev_requests_per_document,
             "jev_questions_per_document": self.jev_questions_per_document,
             "seconds_per_document": self.seconds_per_document,
@@ -122,6 +141,9 @@ class ReplayReport:
     """Each document's test-site wave (``None`` if the corpus doesn't say)."""
     generators: list[int]
     """Learned generators enabled in the store after each document."""
+    learning: list[LearningSpend] = field(default_factory=list[LearningSpend])
+    """What the learner spent after each document, learning from its examples (a
+    document missing here spent nothing)."""
 
     def batches(self) -> list[ReplayBatch]:
         """The documents in batches of ``batch_size`` (the last one may be smaller)."""
@@ -134,10 +156,12 @@ class ReplayReport:
 
     def _batch(self, number: int, start: int, end: int) -> ReplayBatch:
         s = EvalReport(documents=self.report.documents[start:end]).summary()
+        learning = self._learning(start, end)
+        size = end - start
         return ReplayBatch(
             number=number,
             documents=end,
-            size=end - start,
+            size=size,
             waves=tuple(sorted({w for w in self.waves[start:end] if w is not None})),
             accuracy=s["accuracy"],
             precision=s["precision"],
@@ -146,6 +170,9 @@ class ReplayReport:
             jev_cost_per_document=s["jev_cost_per_document"],
             llm_cost_per_document=s["llm_cost_per_document"],
             llm_calls_per_document=s["llm_calls_per_document"],
+            learning_jev_cost_per_document=learning.jev_cost / size,
+            learning_llm_cost_per_document=learning.llm_cost / size,
+            learning_llm_calls_per_document=learning.llm_calls / size,
             jev_requests_per_document=s["jev_requests_per_document"],
             jev_questions_per_document=s["jev_questions_per_document"],
             seconds_per_document=s["seconds_per_document"],
@@ -153,6 +180,16 @@ class ReplayReport:
             generators=self.generators[end - 1],
             methods=s["resolution_mix"],
         )
+
+    def _learning(self, start: int, end: int) -> LearningSpend:
+        total = LearningSpend()
+        for spend in self.learning[start:end]:
+            total = LearningSpend(
+                jev_cost=total.jev_cost + spend.jev_cost,
+                llm_calls=total.llm_calls + spend.llm_calls,
+                llm_cost=total.llm_cost + spend.llm_cost,
+            )
+        return total
 
     def wave_starts(self) -> list[tuple[int, int]]:
         """``(documents processed before it, wave)`` for each wave after the first."""
@@ -170,10 +207,17 @@ class ReplayReport:
         return self.report.failed
 
     def to_dict(self) -> dict[str, Any]:
-        """The run's summary and its batches as JSON types."""
+        """The run's summary (the documents' own), what the learner spent in all, and the
+        batches as JSON types."""
+        learning = self._learning(0, len(self.report.documents))
         return {
             "batch_size": self.batch_size,
             "summary": self.report.summary(),
+            "learning": {
+                "jev_cost": learning.jev_cost,
+                "llm_calls": learning.llm_calls,
+                "llm_cost": learning.llm_cost,
+            },
             "batches": [b.row() for b in self.batches()],
         }
 
@@ -189,18 +233,20 @@ class ReplayReport:
 
     def to_html(self, title: str = "jevex replay") -> str:
         """The stats page in report mode (:func:`~jevex.stats.render_page`): a single file
-        that works offline, charting LLM calls per document, cost per document and
-        accuracy, the resolution mix and cumulative cost over documents processed, with
-        every wave's start marked. Its data is inlined as JSON
+        that works offline, charting LLM calls per document, cost per document (learning
+        included) and accuracy, the resolution mix and cumulative cost over documents
+        processed, with every wave's start marked. Its data is inlined as JSON
         (``<script type="application/json" id="stats-data">``)."""
         return render_page(from_replay(self), title=title, generated=self._lede())
 
     def _lede(self) -> str:
         s = self.report.summary()
         accuracy = "–" if s["accuracy"] is None else pct(s["accuracy"])
+        learning = self._learning(0, len(self.report.documents))
         return (
             f"{s['documents']} documents from an empty store in batches of {self.batch_size}; "
-            f"accuracy {accuracy} overall"
+            f"accuracy {accuracy} overall; learning cost {usd(learning.cost)} "
+            f"({learning.llm_calls} generator LLM calls)"
         )
 
 
@@ -226,9 +272,10 @@ async def replay(
     the learner end the replay (:class:`LearningStoppedError`). Other per-document errors
     are scored as all missing.
 
-    Cost and LLM calls are the documents' own (their ``meta``). What the learner spends
-    between documents (generator LLM calls, Jev requests testing generators) isn't
-    counted.
+    Each document's cost and LLM calls are its own (its ``meta``). What the learner
+    spends after it, learning from its examples (``generator_llm`` calls and the Jev
+    requests testing drafts, :attr:`~jevex.learn.GeneratorLearner.spend`), is counted
+    separately in :attr:`ReplayReport.learning`.
     """
     if batch_size < 1:
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")
@@ -242,6 +289,9 @@ async def replay(
         )
     runs: list[DocumentRun] = []
     generators: list[int] = []
+    learning: list[LearningSpend] = []
+    learner: GeneratorLearner | None = None
+    before = LearningSpend()
     for item in corpus:
         runs.append(await run_document(extractor, item, resolved))
         try:
@@ -250,11 +300,18 @@ async def replay(
             cause = exc.__cause__ or exc
             raise LearningStoppedError(f"learning stopped after {item.path}: {cause}") from exc
         generators.append(len(await store.generators()) if store is not None else 0)
+        current = await extractor.learner()
+        if current is not learner:  # a new learner starts its totals from nothing
+            learner, before = current, LearningSpend()
+        spent = learner.spend if learner is not None else LearningSpend()
+        learning.append(spent - before)
+        before = spent
     return ReplayReport(
         report=EvalReport(documents=runs),
         batch_size=batch_size,
         waves=[item.wave for item in corpus],
         generators=generators,
+        learning=learning,
     )
 
 

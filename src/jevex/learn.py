@@ -43,7 +43,7 @@ import asyncio
 import hashlib
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, get_args
@@ -344,6 +344,30 @@ class LearnOutcome(BaseModel):
     """The snapshot version that published it (``accepted`` only)."""
 
 
+@dataclass(frozen=True)
+class LearningSpend:
+    """A learner's running totals (:attr:`GeneratorLearner.spend`). Subtract an earlier
+    reading for what it spent in between (``jevex eval --replay`` does, per document)."""
+
+    jev_cost: float = 0.0
+    """USD of the Jev requests that tested drafts."""
+    llm_calls: int = 0
+    """``generator_llm`` calls made, including failed ones (not ones a budget refused)."""
+    llm_cost: float = 0.0
+    """USD of those calls (unpriced ones add nothing)."""
+
+    @property
+    def cost(self) -> float:
+        return self.jev_cost + self.llm_cost
+
+    def __sub__(self, other: LearningSpend) -> LearningSpend:
+        return LearningSpend(
+            jev_cost=self.jev_cost - other.jev_cost,
+            llm_calls=self.llm_calls - other.llm_calls,
+            llm_cost=self.llm_cost - other.llm_cost,
+        )
+
+
 class _Rejected(Exception):
     """Ends one example's learning with an outcome."""
 
@@ -385,6 +409,8 @@ class GeneratorLearner:
     or the fallback would still ask the LLM there."""
     prompt: str = PROMPT
     outcomes: list[LearnOutcome] = field(default_factory=list[LearnOutcome])
+    spend: LearningSpend = field(default_factory=LearningSpend, init=False)
+    """What :meth:`learn` has spent so far, whatever each example's outcome."""
     _queue: asyncio.Queue[VerifiedExample] | None = field(default=None, init=False, repr=False)
     _worker: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
@@ -453,6 +479,7 @@ class GeneratorLearner:
                 spec=exc.spec,
             )
         finally:
+            self.spend = replace(self.spend, jev_cost=self.spend.jev_cost + jev.usage.cost)
             await self.ledger.record("jev", jev.usage.cost)
         self.outcomes.append(outcome)
         return outcome
@@ -529,9 +556,15 @@ class GeneratorLearner:
         try:
             response = await self.ledger.call_llm(self.llm, prompt, GeneratorDraft)
         except LLMError as exc:
+            self.spend = replace(self.spend, llm_calls=self.spend.llm_calls + 1)
             raise _Rejected("llm_error", f"{type(exc).__name__}: {exc}") from None
         if response is None:
             raise _Rejected("budget", "the run budget refused the generator_llm call")
+        self.spend = replace(
+            self.spend,
+            llm_calls=self.spend.llm_calls + 1,
+            llm_cost=self.spend.llm_cost + (response.usage.cost or 0.0),
+        )
         return response.output
 
     async def _chosen(

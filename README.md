@@ -289,8 +289,9 @@ pages one at a time in order (letting learning finish after each), and reports a
 cost per document and LLM calls per document per batch, as CSV and as the stats page in
 report mode (a single HTML file that works offline) with the waves marked. `--llm` turns on the LLM fallback and learning; without
 it the replay runs on Jev alone. On a plain run, `--llm` turns on only the fallback. The
-curve counts what documents spend; what the learner spends between them isn't counted
-yet.
+curve counts what the learner spends too: the CSV's `learning_*` columns hold its
+generator LLM calls and cost and the Jev cost of testing drafts, per document, and the
+cost charts include them.
 
 `--gate BASELINE` turns any run into a regression check: it exits 1 if overall accuracy,
 or any field's accuracy, fell, or LLM calls per document rose, by more than the

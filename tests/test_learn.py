@@ -42,7 +42,14 @@ from jevex.generators import InvalidGeneratorError, RegexGenerator, default_regi
 from jevex.interfaces import Learner, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevBackendError
 from jevex.layout import Component
-from jevex.learn import NORMALISERS, PROMPT, GeneratorDraft, LearnOutcome, draft_spec
+from jevex.learn import (
+    NORMALISERS,
+    PROMPT,
+    GeneratorDraft,
+    LearningSpend,
+    LearnOutcome,
+    draft_spec,
+)
 from jevex.llm import LLMError
 from jevex.normalise import BUILTIN_NORMALISERS, FunctionNormaliser, NormaliseStage, strip
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
@@ -481,6 +488,43 @@ async def test_the_learners_jev_spend_goes_in_the_run_ledger() -> None:
     assert outcome.status == "accepted"
     assert await store.spend(kind="jev", run_id=ledger.run_id) > 0
     assert await store.spend(kind="llm", run_id=ledger.run_id) > 0
+
+
+async def test_spend_keeps_running_totals_without_a_run_budget() -> None:
+    fake = FakeJev().choice(None, pick("9.1"))
+    llm = FakeLLM([DRAFT], price=(1.0, 1.0))
+    gl = learner(fake, llm)
+    assert gl.spend == LearningSpend()
+    assert (await gl.learn(example())).status == "accepted"
+    first = gl.spend
+    assert first.llm_calls == 1
+    assert first.llm_cost > 0
+    assert first.jev_cost > 0
+    assert first.cost == first.jev_cost + first.llm_cost
+    # The new generator covers the next one: nothing spent, so the difference is zero.
+    assert (await gl.learn(example("9.5 seconds", 9.5, eid="ex-2"))).status == "covered"
+    assert gl.spend - first == LearningSpend()
+
+
+async def test_spend_counts_a_failed_llm_call_but_not_a_refused_one() -> None:
+    def fail(_p: str, _s: type[BaseModel]) -> object:
+        raise LLMError("overloaded")
+
+    gl = learner(FakeJev(strict=True), FakeLLM(fail))
+    assert (await gl.learn(example())).status == "llm_error"
+    assert gl.spend == LearningSpend(llm_calls=1)
+    store = open_store(":memory:")
+    ledger = RunLedger(RunBudget(max_spend=0.0, period="run"), store)
+    refused = learner(FakeJev(strict=True), FakeLLM([DRAFT]), store=store, ledger=ledger)
+    assert (await refused.learn(example())).status == "budget"
+    assert refused.spend == LearningSpend()
+
+
+async def test_spend_counts_jev_even_when_the_generator_is_rejected() -> None:
+    gl = learner(FakeJev().choice(None, pick("none")), FakeLLM([DRAFT]))
+    assert (await gl.learn(example())).status == "missed_trigger"
+    assert gl.spend.llm_calls == 1
+    assert gl.spend.jev_cost > 0
 
 
 # --- regression tests on stored examples --------------------------------------------------

@@ -14,6 +14,7 @@ from jevex import (
     Extractor,
     Field,
     GeneratorRegistry,
+    LearningSpend,
     LearningStoppedError,
     LearnStage,
     Pipeline,
@@ -119,12 +120,25 @@ def learning_extractor(fallback_llm: FakeLLM, generator_llm: FakeLLM) -> Extract
 async def test_the_llm_call_rate_falls_once_a_generator_is_learned(tmp_path: Path) -> None:
     corpus = load_corpus(car_corpus(tmp_path, [1, 1, 2, 2, 2]))
     fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9.1"})
-    generator_llm = FakeLLM([DRAFT])
+    generator_llm = FakeLLM([DRAFT], price=(1.0, 1.0))
     async with learning_extractor(fallback_llm, generator_llm) as extractor:
         result = await replay(extractor, corpus, batch_size=2)
     first, second, third = result.batches()
     # The learner finished between documents 1 and 2: only the first needed the LLM.
     assert (first.llm_calls_per_document, second.llm_calls_per_document) == (0.5, 0)
+    # ... and only the first's example was learned from: the learner's spend is its.
+    assert first.learning_llm_calls_per_document == 0.5
+    assert first.learning_llm_cost_per_document > 0
+    assert first.learning_jev_cost_per_document > 0
+    assert first.learning_cost_per_document == pytest.approx(
+        first.learning_jev_cost_per_document + first.learning_llm_cost_per_document
+    )
+    assert second.learning_cost_per_document == third.learning_cost_per_document == 0
+    assert result.learning[0].llm_calls == 1
+    assert result.learning[1:] == [LearningSpend()] * 4
+    row = next(csv.DictReader(io.StringIO(result.to_csv())))
+    assert row["learning_llm_calls_per_document"] == "0.5"
+    assert float(row["learning_jev_cost_per_document"]) > 0
     assert first.methods == {"generator": 1, "llm": 1}
     assert second.methods == {"generator": 2}
     assert [b.accuracy for b in (first, second, third)] == [1.0, 1.0, 1.0]
@@ -164,8 +178,37 @@ async def test_documents_run_one_at_a_time_in_order_with_learning_finished_betwe
     assert log == ["car-0.html", "learned", "car-1.html", "learned", "car-2.html", "learned"]
     # No store and no learner: nothing is learned, and there's one (short) batch.
     assert result.generators == [0, 0, 0]
+    assert result.learning == [LearningSpend()] * 3
     [batch] = result.batches()
     assert (batch.number, batch.documents, batch.size, batch.accuracy) == (1, 3, 3, 1.0)
+
+
+@dataclass
+class Spending:
+    """Stands in for a learner: only its ``spend`` is read."""
+
+    spend: LearningSpend
+
+
+async def test_a_new_learner_starts_its_spend_from_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus = load_corpus(car_corpus(tmp_path, [1, 1, 1]))
+    log: list[str] = []
+    extractor = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Spy(log)]))
+    old, new = Spending(LearningSpend(llm_calls=1)), Spending(LearningSpend())
+    totals = {2: 2, 3: 5}  # the new learner's, after documents 2 and 3
+
+    async def learner() -> Spending:
+        # The extractor asks too, before each document's stages run.
+        if len(log) <= 1:
+            return old
+        new.spend = LearningSpend(llm_calls=totals[len(log)])
+        return new
+
+    monkeypatch.setattr(extractor, "learner", learner)
+    result = await replay(extractor, corpus)
+    assert [s.llm_calls for s in result.learning] == [1, 2, 3]
 
 
 async def test_a_store_that_isnt_empty_is_refused(tmp_path: Path) -> None:
@@ -274,13 +317,41 @@ def doc_run(correct: int = 1, wrong: int = 0, *, llm_calls: int = 0) -> Document
     )
 
 
-def report(runs: list[DocumentRun], waves: list[int | None], batch_size: int) -> ReplayReport:
+def report(
+    runs: list[DocumentRun],
+    waves: list[int | None],
+    batch_size: int,
+    learning: list[LearningSpend] | None = None,
+) -> ReplayReport:
     return ReplayReport(
         report=EvalReport(documents=runs),
         batch_size=batch_size,
         waves=waves,
         generators=list(range(len(runs))),
+        learning=learning if learning is not None else [],
     )
+
+
+def test_batches_carry_the_learners_spend_per_document() -> None:
+    learning = [
+        LearningSpend(jev_cost=0.004, llm_calls=2, llm_cost=0.02),
+        LearningSpend(jev_cost=0.002, llm_calls=1, llm_cost=0.01),
+        LearningSpend(),
+    ]
+    first, second = report([doc_run(), doc_run(), doc_run()], [1, 1, 1], 2, learning).batches()
+    assert first.learning_jev_cost_per_document == pytest.approx(0.003)
+    assert first.learning_llm_cost_per_document == pytest.approx(0.015)
+    assert first.learning_llm_calls_per_document == 1.5
+    assert first.learning_cost_per_document == pytest.approx(0.018)
+    assert first.cost_per_document == pytest.approx(0.001)  # the documents' own
+    assert second.learning_cost_per_document == 0
+    data = report([doc_run(), doc_run()], [1, 1], 1, learning[:2]).to_dict()
+    assert data["learning"]["llm_calls"] == 3
+    assert data["learning"]["jev_cost"] == pytest.approx(0.006)
+    assert data["learning"]["llm_cost"] == pytest.approx(0.03)
+    # Documents with no reading spent nothing.
+    lone = report([doc_run(), doc_run()], [1, 1], 2, learning[:1]).batches()[0]
+    assert lone.learning_llm_calls_per_document == 1
 
 
 def test_batches_carry_per_document_metrics() -> None:
@@ -333,11 +404,20 @@ def test_the_html_is_the_stats_report_with_waves_and_the_data() -> None:
     assert page.startswith("<!doctype html>")
     assert "Replay &lt;seed 42&gt;" in page
     assert "<seed 42>" not in page
-    assert "4 documents from an empty store in batches of 1; accuracy 100.0% overall" in page
+    assert (
+        "4 documents from an empty store in batches of 1; accuracy 100.0% overall; "
+        "learning cost $0 (0 generator LLM calls)"
+    ) in page
     # Learning curve (LLM calls, cost, accuracy), resolution mix and cost: documents only.
     assert page.count("<svg") == 3
     assert 'data-axis="time"' not in page
-    for title in ("LLM calls per document", "Cost per document (USD)", "Accuracy"):
+    titles = (
+        "LLM calls per document",
+        "Cost per document, learning included (USD)",
+        "Accuracy",
+        "Cumulative spend, learning included (USD)",
+    )
+    for title in titles:
         assert f">{title}</text>" in page
     assert page.count(">wave 2</text>") == 5  # every panel marks it
     assert "data-refresh" not in page  # a report doesn't reload itself

@@ -298,6 +298,35 @@ def test_a_replay_csv_gives_one_point_per_batch() -> None:
     assert stats.spend[-1].llm == pytest.approx(0.05)
     assert summary(stats)["generators"] == 3
     assert summary(stats)["accuracy"] == pytest.approx(0.75)
+    # A CSV from before the learning columns: the learner's spend wasn't measured.
+    assert not any(p.learning_counted for p in stats.points)
+
+
+LEARNING_CSV = """\
+documents,size,llm_calls_per_document,jev_cost_per_document,llm_cost_per_document,\
+learning_jev_cost_per_document,learning_llm_cost_per_document,\
+learning_llm_calls_per_document,errors
+2,2,1.0,0.001,0.02,0.002,0.01,0.5,0
+4,2,0.0,0.001,0.0,0.0,0.0,0.0,0
+"""
+
+
+def test_a_replay_csvs_learning_spend_counts_in_its_cost() -> None:
+    stats = from_replay_csv(LEARNING_CSV)
+    first, second = stats.points
+    assert first.learning_counted
+    assert (first.learning_jev_cost_per_document, first.learning_llm_cost_per_document) == (
+        0.002,
+        0.01,
+    )
+    assert first.cost_per_document == pytest.approx(0.001 + 0.02 + 0.002 + 0.01)
+    assert second.cost_per_document == pytest.approx(0.001)
+    assert stats.spend[0].jev == pytest.approx(2 * (0.001 + 0.002))
+    assert stats.spend[-1].llm == pytest.approx(2 * (0.02 + 0.01))
+    assert summary(stats)["spent_usd"] == pytest.approx(2 * 0.033 + 2 * 0.001)
+    learning = to_json(stats, "learning")["points"][0]
+    assert learning["learning_jev_cost_per_document"] == 0.002
+    assert learning["cost_per_document"] == pytest.approx(0.033)
 
 
 @pytest.mark.parametrize(
@@ -341,8 +370,21 @@ def test_merge_weights_accuracy_by_scored_documents_and_adds_methods() -> None:
     assert merged.accuracy == pytest.approx((2 * 1.0 + 2 * 0.25) / 4)
     assert merged.methods == {"llm": 3, "jev": 1}
     assert merged.waves == (1, 2)
+    assert merged.learning_jev_cost_per_document is None  # never measured
     with pytest.raises(ValueError, match="nothing"):
         merge([])
+
+
+def test_merge_counts_learning_spend_where_any_point_measured_it() -> None:
+    merged = merge(
+        [
+            point(2, 2, learning_jev_cost_per_document=0.004, learning_llm_cost_per_document=0.0),
+            point(3, 1),
+        ]
+    )
+    assert merged.learning_counted
+    assert merged.learning_jev_cost_per_document == pytest.approx(2 * 0.004 / 3)
+    assert merged.learning_llm_cost_per_document == 0
 
 
 def test_method_shares() -> None:
