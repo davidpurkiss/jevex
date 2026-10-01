@@ -6,6 +6,8 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 | --- | --- |
 | `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora (`jevex.benchmarks.BenchmarkConfig`) |
 | `corpora/<name>.lock` | A corpus's lock: hashes of its `truth.json` and of every document (`jevex corpus lock`, `jevex corpus check`) |
+| `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.instructions`) |
+| `baselines/<tool>_baseline.py` | An open-source tool as a baseline: a uv script with its pinned tool version, run in its own environment (`<tool>_baseline.py.lock`) |
 
 `corpora/testsite.lock` is the seed-42 test site. Rebuild the site and check it:
 
@@ -25,3 +27,30 @@ jevex corpus check /tmp/books benchmarks/corpora/books.lock
 ```
 
 The spec-sheet locks follow once their sources are chosen.
+
+## Baselines
+
+Every baseline reads the same prepared inputs: each document after jevex's clean stage,
+and the text jevex's layout and image stages read from it. Prepare them once per corpus,
+with the pipeline jevex runs on it (the books corpus has a star-rating cleaner):
+
+```sh
+jevex baseline inputs /tmp/books --out /tmp/books-inputs.jsonl \
+    --pipeline jevex.examples.books:books_pipeline --lock benchmarks/corpora/books.lock
+```
+
+Then run each system into a results file, and score it as jevex is scored:
+
+```sh
+B="/tmp/books --schema jevex.examples.books:Book --inputs /tmp/books-inputs.jsonl"
+jevex baseline run $B --model fast --out results/llm-fast.jsonl     # or strong, gemini
+uv run --script benchmarks/baselines/scrapegraphai_baseline.py $B --model fast --out results/scrapegraphai.jsonl
+uv run --script benchmarks/baselines/crawl4ai_baseline.py $B --model fast --out results/crawl4ai.jsonl
+jevex eval /tmp/books --schema jevex.examples.books:Book --results results/crawl4ai.jsonl
+```
+
+They make real LLM calls with the provider's key from the environment (`ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`). Every call is charged at the config's pinned prices against
+`JEVEX_LLM_MAX_COST_USD` and `JEVEX_SPEND_LEDGER`, and a run stopped by the cap keeps the
+rows it paid for. Add `--fake` to a tool script to check its plumbing with a scripted model,
+for free.
