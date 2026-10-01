@@ -26,9 +26,10 @@ DecimalMark = Literal[".", ","]
 DateOrder = Literal["dmy", "mdy"]
 Gallon = Literal["uk", "us"]
 
-THOUSANDS_AFTER_DECIMAL_COMMA = ".\u00a0\u202f"
-"""Thousands separators when the decimal mark is a comma: a dot, a no-break space or a
-narrow no-break space. A plain space isn't one: "5 300" is as often two numbers."""
+THOUSANDS_AFTER_DECIMAL_COMMA = ".\u00a0\u202f\u2009"
+"""Thousands separators when the decimal mark is a comma: a dot, a no-break space, a
+narrow no-break space or a thin space. A plain space isn't one: "5 300" is as often two
+numbers."""
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,12 @@ _DECIMAL_COMMA_LANGUAGES = frozenset(
     }
 )
 _US_REGIONS = frozenset({"US"})
+_POINT_DECIMAL_REGIONS = {
+    "de": frozenset({"CH", "LI"}),
+    "it": frozenset({"CH"}),
+    "es": frozenset({"MX", "GT", "HN", "NI", "SV", "PA", "DO", "PR", "PE"}),
+}
+"""Regions where a decimal-comma language writes a decimal point (de-CH: "1.25 kg")."""
 
 MONTH_NAMES: dict[str, dict[str, int]] = {
     "en": {
@@ -163,15 +170,19 @@ def locale_conventions(locale: str | None) -> LocaleConventions:
     """The conventions for a BCP 47 tag; en-GB's when it's ``None``, empty or unknown.
 
     Languages that write a decimal comma (German, French, Spanish, Dutch, ...) get it with
-    day-first dates and the symbol allowed after an amount. A US region (``en-US``,
-    ``es-US``) means a decimal point, month-first dates and US gallons.
+    day-first dates and the symbol allowed after an amount, except in regions that write
+    a decimal point (``de-CH``, ``es-MX``). A US region (``en-US``, ``es-US``) means a
+    decimal point, month-first dates and US gallons. Swiss apostrophe grouping ("1’250")
+    isn't read.
     """
     if not locale:
         return EN_GB
     language, region = _subtags(locale)
     if region in _US_REGIONS:
         return LocaleConventions(date_order="mdy", gallon="us", language=language)
-    if language in _DECIMAL_COMMA_LANGUAGES:
+    if language in _DECIMAL_COMMA_LANGUAGES and region not in _POINT_DECIMAL_REGIONS.get(
+        language, frozenset()
+    ):
         return LocaleConventions(decimal=",", currency_after=True, language=language)
     return LocaleConventions(language=language)
 

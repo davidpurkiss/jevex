@@ -53,6 +53,14 @@ def test_cells_carry_row_and_column_headers() -> None:
     ]
 
 
+def test_cells_keep_no_break_spaces_and_collapse_other_whitespace() -> None:
+    t = table(
+        cell(0, 0, "Prix\n", header=True),
+        cell(0, 1, "18\u00a0495\t €"),
+    )
+    assert texts(t) == ["Prix: 18\u00a0495 €"]
+
+
 def test_stacked_and_spanning_headers_join_and_bands_group_rows() -> None:
     t = table(
         cell(0, 0, "", header=True),

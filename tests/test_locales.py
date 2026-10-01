@@ -26,10 +26,19 @@ def test_unknown_locales_are_en_gb() -> None:
 def test_decimal_comma_languages(locale: str) -> None:
     conventions = locale_conventions(locale)
     assert conventions.decimal == ","
-    assert conventions.thousands == ".\u00a0\u202f"
+    assert conventions.thousands == ".\u00a0\u202f\u2009"
     assert conventions.date_order == "dmy"
     assert conventions.currency_after
     assert conventions.language == locale[:2].lower()
+
+
+@pytest.mark.parametrize("locale", ["de-CH", "de-LI", "it-CH", "es-MX", "es_pe"])
+def test_regions_that_write_a_decimal_point_in_decimal_comma_languages(locale: str) -> None:
+    conventions = locale_conventions(locale)
+    assert conventions.decimal == "."
+    assert conventions.date_order == "dmy"
+    assert not conventions.currency_after
+    assert locale_conventions("fr-CH").decimal == ","  # French Switzerland keeps the comma
 
 
 @pytest.mark.parametrize("locale", ["en-US", "en_us", "es-US", "en-Latn-US"])

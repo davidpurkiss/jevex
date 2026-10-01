@@ -82,8 +82,8 @@ pipeline = default_pipeline().replace("candidates", CandidateStage(locale="de-DE
 
 | Locale | Reads |
 | --- | --- |
-| unset, `en-GB` and other decimal-point languages | "1,234.5", "£18,495", "03/12/2024" as 3 December, mpg in UK gallons |
-| decimal-comma languages (`de`, `fr`, `es`, `it`, `nl`, `pt`, `pl`, `sv`, ...) | "1.234,5 kg", "18.495 €", "01.12.2023" day first; German month names ("12. März 2024") |
+| unset, `en-GB`, other decimal-point languages, and regions such as `de-CH` and `es-MX` | "1,234.5", "£18,495", "03/12/2024" as 3 December, mpg in UK gallons |
+| decimal-comma languages (`de`, `fr`, `es`, `it`, `nl`, `pt`, `pl`, `sv`, ...) | "1.234,5 kg", "18 495 €" grouped with a dot or a no-break space (not a plain one), "01.12.2023" day first; German month names ("12. März 2024") |
 | a US region (`en-US`, `es-US`) | "03/12/2024" as 12 March, mpg in US gallons |
 
 Normaliser steps take the matching arguments (`{parse_number: {decimal: ","}}`,

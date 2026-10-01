@@ -302,7 +302,7 @@ def parse_range(value: Any, *, decimal: str = ".") -> list[int | float]:
     """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]; with
     ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0]."""
     if isinstance(value, list | tuple):
-        return [parse_number(v) for v in value]  # pyright: ignore[reportUnknownVariableType]
+        return [parse_number(v, decimal=decimal) for v in value]  # pyright: ignore[reportUnknownVariableType]
     text = str(value).replace("–", " ").replace("—", " ")
     numbers = [m.group() for m in _number_pattern(decimal).finditer(text)]
     if len(numbers) < 2:

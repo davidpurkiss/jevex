@@ -247,6 +247,14 @@ def test_a_title_outranks_section_headers() -> None:
     assert root.children[2].children[1].heading_trail == ["Octavia", "Prices"]
 
 
+def test_pdf_text_keeps_no_break_spaces() -> None:
+    doc = new_doc()
+    doc.add_text(DocItemLabel.TEXT, "Prix  18\u202f495 €\n TTC", prov=prov(1))
+    assert [c.text for c in from_docling(doc).walk() if c.type == "paragraph"] == [
+        "Prix 18\u202f495 € TTC"
+    ]
+
+
 def test_deeper_section_headers_nest() -> None:
     doc = new_doc()
     doc.add_heading("Specifications", level=1, prov=prov(1))

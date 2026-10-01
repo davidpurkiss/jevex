@@ -152,6 +152,7 @@ def test_parse_range(raw: str, value: list[int]) -> None:
         ("9,1 s", 9.1),
         ("1\u00a0234,5 kg", 1234.5),
         ("1\u202f234", 1234),
+        ("1\u2009234,5", 1234.5),
         ("-0,5", -0.5),
         (",5", 0.5),
         ("1.234.567", 1234567),
@@ -197,6 +198,11 @@ def test_parse_range_with_a_decimal_comma(raw: str, value: list[float]) -> None:
     assert parse_range(raw, decimal=",") == value
 
 
+def test_parse_range_reads_list_items_with_the_decimal_mark() -> None:
+    assert parse_range(["1,4", "2,0"], decimal=",") == [1.4, 2.0]
+    assert parse_range(["1,400", "2,000"]) == [1400, 2000]
+
+
 @pytest.mark.parametrize(
     ("raw", "args", "value"),
     [
@@ -217,7 +223,7 @@ def test_parse_date_in_other_locales(raw: str, args: dict[str, Any], value: date
 
 def test_decimal_comma_chains_validate_against_the_field() -> None:
     chain = steps({"parse_number": {"decimal": ","}}, {"unit": {"from": "l", "to": "l"}})
-    assert normalise("Kofferraum: 1.234,5 l", [*chain[:1]], f("power_kw")) == 1234.5
+    assert normalise("Kofferraum: 1.234,5 l", chain, f("boot_litres")) == 1234.5
     assert normalise("1,4 Liter", chain, f("boot_litres")) == 1.4
     price = steps({"parse_money": {"currency": "EUR", "decimal": ","}})
     with pytest.raises(NormaliseError, match="EUR"):  # still no currency conversion

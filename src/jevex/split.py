@@ -56,7 +56,7 @@ _KEY_VALUE = re.compile(
     r"^(?P<label>[^:\uff1a\n]{1,60}?)\s*(?P<sep>[:\uff1a])\s*(?P<value>\S.*)$", re.S
 )
 _MAX_LABEL_WORDS = 8
-_WHITESPACE = re.compile(r"\s+")
+_WHITESPACE = re.compile(r"[ \t\n\r\f\v]+")  # a no-break space stays: it can group thousands
 
 
 def is_key_value(text: str) -> bool:
