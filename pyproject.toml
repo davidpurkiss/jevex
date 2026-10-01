@@ -67,6 +67,10 @@ postgres = [
     "psycopg[binary]>=3.3.6",
     "psycopg-pool>=3.3.3",
 ]
+server = [
+    "fastapi>=0.142.2",
+    "uvicorn>=0.54.0",
+]
 # Draws the synthetic test site's scanned PDFs and infographics (load_default(size=) needs 10.1).
 testsite = [
     "pillow>=10.1",
@@ -83,6 +87,8 @@ build-backend = "hatchling.build"
 dev = [
     # A bundled Postgres server, so the store tests run against real Postgres anywhere.
     "pixeltable-pgserver>=0.6.0",
+    # FastAPI's TestClient, for the jevex serve tests.
+    "httpx>=0.28.1",
     "pre-commit>=4.6.2",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
