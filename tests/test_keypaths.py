@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from decimal import Decimal
@@ -180,6 +180,31 @@ async def test_a_hit_is_a_pure_lookup(tmp_path: Path) -> None:
     assert fields["price"].value == Decimal("18000")
     stored = await store.key_mappings(flatten(page_blob(CAR)).fingerprint, schema="Car")
     assert {m.path: m.field for m in stored}["@type"] is None  # "none" is remembered too
+    await store.aclose()
+
+
+class BatchCountingStore(SQLiteStore):
+    """Records the size of each bulk put; single puts aren't expected."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.batches: list[int] = []
+
+    async def put_key_mapping(self, mapping: KeyMapping) -> None:
+        raise AssertionError("the mapper puts its mappings in bulk")
+
+    async def put_key_mappings(self, mappings: Iterable[KeyMapping]) -> None:
+        batch = list(mappings)
+        self.batches.append(len(batch))
+        await super().put_key_mappings(batch)
+
+
+async def test_a_miss_stores_its_mappings_in_one_bulk_put(tmp_path: Path) -> None:
+    store = BatchCountingStore(tmp_path / "jevex.db")
+    await extract(KeyPathMapper(store=store), mapping_jev())
+    fp = flatten(page_blob(CAR)).fingerprint
+    assert store.batches == [7]  # every collapsed path, "none" answers included
+    assert len(await store.key_mappings(fp, schema="Car")) == 7
     await store.aclose()
 
 

@@ -229,6 +229,66 @@ async def test_an_unsure_none_round_trips_and_a_confident_mapping_replaces_it(
     assert (mapping.field, mapping.unsure) == ("title", False)
 
 
+async def test_key_mappings_put_in_bulk(store: Store) -> None:
+    await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.b"])
+    await store.put_key_mapping(
+        KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="old")
+    )
+    await store.put_key_mappings(
+        [
+            KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title"),
+            KeyMapping(fingerprint="fp", schema="Listing", path="$.c", field=None),
+            # The same key again: the later mapping wins, as if put one by one.
+            KeyMapping(
+                fingerprint="fp", schema="Listing", path="$.c", field="price", normalisers=["x"]
+            ),
+            KeyMapping(fingerprint="fp", schema="Book", path="$.a", field="name"),
+        ]
+    )
+    assert [(m.schema_name, m.path, m.field) for m in await store.key_mappings("fp")] == [
+        ("Book", "$.a", "name"),
+        ("Listing", "$.a", "title"),
+        ("Listing", "$.c", "price"),
+    ]
+    assert (await store.key_mappings("fp", schema="Listing"))[1].normalisers == ["x"]
+    # Each put path's unsure count is cleared; others keep theirs.
+    assert await store.count_unsure_key_paths("fp", "Listing", ["$.a", "$.b"]) == {
+        "$.a": 1,
+        "$.b": 2,
+    }
+    # Any iterable will do, and nothing is a no-op.
+    await store.put_key_mappings(
+        KeyMapping(fingerprint="fp2", schema="Book", path=p, field=None) for p in ("$.x", "$.y")
+    )
+    await store.put_key_mappings([])
+    assert [m.path for m in await store.key_mappings("fp2")] == ["$.x", "$.y"]
+
+
+async def test_a_bulk_put_with_an_invalid_mapping_writes_none(store: Store) -> None:
+    good = KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title")
+    naive = KeyMapping(
+        fingerprint="fp", schema="Listing", path="$.b", field=None, created_at=datetime(2026, 1, 1)
+    )
+    with pytest.raises(ValueError, match="naive"):
+        await store.put_key_mappings([good, naive])
+    assert await store.key_mappings("fp") == []
+
+
+async def test_concurrent_bulk_puts_of_overlapping_keys_all_land(store: Store) -> None:
+    def batch(field: str) -> list[KeyMapping]:
+        return [
+            KeyMapping(fingerprint="fp", schema="S", path=f"$.{i}", field=field) for i in range(50)
+        ]
+
+    # Opposite orders: a backend locking rows as given would deadlock.
+    await asyncio.gather(
+        store.put_key_mappings(batch("a")), store.put_key_mappings(reversed(batch("b")))
+    )
+    mappings = await store.key_mappings("fp")
+    assert len(mappings) == 50
+    assert len({m.field for m in mappings}) == 1  # one batch wins every row: no interleaving
+
+
 def test_an_unsure_key_mapping_maps_to_no_field() -> None:
     with pytest.raises(ValidationError, match="unsure key mapping maps to no field"):
         KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field="title", unsure=True)
@@ -550,6 +610,26 @@ async def test_store_calls_do_not_use_the_shared_executor(tmp_path: Path) -> Non
         blocker.close()
     await asyncio.gather(*pending)
     assert (await store.generator_stats("g")).documents == 40
+    await store.aclose()
+
+
+async def test_a_bulk_put_is_one_transaction(tmp_path: Path) -> None:
+    path = tmp_path / "jevex.db"
+    store = SQLiteStore(path)
+    await store.count_unsure_key_paths("fp", "S", ["$.a"])
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TRIGGER no_bad BEFORE INSERT ON key_mappings WHEN NEW.path = '$.bad' "
+        "BEGIN SELECT RAISE(ABORT, 'bad path'); END"
+    )
+    conn.commit()
+    conn.close()
+    batch = [KeyMapping(fingerprint="fp", schema="S", path=p, field=None) for p in ("$.a", "$.bad")]
+    with pytest.raises(StoreError, match="bad path"):
+        await store.put_key_mappings(batch)
+    # The row written before the failure is rolled back, and its unsure count kept.
+    assert await store.key_mappings("fp") == []
+    assert await store.count_unsure_key_paths("fp", "S", ["$.a"]) == {"$.a": 2}
     await store.aclose()
 
 

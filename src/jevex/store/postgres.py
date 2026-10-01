@@ -50,7 +50,7 @@ from jevex.store.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterable
 
     from psycopg import AsyncConnection
     from psycopg.rows import TupleRow
@@ -384,33 +384,45 @@ class PostgresStore:
     # -- key mappings -----------------------------------------------------------------
 
     async def put_key_mapping(self, mapping: KeyMapping) -> None:
-        key = (mapping.fingerprint, mapping.schema_name, mapping.path)
-        params = (
-            *key,
-            mapping.field,
-            _json(mapping.normalisers),
-            mapping.unsure,
-            _aware(mapping.created_at),
-        )
+        await self.put_key_mappings([mapping])
+
+    async def put_key_mappings(self, mappings: Iterable[KeyMapping]) -> None:
+        # The last mapping for a key wins, as if put one by one; sorted, so workers
+        # putting overlapping keys lock rows in the same order.
+        latest = {(m.fingerprint, m.schema_name, m.path): m for m in mappings}
+        keys = sorted(latest)
+        rows = [
+            (
+                *key,
+                latest[key].field,
+                _json(latest[key].normalisers),
+                latest[key].unsure,
+                _aware(latest[key].created_at),
+            )
+            for key in keys
+        ]
+        if not rows:
+            return
 
         async def op(conn: AsyncConnection[Any]) -> None:
-            await conn.execute(
-                self._q(
-                    "INSERT INTO {s}.key_mappings (fingerprint, schema_name, path, field, "
-                    "normalisers, unsure, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (fingerprint, schema_name, path) DO UPDATE SET "
-                    "field = excluded.field, normalisers = excluded.normalisers, "
-                    "unsure = excluded.unsure, created_at = excluded.created_at"
-                ),
-                params,
-            )
-            await conn.execute(
-                self._q(
-                    "DELETE FROM {s}.key_path_unsure "
-                    "WHERE fingerprint = %s AND schema_name = %s AND path = %s"
-                ),
-                key,
-            )
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    self._q(
+                        "INSERT INTO {s}.key_mappings (fingerprint, schema_name, path, field, "
+                        "normalisers, unsure, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (fingerprint, schema_name, path) DO UPDATE SET "
+                        "field = excluded.field, normalisers = excluded.normalisers, "
+                        "unsure = excluded.unsure, created_at = excluded.created_at"
+                    ),
+                    rows,
+                )
+                await cur.executemany(
+                    self._q(
+                        "DELETE FROM {s}.key_path_unsure "
+                        "WHERE fingerprint = %s AND schema_name = %s AND path = %s"
+                    ),
+                    keys,
+                )
 
         await self._run(op)
 

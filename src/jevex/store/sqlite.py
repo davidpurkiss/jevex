@@ -45,7 +45,7 @@ from jevex.store.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator
+    from collections.abc import Callable, Generator, Iterable, Iterator
 
     from jevex.store.base import SpendKind
 
@@ -350,25 +350,35 @@ class SQLiteStore:
     # -- key mappings -----------------------------------------------------------------
 
     async def put_key_mapping(self, mapping: KeyMapping) -> None:
-        key = (mapping.fingerprint, mapping.schema_name, mapping.path)
+        await self.put_key_mappings([mapping])
+
+    async def put_key_mappings(self, mappings: Iterable[KeyMapping]) -> None:
+        rows = [
+            (
+                m.fingerprint,
+                m.schema_name,
+                m.path,
+                m.field,
+                _json(m.normalisers),
+                int(m.unsure),
+                _ts(m.created_at),
+            )
+            for m in mappings
+        ]
+        if not rows:
+            return
 
         def run() -> None:
             with self._write() as cur:
-                cur.execute(
+                cur.executemany(
                     "INSERT OR REPLACE INTO key_mappings (fingerprint, schema_name, path, "
                     "field, normalisers, unsure, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        *key,
-                        mapping.field,
-                        _json(mapping.normalisers),
-                        int(mapping.unsure),
-                        _ts(mapping.created_at),
-                    ),
+                    rows,
                 )
-                cur.execute(
+                cur.executemany(
                     "DELETE FROM key_path_unsure "
                     "WHERE fingerprint = ? AND schema_name = ? AND path = ?",
-                    key,
+                    [row[:3] for row in rows],
                 )
 
         await self._call(run)
