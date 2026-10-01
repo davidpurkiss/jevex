@@ -150,6 +150,7 @@ is disabled, not deleted. `await extractor.dedupe_generators()` disables stored 
 that give the same candidates as an older one on every stored example of their field.
 
 ```python
+store = await extractor.store()
 stats = await store.generator_stats("gen-0f3a9c")
 print(stats.hit_rate, stats.win_rate)
 ```
