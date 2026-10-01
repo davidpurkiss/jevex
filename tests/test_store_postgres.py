@@ -167,6 +167,29 @@ async def test_times_come_back_in_utc_whatever_the_session_zone(
     await store.aclose()
 
 
+async def test_a_bulk_put_is_one_transaction(postgres_url: str, pg_schema: str) -> None:
+    store = PostgresStore(postgres_url, db_schema=pg_schema)
+    await store.count_unsure_key_paths("fp", "S", ["$.a"])
+    query(
+        postgres_url,
+        f"CREATE FUNCTION {pg_schema}.no_bad() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "BEGIN IF NEW.path = '$.bad' THEN RAISE EXCEPTION 'bad path'; END IF; RETURN NEW; "
+        "END $$",
+    )
+    query(
+        postgres_url,
+        f"CREATE TRIGGER no_bad BEFORE INSERT ON {pg_schema}.key_mappings "
+        f"FOR EACH ROW EXECUTE FUNCTION {pg_schema}.no_bad()",
+    )
+    batch = [KeyMapping(fingerprint="fp", schema="S", path=p, field=None) for p in ("$.a", "$.bad")]
+    with pytest.raises(StoreError, match="bad path"):
+        await store.put_key_mappings(batch)
+    # The row written before the failure is rolled back, and its unsure count kept.
+    assert await store.key_mappings("fp") == []
+    assert await store.count_unsure_key_paths("fp", "S", ["$.a"]) == {"$.a": 2}
+    await store.aclose()
+
+
 async def test_a_failed_write_rolls_back_and_the_store_keeps_working(
     postgres_url: str, pg_schema: str
 ) -> None:

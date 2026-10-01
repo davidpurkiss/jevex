@@ -15,7 +15,8 @@
    state shows a few example values per path (never the whole blob), chunked so each
    state fits Jev's budget.
 5. **Store** confident answers (including "none", so a later hit needs no call) as
-   :class:`~jevex.store.KeyMapping` records. A path Jev stays unsure about is asked again
+   :class:`~jevex.store.KeyMapping` records, each schema's in one store transaction
+   (:meth:`~jevex.store.Store.put_key_mappings`). A path Jev stays unsure about is asked again
    on the template's next page, but after :data:`UNSURE_LIMIT` unsure answers it is stored
    as an ``unsure`` "none", so every template reaches the zero-call steady state.
 
@@ -435,16 +436,16 @@ class KeyPathMapper:
             for path in learned:
                 counts.pop(path, None)
             return
-        for path, name in learned.items():
-            await store.put_key_mapping(
-                KeyMapping(
-                    fingerprint=fingerprint,
-                    schema=schema,
-                    path=path,
-                    field=name,
-                    unsure=path in unsure,
-                )
+        await store.put_key_mappings(
+            KeyMapping(
+                fingerprint=fingerprint,
+                schema=schema,
+                path=path,
+                field=name,
+                unsure=path in unsure,
             )
+            for path, name in learned.items()
+        )
 
     async def _ask(
         self,

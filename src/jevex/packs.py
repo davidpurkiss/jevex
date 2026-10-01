@@ -502,8 +502,7 @@ async def import_pack(pack: Pack, store: Store, *, examples: bool = True) -> Non
     """
     for spec in pack.generators:
         await store.put_generator(generator_record(spec))
-    for mapping in pack.key_mappings:
-        await store.put_key_mapping(mapping)
+    await store.put_key_mappings(pack.key_mappings)
     if examples:
         for example in pack.examples:
             await store.add_example(example)

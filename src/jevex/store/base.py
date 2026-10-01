@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def utcnow() -> datetime:
@@ -191,6 +194,15 @@ class Store(Protocol):
     async def put_key_mapping(self, mapping: KeyMapping) -> None:
         """Insert or replace by (fingerprint, schema, path), clearing that path's unsure
         count."""
+        ...
+
+    async def put_key_mappings(self, mappings: Iterable[KeyMapping]) -> None:
+        """:meth:`put_key_mapping` for each of ``mappings`` in one transaction.
+
+        All or nothing: an invalid mapping (say a naive ``created_at``) means none are
+        written. For a key given twice, the later mapping wins. A new template's mapper
+        stores hundreds of paths at once, so this is one write rather than hundreds.
+        """
         ...
 
     async def key_mappings(
