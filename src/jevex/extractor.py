@@ -498,9 +498,10 @@ class Extractor:
         ``thresholds``), whatever the record thresholds are. Answers given back through
         :meth:`feedback` become verified examples.
 
-        With ``record_stats`` (the default) and a store, each document's numbers are added
-        to it as a :class:`~jevex.store.DocumentStat` (:func:`document_stat`), including
-        one for a document whose extraction raised, for the stats UI (:mod:`jevex.stats`,
+        With ``record_stats`` (the default) and a store (not one the extractor keeps in
+        memory for itself), each document's numbers are added to it as a
+        :class:`~jevex.store.DocumentStat` (:func:`document_stat`), including one for a
+        document whose extraction raised, for the stats UI (:mod:`jevex.stats`,
         ``jevex stats``)."""
         if not schemas:
             raise ValueError("register at least one schema")
@@ -798,19 +799,19 @@ class Extractor:
                 # document's whole Jev spend, recorded even when a stage failed.
                 await budget.finish_document(ctx.jev.usage.cost)
         except Exception as exc:
-            if self.record_stats and ctx.store is not None:
-                await ctx.store.record_document(
+            if (stats := self._stats_store(ctx)) is not None:
+                await stats.record_document(
                     self._failed_stat(ctx, exc, doc_id, time.perf_counter() - started)
                 )
             raise
         result = ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
-        if self.record_stats and ctx.store is not None:
+        if (stats := self._stats_store(ctx)) is not None:
             stat = document_stat(
                 result, doc_id=doc_id, run_id=self.run_id, seconds=time.perf_counter() - started
             )
-            await ctx.store.record_document(stat)
+            await stats.record_document(stat)
         if self.review_sink is not None:
             items = review_items(
                 result.records,
@@ -823,6 +824,13 @@ class Extractor:
             if items:
                 await self.review_sink.send(items)
         return result
+
+    def _stats_store(self, ctx: Context) -> Store | None:
+        """Where to record the document's stats: not in an in-memory store the extractor
+        opened for itself, which nothing else can read and which would only grow."""
+        if not self.record_stats or (self._owns_store and self._store_source is None):
+            return None
+        return ctx.store
 
     def _failed_stat(
         self, ctx: Context, exc: Exception, doc_id: str, seconds: float

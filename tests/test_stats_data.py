@@ -1,9 +1,15 @@
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
+from jevex import Budgets, Document, Extractor, Field, Pipeline, RunBudget
+from jevex.jev import Noul
+from jevex.pipeline import Context
 from jevex.stats import (
     VIEWS,
     Point,
@@ -25,8 +31,23 @@ from jevex.store import (
     ValueStat,
     VerifiedExample,
 )
+from jevex.testing import FakeJev
 
 T0 = datetime(2026, 9, 30, 8, 0, tzinfo=UTC)
+
+
+class Car(BaseModel):
+    """A car."""
+
+    model: str = Field(description="Model name")
+
+
+@dataclass
+class AsksOnce:
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        await ctx.jev.ask("s", {"q": Noul(instructions="a?")})
 
 
 @pytest.fixture
@@ -104,6 +125,39 @@ async def test_spend_comes_from_the_ledger_when_it_has_entries(store: SQLiteStor
     assert summary(stats)["spent_usd"] == 0.75
 
 
+async def test_a_documents_charges_count_against_it(store: SQLiteStore) -> None:
+    # As the extractor writes them: charges while a document runs, its stat when it ends.
+    for i in range(2):
+        start = T0 + timedelta(seconds=10 * i)
+        await store.record_spend(
+            SpendEntry(amount_usd=0.5, kind="jev", at=start + timedelta(seconds=1))
+        )
+        await store.record_document(
+            DocumentStat(id=f"d{i}", at=start + timedelta(seconds=2), seconds=1.5)
+        )
+    stats = await from_store(store, source="s")
+    assert [(s.documents, s.jev) for s in stats.spend] == [(1, 0.5), (2, 1.0)]
+
+
+async def test_an_extractors_ledger_spend_is_all_counted(tmp_path: Path) -> None:
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([AsksOnce()]),
+        budgets=Budgets(run=RunBudget(max_jev_spend=10.0)),
+        store=f"sqlite:///{tmp_path / 's.db'}",
+    )
+    first = await ex.extract(Document.from_bytes(b"<p>Golf</p>"))
+    second = await ex.extract(Document.from_bytes(b"<p>Polo</p>"))
+    store = await ex.store()
+    assert store is not None
+    stats = await from_store(store, source="s")
+    await ex.aclose()
+    assert stats.spend[-1].documents == 2
+    assert stats.spend[-1].jev == pytest.approx(first.meta.jev.cost + second.meta.jev.cost)
+    assert stats.spend[0].documents == 1
+
+
 async def test_generators_with_counts_status_and_the_example_they_came_from(
     store: SQLiteStore,
 ) -> None:
@@ -138,8 +192,9 @@ async def test_generators_with_counts_status_and_the_example_they_came_from(
     assert learned.status == "active"
     assert learned.learned_from == ("gone", "ex1")
     assert learned.example == "Power: 150 PS"
-    # Only g1 was learned after the first document: one tick, one document in.
+    # Only g1 was learned after the first document started: one tick, one document in.
     assert stats.learned == [1]
+    assert stats.learned_at == [T0 + timedelta(minutes=2)]
     tiles = summary(stats)
     assert tiles["generators"] == 1
     assert tiles["generators_last_day"] == 1

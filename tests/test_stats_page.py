@@ -66,6 +66,7 @@ def store_stats(**kw: object) -> Stats:
         events=[
             Event("budget", "document max_llm_calls: 1 LLM calls", 3, T0, "https://cars.test/3"),
             Event("error", "JevBackendError: </script><script>alert(1)</script>", 7, T0),
+            Event("error", "<!--<script>", 8, T0),
         ],
         spend=[SpendPoint(20, 0.02, 0.2, at=T0 + timedelta(minutes=19))],
         budget_usd=1.0,
@@ -124,7 +125,11 @@ def test_events_are_newest_first_and_escaped() -> None:
     errors = page.index("JevBackendError")
     assert errors < page.index("max_llm_calls")
     assert "</script><script>alert(1)" not in page
-    assert inlined(page)["events"][1]["message"].endswith("alert(1)</script>")
+    assert "<!--<script>" not in page
+    data = inlined(page)
+    assert data["events"][1]["message"].endswith("alert(1)</script>")
+    assert data["events"][2]["message"] == "<!--<script>"
+    assert page.endswith("</script></body></html>\n")  # the page's own script survives
 
 
 def test_a_report_has_one_axis_and_no_reload() -> None:

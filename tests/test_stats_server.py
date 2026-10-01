@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import threading
 import urllib.error
@@ -170,3 +171,14 @@ def test_a_source_that_cant_be_read_is_a_500_with_the_reason(served: str, source
     status, _, body = get(f"{served}/stats/api/summary")
     assert status == 500
     assert "read stats: database is locked" in body
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["can't connect\nIs the server running?", "costs €2 — over budget"],
+)
+def test_any_error_text_reaches_the_body(served: str, source: Source, message: str) -> None:
+    source.error = StoreError(message)
+    status, _, body = get(f"{served}/stats/")
+    assert status == 500
+    assert html.escape(message).splitlines()[-1] in body

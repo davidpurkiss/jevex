@@ -160,7 +160,8 @@ def render_page(
         # The mix and cost charts carry their own titles.
         for v, heading in (("learning", "Learning curve"), ("mix", ""), ("cost", ""))
     )
-    data = json.dumps(to_json(stats, "all"), ensure_ascii=False).replace("</", "<\\/")
+    # No "<" at all, so no text in the data (``</script>``, ``<!--``) can end the block.
+    data = json.dumps(to_json(stats, "all"), ensure_ascii=False).replace("<", "\\u003c")
     refresh = f' data-refresh="{LIVE_REFRESH_SECONDS}"' if live else ""
     note = f" · {_esc(generated)}" if generated else ""
     return (

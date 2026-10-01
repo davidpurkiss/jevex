@@ -146,8 +146,9 @@ class Stats:
 
     ``source`` names it (a store URL or a CSV path). ``waves`` is ``(documents before it,
     wave)`` for each test-site wave after the first, ``learned`` how many documents had
-    been processed when each generator was learned (the curve's ticks), and
-    ``budget_usd`` an optional budget line for the cost view.
+    been processed when each generator was learned and ``learned_at`` when (the curve's
+    ticks on each axis; a replay has no times), and ``budget_usd`` an optional budget
+    line for the cost view.
     """
 
     source: str
@@ -159,6 +160,7 @@ class Stats:
     spend: list[SpendPoint] = field(default_factory=list[SpendPoint])
     waves: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
     learned: list[int] = field(default_factory=list[int])
+    learned_at: list[datetime] = field(default_factory=list[datetime])
     budget_usd: float | None = None
 
     @property
@@ -397,9 +399,14 @@ async def from_store(
     records = await store.generators(include_disabled=True)
     counts = [await store.generator_stats(g.id) for g in records]
     examples = await _learned_from(store, records)
-    start = docs[0].at if docs else since
+    # A document's charges are written while it runs, before its stat (``at`` is when it
+    # finished), so spend is counted from when the first one started, and a charge
+    # against the documents started by then.
+    starts = sorted(d.at - timedelta(seconds=d.seconds) for d in docs)
+    start = starts[0] if starts else since
     entries = [e for e in await store.spend_entries(since=start) if e.kind in ("jev", "llm")]
     times = [d.at for d in docs]
+    learned_at = sorted(g.created_at for g in records if start is None or g.created_at >= start)
     generators = [
         GeneratorStat(
             generator_id=g.id,
@@ -429,12 +436,9 @@ async def from_store(
             for i, d in enumerate(docs)
             for e in d.events
         ],
-        spend=_ledger_spend(entries, times) if entries else _point_spend(_document_points(docs)),
-        learned=sorted(
-            _processed_by(times, g.created_at)
-            for g in records
-            if docs and g.created_at >= docs[0].at
-        ),
+        spend=_ledger_spend(entries, starts) if entries else _point_spend(_document_points(docs)),
+        learned=[_processed_by(times, when) for when in learned_at] if docs else [],
+        learned_at=learned_at if docs else [],
         budget_usd=budget_usd,
     )
 
@@ -483,7 +487,7 @@ def _count(items: Iterable[str]) -> dict[str, int]:
 
 
 def _processed_by(times: Sequence[datetime], when: datetime) -> int:
-    """Documents recorded at or before ``when`` (``times`` is sorted)."""
+    """How many of ``times`` (sorted) are at or before ``when``."""
     lo, hi = 0, len(times)
     while lo < hi:
         mid = (lo + hi) // 2
@@ -494,7 +498,7 @@ def _processed_by(times: Sequence[datetime], when: datetime) -> int:
     return lo
 
 
-def _ledger_spend(entries: Sequence[SpendEntry], times: Sequence[datetime]) -> list[SpendPoint]:
+def _ledger_spend(entries: Sequence[SpendEntry], starts: Sequence[datetime]) -> list[SpendPoint]:
     out: list[SpendPoint] = []
     jev = llm = 0.0
     for e in entries:
@@ -502,7 +506,7 @@ def _ledger_spend(entries: Sequence[SpendEntry], times: Sequence[datetime]) -> l
             jev += e.amount_usd
         else:
             llm += e.amount_usd
-        out.append(SpendPoint(documents=_processed_by(times, e.at), jev=jev, llm=llm, at=e.at))
+        out.append(SpendPoint(documents=_processed_by(starts, e.at), jev=jev, llm=llm, at=e.at))
     return out
 
 

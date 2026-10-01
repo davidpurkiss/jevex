@@ -108,15 +108,19 @@ def stats_server(
             if path.startswith("/stats/api/chart/"):
                 view = name.removeprefix("chart/").removesuffix(".svg")
                 if view not in CHART_VIEWS or not name.endswith(".svg"):
-                    self.send_error(HTTPStatus.NOT_FOUND, f"no chart {view!r}")
+                    self.send_error(HTTPStatus.NOT_FOUND, explain=f"no chart {view!r}")
                     return
             elif path != "/stats/" and name not in VIEWS:
-                self.send_error(HTTPStatus.NOT_FOUND, f"no view {name!r}")
+                self.send_error(HTTPStatus.NOT_FOUND, explain=f"no view {name!r}")
                 return
             try:
                 stats = load()
             except (StoreError, OSError, ValueError) as exc:
-                self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, f"can't read stats: {exc}")
+                # The reason goes in the body only: the status line can't carry newlines or
+                # characters outside latin-1.
+                self.send_error(
+                    HTTPStatus.INTERNAL_SERVER_ERROR, explain=f"can't read stats: {exc}"
+                )
                 return
             if path == "/stats/":
                 self._send(render_page(stats, title=title, live=True), "text/html")
@@ -124,7 +128,7 @@ def stats_server(
                 query = parse_qs(url.query)
                 axis = query.get("x", [stats.default_axis()])[0]
                 if axis not in ("docs", "time"):
-                    self.send_error(HTTPStatus.BAD_REQUEST, "x must be docs or time")
+                    self.send_error(HTTPStatus.BAD_REQUEST, explain="x must be docs or time")
                     return
                 try:
                     svg = chart_svg(
@@ -135,7 +139,7 @@ def stats_server(
                         animate=query.get("animate", ["0"])[0] == "1",
                     )
                 except ValueError as exc:
-                    self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                    self.send_error(HTTPStatus.BAD_REQUEST, explain=str(exc))
                     return
                 self._send(svg, "image/svg+xml")
             else:

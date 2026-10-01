@@ -87,6 +87,13 @@ def test_a_store_has_no_accuracy_panel_and_a_time_axis() -> None:
     assert "document 2, 30 Sep 09:00" in svg
 
 
+def test_learned_ticks_on_the_time_axis_stay_in_the_plot() -> None:
+    stats = store_stats()
+    stats.learned_at = [T0 + timedelta(minutes=30), T0 + timedelta(days=1)]
+    svg = learning_svg(stats, "time")
+    assert svg.count('class="learned"') == 2  # one per panel; the late one is off the plot
+
+
 def test_a_missing_value_breaks_the_line() -> None:
     stats = replay_stats()
     stats.points.append(point(40, size=10, accuracy=0.8))

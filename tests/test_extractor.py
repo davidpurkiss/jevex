@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import pytest
 from pydantic import BaseModel
 
-from jevex import Budgets, DocBudget, Document, Extractor, Field, Pipeline
+from jevex import Budgets, DocBudget, Document, Extractor, Field, Pipeline, RunBudget
 from jevex.extractor import document_stat
 from jevex.jev import JevBackendError, Noul
 from jevex.pipeline import Context
@@ -125,3 +125,17 @@ async def test_without_a_store_nothing_is_opened_to_record_stats() -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Stops()]))
     await ex.extract(doc())
     assert await ex.store() is None
+
+
+async def test_an_in_memory_store_the_extractor_opened_records_no_stats() -> None:
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([Stops()]),
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+    )
+    await ex.extract(doc())
+    store = await ex.store()
+    assert store is not None
+    assert await store.documents() == []
+    await ex.aclose()

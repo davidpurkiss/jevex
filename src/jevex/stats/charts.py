@@ -225,12 +225,17 @@ class _Frame:
                     f'y2="{self.bottom:.1f}"/><text class="muted" x="{x + 4:.1f}" '
                     f'y="{self.top + _TOP - 8:.1f}">wave {wave}</text>'
                 )
-            for documents in stats.learned:
-                x = self.x(documents)
-                parts.append(
-                    f'<line class="learned" x1="{x:.1f}" x2="{x:.1f}" y1="{self.bottom:.1f}" '
-                    f'y2="{self.bottom - 6:.1f}"><title>generator learned</title></line>'
-                )
+        ticks = (
+            [float(d) for d in stats.learned]
+            if self.axis == "docs"
+            else [when.timestamp() for when in stats.learned_at]
+        )
+        for tick in (t for t in ticks if self.x0 <= t <= self.x1):
+            x = self.x(tick)
+            parts.append(
+                f'<line class="learned" x1="{x:.1f}" x2="{x:.1f}" y1="{self.bottom:.1f}" '
+                f'y2="{self.bottom - 6:.1f}"><title>generator learned</title></line>'
+            )
         return parts
 
 
