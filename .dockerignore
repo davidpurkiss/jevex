@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+dist
+docs
+scripts
+tests
+testsite/build
+benchmarks
+.env

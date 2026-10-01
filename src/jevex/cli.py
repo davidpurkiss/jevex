@@ -5,10 +5,10 @@
 gate against a baseline), ``jevex learn`` compiles
 logged examples into a pack diff, ``jevex pack export|import|diff`` moves learned state
 between stores and packs, ``jevex stats`` serves the stats UI over a store or a replay's
-CSV (``jevex stats export --svg <view>`` writes a chart), and ``jevex testsite
-build|serve`` writes and serves the synthetic test site. The other commands are
-placeholders until their issues land. Uses only the standard library (argparse), so the
-CLI adds nothing to a core install.
+CSV (``jevex stats export --svg <view>`` writes a chart), ``jevex serve`` runs the
+extraction microservice (``server`` extra, :mod:`jevex.server`), and ``jevex testsite
+build|serve`` writes and serves the synthetic test site. Uses only the standard library
+(argparse), so the CLI adds nothing to a core install.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO, get_args
 
 from pydantic import BaseModel, ValidationError
 
@@ -38,7 +38,7 @@ from jevex.baseline import (
     corpus_digest,
     ensure_comparable,
 )
-from jevex.budgets import Budgets, RunBudget
+from jevex.budgets import Budgets, Period, RunBudget
 from jevex.document import Document
 from jevex.eval import evaluate, load_corpus
 from jevex.extractor import Extractor
@@ -85,9 +85,7 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_USAGE = 2
 
-PLANNED = {
-    "serve": ("Run the extraction microservice", 53),
-}
+SERVE_PORT = 8080
 
 
 class CliError(Exception):
@@ -175,18 +173,7 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
             raise CliError(f"Jev: {exc}") from exc
         except PackError as exc:  # an installed community pack that doesn't load
             raise CliError(f"pack: {exc}") from exc
-    if args.meta:
-        return result.to_dict()
-    return {
-        "records": [
-            {
-                "schema": r.schema_name,
-                "entity": r.entity,
-                "record": r.record.model_dump(mode="json"),
-            }
-            for r in result.records
-        ]
-    }
+    return result.to_dict() if args.meta else result.to_plain_dict()
 
 
 async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> EvalReport:
@@ -709,6 +696,58 @@ def _stats_serve(args: argparse.Namespace, stdout: TextIO) -> None:
             httpd.serve_forever()
 
 
+async def _check_store(url: str) -> None:
+    """Open and close the store, so a bad URL fails before the service starts."""
+    store = await _open_store(url, must_exist=False)
+    await store.aclose()
+
+
+def _serve(
+    args: argparse.Namespace, jev: JevClient | None, llm: LLM | None, stdout: TextIO
+) -> None:
+    try:
+        import uvicorn
+
+        from jevex.server import Service, create_app
+    except ImportError as exc:
+        raise CliError(
+            f"jevex serve needs the server extra: pip install 'jevex[server]' ({exc})"
+        ) from exc
+    schemas = [load_schema(s) for s in args.schema]
+    if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
+        raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
+    if args.store is not None:
+        asyncio.run(_check_store(args.store))
+    run = None
+    if args.max_spend is not None or args.max_jev_spend is not None:
+        period: Period = args.period
+        run = RunBudget(max_spend=args.max_spend, max_jev_spend=args.max_jev_spend, period=period)
+    model = (llm or load_llm(args.llm)) if args.llm else None
+    try:
+        service = Service(
+            schemas,
+            jev=jev,
+            store=args.store,
+            budgets=Budgets(run=run),
+            threshold=args.threshold,
+            extraction_llm=model,
+            generator_llm=model,
+            close_llms=llm is None,  # an adapter built here is the service's to close
+            stats=args.stats,
+            stats_budget_usd=args.stats_budget,
+        )
+    except (ValueError, UnsupportedFieldError) as exc:
+        raise CliError(str(exc)) from exc
+    names = ", ".join(service.schema_names)
+    stats = f"; stats at http://{args.host}:{args.port}/stats/" if args.stats else ""
+    print(
+        f"serving {names} at http://{args.host}:{args.port}/extract{stats} (Ctrl-C to stop)",
+        file=stdout,
+    )
+    stdout.flush()
+    uvicorn.run(create_app(service), host=args.host, port=args.port)
+
+
 def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:
     try:
         httpd = server(args.dir, args.host, args.port)
@@ -1003,6 +1042,58 @@ def build_parser() -> argparse.ArgumentParser:
     )
     stats.add_argument("--static", action="store_true", help="export: no animation")
 
+    serve = commands.add_parser(
+        "serve",
+        help="Run the extraction microservice (server extra)",
+        description="Serve POST /extract (a document, its bytes base64, and a schema "
+        "name), /health and /metrics (Prometheus) over HTTP, until interrupted. Needs "
+        "TYPESAFE_API_KEY and the server extra.",
+    )
+    serve.add_argument(
+        "--schema",
+        action="append",
+        required=True,
+        metavar="MODULE:CLASS",
+        help="A Pydantic model to serve, as module:Class or path/to/file.py:Class "
+        "(repeatable); requests name it by its class name",
+    )
+    serve.add_argument(
+        "--store",
+        help="A store URL for learned state, the spend ledger and stats, e.g. "
+        "sqlite:///jevex.db (default: in memory, lost on exit)",
+    )
+    serve.add_argument(
+        "--llm",
+        metavar="PROVIDER[:MODEL]",
+        help="Use this LLM for the fallback and for learning generators: "
+        f"{', '.join(LLM_PROVIDERS)} (anthropic defaults to {ANTHROPIC_MODEL}). "
+        "Without it the service uses Jev alone",
+    )
+    serve.add_argument(
+        "--threshold",
+        type=_probability,
+        default=0.0,
+        help="Confidence (0–1) below which values become null (default 0: keep everything)",
+    )
+    serve.add_argument("--max-spend", type=_usd, help="LLM spend allowed per --period, in USD")
+    serve.add_argument("--max-jev-spend", type=_usd, help="Jev spend allowed per --period, in USD")
+    serve.add_argument(
+        "--period",
+        choices=get_args(Period),
+        default="day",
+        help="The period the spend limits cover (default day)",
+    )
+    serve.add_argument(
+        "--stats",
+        action="store_true",
+        help="Also serve the stats UI at /stats/ (needs --store; it shows URLs and spend)",
+    )
+    serve.add_argument(
+        "--stats-budget", type=_usd, metavar="USD", help="Draw the stats UI's budget line"
+    )
+    serve.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
+    serve.add_argument("--port", type=int, default=SERVE_PORT, help=f"Port (default {SERVE_PORT})")
+
     site = commands.add_parser(
         "testsite",
         help="Build and serve the synthetic test site",
@@ -1038,9 +1129,6 @@ def build_parser() -> argparse.ArgumentParser:
     site_serve.add_argument("--dir", default=BUILD_DIR, help=f"The build (default {BUILD_DIR})")
     site_serve.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
     site_serve.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
-
-    for name, (summary, issue) in PLANNED.items():
-        commands.add_parser(name, help=f"{summary} (not implemented yet, #{issue})")
     return parser
 
 
@@ -1057,9 +1145,9 @@ def main(
     0: success. 1: a runtime or user error (printed to stderr as ``jevex: error: ...``),
     including ``jevex eval`` runs (and replays) where any document failed or ``--gate``
     found a regression (the report is still printed).
-    2: a usage error, no command, or a command that isn't implemented yet.
-    ``jev``, ``llm`` (the ``--llm`` of ``jevex learn`` and ``jevex eval``), ``out`` and
-    ``err`` are injectable for tests.
+    2: a usage error or no command.
+    ``jev``, ``llm`` (the ``--llm`` of ``jevex learn``, ``jevex eval`` and ``jevex serve``),
+    ``out`` and ``err`` are injectable for tests.
     """
     stdout: TextIO = out or sys.stdout
     stderr: TextIO = err or sys.stderr
@@ -1068,10 +1156,13 @@ def main(
     if args.command is None:
         parser.print_help(stderr)
         return EXIT_USAGE
-    if args.command in PLANNED:
-        summary, issue = PLANNED[args.command]
-        print(f"jevex {args.command}: not implemented yet ({summary}; see #{issue})", file=stderr)
-        return EXIT_USAGE
+    if args.command == "serve":
+        if args.stats and args.store is None:
+            parser.error("--stats reads the store: give --store too")
+        if args.stats_budget is not None and not args.stats:
+            parser.error("--stats-budget only applies with --stats")
+        if args.max_spend is None and args.max_jev_spend is None and args.period != "day":
+            parser.error("--period only applies with --max-spend or --max-jev-spend")
     if args.command == "stats":
         export_only = [
             flag
@@ -1147,6 +1238,9 @@ def main(
                 stdout.write(_stats_export(args))
             else:
                 _stats_serve(args, stdout)
+            return EXIT_OK
+        if args.command == "serve":
+            _serve(args, jev, llm, stdout)
             return EXIT_OK
         if args.command == "testsite":
             if args.testsite_command == "build":

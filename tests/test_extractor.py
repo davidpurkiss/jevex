@@ -139,3 +139,20 @@ async def test_an_in_memory_store_the_extractor_opened_records_no_stats() -> Non
     assert store is not None
     assert await store.documents() == []
     await ex.aclose()
+
+
+async def test_plain_dict_has_each_records_values_without_meta() -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]))
+    result = await ex.extract(doc())
+    assert result.to_plain_dict() == {
+        "records": [
+            {
+                "schema": "Car",
+                "entity": "document",
+                "record": {"model": "Golf " * 50, "power_ps": 150},
+            }
+        ]
+    }
+    assert (
+        result.to_dict()["records"][0]["record"] == result.to_plain_dict()["records"][0]["record"]
+    )

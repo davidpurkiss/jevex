@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 
 from jevex import Context, GeneratorRecord, GeneratorSpec, VerifiedExample, cli
 from jevex.cli import CliError, load_llm, load_schema, main
@@ -112,11 +113,96 @@ def test_schema_by_module_path_and_by_file() -> None:
     assert load_schema(SCHEMA).__name__ == "Book"
 
 
-def test_planned_commands_say_so() -> None:
-    code, _, err = run_cli("serve")
-    assert code == 2
-    assert "not implemented yet" in err
-    assert "#" in err
+type Served = list[tuple[FastAPI, dict[str, object]]]
+
+
+@pytest.fixture
+def served(monkeypatch: pytest.MonkeyPatch) -> Served:
+    """``jevex serve``'s calls to ``uvicorn.run``, which returns at once."""
+    calls: Served = []
+
+    def run(app: FastAPI, **options: object) -> None:
+        calls.append((app, options))
+
+    monkeypatch.setattr("uvicorn.run", run)
+    return calls
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_serve_runs_the_app_until_interrupted(served: Served, tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from jevex.server import Service
+
+    url = f"sqlite:///{tmp_path / 'jevex.db'}"
+    code, out, err = run_cli(
+        "serve", "--schema", SCHEMA, "--store", url, "--stats", "--port", "9001",
+        "--max-spend", "2", "--period", "week",
+    )  # fmt: skip
+    assert (code, err) == (0, "")
+    assert out == (
+        "serving Book at http://127.0.0.1:9001/extract; stats at "
+        "http://127.0.0.1:9001/stats/ (Ctrl-C to stop)\n"
+    )
+    [(app, options)] = served
+    assert options == {"host": "127.0.0.1", "port": 9001}
+    service: object = app.state.service
+    assert isinstance(service, Service)
+    run = service.budgets.run if service.budgets else None
+    assert run is not None
+    assert (run.max_spend, run.period) == (2, "week")
+    with TestClient(app) as client:
+        response = client.post(
+            "/extract", json={"document": {"content": "PGgxPkR1bmU8L2gxPg=="}, "schema": "Book"}
+        )
+        assert response.json()["records"][0]["record"] == {"title": "Dune"}
+        assert client.get("/stats/api/summary").json()["documents"] == 1
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--stats"], "--stats reads the store: give --store too"),
+        (["--stats-budget", "5"], "--stats-budget only applies with --stats"),
+        (["--period", "week"], "--period only applies with --max-spend or --max-jev-spend"),
+    ],
+)
+def test_serve_usage_errors(
+    argv: list[str], message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("serve", "--schema", SCHEMA, *argv)
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--schema", "nope:Nope"], "couldn't import 'nope'"),
+        (["--schema", SCHEMA, "--store", "mysql://x"], "store: unsupported store URL"),
+    ],
+)
+def test_serve_errors_before_serving(argv: list[str], message: str, served: Served) -> None:
+    code, out, err = run_cli("serve", *argv)
+    assert (code, out) == (1, "")
+    assert message in err
+    assert served == []
+
+
+def test_serve_needs_an_api_key(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    err = io.StringIO()
+    assert main(["serve", "--schema", SCHEMA], err=err) == 1
+    assert "TYPESAFE_API_KEY is not set" in err.getvalue()
+    assert served == []
+
+
+def test_serve_needs_the_server_extra(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:
+    monkeypatch.setitem(sys.modules, "jevex.server", None)
+    code, out, err = run_cli("serve", "--schema", SCHEMA)
+    assert (code, out) == (1, "")
+    assert "jevex serve needs the server extra: pip install 'jevex[server]'" in err
 
 
 def test_no_command_prints_help_to_stderr() -> None:
