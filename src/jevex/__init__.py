@@ -110,6 +110,7 @@ from jevex.packs import (
     stored_generators,
 )
 from jevex.pipeline import Context, Pipeline, Stage
+from jevex.replay import LearningStoppedError, ReplayBatch, ReplayReport, replay
 from jevex.resolve import (
     ChildFieldError,
     EntityStage,
@@ -237,6 +238,7 @@ __all__ = [
     "LearnOutcome",
     "LearnStage",
     "LearnedGenerators",
+    "LearningStoppedError",
     "Location",
     "MatchSpec",
     "MultiEntity",
@@ -263,6 +265,8 @@ __all__ = [
     "Questions",
     "RapidOcrEngine",
     "RegexGenerator",
+    "ReplayBatch",
+    "ReplayReport",
     "ReviewItem",
     "ReviewQueue",
     "ReviewSink",
@@ -327,6 +331,7 @@ __all__ = [
     "normalise",
     "open_store",
     "pack_generators",
+    "replay",
     "review_items",
     "row_roles",
     "run_chain",
