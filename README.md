@@ -280,6 +280,46 @@ docker run -p 8080:8080 -e TYPESAFE_API_KEY -v jevex-data:/data jevex \
     --schema carfinder.schemas:VehicleSpec --store sqlite:////data/jevex.db
 ```
 
+## Scrapy
+
+With the `scrapy` extra (`pip install "jevex[scrapy]"`), Scrapy does the crawling and
+`jevex.contrib.scrapy.JevexPipeline`, an item pipeline, does the extraction on Scrapy's
+asyncio reactor (its default). The spider yields each page as a document, made with
+`document_from_response`:
+
+```python
+from jevex.contrib.scrapy import document_from_response
+
+
+class BookSpider(scrapy.Spider):
+    name = "books"
+    custom_settings = {
+        "ITEM_PIPELINES": {"jevex.contrib.scrapy.JevexPipeline": 300},
+        "JEVEX_SCHEMAS": ["myproject.schemas:Book"],
+        "JEVEX_STORE": "sqlite:///jevex.db",
+    }
+
+    def parse_book(self, response):
+        yield {"url": response.url, "document": document_from_response(response)}
+```
+
+The pipeline swaps the item's `document` for `records` (each record's schema, entity and
+values, as `jevex extract` prints them), so `scrapy crawl books -O books.jsonl` writes
+them out. Items without a document pass through. `JEVEX_THRESHOLD` and `JEVEX_META`
+(per-field and document meta) work as their `Extractor` and `jevex extract` namesakes,
+and counts go to Scrapy's stats under `jevex/`. For anything else (LLMs, budgets, a
+custom pipeline), subclass `JevexPipeline` and override `make_extractor`; `fill_item`
+decides what the item gets. When the spider closes, the pipeline lets queued learning
+finish (`JEVEX_WAIT_FOR_LEARNING`), then closes the extractor. Several Scrapy workers
+can share learned generators and a run budget through one store (Postgres across hosts).
+
+`src/jevex/examples/books_spider.py` is a complete spider for
+[books.toscrape.com](https://books.toscrape.com), a practice site:
+
+```sh
+scrapy runspider src/jevex/examples/books_spider.py -O books.jsonl -s CLOSESPIDER_ITEMCOUNT=5
+```
+
 ## Stats
 
 With a store, each document's numbers are recorded in it (`Extractor(record_stats=False)`
