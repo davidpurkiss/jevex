@@ -44,7 +44,7 @@ from jevex.statements import Statement, TableCellRef
 if TYPE_CHECKING:
     from jevex.layout import Component, TableCell
 
-_WHITESPACE = re.compile(r"\s+")
+_WHITESPACE = re.compile(r"[ \t\n\r\f\v]+")  # a no-break space stays: it can group thousands
 
 RowRole = Literal["header", "band", "body"]
 """A table row's part in reading the table (:func:`row_roles`)."""

@@ -23,10 +23,12 @@ from jevex import (
     cut_statement,
 )
 from jevex.extractor import default_pipeline
+from jevex.generators import default_registry
 from jevex.interfaces import ParsedDocument, StatementSplitter
 from jevex.jev import Choice
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
+from jevex.normalise import normalise
 from jevex.split import (
     MAX_SEGMENT_CHARS,
     MAX_STATEMENT_CHARS,
@@ -663,3 +665,65 @@ async def test_a_200k_character_statement_is_extracted_without_raising(body: str
     stated = [c.state for c in fake.calls if isinstance(c.state, dict) and "statement" in c.state]
     assert stated
     assert max(len(str(state["statement"])) for state in stated) <= MAX_STATEMENT_CHARS
+
+
+# --- locales (#56) ---------------------------------------------------------------------
+
+
+class Offre(BaseModel):
+    prix: Decimal = Field(description="Price", unit="EUR")
+    poids_kg: float = Field(description="Kerb weight", unit="kg")
+
+
+async def test_no_break_spaces_survive_splitting_so_french_thousands_read_whole() -> None:
+    html = "<p>Poids à vide 1&nbsp;234,5 kg. Prix 18&#8239;495 €.</p>".encode()
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html, content_type="text/html"))
+    [para] = [c for c in root.walk() if c.type == "paragraph"]
+    statements = DefaultSplitter().split(para)
+    assert [s.text for s in statements] == [
+        "Poids à vide 1\u00a0234,5 kg.",
+        "Prix 18\u202f495 €.",
+    ]
+    spec = SchemaSpec.from_model(Offre)
+    weight, price = statements
+    found = {
+        c.raw: normalise(c.raw, c.normalise, spec.field("poids_kg"))
+        for c in default_registry().generate(
+            weight, spec.field("poids_kg"), schema="Offre", locale="fr-FR"
+        )
+    }
+    assert found["1\u00a0234,5 kg"] == 1234.5
+    assert "234,5 kg" not in found
+    amounts = [
+        (c.raw, normalise(c.raw, c.normalise, spec.field("prix")))
+        for c in default_registry().generate(
+            price, spec.field("prix"), schema="Offre", locale="fr-FR"
+        )
+        if c.generator_id == "money"
+    ]
+    assert amounts == [("18\u202f495 €", Decimal(18495))]
+
+
+def test_ascii_whitespace_still_collapses_around_a_no_break_space() -> None:
+    assert split(comp("paragraph", "Prix\t 18\u00a0495 €  \f TTC.")) == [
+        ("Prix 18\u00a0495 € TTC.", "sentence")
+    ]
+
+
+async def test_text_values_read_no_break_spaces_as_plain_spaces() -> None:
+    html = b"<h1>A&nbsp;Light in the&nbsp;Attic</h1>"
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html, content_type="text/html"))
+    [heading] = [c for c in root.walk() if c.type == "heading"]
+    [statement] = DefaultSplitter().split(heading)
+    assert statement.text == "A\u00a0Light in the\u00a0Attic"
+
+    class Book(BaseModel):
+        title: str = Field(description="Title")
+
+    title = SchemaSpec.from_model(Book).field("title")
+    [whole] = [
+        c
+        for c in default_registry().generate(statement, title, schema="Book")
+        if c.generator_id == "whole_statement"
+    ]
+    assert normalise(whole.raw, whole.normalise, title) == "A Light in the Attic"

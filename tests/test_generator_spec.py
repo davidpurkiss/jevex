@@ -128,7 +128,10 @@ def test_rejects_a_missing_group() -> None:
         (["custom_normaliser"], "isn't built in"),
         ([{"unit": {"from": "parsecs"}}], "unknown unit 'parsecs'"),
         ([{"unit": {"from": "s", "via": "x"}}], "doesn't take 'via'"),
-        ([{"parse_number": {"locale": "de"}}], "takes no arguments"),
+        ([{"parse_number": {"locale": "de"}}], r"doesn't take 'locale' \(it takes decimal\)"),
+        ([{"parse_number": {"decimal": "·"}}], "decimal"),
+        ([{"parse_money": {"decimal": ";"}}], "decimal"),
+        ([{"strip": {"decimal": ","}}], "takes no arguments"),
         ([{"parse_date": {"order": "ydm"}}], "order"),
         ([{"parse_money": {"currency": "pounds"}}], "ISO 4217"),
         ([{"unit": {"gallon": "imperial"}}], "gallon"),
@@ -150,10 +153,13 @@ def test_every_built_in_normaliser_is_allowed_and_real() -> None:
                 {"unit": {"from": "km/h", "to": "mph", "gallon": "us"}},
                 {"parse_money": {"currency": "GBP"}},
                 {"parse_date": {"order": "dmy", "precision": "month"}},
+                {"parse_number": {"decimal": ","}},
+                {"parse_range": {"decimal": "."}},
+                {"parse_money": {"currency": "EUR", "decimal": ","}},
             ]
         )
     )
-    assert len(spec.normalise) == 5
+    assert len(spec.normalise) == 8
 
 
 @pytest.mark.parametrize(

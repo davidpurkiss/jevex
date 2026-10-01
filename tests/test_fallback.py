@@ -273,6 +273,18 @@ async def test_evidence_not_in_the_statement_is_dropped_unverified(evidence: str
     assert [e.kind for e in ctx.events] == ["llm_no_evidence"]
 
 
+@pytest.mark.parametrize("evidence", ["9.1 s", "9.1\u00a0s", "9.1  s"])
+async def test_evidence_matches_whatever_whitespace_separates_its_words(evidence: str) -> None:
+    fake = FakeJev().noul(VERIFY, p=0.95)
+    ctx = context(fake, [st("s1", "0-62 mph in 9.1\u00a0s")], {"s1": "zero_to_62_s"})
+    ctx.extraction_llm = llm(value=9.1, evidence=evidence)
+    await FallbackStage().run(ctx)
+    m = meta(ctx)
+    assert m.value == 9.1
+    assert m.source is not None
+    assert m.source.span == Span(start=12, end=17)
+
+
 async def test_a_value_that_doesnt_fit_the_field_is_dropped_unverified() -> None:
     fake = FakeJev(strict=True)
     ctx = context(fake, [st("s1", "Seats: none")], {"s1": "seats"})

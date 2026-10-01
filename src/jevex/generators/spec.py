@@ -120,10 +120,12 @@ _UNIT_NAMES = sorted(
 )
 _UNIT = ArgRule(_unit_name, _enum(*_UNIT_NAMES))
 
+_DECIMAL = ArgRule(_one_of(".", ","), _enum(".", ","))
+
 BUILTIN_NORMALISER_ARGS: dict[str, dict[str, ArgRule]] = {
     "strip": {},
-    "parse_number": {},
-    "parse_range": {},
+    "parse_number": {"decimal": _DECIMAL},
+    "parse_range": {"decimal": _DECIMAL},
     "unit": {
         "from": _UNIT,
         "to": _UNIT,
@@ -131,6 +133,7 @@ BUILTIN_NORMALISER_ARGS: dict[str, dict[str, ArgRule]] = {
     },
     "parse_money": {
         "currency": ArgRule(_currency, {"type": "string", "pattern": "^[A-Z]{3}$"}),
+        "decimal": _DECIMAL,
     },
     "parse_date": {
         "order": ArgRule(_one_of("ymd", "dmy", "mdy"), _enum("ymd", "dmy", "mdy")),

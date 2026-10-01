@@ -68,6 +68,31 @@ pipeline = default_pipeline().replace(
 A vision model plugs in as another `ImageProcessor` passed to `ImageStage(processors=[...])`;
 the statements it returns are tagged `vision`, and so are the values taken from them.
 
+## Locales
+
+Generators read numbers, amounts and dates the way the page's locale writes them. Set it
+on the candidate stage:
+
+```python
+from jevex import CandidateStage
+from jevex.extractor import default_pipeline
+
+pipeline = default_pipeline().replace("candidates", CandidateStage(locale="de-DE"))
+```
+
+| Locale | Reads |
+| --- | --- |
+| unset, `en-GB`, other decimal-point languages, and regions such as `de-CH` and `es-MX` | "1,234.5", "£18,495", "03/12/2024" as 3 December, mpg in UK gallons |
+| decimal-comma languages (`de`, `fr`, `es`, `it`, `nl`, `pt`, `pl`, `sv`, ...) | "1.234,5 kg", "18 495 €" grouped with a dot or a no-break space (not a plain one), "01.12.2023" day first; German month names ("12. März 2024") |
+| a US region (`en-US`, `es-US`) | "03/12/2024" as 12 March, mpg in US gallons |
+
+Normaliser steps take the matching arguments (`{parse_number: {decimal: ","}}`,
+`{parse_date: {order: mdy}}`, `{unit: {from: mpg, gallon: us}}`), and a learned or pack
+generator scoped to a locale (`scope: {locale: de-DE}`) gets them added to its chain, so
+it reads its locale's numbers without spelling that out. A locale-scoped generator runs
+only when the stage's locale matches it (`de` matches `de-AT`), never when it's unset. `locale_conventions("de-DE")` shows what jevex
+assumes for a tag.
+
 ## LLM fallback
 
 An LLM is optional. With one set as `extraction_llm`, jevex asks it about a field only

@@ -12,6 +12,7 @@ from jevex.interfaces import CandidateSelector, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
 from jevex.learn import GeneratorSnapshot
+from jevex.normalise import NormaliseStage
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
     CandidateStage,
@@ -223,6 +224,24 @@ async def test_source_scoped_learned_generators_run_only_on_their_sources(
     found = ctx.schemas["Car"].candidates[("s1", "zero_to_62_s")]
     assert [(c.raw, c.generator_id) for c in found] == ([("9.1", "gen-acme")] if runs else [])
     assert ctx.generators_ran == ({"gen-acme"} if runs else set())
+
+
+async def test_the_stage_locale_reads_decimal_commas_through_to_the_value() -> None:
+    fake = FakeJev().choice("Which of these is the 0-62 mph time", "9,1 s", confidence=0.8)
+    ctx = context(fake, [st("s1", "0-100 km/h in 9,1 s")], {"s1": "zero_to_62_s"})
+    await CandidateStage(locale="de-DE").run(ctx)
+    run = ctx.schemas["Car"]
+    assert "9,1 s" in [c.raw for c in run.candidates[("s1", "zero_to_62_s")]]
+    await SelectStage().run(ctx)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["zero_to_62_s"].value == 9.1
+
+
+async def test_without_a_locale_a_decimal_comma_is_not_one_number() -> None:
+    ctx = context(FakeJev(), [st("s1", "0-100 km/h in 9,1 s")], {"s1": "zero_to_62_s"})
+    await CandidateStage().run(ctx)
+    raws = [c.raw for c in ctx.schemas["Car"].candidates[("s1", "zero_to_62_s")]]
+    assert "9,1 s" not in raws
 
 
 async def test_no_generator_runs_without_a_statement_for_its_field() -> None:

@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.layout import ComponentType
 
-_WHITESPACE = re.compile(r"\s+")
+_WHITESPACE = re.compile(r"[ \t\n\r\f\v]+")  # a no-break space stays: it can group thousands
 _NO_SPACE_BEFORE = frozenset(".,;:!?)]}%")
 _LIST_MARKER = re.compile(
     r"[•◦▪▫●○■□‣∙·*+\-–—]"  # bullets

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
 
 from jevex.interfaces import Scope
+from jevex.locales import locale_conventions, localise_steps
 from jevex.statements import Candidate, NormaliserStep, Span, Statement
 
 if TYPE_CHECKING:
@@ -78,7 +79,13 @@ def compile_re2(pattern: str) -> _Pattern:
 
 @dataclass(frozen=True)
 class RegexGenerator:
-    """Proposes the text matched by ``group`` of an RE2 ``pattern`` as a candidate."""
+    """Proposes the text matched by ``group`` of an RE2 ``pattern`` as a candidate.
+
+    A generator scoped to a locale reads numbers and dates the way that locale writes
+    them: its chain gets the arguments :func:`~jevex.locales.localise_steps` adds (a
+    ``de-DE`` generator's ``parse_number`` reads "1.234,5" as 1234.5), unless a step sets
+    them itself. An unscoped generator's chain is used as written.
+    """
 
     id: str
     pattern: str
@@ -86,6 +93,7 @@ class RegexGenerator:
     normalise: tuple[NormaliserStep, ...] = ()
     scope: Scope = field(default_factory=Scope)
     _compiled: _Pattern = field(init=False, repr=False, compare=False)
+    _steps: tuple[NormaliserStep, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         compiled = compile_re2(self.pattern)
@@ -94,6 +102,8 @@ class RegexGenerator:
                 f"group {self.group} doesn't exist; the pattern has {compiled.groups} group(s)"
             )
         object.__setattr__(self, "_compiled", compiled)  # frozen dataclass
+        steps = localise_steps(self.normalise, locale_conventions(self.scope.locale))
+        object.__setattr__(self, "_steps", tuple(steps))
 
     def generate(self, statement: Statement) -> list[Candidate]:
         out: list[Candidate] = []
@@ -106,7 +116,7 @@ class RegexGenerator:
                     statement,
                     Span(start=start, end=end),
                     generator_id=self.id,
-                    normalise=list(self.normalise),
+                    normalise=list(self._steps),
                 )
             )
         return out
