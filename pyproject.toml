@@ -60,6 +60,9 @@ pdf = [
     "torch>=2.2.2",
     "torchvision>=0.17",
 ]
+gemini = [
+    "google-genai>=2.26.0",
+]
 
 [tool.hatch.version]
 path = "src/jevex/__init__.py"

@@ -405,6 +405,7 @@ extractor = Extractor(
 | --- | --- |
 | `jevex[anthropic]` | `AnthropicLLM` (native) |
 | `jevex[openai]` | `OpenAILLM` (native) |
+| `jevex[gemini]` | `GeminiLLM` (native, Google's `google-genai` SDK) |
 | `jevex[litellm]` | `LiteLLM`, which covers any provider LiteLLM supports, including local Ollama |
 
 Each adapter implements one small protocol, so anything else is a few lines:

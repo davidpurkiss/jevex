@@ -52,7 +52,7 @@ CI (`.github/workflows/ci.yml`) runs lint, then pyright + pytest on 3.12 and 3.1
 | `store/` | Learned state: `Store` protocol and records (`base.py`), `SQLiteStore` (WAL, `BEGIN IMMEDIATE` writes, integer nano-dollar spend ledger, own worker thread), `open_store(url)` |
 | `tables.py` | `table_statements`: one `table_cell` statement per data cell, rendered `[band › ][row headers · ][column headers: ]value`, with headers structured on `Statement.table` (`TableCellRef`) for entity resolvers; `header_prefix`; `blank_rows` (a label whose data cells are empty: not a band or header row, for the gate too); `row_roles` (each row a header, band or body row, as the statements read it; the gate splits oversized tables by it); `infer_headers` (a header-less comparison table's first row and column, guarded by number-like values) |
 | `testing.py` | `FakeJev` / `FakeLLM` (scripted answers), `Cassette` / `LLMCassette` record/replay |
-| `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/litellm.py` (extras) |
+| `llm/` | `LLM` protocol, `LLMResponse`, price table, spend cap; adapters in `llm/anthropic.py`, `llm/openai.py`, `llm/gemini.py`, `llm/litellm.py` (extras) |
 
 How the parts fit together:
 - A stage is anything with `name` and `async run(ctx)`. It reads earlier results from
@@ -72,7 +72,7 @@ How the parts fit together:
 Put new modules where the spec's structure suggests. For example: `jevex/clean.py`,
 `jevex/layout_html.py`, `jevex/generators/`, `jevex/normalise.py`, `jevex/store/`,
 `jevex/llm/`, `jevex/contrib/scrapy.py`, `jevex/cli.py`. Heavy dependencies are optional
-extras (`pdf`, `ocr`, `anthropic`, `openai`, `litellm`, `postgres`, `server`, `scrapy`).
+extras (`pdf`, `ocr`, `anthropic`, `openai`, `gemini`, `litellm`, `postgres`, `server`, `scrapy`).
 Import them lazily inside the code that needs them.
 
 ## Conventions
