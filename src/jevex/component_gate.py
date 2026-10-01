@@ -30,7 +30,7 @@ from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
-from jevex.tables import blank_rows
+from jevex.tables import blank_rows, infer_headers
 
 if TYPE_CHECKING:
     from jevex.interfaces import ComponentGate, ParsedDocument
@@ -134,6 +134,7 @@ def _table_rows(table: Component) -> tuple[list[str], list[str]]:
     captions = [c.text.strip() for c in table.children if c.text.strip()]
     if not table.cells:
         return captions, [line for line in table.text.split("\n") if line.strip()]
+    table = infer_headers(table)  # a comparison table's first row, as its statements have
     rows: dict[int, list[TableCell]] = {}
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
         if cell.text:

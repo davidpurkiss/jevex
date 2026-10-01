@@ -202,6 +202,26 @@ def test_an_oversized_tables_blank_row_is_a_body_row_without_gaps() -> None:
     assert not any(line.startswith(" |") or line.endswith("| ") for line in lines)
 
 
+def test_an_oversized_comparison_table_without_headers_repeats_its_inferred_header_row() -> None:
+    grid = [("Spec", "SE", "GT")] + [(f"Spec {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, 30)]
+    t = Component.model_validate(
+        {
+            "id": "t",
+            "type": "table",
+            "text": "\n".join(" | ".join(row) for row in grid),
+            "cells": [
+                {"row": r, "col": c, "text": text}
+                for r, row in enumerate(grid)
+                for c, text in enumerate(row)
+            ],
+            "location": DomLocation(dom_path="/t"),
+        }
+    )
+    units = gate_units(comp("section", "", "r", t), max_chars=120)
+    assert len(units) > 1
+    assert all(u.text.startswith("Spec | SE | GT\nSpec ") for u in units)
+
+
 def test_an_oversized_list_is_split_by_items() -> None:
     items = [comp("list_item", f"Feature number {i}", f"li{i}") for i in range(20)]
     units = gate_units(comp("section", "", "r", comp("list", "", "l", *items)), max_chars=100)
