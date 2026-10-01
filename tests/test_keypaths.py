@@ -200,6 +200,105 @@ async def test_unsure_answers_arent_stored_so_the_path_is_asked_again() -> None:
     assert len(again.calls) == 1
 
 
+UNSURE_PATHS = [
+    "model",
+    "vehicleEngine.engineDisplacement",
+    "fuelType",
+    "offers[].price",
+    "color[]",
+]
+
+
+async def test_after_three_unsure_answers_a_path_is_stored_as_none() -> None:
+    mapper = KeyPathMapper()
+    car = SchemaSpec.from_model(Car)
+    # The first page asks about every path; the "@type"s get a confident "none", so the
+    # second asks only about the unsure ones.
+    for asked in (7, 5):
+        fake = mapping_jev(confidence=0.4)
+        result = await mapper.extract(page(CAR), [car], fake.client())
+        [call] = fake.calls
+        assert len(call.questions) == asked
+        assert not [e for e in result.events if e[0] == "structured_paths_unsure"]
+    third = mapping_jev(confidence=0.4)
+    result = await mapper.extract(page(CAR), [car], third.client())
+    assert len(third.calls) == 1
+    assert result.events == [
+        (
+            "structured_paths_unsure",
+            f"Car: stored 5 key path(s) as none after 3 unsure answers: {', '.join(UNSURE_PATHS)}",
+        )
+    ]
+    # Steady state: every path is known, so no call (and, being "none", no values).
+    fourth = FakeJev(strict=True)
+    assert await extract(mapper, fourth) == {}
+    assert fourth.calls == []
+
+
+async def test_unsure_counts_persist_in_the_store_and_a_confident_answer_replaces_none(
+    store: SQLiteStore,
+) -> None:
+    fp = flatten(page_blob(CAR)).fingerprint
+    for _ in range(3):  # a fresh mapper each page: the count lives in the store
+        await extract(KeyPathMapper(store=store), mapping_jev(confidence=0.4))
+    stored = {m.path: m for m in await store.key_mappings(fp, schema="Car")}
+    assert stored["model"].field is None
+    assert stored["model"].unsure
+    assert not stored["@type"].unsure  # a confident "none" isn't marked
+    fresh = FakeJev(strict=True)
+    await extract(KeyPathMapper(store=store), fresh)
+    assert fresh.calls == []
+    # A review or re-learn puts a confident mapping in its place.
+    await store.put_key_mapping(
+        KeyMapping(fingerprint=fp, schema="Car", path="model", field="model")
+    )
+    fields = await extract(KeyPathMapper(store=store), FakeJev(strict=True))
+    assert fields["model"].value == "Golf"
+
+
+async def test_a_confident_answer_after_unsure_ones_is_stored_and_resets_the_count(
+    store: SQLiteStore,
+) -> None:
+    fp = flatten(page_blob(CAR)).fingerprint
+    for _ in range(2):
+        await extract(KeyPathMapper(store=store), mapping_jev(confidence=0.4))
+    await extract(KeyPathMapper(store=store), mapping_jev(confidence=0.9))
+    stored = {m.path: m for m in await store.key_mappings(fp, schema="Car")}
+    assert (stored["model"].field, stored["model"].unsure) == ("model", False)
+    assert await store.count_unsure_key_paths(fp, "Car", ["model"]) == {"model": 1}
+
+
+async def test_unsure_counts_are_per_schema() -> None:
+    class Other(BaseModel):
+        """Something else on the page."""
+
+        name: str = Field(description="Name")
+
+    mapper = KeyPathMapper(unsure_limit=2)
+    car, other = SchemaSpec.from_model(Car), SchemaSpec.from_model(Other)
+    await mapper.extract(page(CAR), [car], mapping_jev(confidence=0.4).client())
+    # Second page: Car reaches the limit; Other's first unsure answers don't.
+    result = await mapper.extract(page(CAR), [car, other], mapping_jev(confidence=0.4).client())
+    assert [m.split(":")[0] for k, m in result.events if k == "structured_paths_unsure"] == ["Car"]
+    third = mapping_jev(confidence=0.4)
+    await mapper.extract(page(CAR), [car, other], third.client())
+    [call] = third.calls
+    assert {k.split(":")[0] for k in call.questions} == {"Other"}
+
+
+async def test_an_unsure_limit_of_one_stores_none_at_once() -> None:
+    mapper = KeyPathMapper(unsure_limit=1)
+    await extract(mapper, mapping_jev(confidence=0.4))
+    fresh = FakeJev(strict=True)
+    await extract(mapper, fresh)
+    assert fresh.calls == []
+
+
+def test_the_unsure_limit_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="unsure_limit must be at least 1"):
+        KeyPathMapper(unsure_limit=0)
+
+
 async def test_enum_values_that_dont_read_directly_are_asked_of_jev() -> None:
     fake = mapping_jev().choice(
         re.compile("(?i)what is the fuel type"), "ev", confidence=0.8, state="Fully electric"

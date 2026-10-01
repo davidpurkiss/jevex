@@ -15,7 +15,9 @@
    state shows a few example values per path (never the whole blob), chunked so each
    state fits Jev's budget.
 5. **Store** confident answers (including "none", so a later hit needs no call) as
-   :class:`~jevex.store.KeyMapping` records.
+   :class:`~jevex.store.KeyMapping` records. A path Jev stays unsure about is asked again
+   on the template's next page, but after :data:`UNSURE_LIMIT` unsure answers it is stored
+   as an ``unsure`` "none", so every template reaches the zero-call steady state.
 
 Mapped values are normalised like any candidate: numbers, money and dates take the chain
 the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
@@ -74,6 +76,10 @@ StructuredMode = Literal["structured_only", "fill_gaps", "merge"]
 
 ACCEPT_AT = 0.5
 """A Jev answer at or above this confidence becomes a stored mapping (field or "none")."""
+
+UNSURE_LIMIT = 3
+"""Unsure answers (below :data:`ACCEPT_AT`) about one (fingerprint, schema, path) before
+it is stored as "none". A review or re-learn can replace that with a confident mapping."""
 
 MAX_PATHS = 300
 """Key paths asked about per blob; the rest are skipped (with an event)."""
@@ -205,7 +211,8 @@ class KeyPathMapper:
 
     ``store`` persists mappings across documents and processes; without one, mappings
     are remembered by this mapper (the :data:`MEMORY_SIZE` most recent fingerprints) for
-    its lifetime only. ``registry`` supplies the normaliser chains for values.
+    its lifetime only. ``registry`` supplies the normaliser chains for values. A path
+    with ``unsure_limit`` unsure answers is stored as "none" (see :data:`UNSURE_LIMIT`).
     """
 
     def __init__(
@@ -215,6 +222,7 @@ class KeyPathMapper:
         reader: EmbeddedDataReader | None = None,
         registry: GeneratorRegistry | None = None,
         accept_at: float = ACCEPT_AT,
+        unsure_limit: int = UNSURE_LIMIT,
         max_paths: int = MAX_PATHS,
         max_blobs: int = MAX_BLOBS,
         state_tokens: int = STATE_TOKEN_BUDGET,
@@ -223,13 +231,18 @@ class KeyPathMapper:
         self.store = store
         self.reader = reader or EmbeddedDataReader()
         self.registry = registry or default_registry()
+        if unsure_limit < 1:
+            raise ValueError(f"unsure_limit must be at least 1, not {unsure_limit}")
         self.accept_at = accept_at
+        self.unsure_limit = unsure_limit
         self.max_paths = max_paths
         self.max_blobs = max_blobs
         self.state_tokens = state_tokens
         self.memory_size = memory_size
         # (fingerprint, schema) → path → field (None: no field). Used without a store.
         self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
+        # (fingerprint, schema) → path → unsure answers so far. Used without a store.
+        self._unsure: OrderedDict[tuple[str, str], dict[str, int]] = OrderedDict()
         # The exact state and questions sent → Jev's answers, for enum/bool value fallbacks.
         self._values: OrderedDict[str, dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]] = (
             OrderedDict()
@@ -352,11 +365,24 @@ class KeyPathMapper:
         answers = await self._ask(flat, by_name, unknown, jev, events)
         for schema_name, paths in answers.items():
             learned: dict[str, str | None] = {}
+            unsure: list[str] = []
             for shape, answer in paths.items():
                 if answer.confidence < self.accept_at:
+                    unsure.append(shape)
                     continue
                 learned[shape] = None if answer.choice == NONE_OPTION else answer.choice
-            await self._remember(fingerprint, schema_name, learned, store)
+            counts = await self._count_unsure(fingerprint, schema_name, unsure, store)
+            given_up = [path for path in unsure if counts[path] >= self.unsure_limit]
+            if given_up:
+                events.append(
+                    (
+                        "structured_paths_unsure",
+                        f"{schema_name}: stored {len(given_up)} key path(s) as none after "
+                        f"{self.unsure_limit} unsure answers: {', '.join(given_up)}",
+                    )
+                )
+            learned |= dict.fromkeys(given_up)
+            await self._remember(fingerprint, schema_name, learned, set(given_up), store)
             known[schema_name] |= learned
         return known
 
@@ -370,13 +396,33 @@ class KeyPathMapper:
             return dict(self._memory.get(key, {}))
         return {m.path: m.field for m in await store.key_mappings(fingerprint, schema=schema)}
 
+    async def _count_unsure(
+        self, fingerprint: str, schema: str, paths: list[str], store: Store | None
+    ) -> dict[str, int]:
+        """Each path's unsure answers so far, this one included."""
+        if not paths:
+            return {}
+        if store is not None:
+            return await store.count_unsure_key_paths(fingerprint, schema, paths)
+        key = (fingerprint, schema)
+        counts = self._unsure.setdefault(key, {})
+        self._unsure.move_to_end(key)
+        for path in paths:
+            counts[path] = counts.get(path, 0) + 1
+        found = {path: counts[path] for path in paths}
+        while len(self._unsure) > self.memory_size:
+            self._unsure.popitem(last=False)
+        return found
+
     async def _remember(
         self,
         fingerprint: str,
         schema: str,
         learned: dict[str, str | None],
+        unsure: set[str],
         store: Store | None,
     ) -> None:
+        """Store ``learned``; paths in ``unsure`` are "none" because Jev stayed unsure."""
         if not learned:
             return
         if store is None:
@@ -385,10 +431,19 @@ class KeyPathMapper:
             self._memory.move_to_end(key)
             while len(self._memory) > self.memory_size:
                 self._memory.popitem(last=False)
+            counts = self._unsure.get(key, {})
+            for path in learned:
+                counts.pop(path, None)
             return
         for path, name in learned.items():
             await store.put_key_mapping(
-                KeyMapping(fingerprint=fingerprint, schema=schema, path=path, field=name)
+                KeyMapping(
+                    fingerprint=fingerprint,
+                    schema=schema,
+                    path=path,
+                    field=name,
+                    unsure=path in unsure,
+                )
             )
 
     async def _ask(

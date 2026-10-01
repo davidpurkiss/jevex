@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def utcnow() -> datetime:
@@ -44,6 +44,11 @@ class KeyMapping(BaseModel):
     (spec: *Structured-data stage*). ``normalisers`` is the chain to apply, in
     :class:`~jevex.statements.NormaliserStep`'s compact form. One mapping per
     (fingerprint, schema, path); putting another replaces it.
+
+    ``unsure`` marks a "none" stored because Jev stayed unsure about the path (see
+    :meth:`Store.count_unsure_key_paths`) rather than because it answered "none". The
+    mapper treats it as "none"; a review or re-learn may re-ask it and put a confident
+    mapping in its place.
     """
 
     # ``schema`` would shadow a BaseModel attribute, so the field is ``schema_name``;
@@ -55,7 +60,14 @@ class KeyMapping(BaseModel):
     path: str
     field: str | None
     normalisers: list[Any] = Field(default_factory=list[Any])
+    unsure: bool = False
     created_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def _unsure_is_none(self) -> KeyMapping:
+        if self.unsure and self.field is not None:
+            raise ValueError("an unsure key mapping maps to no field (field=None)")
+        return self
 
 
 class VerifiedExample(BaseModel):
@@ -165,12 +177,26 @@ class Store(Protocol):
         ...
 
     # Key mappings
-    async def put_key_mapping(self, mapping: KeyMapping) -> None: ...
+    async def put_key_mapping(self, mapping: KeyMapping) -> None:
+        """Insert or replace by (fingerprint, schema, path), clearing that path's unsure
+        count."""
+        ...
 
     async def key_mappings(
         self, fingerprint: str, *, schema: str | None = None
     ) -> list[KeyMapping]:
         """Mappings for one fingerprint, by path, optionally for one schema."""
+        ...
+
+    async def count_unsure_key_paths(
+        self, fingerprint: str, schema: str, paths: list[str]
+    ) -> dict[str, int]:
+        """Count one more unsure Jev answer for each of ``paths``; return each new total.
+
+        Atomic across processes, so pages from one template mapped at the same time each
+        add theirs. The mapper stores a path as an ``unsure`` "none" once its total
+        reaches its limit, so a template never pays to re-ask a path forever.
+        """
         ...
 
     # Verified examples
