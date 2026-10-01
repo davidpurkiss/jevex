@@ -28,6 +28,8 @@ the ICO after changing them.
 
 To use the social preview, upload `social-preview.png` under the repository's
 **Settings → General → Social preview**. The settings page is the only place to set it.
+Unlike the logo, its two text lines are live text in Nunito, falling back to Avenir Next
+and then system-ui. The committed PNG was rendered with Avenir Next.
 
 For a README that follows the reader's theme:
 

@@ -5,7 +5,9 @@
 """Render the raster brand assets in docs/brand/ from their SVG sources.
 
 Run `uv run scripts/render_brand.py` after changing an SVG there. The SVGs are the
-sources; the PNGs and the ICO are committed renders of them.
+sources; the PNGs and the ICO are committed renders of them. The social preview's text
+uses installed fonts: Nunito if present, else Avenir Next (macOS), else system-ui. Its
+committed PNG was rendered with Avenir Next, so a render elsewhere differs slightly.
 """
 
 from __future__ import annotations

@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-BRAND = Path(__file__).resolve().parent.parent / "docs" / "brand"
+ROOT = Path(__file__).resolve().parent.parent
+BRAND = ROOT / "docs" / "brand"
 SVG = "{http://www.w3.org/2000/svg}"
 SVGS = sorted(p.name for p in BRAND.glob("*.svg"))
 
@@ -49,8 +50,11 @@ def missing_links(markdown: str, base: Path) -> list[str]:
     targets = re.findall(r"\]\(([^)#\s]+)\)|srcset=\"([^\"]+)\"|src=\"([^\"]+)\"", markdown)
     links = [t for groups in targets for t in groups if t and "://" not in t]
     # Snippets for the repo README use repo-root paths.
-    links = [link for link in links if not link.startswith("docs/")]
-    return [link for link in links if not (base / link).exists()]
+    return [
+        link
+        for link in links
+        if not (ROOT / link if link.startswith("docs/") else base / link).exists()
+    ]
 
 
 def test_brand_assets_exist() -> None:
@@ -122,5 +126,8 @@ def test_readme_links_resolve(readme: str) -> None:
 
 
 def test_missing_links_reports_broken_targets() -> None:
-    markdown = "![a](palette.svg) [b](nope.svg) [c](https://example.com/x.svg)"
-    assert missing_links(markdown, BRAND) == ["nope.svg"]
+    markdown = (
+        "![a](palette.svg) [b](nope.svg) [c](https://example.com/x.svg) "
+        '<img src="docs/brand/jevex-logo.svg"> <img src="docs/brand/nope.svg">'
+    )
+    assert missing_links(markdown, BRAND) == ["nope.svg", "docs/brand/nope.svg"]
