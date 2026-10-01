@@ -12,14 +12,17 @@ time, in the background:
    value, the miss wasn't one of recall and there's nothing to learn.
 3. **Synthesise.** ``generator_llm`` writes the pattern and normalisers as structured
    output (:class:`GeneratorDraft`), asked for recall, not for the only match. The
-   learner fills in the id, field, scope and provenance.
+   learner fills in the id, field, scope and provenance. An example from a document with
+   a locale (:attr:`VerifiedExample.locale <jevex.store.VerifiedExample.locale>`) gives a
+   generator scoped to it, its chain written for that locale's conventions.
 4. **Validate.** :meth:`~jevex.generators.GeneratorSpec.parse`: the pattern compiles
    under RE2 within the length cap, and the normalisers are built in.
 5. **Test.** The generator must find the value in the triggering statement, and Jev
    must choose it there among every generator's candidates. On up to ``sample_size`` of
    the field's stored examples (the newest), it must not lower accuracy: wherever it
    changes the candidates, Jev picks from the old and the new set (one request per
-   example) and the new set must be right at least as often.
+   example) and the new set must be right at least as often. Each example runs under its
+   own document's locale, as the candidate stage would run it.
 6. **Hot-swap.** An accepted spec is put in the store and published as a new
    :class:`GeneratorSnapshot`. A document takes the current snapshot when it starts and
    keeps it to the end; later documents get the new one. Other processes sharing the
@@ -64,6 +67,7 @@ from jevex.generators.spec import NORMALISE_JSON_SCHEMA
 from jevex.jev import JevBudgetExceededError, JevError
 from jevex.layout import DomLocation, section_text
 from jevex.llm import LLMError
+from jevex.locales import locale_conventions, localise_steps
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliserRegistry, normalise
 from jevex.packs import (
     PACK_GENERATORS,
@@ -288,23 +292,42 @@ class GeneratorDraft(BaseModel):
     )
 
 
-def draft_spec(draft: GeneratorDraft, field: str, example_id: str) -> GeneratorSpec:
+def draft_spec(
+    draft: GeneratorDraft, field: str, example_id: str, locale: str | None = None
+) -> GeneratorSpec:
     """The spec for a draft: its id is a hash of what it does, so a second draft of the
-    same generator gets the same id. Raises :class:`InvalidGeneratorError`."""
-    body = json.dumps(
-        [field, draft.regex, draft.group, draft.normalise], sort_keys=True, default=str
-    )
+    same generator gets the same id. Raises :class:`InvalidGeneratorError`.
+
+    With ``locale`` (the example's document's), the spec is scoped to that tag and its
+    chain gets the arguments the locale's conventions need
+    (:func:`~jevex.locales.localise_steps`), so it reads "1.234,5" the way the page wrote
+    it and doesn't run on pages that write numbers differently. The locale is part of the
+    id: the same draft learned on a ``de-DE`` and an ``en-GB`` page is two generators.
+    """
+    what: list[Any] = [field, draft.regex, draft.group, draft.normalise]
+    if locale:
+        what.append(locale)
+    body = json.dumps(what, sort_keys=True, default=str)
+    data: dict[str, Any] = {
+        "id": f"gen-{hashlib.sha256(body.encode()).hexdigest()[:12]}",
+        "field": field,
+        "match": {"regex": draft.regex, "group": draft.group},
+        "normalise": draft.normalise,
+        "provenance": {
+            "learned_from": [example_id],
+            "synthesised_by": "generator_llm",
+            "created": datetime.now(UTC).date(),
+        },
+    }
+    spec = GeneratorSpec.parse(data)
+    if not locale:
+        return spec
+    steps = localise_steps(spec.normalise, locale_conventions(locale))
     return GeneratorSpec.parse(
         {
-            "id": f"gen-{hashlib.sha256(body.encode()).hexdigest()[:12]}",
-            "field": field,
-            "match": {"regex": draft.regex, "group": draft.group},
-            "normalise": draft.normalise,
-            "provenance": {
-                "learned_from": [example_id],
-                "synthesised_by": "generator_llm",
-                "created": datetime.now(UTC).date(),
-            },
+            **data,
+            "scope": {"locale": locale},
+            "normalise": [step.model_dump() for step in steps],
         }
     )
 
@@ -390,7 +413,8 @@ class GeneratorLearner:
     ``"Parent.nested_field.field"`` for a nested model's field).
     ``base``, ``locale``, ``selector``, ``normalisers`` and ``fallback_threshold`` should
     be what the candidate, select, normalise and fallback stages use, so a generator is
-    tested as documents will run it. ``ledger`` applies the run budget to
+    tested as documents will run it: ``locale`` is the candidate stage's, used for
+    examples whose document had none of its own. ``ledger`` applies the run budget to
     the learner's LLM and Jev calls and records their spend.
     """
 
@@ -491,13 +515,13 @@ class GeneratorLearner:
         schema, spec = self._field(example)
         statement = example_statement(example)
         expected = self._expected(example, spec)
-        source = example.document_source
+        where = self._where(example)
         current = self.snapshot.on(self.base)
-        if self._finds(self._generate(current, statement, spec, schema, source), spec, expected):
+        if self._finds(self._generate(current, statement, spec, schema, where), spec, expected):
             raise _Rejected("covered", "the generators in use already find the value")
         draft = await self._synthesise(example, statement, spec)
         try:
-            generator_spec = draft_spec(draft, example.field, example.id)
+            generator_spec = draft_spec(draft, example.field, example.id, example.locale)
         except InvalidGeneratorError as exc:
             raise _Rejected("invalid_spec", str(exc)) from None
         generator = generator_spec.to_generator()
@@ -507,7 +531,7 @@ class GeneratorLearner:
             raise _Rejected("budget", "the run's Jev spend cap is reached", generator_spec)
         candidate = current.with_generator(generator)
         try:
-            if not await self._chosen(jev, statement, spec, schema, source, candidate, expected):
+            if not await self._chosen(jev, statement, spec, schema, where, candidate, expected):
                 raise _Rejected("missed_trigger", "Jev doesn't choose its value", generator_spec)
             await self._regression(example, jev, spec, schema, current, candidate, generator_spec)
         except JevBudgetExceededError as exc:
@@ -574,11 +598,11 @@ class GeneratorLearner:
         statement: Statement,
         spec: FieldSpec,
         schema: str,
-        source: str | None,
+        where: _Where,
         registry: GeneratorRegistry,
         expected: Any,
     ) -> bool:
-        candidates = self._generate(registry, statement, spec, schema, source)
+        candidates = self._generate(registry, statement, spec, schema, where)
         questions = self.selector.questions(statement, spec, candidates)
         answers = await jev.ask(statement_state(statement), questions)
         selection = self._right(spec, candidates, answers, expected)
@@ -598,7 +622,7 @@ class GeneratorLearner:
         if self.sample_size == 0 or self.generators.store is None:
             return
         stored = await self.generators.store.examples(example.field, limit=self.sample_size + 1)
-        cases: list[tuple[Statement, str | None, Any]] = []
+        cases: list[tuple[Statement, _Where, Any]] = []
         for other in stored:
             if other.id == example.id or len(cases) == self.sample_size:
                 continue
@@ -606,10 +630,10 @@ class GeneratorLearner:
                 expected = self._expected(other, spec)
             except _Rejected:
                 continue  # a stored example this field can no longer read tests nothing
-            cases.append((example_statement(other), other.document_source, expected))
+            cases.append((example_statement(other), self._where(other), expected))
         results = await gather(
-            self._compare(jev, statement, spec, schema, source, old, new, expected)
-            for statement, source, expected in cases
+            self._compare(jev, statement, spec, schema, where, old, new, expected)
+            for statement, where, expected in cases
         )
         changed = [r for r in results if r is not None]
         before = sum(old_right for old_right, _ in changed)
@@ -628,7 +652,7 @@ class GeneratorLearner:
         statement: Statement,
         spec: FieldSpec,
         schema: str,
-        source: str | None,
+        where: _Where,
         old: GeneratorRegistry,
         new: GeneratorRegistry,
         expected: Any,
@@ -636,8 +660,8 @@ class GeneratorLearner:
         """Whether the old and the new candidates each lead to ``expected``; ``None`` when
         the generator doesn't change the candidates (Jev isn't asked). Both sets go in one
         request."""
-        before = self._generate(old, statement, spec, schema, source)
-        after = self._generate(new, statement, spec, schema, source)
+        before = self._generate(old, statement, spec, schema, where)
+        after = self._generate(new, statement, spec, schema, where)
         if unique_spans(before).keys() == unique_spans(after).keys():
             return None
         old_q = self.selector.questions(statement, spec, before)
@@ -676,11 +700,19 @@ class GeneratorLearner:
         statement: Statement,
         spec: FieldSpec,
         schema: str,
-        source: str | None,
+        where: _Where,
     ) -> list[Candidate]:
-        """The candidates a document from ``source`` (an example's ``document_source``)
-        would get: source-scoped generators run only when it matches."""
-        return registry.generate(statement, spec, schema=schema, locale=self.locale, source=source)
+        """The candidates the example's document would get (:meth:`_where`): locale- and
+        source-scoped generators run only when they match, and locale-aware ones read
+        numbers and dates by its locale."""
+        locale, source = where
+        return registry.generate(statement, spec, schema=schema, locale=locale, source=source)
+
+    def _where(self, example: VerifiedExample) -> _Where:
+        """The locale and source an example's statement runs under: its document's own
+        locale, else ``locale`` (as the candidate stage falls back to its own), and its
+        ``document_source``."""
+        return example.locale or self.locale, example.document_source
 
     def _expected(self, example: VerifiedExample, spec: FieldSpec) -> Any:
         """The example's value as the field types it (a stored date comes back a string)."""
@@ -732,6 +764,10 @@ class GeneratorLearner:
             error, self._error = self._error, None
             self._worker, self._queue, self._loop = None, None, None
             raise RuntimeError("the learner worker failed") from error
+
+
+_Where = tuple[str | None, str | None]
+"""An example's ``(locale, document_source)``."""
 
 
 def _strip(answers: dict[str, Answer], prefix: str) -> dict[str, Answer]:

@@ -100,7 +100,9 @@ Normaliser steps take the matching arguments (`{parse_number: {decimal: ","}}`,
 generator scoped to a locale (`scope: {locale: de-DE}`) gets them added to its chain, so
 it reads its locale's numbers without spelling that out. A locale-scoped generator runs
 only when the document's locale matches it (`de` matches `de-AT`), never when it's unknown. `locale_conventions("de-DE")` shows what jevex
-assumes for a tag.
+assumes for a tag. The learner scopes a generator it learns from a page with a locale to
+that page's tag, with the chain written out for it, so one learned on a `de-DE` page
+doesn't misread "1.234" on an `en-GB` one; pages with no locale give unscoped generators.
 
 ## LLM fallback
 
