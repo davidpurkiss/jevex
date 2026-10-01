@@ -1,4 +1,5 @@
 import dataclasses
+import hashlib
 import io
 import random
 import re
@@ -12,6 +13,7 @@ from jevex.testsite.drawing import (
     _png,  # pyright: ignore[reportPrivateUsage]
     _scanned_pdf,  # pyright: ignore[reportPrivateUsage]
     plain_text,
+    png_bytes,
     rasterise,
     to_pdf,
     to_png,
@@ -72,6 +74,23 @@ def test_rasterising_refuses_text_the_font_cant_draw() -> None:
         rasterise(sample())
     with pytest.raises(ValueError, match="not ASCII"):
         to_png(sample())
+
+
+def test_png_bytes_depend_only_on_the_pixels() -> None:
+    """The same pixels give the same bytes on every machine. Pillow's encoder (zlib-ng)
+    writes different bytes on x86 and arm64, which broke the benchmark's test-site lock."""
+    image_module = pytest.importorskip("PIL.Image")
+    image = image_module.new("RGB", (40, 30))
+    pixels = [((x * 7) % 256, (y * 11) % 256, (x * y) % 256) for y in range(30) for x in range(40)]
+    image.putdata(pixels)
+    png = png_bytes(image)
+    assert hashlib.sha256(png).hexdigest() == (
+        "f740c453bbdd28cce64400126d633fa3cb10ca9b1b3c1b687fd0b4dbb5fab642"
+    )
+    with image_module.open(io.BytesIO(png)) as decoded:
+        assert decoded.mode == "RGB"
+        assert decoded.tobytes() == image.tobytes()
+    assert png_bytes(image.convert("RGBA")) == png  # written as RGB whatever the mode
 
 
 def test_pngs_and_scans() -> None:

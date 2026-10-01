@@ -397,6 +397,16 @@ jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.tes
     --llm anthropic --write-baseline baseline.json   # then, later: --gate baseline.json
 ```
 
+Benchmarks follow [`docs/benchmarks.md`](docs/benchmarks.md). `benchmarks/config.yaml`
+pins the seeds, the model versions and prices, and the corpora. Each corpus is frozen by a
+lock of hashes in `benchmarks/corpora/`:
+
+```sh
+jevex corpus lock DIR --name NAME --out NAME.lock   # hash truth.json and every document
+jevex corpus check DIR NAME.lock                    # exit 1, listing what differs
+jevex corpus books --out books --lock books.lock    # fetch the books.toscrape.com sample
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

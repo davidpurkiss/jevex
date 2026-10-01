@@ -1,0 +1,70 @@
+# The pinned benchmark setup (docs/benchmarks.md). jevex.benchmarks.BenchmarkConfig reads
+# it. Change it only together with a new results run, and record why in the results.
+version: 1
+seed: 42
+concurrency: 8
+budget_usd: 25.0
+bootstrap:
+  samples: 1000
+  confidence: 0.95
+
+# Prices are USD per million tokens, as published on price_date.
+jev:
+  provider: jev
+  model: jev-1.13.0
+  input_usd_per_mtok: 0.042
+  output_usd_per_mtok: 0.0
+  price_date: 2026-10-01
+
+models:
+  # jevex's own LLMs: the fallback uses the fast baseline's model, so jevex (cold) and
+  # LLM-only (fast) differ in method, not in model.
+  extraction:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    input_usd_per_mtok: 1.00
+    output_usd_per_mtok: 5.00
+    price_date: 2026-10-01
+  generator:
+    provider: anthropic
+    model: claude-opus-5-5
+    input_usd_per_mtok: 4.00
+    output_usd_per_mtok: 20.00
+    price_date: 2026-10-01
+  baseline_fast:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    input_usd_per_mtok: 1.00
+    output_usd_per_mtok: 5.00
+    price_date: 2026-10-01
+  baseline_strong:
+    provider: anthropic
+    model: claude-opus-5-5
+    input_usd_per_mtok: 4.00
+    output_usd_per_mtok: 20.00
+    price_date: 2026-10-01
+  # baseline_gemini: chosen in #62.
+
+# Locks are relative to this file.
+corpora:
+  - name: testsite
+    kind: testsite
+    seed: 42
+    lock: corpora/testsite.lock
+  - name: books
+    kind: books
+    seed: 42
+    sample: 200
+    lock: corpora/books.lock
+  # Real spec sheets we may not redistribute: kept outside the repo, only aggregate
+  # numbers published.
+  - name: spec-sheets-local
+    kind: directory
+    env: JEVEX_BENCH_SPEC_SHEETS
+    publish: aggregate
+    lock: corpora/spec-sheets-local.lock
+  # Press-kit spec sheets whose terms allow committing them, checked per source.
+  - name: spec-sheets-press
+    kind: directory
+    path: corpora/spec-sheets-press
+    lock: corpora/spec-sheets-press.lock
