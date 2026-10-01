@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Version 1's tables. ``{s}`` is the store's Postgres schema.
 _SCHEMA: LiteralString = """
@@ -126,7 +126,9 @@ CREATE INDEX spend_at ON {s}.spend (at);
 """
 
 # Schema version → the statements that bring the version before it up to it.
-_MIGRATIONS: dict[int, LiteralString] = {}
+_MIGRATIONS: dict[int, LiteralString] = {
+    2: "ALTER TABLE {s}.examples ADD COLUMN document_source TEXT",
+}
 
 # Serialises schema creation and migration across every process opening a store on the
 # same database (an advisory lock: it holds no rows and ends with the transaction).
@@ -486,19 +488,22 @@ class PostgresStore:
             example.source,
             example.probability,
             _aware(example.created_at),
+            example.document_source,
         )
 
         async def op(conn: AsyncConnection[Any]) -> None:
             await conn.execute(
                 self._q(
-                    "INSERT INTO {s}.examples "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "INSERT INTO {s}.examples (id, field, statement, value, evidence_start, "
+                    "evidence_end, context, source, probability, created_at, document_source) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (id) DO UPDATE SET field = excluded.field, "
                     "statement = excluded.statement, value = excluded.value, "
                     "evidence_start = excluded.evidence_start, "
                     "evidence_end = excluded.evidence_end, context = excluded.context, "
                     "source = excluded.source, probability = excluded.probability, "
-                    "created_at = excluded.created_at"
+                    "created_at = excluded.created_at, "
+                    "document_source = excluded.document_source"
                 ),
                 params,
             )
@@ -528,6 +533,7 @@ class PostgresStore:
                 source=r["source"],
                 probability=r["probability"],
                 created_at=_utc(r["created_at"]),
+                document_source=r["document_source"],
             )
             for r in await self._rows(self._q(query + _C + " LIMIT %s"), (field, field, limit))
         ]

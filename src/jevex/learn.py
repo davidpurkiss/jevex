@@ -463,8 +463,9 @@ class GeneratorLearner:
         schema, spec = self._field(example)
         statement = example_statement(example)
         expected = self._expected(example, spec)
+        source = example.document_source
         current = self.snapshot.on(self.base)
-        if self._finds(self._generate(current, statement, spec, schema), spec, expected):
+        if self._finds(self._generate(current, statement, spec, schema, source), spec, expected):
             raise _Rejected("covered", "the generators in use already find the value")
         draft = await self._synthesise(example, statement, spec)
         try:
@@ -478,7 +479,7 @@ class GeneratorLearner:
             raise _Rejected("budget", "the run's Jev spend cap is reached", generator_spec)
         candidate = current.with_generator(generator)
         try:
-            if not await self._chosen(jev, statement, spec, schema, candidate, expected):
+            if not await self._chosen(jev, statement, spec, schema, source, candidate, expected):
                 raise _Rejected("missed_trigger", "Jev doesn't choose its value", generator_spec)
             await self._regression(example, jev, spec, schema, current, candidate, generator_spec)
         except JevBudgetExceededError as exc:
@@ -539,10 +540,11 @@ class GeneratorLearner:
         statement: Statement,
         spec: FieldSpec,
         schema: str,
+        source: str | None,
         registry: GeneratorRegistry,
         expected: Any,
     ) -> bool:
-        candidates = self._generate(registry, statement, spec, schema)
+        candidates = self._generate(registry, statement, spec, schema, source)
         questions = self.selector.questions(statement, spec, candidates)
         answers = await jev.ask(statement_state(statement), questions)
         selection = self._right(spec, candidates, answers, expected)
@@ -562,17 +564,18 @@ class GeneratorLearner:
         if self.sample_size == 0 or self.generators.store is None:
             return
         stored = await self.generators.store.examples(example.field, limit=self.sample_size + 1)
-        cases: list[tuple[Statement, Any]] = []
+        cases: list[tuple[Statement, str | None, Any]] = []
         for other in stored:
             if other.id == example.id or len(cases) == self.sample_size:
                 continue
             try:
-                cases.append((example_statement(other), self._expected(other, spec)))
+                expected = self._expected(other, spec)
             except _Rejected:
                 continue  # a stored example this field can no longer read tests nothing
+            cases.append((example_statement(other), other.document_source, expected))
         results = await gather(
-            self._compare(jev, statement, spec, schema, old, new, expected)
-            for statement, expected in cases
+            self._compare(jev, statement, spec, schema, source, old, new, expected)
+            for statement, source, expected in cases
         )
         changed = [r for r in results if r is not None]
         before = sum(old_right for old_right, _ in changed)
@@ -591,6 +594,7 @@ class GeneratorLearner:
         statement: Statement,
         spec: FieldSpec,
         schema: str,
+        source: str | None,
         old: GeneratorRegistry,
         new: GeneratorRegistry,
         expected: Any,
@@ -598,8 +602,8 @@ class GeneratorLearner:
         """Whether the old and the new candidates each lead to ``expected``; ``None`` when
         the generator doesn't change the candidates (Jev isn't asked). Both sets go in one
         request."""
-        before = self._generate(old, statement, spec, schema)
-        after = self._generate(new, statement, spec, schema)
+        before = self._generate(old, statement, spec, schema, source)
+        after = self._generate(new, statement, spec, schema, source)
         if unique_spans(before).keys() == unique_spans(after).keys():
             return None
         old_q = self.selector.questions(statement, spec, before)
@@ -633,9 +637,16 @@ class GeneratorLearner:
         return selection if self._finds(picks, spec, expected) else None
 
     def _generate(
-        self, registry: GeneratorRegistry, statement: Statement, spec: FieldSpec, schema: str
+        self,
+        registry: GeneratorRegistry,
+        statement: Statement,
+        spec: FieldSpec,
+        schema: str,
+        source: str | None,
     ) -> list[Candidate]:
-        return registry.generate(statement, spec, schema=schema, locale=self.locale)
+        """The candidates a document from ``source`` (an example's ``document_source``)
+        would get: source-scoped generators run only when it matches."""
+        return registry.generate(statement, spec, schema=schema, locale=self.locale, source=source)
 
     def _expected(self, example: VerifiedExample, spec: FieldSpec) -> Any:
         """The example's value as the field types it (a stored date comes back a string)."""

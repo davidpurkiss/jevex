@@ -353,6 +353,19 @@ async def test_example_values_come_back_in_json_form(store: Store) -> None:
     assert example.value == "19995.00"
     assert example.evidence is None
     assert example.source == "human"
+    assert example.document_source is None
+
+
+async def test_an_examples_document_source_is_kept_and_replaced(store: Store) -> None:
+    example = VerifiedExample(
+        id="ex", field="S.f", statement="s", value=1, document_source="cars.example.com"
+    )
+    await store.add_example(example)
+    assert await store.examples("S.f") == [example]
+    # A human confirming the same answer from another site replaces it, source and all.
+    human = example.model_copy(update={"source": "human", "document_source": None})
+    await store.add_example(human)
+    assert await store.examples("S.f") == [human]
 
 
 # --- stats ---------------------------------------------------------------------------
@@ -531,6 +544,10 @@ async def test_a_version_1_database_is_migrated(tmp_path: Path) -> None:
         "INSERT INTO key_mappings VALUES ('fp', 'Listing', '$.a', NULL, '[]', ?)",
         (T0.timestamp(),),
     )
+    conn.execute(
+        "INSERT INTO examples VALUES ('ex', 'S.f', 's', '1', NULL, NULL, '{}', 'llm', 0.9, ?)",
+        (T0.timestamp(),),
+    )
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -539,9 +556,19 @@ async def test_a_version_1_database_is_migrated(tmp_path: Path) -> None:
         KeyMapping(fingerprint="fp", schema="Listing", path="$.a", field=None, created_at=T0)
     ]
     assert await store.count_unsure_key_paths("fp", "Listing", ["$.b"]) == {"$.b": 1}
+    # v3: an example stored before document sources were recorded has none.
+    assert await store.examples() == [
+        VerifiedExample(
+            id="ex", field="S.f", statement="s", value=1, probability=0.9, created_at=T0
+        )
+    ]
+    await store.add_example(
+        VerifiedExample(id="new", field="S.f", statement="t", value=2, document_source="a.com")
+    )
+    assert [e.document_source for e in await store.examples(limit=1)] == ["a.com"]
     await store.aclose()
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
     conn.close()
 
 

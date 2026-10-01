@@ -26,7 +26,11 @@ from jevex.store import (
     VerifiedExample,
     open_store,
 )
-from jevex.store.postgres import SCHEMA_VERSION, PostgresStore
+from jevex.store.postgres import (
+    _SCHEMA,  # pyright: ignore[reportPrivateUsage]
+    SCHEMA_VERSION,
+    PostgresStore,
+)
 
 T0 = datetime(2026, 9, 29, 12, 0, tzinfo=UTC)
 
@@ -136,6 +140,36 @@ async def test_data_survives_reopening(postgres_url: str, pg_schema: str) -> Non
     assert await second.get_generator("g1") == gen("g1", created_at=T0)
     assert await second.disabled_generator_ids() == {"pack:x"}
     await second.aclose()
+
+
+async def test_a_version_1_schema_is_migrated(postgres_url: str, pg_schema: str) -> None:
+    query(postgres_url, f"CREATE SCHEMA {pg_schema}")
+    query(postgres_url, f"CREATE TABLE {pg_schema}.schema_version (version INTEGER NOT NULL)")
+    query(postgres_url, f"INSERT INTO {pg_schema}.schema_version VALUES (1)")
+    query(postgres_url, _SCHEMA.replace("{s}", pg_schema))
+    query(
+        postgres_url,
+        f"INSERT INTO {pg_schema}.examples VALUES "
+        f"('ex', 'S.f', 's', '1', NULL, NULL, '{{}}', 'llm', 0.9, '{T0.isoformat()}')",
+    )
+    store = PostgresStore(postgres_url, db_schema=pg_schema)
+    try:
+        # v2: an example stored before document sources were recorded has none.
+        assert await store.examples() == [
+            VerifiedExample(
+                id="ex", field="S.f", statement="s", value=1, probability=0.9, created_at=T0
+            )
+        ]
+        await store.add_example(
+            VerifiedExample(id="new", field="S.f", statement="t", value=2, document_source="a.com")
+        )
+        assert [e.document_source for e in await store.examples(limit=1)] == ["a.com"]
+    finally:
+        await store.aclose()
+    assert query(postgres_url, f"SELECT version FROM {pg_schema}.schema_version") == [
+        (SCHEMA_VERSION,)
+    ]
+    assert SCHEMA_VERSION == 2
 
 
 async def test_newer_schema_is_refused(postgres_url: str, pg_schema: str) -> None:

@@ -65,6 +65,14 @@ FIELD = "Car.zero_to_62_s"
 TEXT = "62 mph takes 9.1 seconds"
 DRAFT = {"regex": r"(\d+(?:\.\d+)?) seconds", "group": 1, "normalise": ["parse_number"]}
 
+CARS = "cars.example.com"
+
+
+def cars_only(pattern: str, gid: str = "cars") -> GeneratorRegistry:
+    """A base registry with one generator scoped to the :data:`CARS` source."""
+    scope = Scope(sources=frozenset({CARS}))
+    return GeneratorRegistry([RegexGenerator(id=gid, pattern=pattern, group=1, scope=scope)])
+
 
 def example(
     text: str = TEXT,
@@ -76,6 +84,7 @@ def example(
     source: Literal["llm", "human"] = "llm",
     evidence: tuple[int, int] | None = None,
     context: dict[str, Any] | None = None,
+    document_source: str | None = None,
 ) -> VerifiedExample:
     if evidence is None and str(value) in text:
         start = text.index(str(value))
@@ -89,6 +98,7 @@ def example(
         context=context if context is not None else {"heading_trail": [], "kind": "sentence"},
         source=source,
         probability=p,
+        document_source=document_source,
     )
 
 
@@ -504,6 +514,23 @@ async def test_a_generator_that_lowers_accuracy_on_stored_examples_is_rejected()
     old_new = [c for c in fake.calls if c.state == {"statement": STORED}]
     assert len(old_new) == 1
     assert {k.split("/")[0] for k in old_new[0].questions} == {"old", "new"}
+
+
+@pytest.mark.parametrize(("document_source", "status"), [(CARS, "regressed"), (None, "accepted")])
+async def test_stored_examples_are_tested_with_their_own_sources_generators(
+    document_source: str | None, status: str
+) -> None:
+    # The source-scoped generator gets the stored example right only on its own source.
+    old = example(STORED, 7.5, eid="old", document_source=document_source)
+    store = await stored(open_store(":memory:"), old)
+    fake = (
+        FakeJev(strict=True)
+        .choice(None, pick("9.1"), state=TEXT)
+        .choice(None, lambda q: "120" if "120" in q.options else "7.5", state=STORED)
+    )
+    base = cars_only(r"in (\d+\.\d+)", gid="after-in")
+    outcome = await learned(fake, FakeLLM([WIDE]), example(), store=store, base=base)
+    assert outcome.status == status
 
 
 async def test_a_generator_that_keeps_accuracy_is_accepted() -> None:
@@ -1014,6 +1041,42 @@ async def test_generators_are_run_with_the_learners_locale() -> None:
     assert unknown.status != "covered"
     uk = await learned(FakeJev(), FakeLLM([]), example(), base=base, locale="en-GB")
     assert uk.status == "covered"
+
+
+@pytest.mark.parametrize("document_source", [CARS, "www.Cars.Example.com"])
+async def test_a_source_scoped_generator_covers_an_example_from_its_source(
+    document_source: str,
+) -> None:
+    llm = FakeLLM([])
+    fake = FakeJev(strict=True)
+    ex = example(document_source=document_source)
+    outcome = await learned(fake, llm, ex, base=cars_only(r"(\d+\.\d+) seconds"))
+    assert outcome.status == "covered"
+    assert llm.calls == []
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("document_source", ["vans.example.com", None])
+async def test_a_source_scoped_generator_doesnt_cover_an_example_from_elsewhere(
+    document_source: str | None,
+) -> None:
+    llm = FakeLLM([DRAFT])
+    ex = example(document_source=document_source)
+    lrn = learner(FakeJev().choice(None, pick("9.1")), llm, base=cars_only(r"(\d+\.\d+) seconds"))
+    outcome = await lrn.learn(ex)
+    assert outcome.status == "accepted"
+    assert len(llm.calls) == 1
+
+
+async def test_jev_chooses_on_the_trigger_among_its_sources_candidates() -> None:
+    fake = FakeJev().choice(None, pick("9.1"))
+    ex = example(document_source=CARS)
+    outcome = await learned(fake, FakeLLM([DRAFT]), ex, base=cars_only(r"(\d+) mph"))
+    assert outcome.status == "accepted"
+    [call] = fake.calls
+    [question] = call.questions.values()
+    assert isinstance(question, Choice)
+    assert sorted(question.options) == ["62", "9.1", "none"]
 
 
 async def test_values_are_normalised_with_the_learners_normalisers() -> None:
