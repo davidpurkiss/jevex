@@ -37,7 +37,7 @@ PDF).
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from jevex.statements import Statement, TableCellRef
 
@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from jevex.layout import Component, TableCell
 
 _WHITESPACE = re.compile(r"\s+")
+
+RowRole = Literal["header", "band", "body"]
+"""A table row's part in reading the table (:func:`row_roles`)."""
 
 
 def _clean(text: str) -> str:
@@ -95,15 +98,7 @@ def table_statements(table: Component) -> list[Statement]:
                     out.setdefault(col, []).append(_label(c.text))
         return out
 
-    # Rows a data cell spans into aren't header-only, even if their own cells all are;
-    # nor are blank rows, whose data cells are there but empty.
-    has_data = {
-        covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
-    }
-    has_data |= blank_rows(table)
-
-    def header_only(r: int) -> bool:
-        return r not in has_data and all(c.header for c in rows[r])
+    roles = row_roles(table)
 
     # Header rows: the leading rows made only of header cells. A band among them
     # ("Technical data" above the header row, "Performance" just below it) is a group for
@@ -112,10 +107,10 @@ def table_statements(table: Component) -> list[Statement]:
     leading: list[int] = []
     header_rows: list[int] = []
     for r in ordered:
-        if not header_only(r):
+        if roles[r] == "body":
             break
         leading.append(r)
-        if _is_band(rows[r], width):
+        if roles[r] == "band":
             group = _label(rows[r][0].text)
         else:
             header_rows.append(r)
@@ -126,7 +121,7 @@ def table_statements(table: Component) -> list[Statement]:
     # they cover.
     row_header_cells: dict[int, list[TableCell]] = {}
     for r in body:
-        if header_only(r):
+        if roles[r] != "body":
             continue
         for c in rows[r]:
             if c.header:
@@ -136,8 +131,8 @@ def table_statements(table: Component) -> list[Statement]:
     out = []
     for r in body:
         row = sorted(rows[r], key=lambda c: c.col)
-        if header_only(r):
-            if _is_band(row, width):
+        if roles[r] != "body":
+            if roles[r] == "band":
                 group = _label(row[0].text)  # a band ("Performance")
             else:
                 col_headers = headers_of([r])  # a header row repeated mid-table
@@ -247,6 +242,35 @@ def _is_name(text: str) -> bool:
 def _number_like(text: str) -> bool:
     digits, letters = _digits_and_letters(text)
     return digits > 0 and digits >= letters
+
+
+def row_roles(table: Component) -> dict[int, RowRole]:
+    """How :func:`table_statements` reads each row of ``table`` that has text.
+
+    ``"band"`` is a group header ("Performance") that prefixes the rows below it until the
+    next band. ``"header"`` is a row made only of header cells giving column headers: the
+    leading ones stack, and one repeated after the first body row replaces them.
+    Everything else is ``"body"``, including blank rows (:func:`blank_rows`) and rows a
+    data cell spans into. A table made only of headers, or without any, is all body rows.
+    Pass ``infer_headers(table)`` to read a header-less comparison table as its statements
+    do.
+    """
+    cells = [c for c in table.cells if _clean(c.text)]
+    roles: dict[int, RowRole] = {c.row: "body" for c in cells}
+    if all(c.header for c in cells) or not any(c.header for c in cells):
+        return roles
+    width = max(c.col + c.col_span for c in cells)
+    has_data = {
+        covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
+    }
+    has_data |= blank_rows(table)
+    rows: dict[int, list[TableCell]] = {}
+    for c in cells:
+        rows.setdefault(c.row, []).append(c)
+    for r, row in rows.items():
+        if r not in has_data and all(c.header for c in row):
+            roles[r] = "band" if _is_band(row, width) else "header"
+    return roles
 
 
 def blank_rows(table: Component) -> set[int]:

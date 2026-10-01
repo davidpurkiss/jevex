@@ -30,7 +30,7 @@ from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
-from jevex.tables import blank_rows, infer_headers
+from jevex.tables import infer_headers, row_roles
 
 if TYPE_CHECKING:
     from jevex.interfaces import ComponentGate, ParsedDocument
@@ -114,59 +114,95 @@ def _split_line(line: str, max_chars: int) -> list[str]:
     return _pack(parts, max_chars, sep=" ")
 
 
-def _pack(lines: list[str], max_chars: int, *, sep: str = "\n", head: str = "") -> list[str]:
-    """Lines packed greedily into pieces of at most ``max_chars``, each starting ``head``."""
+def _pack(lines: list[str], max_chars: int, *, sep: str = "\n") -> list[str]:
+    """Lines packed greedily into pieces of at most ``max_chars``."""
     pieces: list[str] = []
-    current = head
+    current = ""
     for line in lines:
         candidate = f"{current}{sep}{line}" if current else line
-        if len(candidate) > max_chars and current and current != head:
+        if len(candidate) > max_chars and current:
             pieces.append(current)
-            candidate = f"{head}{sep}{line}" if head else line
+            candidate = line
         current = candidate
-    if current and current != head:
+    if current:
         pieces.append(current)
     return pieces
 
 
-def _table_rows(table: Component) -> tuple[list[str], list[str]]:
-    """(header rows, other rows) as text lines. Captions count as header lines."""
+def _table_lines(table: Component) -> list[tuple[str, str]]:
+    """``table``'s text lines in reading order, each with the context a piece starting at
+    it repeats first: the captions, then the header rows and the band in force.
+
+    Rows are read as :func:`~jevex.tables.table_statements` reads them
+    (:func:`~jevex.tables.row_roles`): the leading header rows stack, a header row repeated
+    after the first body row replaces them, and a band ("Economy") holds until the next
+    one. Bands and repeated header rows stay in place, so a band is only repeated in
+    pieces that hold rows it groups.
+    """
     captions = [c.text.strip() for c in table.children if c.text.strip()]
+    lines = [(caption, "\n".join(captions[:i])) for i, caption in enumerate(captions)]
     if not table.cells:
-        return captions, [line for line in table.text.split("\n") if line.strip()]
+        head = "\n".join(captions)
+        return lines + [(line, head) for line in table.text.split("\n") if line.strip()]
     table = infer_headers(table)  # a comparison table's first row, as its statements have
+    roles = row_roles(table)
     rows: dict[int, list[TableCell]] = {}
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
-        if cell.text:
+        if cell.text.strip():
             rows.setdefault(cell.row, []).append(cell)
-    blank = blank_rows(table)  # a label with empty values ("Towing | | ") is a body row
-    header: list[str] = list(captions)
-    body: list[str] = []
+    header: list[str] = []
+    band: str | None = None
+    in_body = False
     for r, cells in rows.items():
         line = " | ".join(c.text for c in cells)
-        (header if r not in blank and all(c.header for c in cells) else body).append(line)
-    return header, body
+        role = roles[r]
+        if role == "band":
+            band = None
+        elif role == "header" and in_body:
+            header = []
+        lines.append((line, "\n".join([*captions, *header, *([band] if band else [])])))
+        if role == "band":
+            band = line
+        elif role == "header":
+            header.append(line)
+        else:
+            in_body = True
+    return lines
+
+
+def _pack_table(lines: list[tuple[str, str]], max_chars: int) -> list[str]:
+    """Lines packed greedily into pieces of at most ``max_chars``, each piece after the
+    first starting with its first line's context (dropped when over half a piece)."""
+    pieces: list[str] = []
+    current = head = ""
+    for line, context in lines:
+        if len(context) > max_chars // 2:
+            context = ""
+        width = max_chars - len(context) - 1 if context else max_chars
+        for part in _split_line(line, width):
+            candidate = f"{current}\n{part}" if current else part
+            if len(candidate) > max_chars and current != head:
+                pieces.append(current)
+                head = context
+                candidate = f"{context}\n{part}" if context else part
+            current = candidate
+    if current != head:
+        pieces.append(current)
+    return pieces
 
 
 def _pieces(block: Component, max_chars: int) -> list[str]:
     """``block``'s text in pieces of at most ``max_chars``.
 
-    Tables split by row groups with their header rows (and captions) repeated; other
-    blocks by line (list items), then sentence, then overlapping character windows.
+    Tables split by row groups, each piece repeating the captions, header rows and band
+    in force (:func:`_table_lines`); other blocks by line (list items), then sentence,
+    then overlapping character windows.
     """
     text = _text(block)
     if len(text) <= max_chars:
         return [text] if text else []
     if block.type == "table":
-        header, body = _table_rows(block)
-        head = "\n".join(header)
-        if len(head) <= max_chars // 2:
-            return _pack(
-                [p for row in body for p in _split_line(row, max_chars - len(head) - 1)],
-                max_chars,
-                head=head,
-            )
-        text = "\n".join([*header, *body])
+        return _pack_table(_table_lines(block), max_chars)
     lines = [p for line in text.split("\n") for p in _split_line(line, max_chars)]
     return _pack(lines, max_chars)
 

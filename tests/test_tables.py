@@ -11,7 +11,7 @@ from jevex import (
 from jevex.generators import default_registry
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
-from jevex.tables import blank_rows, header_prefix, infer_headers, table_statements
+from jevex.tables import blank_rows, header_prefix, infer_headers, row_roles, table_statements
 from jevex.testsite import VehicleSpec, generate, render
 
 
@@ -551,3 +551,39 @@ def test_header_inference_needs_a_comparison_tables_shape() -> None:
     # Tables that already have headers are left as they are.
     headed = table(cell(0, 1, "SE", header=True), cell(1, 0, "Power"), cell(1, 1, "150 PS"))
     assert infer_headers(headed) is headed
+
+
+def test_row_roles_say_how_the_statements_read_each_row() -> None:
+    t = html_table(
+        "<tr><th colspan=3>Technical data</th></tr>"
+        "<tr><th></th><th>SE</th><th>GT</th></tr>"
+        "<tr><th colspan=3>Performance</th></tr>"
+        "<tr><th>Power</th><td>150</td><td>200</td></tr>"
+        "<tr><th>Towing</th><td></td><td></td></tr>"
+        "<tr><th colspan=3>Economy</th></tr>"
+        "<tr><th></th><th>SE L</th><th>R</th></tr>"
+        "<tr><th>Engine</th><td rowspan=2>1.5 TSI</td><td>2.0 TSI</td></tr>"
+        "<tr><th>Gearbox</th><td>DSG</td></tr>"
+    )
+    assert row_roles(t) == {
+        0: "band",
+        1: "header",
+        2: "band",
+        3: "body",
+        4: "body",  # a blank row
+        5: "band",
+        6: "header",
+        7: "body",
+        8: "body",  # a data cell spans into it
+    }
+    assert texts(t)[:2] == ["Performance › Power · SE: 150", "Performance › Power · GT: 200"]
+
+
+def test_row_roles_of_tables_with_only_headers_or_none_are_all_body() -> None:
+    only_headers = html_table(
+        "<tr><th>Engine</th><th>1.5 TSI</th></tr><tr><th>Performance</th></tr>"
+    )
+    assert row_roles(only_headers) == {0: "body", 1: "body"}
+    plain = table(cell(0, 0, "Spec"), cell(0, 1, "SE"), cell(0, 2, "GT"), cell(1, 0, "Power"))
+    assert row_roles(plain) == {0: "body", 1: "body"}
+    assert row_roles(table(cell(0, 0, " ", header=True))) == {}
