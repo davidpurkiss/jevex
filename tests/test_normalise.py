@@ -80,6 +80,7 @@ def test_parse_number_rejects(raw: object) -> None:
 
 def test_strip() -> None:
     assert strip("  Moonstone Grey. \n") == "Moonstone Grey"
+    assert strip("A\u00a0Light in\u202f the\u2009Attic\u00a0") == "A Light in the Attic"
     assert strip(5) == 5
 
 

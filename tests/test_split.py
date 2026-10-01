@@ -708,3 +708,22 @@ def test_ascii_whitespace_still_collapses_around_a_no_break_space() -> None:
     assert split(comp("paragraph", "Prix\t 18\u00a0495 €  \f TTC.")) == [
         ("Prix 18\u00a0495 € TTC.", "sentence")
     ]
+
+
+async def test_text_values_read_no_break_spaces_as_plain_spaces() -> None:
+    html = b"<h1>A&nbsp;Light in the&nbsp;Attic</h1>"
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html, content_type="text/html"))
+    [heading] = [c for c in root.walk() if c.type == "heading"]
+    [statement] = DefaultSplitter().split(heading)
+    assert statement.text == "A\u00a0Light in the\u00a0Attic"
+
+    class Book(BaseModel):
+        title: str = Field(description="Title")
+
+    title = SchemaSpec.from_model(Book).field("title")
+    [whole] = [
+        c
+        for c in default_registry().generate(statement, title, schema="Book")
+        if c.generator_id == "whole_statement"
+    ]
+    assert normalise(whole.raw, whole.normalise, title) == "A Light in the Attic"

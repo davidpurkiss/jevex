@@ -97,10 +97,17 @@ def parse_number(value: Any, *, decimal: str = ".") -> int | float:
     return float(text) if "." in text else int(text)
 
 
+_SPACE_RUN = re.compile(r"\s+")
+
+
 def strip(value: Any) -> Any:
-    """Trim whitespace and trailing punctuation from strings; other values pass through."""
+    """Trim whitespace and trailing punctuation from strings; other values pass through.
+
+    Runs of whitespace, no-break spaces included (statements keep them for numbers'
+    thousands), become one plain space: "A\u00a0Light" → "A Light".
+    """
     if isinstance(value, str):
-        return value.strip().strip(" \t\r\n.;,")
+        return _SPACE_RUN.sub(" ", value).strip().strip(" \t\r\n.;,")
     return value
 
 

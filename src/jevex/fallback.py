@@ -34,6 +34,7 @@ Jev answers and the hit is in ``meta.budget_events``.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -290,8 +291,8 @@ class FallbackStage:
     def _check(self, ctx: Context, ask: _Ask, answer: LLMAnswer) -> None:
         """Keep an answer whose evidence is in the statement and whose value fits."""
         ask.answer = answer
-        start = ask.statement.text.find(answer.evidence) if answer.evidence.strip() else -1
-        if start < 0:
+        found = _find_evidence(ask.statement.text, answer.evidence)
+        if found is None:
             _event(
                 ctx, ask, "llm_no_evidence", f"evidence {answer.evidence!r} is not in the statement"
             )
@@ -312,7 +313,7 @@ class FallbackStage:
         if not values:
             return
         ask.values = values
-        ask.span = Span(start=start, end=start + len(answer.evidence))
+        ask.span = Span(start=found[0], end=found[1])
 
     async def _verify(self, ctx: Context, asks: list[_Ask]) -> None:
         """One Jev request per statement, holding every check about it."""
@@ -488,6 +489,16 @@ def _examples(ask: _Ask, document_source: str | None) -> list[VerifiedExample]:
             )
         )
     return out
+
+
+def _find_evidence(text: str, evidence: str) -> tuple[int, int] | None:
+    """Where ``evidence`` is in ``text``, any run of whitespace matching any other: a
+    statement keeps no-break spaces ("9,1\u00a0s") that an LLM writes as plain ones."""
+    words = evidence.split()
+    if not words:
+        return None
+    m = re.search(r"\s+".join(re.escape(w) for w in words), text)
+    return (m.start(), m.end()) if m else None
 
 
 def _event(ctx: Context, ask: _Ask, kind: str, message: str, **data: Any) -> None:
