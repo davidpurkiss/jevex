@@ -275,6 +275,18 @@ class SchemaSpec:
             raise TypeError(f"{self.name}.{name} is not a nested model field")
         return replace(SchemaSpec.from_model(spec.model), name=f"{self.name}.{name}")
 
+    def children(self) -> tuple[SchemaSpec, ...]:
+        """:meth:`child` of each nested model jevex can extract. One it can't (an
+        unsupported or reserved field) is left out: it is only an error if ``ParentChild``
+        is asked to fill it."""
+        out: list[SchemaSpec] = []
+        for f in self.child_fields:
+            try:
+                out.append(self.child(f.name))
+            except (UnsupportedFieldError, ReservedFieldNameError):
+                continue
+        return tuple(out)
+
     @property
     def groups(self) -> dict[str, tuple[FieldSpec, ...]]:
         """Fields grouped by ``group``; ungrouped fields form a group of their own."""

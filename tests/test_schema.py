@@ -491,6 +491,19 @@ def test_child_needs_a_nested_model_field() -> None:
         car.child("nope")
 
 
+def test_children_are_the_nested_models_jevex_can_extract() -> None:
+    class Odd(BaseModel):
+        tags: dict[str, str] = Field(description="Tags")
+
+    class Page(BaseModel):
+        model: str = Field(description="Model name")
+        odd: Odd = Field(description="Odd bits")
+        trims: list[Trim] = Field(description="Trims")
+
+    assert [c.name for c in SchemaSpec.from_model(Page).children()] == ["Page.trims"]
+    assert SchemaSpec.from_model(Trim).children() == ()
+
+
 class Engine(BaseModel):
     size_cc: int = Field(description="Engine size", unit="cc")
 
