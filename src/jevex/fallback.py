@@ -372,7 +372,11 @@ def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_As
     if not accepted:
         if rejected:
             base = existing or FieldMeta()
-            alternatives = sorted([*base.alternatives, *rejected], key=lambda a: -a.p)
+            alternatives = [*base.alternatives, *rejected]
+            if base.found:
+                alternatives = _ranked(alternatives, base.value)
+            else:
+                alternatives.sort(key=lambda a: -a.p)
             run.set_field(scope, name, base.model_copy(update={"alternatives": alternatives}))
         return
     order = {sid: i for i, sid in enumerate(ctx.parsed.statements)} if ctx.parsed else {}

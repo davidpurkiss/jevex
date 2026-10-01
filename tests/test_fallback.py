@@ -242,6 +242,16 @@ async def test_rejected_answer_keeps_the_jev_answer_and_lists_the_llm_value() ->
     assert event.data["trigger"] == "low_confidence"
 
 
+async def test_a_rejected_answer_equal_to_the_jev_value_isnt_listed_as_its_alternative() -> None:
+    ctx = context(FakeJev().noul(VERIFY, p=0.4), [st("s1")], {"s1": "zero_to_62_s"})
+    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.3)
+    ctx.extraction_llm = llm(value=9.1, evidence="9.1")
+    await FallbackStage().run(ctx)
+    m = meta(ctx)
+    assert (m.value, m.confidence, m.alternatives) == (9.1, 0.3, [])
+    assert [e.kind for e in ctx.events] == ["llm_rejected"]
+
+
 async def test_rejected_answer_with_no_jev_answer_leaves_the_field_empty() -> None:
     ctx = context(FakeJev().noul(VERIFY, p=0.1), [st("s1")], {"s1": "zero_to_62_s"})
     ctx.extraction_llm = llm(value=9.1, evidence="9.1")
