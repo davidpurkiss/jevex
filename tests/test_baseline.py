@@ -23,7 +23,7 @@ from jevex.cli import format_gate, main
 from jevex.eval import DocumentRun, EvalReport, FieldScore, evaluate, load_corpus
 from jevex.jev import JevClient
 from jevex.results import FieldMeta
-from jevex.testing import RECORD_ENV, FakeJev, FakeLLM, cassette, llm_cassette
+from jevex.testing import RECORD_ENV, FakeJev, FakeLLM, cassette, llm_cassette, stale_recording
 from jevex.testsite import build
 from jevex.testsite.schemas import Listing, VehicleSpec
 
@@ -586,7 +586,7 @@ async def test_the_test_site_passes_the_eval_gate(
 
     ``JEVEX_RECORD=1`` records all three (see ``fixtures/testsite_gate/README.md``);
     ``JEVEX_UPDATE_BASELINE=1`` rewrites only the baseline from the recordings, offline.
-    A stale recording xfails for now, like the books smoke test; #129 makes it fail in CI.
+    A stale recording fails in CI, like the books smoke test (``stale_recording``).
     """
     recording = os.environ.get(RECORD_ENV) == "1"
     if not recording and not (JEV_CASSETTE.exists() and GATE_BASELINE.exists()):
@@ -624,8 +624,12 @@ async def test_the_test_site_passes_the_eval_gate(
     baseline = Baseline.load(GATE_BASELINE)
     # A Jev or LLM request that wasn't recorded (run_document names the exception first).
     stale = [d.error for d in report.failed if (d.error or "").startswith("CassetteMissError")]
-    if stale or digest != baseline.corpus:
-        pytest.xfail(f"the test-site recording is stale; re-record it ({stale[:1]})")
+    if stale:
+        stale_recording(
+            f"{len(stale)} test-site document(s) asked unrecorded questions: {stale[0]}"
+        )
+    if digest != baseline.corpus:
+        stale_recording("the test-site corpus changed since it was recorded")
     assert not report.failed, [d.error for d in report.failed]
     result = check_baseline(report, baseline, corpus=digest)
     assert result.passed, format_gate(result, str(GATE_BASELINE))

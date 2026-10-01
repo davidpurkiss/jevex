@@ -7,9 +7,8 @@ The pages are saved in ``tests/fixtures/books/``. Jev's answers are replayed fro
         uv run pytest tests/test_smoke_books.py
 
 Until a recording exists, the replay tests skip. Any pipeline change that alters what
-jevex asks Jev makes the recording stale; those tests then xfail with a note to
-re-record, rather than failing builds that can't reach the API. Whether CI should fail
-instead is the owner's call (#129).
+jevex asks Jev makes the recording stale; those tests then xfail locally and fail in CI
+(see ``jevex.testing.stale_recording``), unless the PR is labelled ``cassette-stale-ok``.
 
 The other tests always run: the rating cleaner, and the whole pipeline over the saved
 pages with Jev answering by pattern (any price is "the price") rather than from the
@@ -27,7 +26,7 @@ from jevex import Document, Extractor
 from jevex.examples.books import Book, StarRatingCleaner, books_pipeline
 from jevex.jev import Choice, JevClient
 from jevex.layout_html import HtmlLayoutParser
-from jevex.testing import RECORD_ENV, CassetteMissError, FakeJev, cassette
+from jevex.testing import RECORD_ENV, CassetteMissError, FakeJev, cassette, stale_recording
 
 FIXTURES = Path(__file__).parent / "fixtures" / "books"
 CASSETTE = FIXTURES / "jev-cassette.json"
@@ -83,7 +82,7 @@ async def test_books_page_with_recorded_jev(name: str, recorded_jev: JevClient) 
         try:
             result = await ex.extract(page(name))
         except CassetteMissError as exc:
-            pytest.xfail(f"the Jev recording is stale; re-record it ({exc})")
+            stale_recording(str(exc))
     found = result.one(Book).record.model_dump(exclude_unset=True)
     assert found == PAGES[name].model_dump()
 

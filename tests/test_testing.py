@@ -14,6 +14,7 @@ from jevex.testing import (
     UnscriptedQuestionError,
     cassette,
     request_key,
+    stale_recording,
 )
 
 VEHICLE = Choice(
@@ -135,6 +136,51 @@ def test_cassette_mode_follows_env(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert not cassette(tmp_path / "c.json").record
     monkeypatch.setenv("JEVEX_RECORD", "1")
     assert cassette(tmp_path / "c.json").record
+
+
+def test_a_stale_recording_xfails_outside_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("JEVEX_CASSETTE_STALE_OK", raising=False)
+    with pytest.raises(pytest.xfail.Exception, match="re-record it with JEVEX_RECORD=1"):
+        stale_recording("no recording for request abc")
+
+
+@pytest.mark.parametrize("ci", ["true", "1", "TRUE"])
+def test_a_stale_recording_fails_in_ci(ci: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CI", ci)
+    monkeypatch.delenv("JEVEX_CASSETTE_STALE_OK", raising=False)
+    with pytest.raises(pytest.fail.Exception) as failed:
+        stale_recording("no recording for request abc")
+    assert str(failed.value) == (
+        "the recording is stale: no recording for request abc; re-record it with "
+        "JEVEX_RECORD=1 (or set JEVEX_CASSETTE_STALE_OK=1 to xfail instead)"
+    )
+    assert not failed.value.pytrace
+
+
+@pytest.mark.parametrize("ok", ["", "0", "false", "no"])
+def test_only_a_set_flag_lets_ci_pass_a_stale_recording(
+    ok: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("JEVEX_CASSETTE_STALE_OK", ok)
+    with pytest.raises(pytest.fail.Exception):
+        stale_recording("x")
+
+
+def test_the_stale_ok_flag_xfails_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("JEVEX_CASSETTE_STALE_OK", "1")
+    with pytest.raises(pytest.xfail.Exception, match="the recording is stale: x;"):
+        stale_recording("x")
+
+
+@pytest.mark.parametrize("ci", ["", "0", "false"])
+def test_a_ci_variable_that_is_off_is_not_ci(ci: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CI", ci)
+    monkeypatch.delenv("JEVEX_CASSETTE_STALE_OK", raising=False)
+    with pytest.raises(pytest.xfail.Exception):
+        stale_recording("x")
 
 
 def test_network_is_blocked() -> None:
