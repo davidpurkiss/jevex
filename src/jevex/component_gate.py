@@ -114,17 +114,17 @@ def _split_line(line: str, max_chars: int) -> list[str]:
     return _pack(parts, max_chars, sep=" ")
 
 
-def _pack(lines: list[str], max_chars: int, *, sep: str = "\n", head: str = "") -> list[str]:
-    """Lines packed greedily into pieces of at most ``max_chars``, each starting ``head``."""
+def _pack(lines: list[str], max_chars: int, *, sep: str = "\n") -> list[str]:
+    """Lines packed greedily into pieces of at most ``max_chars``."""
     pieces: list[str] = []
-    current = head
+    current = ""
     for line in lines:
         candidate = f"{current}{sep}{line}" if current else line
-        if len(candidate) > max_chars and current and current != head:
+        if len(candidate) > max_chars and current:
             pieces.append(current)
-            candidate = f"{head}{sep}{line}" if head else line
+            candidate = line
         current = candidate
-    if current and current != head:
+    if current:
         pieces.append(current)
     return pieces
 

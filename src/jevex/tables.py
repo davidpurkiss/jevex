@@ -264,8 +264,10 @@ def row_roles(table: Component) -> dict[int, RowRole]:
         covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
     }
     has_data |= blank_rows(table)
-    for r in roles:
-        row = [c for c in cells if c.row == r]
+    rows: dict[int, list[TableCell]] = {}
+    for c in cells:
+        rows.setdefault(c.row, []).append(c)
+    for r, row in rows.items():
         if r not in has_data and all(c.header for c in row):
             roles[r] = "band" if _is_band(row, width) else "header"
     return roles
