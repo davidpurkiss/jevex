@@ -234,6 +234,52 @@ names to use):
 automotive-uk = "jevex_pack_automotive_uk"  # the package directory holding manifest.yaml
 ```
 
+## Microservice
+
+`jevex serve` (the `server` extra: `pip install "jevex[server]"`) puts extraction behind
+HTTP for callers that aren't Python. Schemas are registered by module path, as for
+`jevex extract`, and requests name them by class name:
+
+```sh
+jevex serve --schema carfinder.schemas:VehicleSpec --schema carfinder.schemas:Listing \
+    --store sqlite:///jevex.db --llm anthropic --max-spend 5    # http://127.0.0.1:8080/
+```
+
+```sh
+curl -s localhost:8080/extract -H 'content-type: application/json' -d '{
+  "document": {"content": "<the page, base64>", "content_type": "text/html",
+               "url": "https://example.com/cars/1"},
+  "schema": "VehicleSpec"
+}'
+# {"records": [{"schema": "VehicleSpec", "entity": "document", "record": {...}}]}
+```
+
+`schema` is one name or a list (one extractor per set, so a document is only asked about
+the schemas it's for). `"meta": true` adds per-field and document metadata, as
+`jevex extract --meta` does. `content_type` is sniffed from the bytes when left out.
+Unknown schemas and unreadable documents answer 422, a Jev error 502, and a process spend
+cap (`JEVEX_*_MAX_COST_USD`) 503.
+
+`GET /health` names the schemas; `GET /metrics` is Prometheus text (documents by outcome,
+records, values by resolution method, Jev and LLM calls and spend, budget hits, extraction
+time). `--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's
+off by default because it shows URLs and spend. The service has no auth of its own: run it
+behind yours.
+
+`--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
+across every request. In Python, `jevex.server.create_app(Service([...], store=...))`
+gives the FastAPI app to mount or run yourself.
+
+The `Dockerfile` builds an image that runs `jevex serve` on port 8080. Your schemas'
+package must be importable inside it (build an image `FROM` it that installs the
+package, or mount it):
+
+```sh
+docker build -t jevex .            # --build-arg EXTRAS=server,postgres,anthropic for more
+docker run -p 8080:8080 -e TYPESAFE_API_KEY -v jevex-data:/data jevex \
+    --schema carfinder.schemas:VehicleSpec --store sqlite:////data/jevex.db
+```
+
 ## Stats
 
 With a store, each document's numbers are recorded in it (`Extractor(record_stats=False)`
