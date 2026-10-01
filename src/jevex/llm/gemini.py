@@ -44,10 +44,10 @@ REFUSAL_FINISH_REASONS = frozenset(
 class GeminiLLM:
     """:class:`~jevex.llm.LLM` backed by a Gemini model (the model id is required).
 
-    ``thinking_level`` trades depth for cost on models that think; extraction prompts are
-    short, so ``minimal`` or ``low`` usually suffice. Usage (and cost, thinking tokens
-    included) is recorded before the output is validated, so failed calls still count
-    against ``JEVEX_LLM_MAX_COST_USD``.
+    ``thinking_level`` trades depth for cost on Gemini 3 models; extraction prompts are
+    short, so ``minimal`` or ``low`` usually suffice. Gemini 2.5 models don't take it.
+    Usage (and cost, thinking tokens included) is recorded before the output is validated,
+    so failed calls still count against ``JEVEX_LLM_MAX_COST_USD``.
     """
 
     def __init__(
@@ -70,7 +70,7 @@ class GeminiLLM:
         self._client = client or genai.Client()
 
     async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
-        from google.genai import errors, types
+        from google.genai import types
 
         check_budget()
         config = types.GenerateContentConfig(
@@ -92,7 +92,9 @@ class GeminiLLM:
             response = await self._client.aio.models.generate_content(
                 model=self.model, contents=prompt, config=config
             )
-        except errors.APIError as exc:
+        # Not just ``errors.APIError``: transport failures surface as httpx, httpx2 or aiohttp
+        # exceptions (whichever client the SDK picked), and a non-JSON body as a ValueError.
+        except Exception as exc:
             raise LLMError(f"Gemini API error: {exc}") from exc
 
         served_by = response.model_version or self.model

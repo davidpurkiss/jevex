@@ -436,7 +436,9 @@ async def test_gemini_blocked_prompt_is_a_refusal_and_still_costs() -> None:
     assert process_llm_cost() == pytest.approx(12 * 1.50 / 1_000_000)
 
 
-@pytest.mark.parametrize("reason", ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"])
+@pytest.mark.parametrize(
+    "reason", ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"]
+)
 async def test_gemini_safety_stop_is_a_refusal(reason: str) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=gemini_response(None, finish=reason))
@@ -507,14 +509,30 @@ async def test_gemini_spent_cap_makes_no_call(monkeypatch: pytest.MonkeyPatch) -
     assert len(calls) == 1
 
 
-async def test_gemini_aclose_closes_the_sdk_client() -> None:
+async def test_gemini_transport_errors_are_llm_errors() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("connection refused", request=request)
+
+    with pytest.raises(LLMError, match="connection refused"):
+        await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
+
+
+async def test_gemini_non_json_reply_is_an_llm_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, text="<html>proxy error</html>")
+
+    with pytest.raises(LLMError, match="Gemini API error"):
+        await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
+
+
+async def test_gemini_aclose_closes_the_sdk_client(monkeypatch: pytest.MonkeyPatch) -> None:
     closed: list[bool] = []
     client = gemini_client(lambda request: httpx2.Response(200))
 
     async def aclose() -> None:
         closed.append(True)
 
-    client.aio.aclose = aclose  # type: ignore[method-assign]
+    monkeypatch.setattr(client.aio, "aclose", aclose)
     await GeminiLLM("gemini-3.5-flash", client=client).aclose()
     assert closed == [True]
 
