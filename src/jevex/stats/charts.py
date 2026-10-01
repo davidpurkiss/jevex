@@ -178,7 +178,10 @@ class _Frame:
             raise ValueError(f"{stats.source} has no times: use the documents axis")
         else:
             self.x0, self.x1 = points[0].x("time"), points[-1].x("time")
-        self.x1 = max(self.x1, *extra) if extra else self.x1
+            if stats.started is not None:
+                self.x0 = min(self.x0, stats.started.timestamp())
+        if extra:  # a series reaching past the documents (the learner's later spend)
+            self.x0, self.x1 = min(self.x0, *extra), max(self.x1, *extra)
         if self.x1 <= self.x0:
             self.x1 = self.x0 + 1.0
 

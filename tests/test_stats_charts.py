@@ -124,6 +124,32 @@ def test_cost_stacks_jev_and_llm_against_the_budget() -> None:
     assert "Jev $0.002 · LLM $0 · total $0.002" in svg
 
 
+def band_xs(svg: str) -> list[float]:
+    return [
+        float(xy.split(",")[0])
+        for points in re.findall(r'class="band[^"]*" points="([^"]*)"', svg)
+        for xy in points.split()
+    ]
+
+
+def test_spend_while_the_first_document_ran_is_on_the_plot() -> None:
+    stats = store_stats()  # the first document finished at T0
+    stats.started = T0 - timedelta(seconds=10)
+    stats.spend = [
+        SpendPoint(1, 0.1, 0.0, at=T0 - timedelta(seconds=8)),
+        SpendPoint(1, 0.2, 0.0, at=T0 - timedelta(seconds=1)),
+        SpendPoint(2, 0.3, 0.0, at=T0 + timedelta(hours=1)),
+    ]
+    stats.learned_at = [T0 - timedelta(seconds=5)]
+    svg = cost_svg(stats, "time")
+    xs = band_xs(svg)
+    assert min(xs) == 72.0  # the plot's left edge: the first document's start
+    assert all(72.0 <= x <= 720 - 96 for x in xs)
+    assert ">30 Sep 07:59</text>" in svg
+    # The learning curve starts there too, with the generator learned during it.
+    assert learning_svg(stats, "time").count('class="learned"') == 2
+
+
 def test_a_long_ledger_is_thinned_to_the_last_entry() -> None:
     stats = store_stats()
     stats.spend = [SpendPoint(1, 0.001 * i, 0.0) for i in range(1000)]

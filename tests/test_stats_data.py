@@ -137,6 +137,7 @@ async def test_a_documents_charges_count_against_it(store: SQLiteStore) -> None:
         )
     stats = await from_store(store, source="s")
     assert [(s.documents, s.jev) for s in stats.spend] == [(1, 0.5), (2, 1.0)]
+    assert stats.started == T0 + timedelta(seconds=0.5)
 
 
 async def test_an_extractors_ledger_spend_is_all_counted(tmp_path: Path) -> None:

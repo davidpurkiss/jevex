@@ -162,6 +162,9 @@ class Stats:
     learned: list[int] = field(default_factory=list[int])
     learned_at: list[datetime] = field(default_factory=list[datetime])
     budget_usd: float | None = None
+    started: datetime | None = None
+    """When the first document started: the time axis begins here, since its charges and
+    anything learned while it ran come before it finished."""
 
     @property
     def documents(self) -> int:
@@ -440,6 +443,7 @@ async def from_store(
         learned=[_processed_by(times, when) for when in learned_at] if docs else [],
         learned_at=learned_at if docs else [],
         budget_usd=budget_usd,
+        started=starts[0] if starts else None,
     )
 
 
