@@ -173,18 +173,7 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
             raise CliError(f"Jev: {exc}") from exc
         except PackError as exc:  # an installed community pack that doesn't load
             raise CliError(f"pack: {exc}") from exc
-    if args.meta:
-        return result.to_dict()
-    return {
-        "records": [
-            {
-                "schema": r.schema_name,
-                "entity": r.entity,
-                "record": r.record.model_dump(mode="json"),
-            }
-            for r in result.records
-        ]
-    }
+    return result.to_dict() if args.meta else result.to_plain_dict()
 
 
 async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> EvalReport:

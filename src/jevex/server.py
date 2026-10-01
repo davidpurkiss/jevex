@@ -114,23 +114,6 @@ class ExtractRequest(BaseModel):
         return list(dict.fromkeys(names))
 
 
-def records_payload(result: ExtractionResult, *, meta: bool = False) -> dict[str, Any]:
-    """A result as JSON types, as ``jevex extract`` prints it: each record's schema, entity
-    and values, or (``meta``) :meth:`~jevex.extractor.ExtractionResult.to_dict`."""
-    if meta:
-        return result.to_dict()
-    return {
-        "records": [
-            {
-                "schema": r.schema_name,
-                "entity": r.entity,
-                "record": r.record.model_dump(mode="json"),
-            }
-            for r in result.records
-        ]
-    }
-
-
 type Outcome = Literal["ok", "stopped", "error"]
 
 
@@ -366,7 +349,7 @@ class Service:
         started = time.perf_counter()
         try:
             result = await extractor.extract(document)
-        except BaseException:
+        except Exception:  # not a cancellation (a client gone, or shutdown)
             self.metrics.documents["error"] += 1
             raise
         finally:
@@ -448,7 +431,7 @@ def create_app(service: Service) -> FastAPI:
             raise HTTPException(503, detail=str(exc)) from exc
         except JevError as exc:
             raise HTTPException(502, detail=f"Jev: {exc}") from exc
-        return records_payload(result, meta=request.meta)
+        return result.to_dict() if request.meta else result.to_plain_dict()
 
     @app.get("/health")
     async def health() -> dict[str, Any]:

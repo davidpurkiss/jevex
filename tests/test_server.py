@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from jevex import Context, Field, UnreadablePdfError
 from jevex.jev import JevBackendError, JevBudgetExceededError, Noul
+from jevex.llm import LLMBudgetExceededError
 from jevex.results import FieldMeta
 from jevex.server import (
     DocumentIn,
@@ -18,10 +19,9 @@ from jevex.server import (
     Service,
     UnknownSchemaError,
     create_app,
-    records_payload,
 )
 from jevex.store import open_store
-from jevex.testing import FakeJev
+from jevex.testing import FakeJev, FakeLLM
 
 HTML = b"<html><body><h1>Dune</h1><p>Title: Dune</p></body></html>"
 
@@ -46,6 +46,7 @@ class FindValues:
     name: str = "select"
     seen: list[tuple[str, list[str]]] = field(default_factory=list[tuple[str, list[str]]])
     fail: Exception | None = None
+    stop: bool = False
 
     async def run(self, ctx: Context) -> None:
         self.seen.append((ctx.document.content_type, [r.spec.name for r in ctx.active]))
@@ -55,6 +56,9 @@ class FindValues:
         for run in ctx.active:
             name = run.spec.fields[0].name
             run.set_field("document", name, FieldMeta(value="Dune", confidence=0.9, method="jev"))
+        if self.stop and ctx.budget is not None:
+            ctx.budget.record_hit("run", "max_spend", "the day's LLM budget is spent")
+            ctx.stop(self.name, "budget")
 
 
 @pytest.fixture
@@ -179,6 +183,7 @@ def test_bad_requests_are_422(client: TestClient, payload: dict[str, Any]) -> No
     [
         (JevBackendError("upstream down"), 502, "Jev: upstream down"),
         (JevBudgetExceededError("Jev spend cap reached"), 503, "Jev spend cap reached"),
+        (LLMBudgetExceededError("LLM spend cap reached"), 503, "LLM spend cap reached"),
         (
             UnreadablePdfError("pdfium couldn't open the PDF"),
             422,
@@ -229,6 +234,17 @@ def test_metrics_count_documents_values_and_spend(client: TestClient) -> None:
     ):
         assert line + "\n" in text
     assert text.endswith("\n")
+
+
+def test_metrics_count_stopped_documents_and_budget_hits(
+    client: TestClient, stage: FindValues
+) -> None:
+    stage.stop = True
+    assert client.post("/extract", json=body()).status_code == 200
+    text = client.get("/metrics").text
+    assert 'jevex_documents_total{outcome="ok"} 0\n' in text
+    assert 'jevex_documents_total{outcome="stopped"} 1\n' in text
+    assert 'jevex_budget_events_total{scope="run",limit="max_spend"} 1\n' in text
 
 
 def test_metrics_escape_label_values() -> None:
@@ -315,9 +331,10 @@ async def test_extract_before_start_raises(fake_jev: FakeJev) -> None:
         service.extractor(["Nope"])
 
 
-@dataclass
-class ClosingLLM:
-    closed: int = 0
+class ClosingLLM(FakeLLM):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.closed = 0
 
     async def aclose(self) -> None:
         self.closed += 1
@@ -329,8 +346,8 @@ async def test_llms_are_closed_only_when_asked(fake_jev: FakeJev, close_llms: bo
     service = Service(
         [Book],
         jev=fake_jev.client(),
-        extraction_llm=llm,  # pyright: ignore[reportArgumentType]
-        generator_llm=llm,  # pyright: ignore[reportArgumentType]
+        extraction_llm=llm,
+        generator_llm=llm,
         close_llms=close_llms,
     )
     await service.start()
@@ -353,12 +370,3 @@ def test_request_model_takes_one_name_or_several() -> None:
     assert one.schema_names() == ["Book"]
     assert several.schema_names() == ["Author", "Book"]
     assert one.document.to_document().content == b"<html>"
-
-
-async def test_records_payload_matches_the_result(stage: FindValues, fake_jev: FakeJev) -> None:
-    service = Service([Book], jev=fake_jev.client())
-    await service.start()
-    result = await service.extract(DocumentIn(content=HTML).to_document(), ["Book"])
-    await service.aclose()
-    assert records_payload(result, meta=True) == result.to_dict()
-    assert records_payload(result)["records"][0]["record"] == {"title": "Dune"}

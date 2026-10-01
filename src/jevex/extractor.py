@@ -225,6 +225,20 @@ class ExtractionResult:
             "meta": self.meta.model_dump(mode="json"),
         }
 
+    def to_plain_dict(self) -> dict[str, Any]:
+        """Each record's schema, entity and values, without meta, as JSON types: what
+        ``jevex extract`` prints and ``jevex serve`` answers."""
+        return {
+            "records": [
+                {
+                    "schema": r.schema_name,
+                    "entity": r.entity,
+                    "record": r.record.model_dump(mode="json"),
+                }
+                for r in self.records
+            ]
+        }
+
     @classmethod
     def from_context(
         cls,
