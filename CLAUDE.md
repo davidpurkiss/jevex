@@ -177,7 +177,9 @@ same prompt ("Follow .claude/loop.md...").
   (`jevex.testing.stale_recording`; locally it xfails, so run with `CI=1` to see it).
   Re-record in the same PR when the run may make live calls. Otherwise label the PR
   `cassette-stale-ok` (CI then xfails them; re-run the failed jobs), say so in the PR
-  body, and open a `live-api` issue to re-record.
+  body, and open a `live-api` issue to re-record. Until that's done `main`'s recording is
+  stale and fails every PR: if an open re-record issue explains the failure, label your
+  PR `cassette-stale-ok` too and cite that issue in the PR body.
 - `jevex.Field` isn't recognised as a field specifier by type checkers, so a required
   field looks optional in direct constructor calls. This is a known limitation.
 
