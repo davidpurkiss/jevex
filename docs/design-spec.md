@@ -445,7 +445,7 @@ class Document(BaseModel):
 | Library | Async-first `await extractor.extract(doc)`, with `extract_sync` as a wrapper. Python 3.12+. |
 | Scrapy | `jevex.contrib.scrapy.JevexPipeline`, an item pipeline that runs on Scrapy's asyncio reactor, plus a helper that turns a `Response` into a `Document` |
 | Built-in fetcher | `jevex.fetch.SimpleFetcher`: httpx, honours robots.txt, polite per-host delay, no JavaScript rendering |
-| Microservice | `jevex serve` (`jevex[server]`, FastAPI): `POST /extract` takes a document plus a schema name; schemas are registered by module path. Also `/health` and `/metrics`. |
+| Microservice | `jevex serve` (`jevex[server]`, FastAPI): `POST /extract` takes a document plus a schema name; schemas are registered by module path. Also `/health`, `/metrics` and, opt-in, `/stats` (see **Stats UI**). |
 | CLI | `jevex extract`, `learn`, `pack`, `eval`, `testsite`, `serve`, `stats` |
 
 **Car finder:** the Go app handles crawling and calls `jevex serve` over HTTP. `VehicleSpec` and `Listing` schemas live in a small Python package the service loads.
