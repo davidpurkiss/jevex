@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" width="960" height="330" role="img" aria-label="How jevex narrows a document: the page is laid out into components and Jev keeps the relevant ones; those are split into statements, Jev keeps the one that states the field, and it picks the value from that statement's candidates">
+  <title>How jevex narrows a document: the page is laid out into components and Jev keeps the relevant ones; those are split into statements, Jev keeps the one that states the field, and it picks the value from that statement's candidates</title>
+  <!-- Pipeline narrowing: document → component → statement → value.
+       Drawn by scripts/draw_illustrations.py; edit it there. -->
+  <path d="M30 30 Q30 14 46 14 L210 14 C380 14 560 110 770 116 L770 144 C560 150 380 246 210 246 L46 246 Q30 246 30 230 Z" fill="#1E1B4B"/>
+  <g>
+    <rect x="54" y="30" width="148" height="200" rx="10" fill="#0F0D24" stroke="#5B21B6" stroke-width="2"/>
+    <rect x="68" y="44" width="78" height="10" rx="5" fill="#7C3AED"/>
+    <rect x="68" y="64" width="120" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="68" y="75" width="96" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="68" y="96" width="120" height="52" rx="3" fill="none" stroke="#5B21B6" stroke-width="2"/>
+    <path d="M68 109 L188 109" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M68 122 L188 122" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M68 135 L188 135" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M112 96 L112 148" stroke="#5B21B6" stroke-width="1.5"/>
+    <rect x="64" y="92" width="128" height="60" rx="6" fill="none" stroke="#7C3AED" stroke-width="2.5"/>
+    <rect x="68" y="162" width="50" height="40" rx="4" fill="#5B21B6"/>
+    <path d="M74 196 L88 178 L98 188 L104 182 L114 196 Z" fill="#7C3AED"/>
+    <rect x="126" y="166" width="62" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="126" y="177" width="48" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="126" y="188" width="56" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="68" y="210" width="112" height="5" rx="2.5" fill="#5B21B6"/>
+  </g>
+  <g class="zoom1">
+    <path d="M192 92 L270 98 M192 152 L270 164" stroke="#7C3AED" stroke-width="1.5" stroke-dasharray="4 4"/>
+  </g>
+  <g opacity="0.45" class="comp-out">
+    <rect x="270" y="40" width="140" height="46" rx="8" fill="none" stroke="#5B21B6" stroke-width="2" stroke-dasharray="6 5"/>
+    <rect x="282" y="52" width="104" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="282" y="63" width="92" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="282" y="74" width="70" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="270" y="176" width="140" height="46" rx="8" fill="none" stroke="#5B21B6" stroke-width="2" stroke-dasharray="6 5"/>
+    <rect x="282" y="186" width="34" height="26" rx="3" fill="#5B21B6"/>
+    <rect x="324" y="188" width="74" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="324" y="199" width="56" height="5" rx="2.5" fill="#5B21B6"/>
+  </g>
+  <g class="comp">
+    <rect x="270" y="98" width="140" height="66" rx="8" fill="#0F0D24" stroke="#7C3AED" stroke-width="2.5"/>
+    <path d="M280 118 L400 118" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M280 131 L400 131" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M280 144 L400 144" stroke="#5B21B6" stroke-width="1.5"/>
+    <path d="M322 106 L322 156" stroke="#5B21B6" stroke-width="1.5"/>
+    <rect x="284" y="108" width="28" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="284" y="121" width="28" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="284" y="134" width="28" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="284" y="147" width="28" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="330" y="108" width="50" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="330" y="121" width="40" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="330" y="134" width="58" height="5" rx="2.5" fill="#5B21B6"/>
+    <rect x="330" y="147" width="34" height="5" rx="2.5" fill="#5B21B6"/>
+  </g>
+  <g class="zoom2">
+    <path d="M414 98 L474 77 M414 164 L474 183" stroke="#A78BFA" stroke-width="1.5" stroke-dasharray="4 4"/>
+  </g>
+  <g opacity="0.45" class="stmt-out">
+    <rect x="474" y="77" width="152" height="22" rx="11" fill="none" stroke="#7C3AED" stroke-width="2" stroke-dasharray="6 5"/>
+    <rect x="488" y="85.5" width="40" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="536" y="85.5" width="76" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="474" y="133" width="152" height="22" rx="11" fill="none" stroke="#7C3AED" stroke-width="2" stroke-dasharray="6 5"/>
+    <rect x="488" y="141.5" width="40" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="536" y="141.5" width="68" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="474" y="161" width="152" height="22" rx="11" fill="none" stroke="#7C3AED" stroke-width="2" stroke-dasharray="6 5"/>
+    <rect x="488" y="169.5" width="40" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="536" y="169.5" width="76" height="5" rx="2.5" fill="#7C3AED"/>
+  </g>
+  <g class="stmt">
+    <rect x="474" y="105" width="152" height="22" rx="11" fill="#A78BFA"/>
+    <rect x="488" y="113.5" width="40" height="5" rx="2.5" fill="#1E1B4B"/>
+    <rect x="536" y="113.5" width="74" height="5" rx="2.5" fill="#1E1B4B"/>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="tovalue">
+    <path d="M632 116 L760 128 M753 122 L760 128 L753 134"/>
+  </g>
+  <g class="hop">
+    <g transform="translate(752 96) translate(172 0) scale(-1 1)">
+      <g transform="translate(6 2)">
+        <ellipse cx="62" cy="140" rx="46" ry="6" fill="#000000" opacity="0.25"/>
+        <path d="M18 128 C 6 70, 34 22, 62 22 C 92 22, 118 70, 106 128 Z" fill="#8B5CF6"/>
+        <path d="M30 124 C 24 84, 40 44, 62 44 C 86 44, 100 84, 94 124 Z" fill="#A78BFA" opacity="0.45"/>
+        <circle cx="48" cy="70" r="11" fill="#FFFFFF"/><circle cx="51" cy="72" r="5" fill="#1E1B4B"/>
+        <circle cx="78" cy="70" r="11" fill="#FFFFFF"/><circle cx="81" cy="72" r="5" fill="#1E1B4B"/>
+        <path d="M52 92 Q 63 102 74 92" fill="none" stroke="#1E1B4B" stroke-width="4" stroke-linecap="round"/>
+        <path d="M104 86 L 122 50" stroke="#8B5CF6" stroke-width="9" stroke-linecap="round"/>
+        <g transform="translate(260 0) scale(-1 1)">
+          <g class="badge">
+            <rect x="108" y="18" width="44" height="28" rx="9" fill="#34D399"/>
+            <path d="M120 32 L 127 39 L 140 25" fill="none" stroke="#064E3B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+  <text x="128" y="286" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">document</text>
+  <text x="128" y="307" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">cleaned and laid out</text>
+  <text x="340" y="286" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">component</text>
+  <text x="340" y="307" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">Noul: does it contain the field?</text>
+  <text x="550" y="286" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">statement</text>
+  <text x="550" y="307" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">Choice: which detail does it state?</text>
+  <text x="838" y="286" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">value</text>
+  <text x="838" y="307" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">Choice: which candidate is it?</text>
+</svg>

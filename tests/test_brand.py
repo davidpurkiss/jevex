@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 import struct
+import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -14,6 +16,14 @@ ROOT = Path(__file__).resolve().parent.parent
 BRAND = ROOT / "docs" / "brand"
 SVG = "{http://www.w3.org/2000/svg}"
 SVGS = sorted(p.name for p in BRAND.glob("*.svg"))
+ILLUSTRATIONS = BRAND / "illustrations"
+DRAW = ROOT / "scripts" / "draw_illustrations.py"
+# The brand sheet's colours, plus the white and black the mascot's eyes and shadow use.
+PALETTE = {
+    "#1E1B4B", "#0F0D24", "#F5F3FF", "#7C3AED", "#5B21B6", "#8B5CF6", "#A78BFA",
+    "#C4B5FD", "#DDD6FE", "#EDE9FE", "#34D399", "#064E3B", "#F59E0B", "#4F46E5",
+    "#FFFFFF", "#000000",
+}  # fmt: skip
 
 
 def png_size(data: bytes) -> tuple[int, int]:
@@ -122,7 +132,7 @@ def test_binary_readers_reject_other_files() -> None:
 @pytest.mark.parametrize("readme", ["README.md", "concepts/README.md"])
 def test_readme_links_resolve(readme: str) -> None:
     path = BRAND / readme
-    assert missing_links(path.read_text(), path.parent) == []
+    assert missing_links(path.read_text(encoding="utf-8"), path.parent) == []
 
 
 def test_missing_links_reports_broken_targets() -> None:
@@ -131,3 +141,84 @@ def test_missing_links_reports_broken_targets() -> None:
         '<img src="docs/brand/jevex-logo.svg"> <img src="docs/brand/nope.svg">'
     )
     assert missing_links(markdown, BRAND) == ["nope.svg", "docs/brand/nope.svg"]
+
+
+def draw(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(DRAW), *args], capture_output=True, text=True, check=False
+    )
+
+
+def test_illustrations_match_their_script() -> None:
+    result = draw("--check")
+    assert result.returncode == 0, result.stdout
+
+
+def test_draw_check_reports_stale_and_stray_files(tmp_path: Path) -> None:
+    missing = draw("--check", "--out", str(tmp_path))
+    assert missing.returncode == 1
+    assert "stale:" in missing.stdout
+    assert list(tmp_path.iterdir()) == []
+
+    assert draw("--out", str(tmp_path)).returncode == 0
+    assert draw("--check", "--out", str(tmp_path)).returncode == 0
+
+    (tmp_path / "pipeline.svg").write_text("<svg/>")
+    (tmp_path / "old-drawing.svg").write_text("<svg/>")
+    stale = draw("--check", "--out", str(tmp_path))
+    assert stale.returncode == 1
+    assert f"stale: {tmp_path / 'pipeline.svg'}" in stale.stdout
+    assert f"not drawn by this script: {tmp_path / 'old-drawing.svg'}" in stale.stdout
+
+
+def test_each_illustration_has_every_variant() -> None:
+    names = {p.name for p in ILLUSTRATIONS.glob("*.svg")}
+    assert names == {
+        f"{drawing}{kind}{theme}.svg"
+        for drawing in ("pipeline", "learning-loop")
+        for kind in ("", "-animated")
+        for theme in ("", "-dark")
+    }
+
+
+@pytest.mark.parametrize("path", sorted(ILLUSTRATIONS.glob("*.svg")), ids=lambda p: p.name)
+def test_illustrations_are_labelled_and_on_palette(path: Path) -> None:
+    svg = ET.parse(path).getroot()
+    assert svg.get("role") == "img"
+    assert svg.get("aria-label")
+    assert svg.find(f"{SVG}title") is not None
+    colours = {
+        c.upper() for c in re.findall(r"#[0-9A-Fa-f]{6}\b", path.read_text(encoding="utf-8"))
+    }
+    assert colours <= PALETTE
+
+
+@pytest.mark.parametrize("path", sorted(ILLUSTRATIONS.glob("*.svg")), ids=lambda p: p.name)
+def test_only_animated_illustrations_move(path: Path) -> None:
+    styles = ET.parse(path).getroot().findall(f"{SVG}style")
+    if "-animated" not in path.name:
+        assert styles == []
+        return
+    (style,) = styles
+    css = style.text or ""
+    assert "@keyframes" in css
+    # GitHub shows README images through <img>, where scripts and SMIL don't run.
+    assert "<script" not in path.read_text(encoding="utf-8")
+    assert "<animate" not in path.read_text(encoding="utf-8")
+    assert "@media (prefers-reduced-motion: reduce)" in css
+
+
+@pytest.mark.parametrize("theme", ["", "-dark"])
+@pytest.mark.parametrize("drawing", ["pipeline", "learning-loop"])
+def test_animated_illustrations_rest_on_the_static_picture(drawing: str, theme: str) -> None:
+    """With animations off (reduced motion), an animated file must show what the static
+    one shows: the same elements, apart from ones hidden at rest."""
+
+    def picture(svg: str) -> str:
+        svg = re.sub(r"\n\s*<style>.*?</style>", "", svg, flags=re.S)
+        svg = re.sub(r' class="[^"]*"', "", svg)
+        return re.sub(r'\n\s*<rect [^>]*opacity="0"[^>]*/>', "", svg)
+
+    still = (ILLUSTRATIONS / f"{drawing}{theme}.svg").read_text(encoding="utf-8")
+    moving = (ILLUSTRATIONS / f"{drawing}-animated{theme}.svg").read_text(encoding="utf-8")
+    assert picture(moving) == picture(still)

@@ -25,6 +25,7 @@ the ICO after changing them.
 | [`social-preview.png`](social-preview.png) | GitHub social preview, 1280×640 (source: [`social-preview.svg`](social-preview.svg)) |
 | [`mascot.svg`](mascot.svg) | Jev-ex, the mascot, for the README, illustrations and animations |
 | [`palette.svg`](palette.svg) | The palette as swatches |
+| [`illustrations/`](illustrations/) | How jevex works, in two pictures, light and dark, still and animated (see [Illustrations](#illustrations)) |
 
 To use the social preview, upload `social-preview.png` under the repository's
 **Settings → General → Social preview**. The settings page is the only place to set it.
@@ -37,6 +38,45 @@ For a README that follows the reader's theme:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/jevex-logo-dark.svg">
   <img src="docs/brand/jevex-logo.svg" alt="jevex" width="320">
+</picture>
+```
+
+## Illustrations
+
+Two pictures explain jevex at a glance, with the mascot holding the value at the end of
+each. Every picture comes in four files: light and dark (`-dark`), still and animated
+(`-animated`).
+
+| Picture | Shows |
+| --- | --- |
+| [`pipeline`](illustrations/pipeline.svg) | Narrowing: the document is laid out into components, the gate keeps the one holding the field, it's split into statements, the classifier keeps the one stating the field, and the value is picked from its candidates. Each stage's caption is the question Jev answers there. |
+| [`learning-loop`](illustrations/learning-loop.svg) | Learning: the first time no candidate fits, so the LLM reads the statement, Jev verifies its answer and a generator is learned from the verified example. The next time, the generator finds the value and there's no LLM call. |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="illustrations/pipeline-animated-dark.svg">
+  <img src="illustrations/pipeline-animated.svg" alt="How jevex narrows a document to a value" width="720">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="illustrations/learning-loop-animated-dark.svg">
+  <img src="illustrations/learning-loop-animated.svg" alt="How jevex learns a generator from an LLM fallback" width="600">
+</picture>
+
+The animations are CSS keyframes inside the SVG, which GitHub plays in an `<img>`, and
+they loop every 10 s (pipeline) and 12 s (learning loop). Readers who ask for reduced
+motion see the still picture, which is also what an animated file shows wherever CSS
+animation doesn't run. Use the still files in print, PDFs and slides.
+
+They're drawn by [`scripts/draw_illustrations.py`](../../scripts/draw_illustrations.py),
+not by hand. Edit the script and run `uv run scripts/draw_illustrations.py`. The tests
+fail if the committed files and the script disagree, or if a colour is off the palette.
+
+For the README, with repo-root paths:
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/illustrations/pipeline-animated-dark.svg">
+  <img src="docs/brand/illustrations/pipeline-animated.svg" alt="How jevex narrows a document to a value" width="720">
 </picture>
 ```
 
@@ -87,7 +127,7 @@ and `#14AC7A` on dark: `#34D399` is too light for a filled band.
   logo on dark ones. On photos or busy backgrounds, use the icon.
 - **Don't** recolour, stretch, rotate, outline, add shadows to or rearrange the logo, and
   don't use mint for anything other than the value.
-- **The mascot** is the character, not the logo. Use it in the README, illustrations
-  (#58), animations (#59) and stickers; keep the logo for identifying the project. Its
+- **The mascot** is the character, not the logo. Use it in the README, [illustrations](#illustrations),
+  animations (#59) and stickers; keep the logo for identifying the project. Its
   badge says "value found" (a check). Don't put example data such as "9.1s" on it, so
   the brand isn't tied to one domain.

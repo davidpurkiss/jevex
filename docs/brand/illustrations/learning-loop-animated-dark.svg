@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450" role="img" aria-label="How jevex learns: the first time, no candidate fits, so an LLM reads the statement, Jev verifies its answer and a generator is learned from it; the next time, the generator finds the value and no LLM is called">
+  <title>How jevex learns: the first time, no candidate fits, so an LLM reads the statement, Jev verifies its answer and a generator is learned from it; the next time, the generator finds the value and no LLM is called</title>
+  <!-- Learning loop: LLM fallback → verified → generator → no LLM next time.
+       Drawn by scripts/draw_illustrations.py; edit it there. -->
+  <style>
+    @keyframes unsure { 0%, 2%, 9%, 100% { transform: scale(1) } 5.5% { transform: scale(1.3) } }
+    .unsure { animation: unsure 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes a1 { 0%, 9% { opacity: 0 } 11%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .a1 { animation: a1 12s ease-in-out infinite; }
+    @keyframes llm { 0%, 10% { opacity: 0; transform: scale(0.4) } 13% { opacity: 1; transform: scale(1.15) } 15%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .llm { animation: llm 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes a2 { 0%, 17% { opacity: 0 } 19%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .a2 { animation: a2 12s ease-in-out infinite; }
+    @keyframes jev1 { 0%, 19% { opacity: 0; transform: scale(0.4) } 21.4% { opacity: 1; transform: scale(1.15) } 23%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .jev1 { animation: jev1 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes tick1 { 0%, 23% { opacity: 0; transform: scale(0.4) } 25.4% { opacity: 1; transform: scale(1.15) } 27%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .tick1 { animation: tick1 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes a3 { 0%, 27% { opacity: 0 } 29%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .a3 { animation: a3 12s ease-in-out infinite; }
+    @keyframes value1 { 0%, 29% { opacity: 0; transform: scale(0.4) } 31.4% { opacity: 1; transform: scale(1.15) } 33%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .value1 { animation: value1 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes learn { 0%, 35% { stroke-dashoffset: 1; opacity: 1 } 45%, 90% { stroke-dashoffset: 0; opacity: 1 } 96%, 100% { stroke-dashoffset: 0; opacity: 0 } }
+    .learn { animation: learn 12s ease-in-out infinite; }
+    .learn { stroke-dasharray: 1 1; }
+    @keyframes learn-end { 0%, 44% { opacity: 0 } 47%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .learn-end { animation: learn-end 12s ease-in-out infinite; }
+    @keyframes gen { 0%, 46% { opacity: 0; transform: scale(0.4) } 49% { opacity: 1; transform: scale(1.15) } 51%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .gen { animation: gen 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes b1 { 0%, 51% { opacity: 0 } 53%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .b1 { animation: b1 12s ease-in-out infinite; }
+    @keyframes b2 { 0%, 53% { opacity: 0 } 55%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .b2 { animation: b2 12s ease-in-out infinite; }
+    @keyframes jev2 { 0%, 55% { opacity: 0; transform: scale(0.4) } 57.4% { opacity: 1; transform: scale(1.15) } 59%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .jev2 { animation: jev2 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes tick2 { 0%, 58% { opacity: 0; transform: scale(0.4) } 60.4% { opacity: 1; transform: scale(1.15) } 62%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .tick2 { animation: tick2 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes b3 { 0%, 62% { opacity: 0 } 64%, 90% { opacity: 1 } 96%, 100% { opacity: 0 } }
+    .b3 { animation: b3 12s ease-in-out infinite; }
+    @keyframes value2 { 0%, 64% { opacity: 0; transform: scale(0.4) } 66.4% { opacity: 1; transform: scale(1.15) } 68%, 90% { opacity: 1; transform: scale(1) } 96%, 100% { opacity: 0; transform: scale(1) } }
+    .value2 { animation: value2 12s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes cheer { 0%, 68%, 75%, 100% { transform: translateY(0) } 71.5% { transform: translateY(-14px) } }
+    .cheer { animation: cheer 12s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <rect x="16" y="14" width="768" height="186" rx="18" fill="#1E1B4B"/>
+  <text x="40" y="46" font-size="18" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800">First time</text>
+  <g transform="translate(170 40)">
+    <circle cx="0" cy="0" r="7" fill="#F59E0B"/>
+  </g>
+  <text x="184" y="45" font-size="14" fill="#F5F3FF" font-family="system-ui,sans-serif">one LLM call</text>
+  <g>
+    <rect x="40" y="70" width="170" height="56" rx="10" fill="#0F0D24" stroke="#5B21B6" stroke-width="2"/>
+    <rect x="56" y="85" width="96" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="56" y="97" width="130" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="56" y="109" width="70" height="5" rx="2.5" fill="#7C3AED"/>
+  </g>
+  <g class="unsure">
+    <circle cx="210" cy="70" r="14" fill="#DDD6FE"/>
+    <text x="210" y="76" font-size="18" fill="#1E1B4B" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800" text-anchor="middle">?</text>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="a1">
+    <path d="M226 98 L262 98 M255 92 L262 98 L255 104"/>
+  </g>
+  <g class="llm">
+    <rect x="270" y="70" width="110" height="56" rx="14" fill="#F59E0B"/>
+    <text x="325" y="105" font-size="20" fill="#1E1B4B" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800" text-anchor="middle">LLM</text>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="a2">
+    <path d="M388 98 L432 98 M425 92 L432 98 L425 104"/>
+  </g>
+  <g class="jev1">
+    <rect x="440" y="70" width="110" height="56" rx="14" fill="#7C3AED"/>
+    <text x="495" y="105" font-size="20" fill="#FFFFFF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800" text-anchor="middle">Jev</text>
+    <g class="tick1">
+      <circle cx="548" cy="72" r="13" fill="#0F0D24" stroke="#7C3AED" stroke-width="2.5"/>
+      <path d="M542 72 L546.2 76.2 L554 67.8" fill="none" stroke="#7C3AED" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="a3">
+    <path d="M564 98 L602 98 M595 92 L602 98 L595 104"/>
+  </g>
+  <g class="value1">
+    <g>
+      <rect x="610" y="82" width="80" height="32" rx="10.24" fill="#34D399"/>
+      <path d="M640.4 98 L647.12 104.72 L659.6 91.28" fill="none" stroke="#064E3B" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <text x="125" y="152" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">statement</text>
+  <text x="125" y="173" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">no candidate fits</text>
+  <text x="325" y="152" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">LLM fallback</text>
+  <text x="325" y="173" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">reads the statement</text>
+  <text x="495" y="152" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">verified</text>
+  <text x="495" y="173" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">Jev checks the answer</text>
+  <text x="650" y="152" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">value</text>
+  <text x="650" y="173" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">a verified example</text>
+  <rect x="16" y="250" width="768" height="186" rx="18" fill="#1E1B4B"/>
+  <text x="40" y="282" font-size="18" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800">Next time</text>
+  <g transform="translate(170 276)">
+    <circle cx="0" cy="0" r="6" fill="none" stroke="#F59E0B" stroke-width="2" stroke-dasharray="3 3"/>
+  </g>
+  <text x="184" y="281" font-size="14" fill="#F5F3FF" font-family="system-ui,sans-serif">no LLM call</text>
+  <g>
+    <rect x="40" y="306" width="170" height="56" rx="10" fill="#0F0D24" stroke="#5B21B6" stroke-width="2"/>
+    <rect x="56" y="321" width="80" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="56" y="333" width="120" height="5" rx="2.5" fill="#7C3AED"/>
+    <rect x="56" y="345" width="104" height="5" rx="2.5" fill="#7C3AED"/>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="b1">
+    <path d="M218 334 L262 334 M255 328 L262 334 L255 340"/>
+  </g>
+  <g class="gen">
+    <rect x="270" y="306" width="110" height="56" rx="10" fill="#0F0D24" stroke="#A78BFA" stroke-width="2.5"/>
+    <text x="282" y="329" font-size="12" fill="#F5F3FF" font-family="ui-monospace,Menlo,monospace">match: …</text>
+    <text x="282" y="347" font-size="12" fill="#F5F3FF" font-family="ui-monospace,Menlo,monospace">normalise: …</text>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="b2">
+    <path d="M388 334 L432 334 M425 328 L432 334 L425 340"/>
+  </g>
+  <g class="jev2">
+    <rect x="440" y="306" width="110" height="56" rx="14" fill="#7C3AED"/>
+    <text x="495" y="341" font-size="20" fill="#FFFFFF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="800" text-anchor="middle">Jev</text>
+    <g class="tick2">
+      <circle cx="548" cy="308" r="13" fill="#0F0D24" stroke="#7C3AED" stroke-width="2.5"/>
+      <path d="M542 308 L546.2 312.2 L554 303.8" fill="none" stroke="#7C3AED" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <g fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="b3">
+    <path d="M564 334 L610 340 M603 334 L610 340 L603 346"/>
+  </g>
+  <g class="cheer">
+    <g transform="translate(600 282) translate(172 0) scale(-1 1)">
+      <g transform="translate(6 2)">
+        <ellipse cx="62" cy="140" rx="46" ry="6" fill="#000000" opacity="0.25"/>
+        <path d="M18 128 C 6 70, 34 22, 62 22 C 92 22, 118 70, 106 128 Z" fill="#8B5CF6"/>
+        <path d="M30 124 C 24 84, 40 44, 62 44 C 86 44, 100 84, 94 124 Z" fill="#A78BFA" opacity="0.45"/>
+        <circle cx="48" cy="70" r="11" fill="#FFFFFF"/><circle cx="51" cy="72" r="5" fill="#1E1B4B"/>
+        <circle cx="78" cy="70" r="11" fill="#FFFFFF"/><circle cx="81" cy="72" r="5" fill="#1E1B4B"/>
+        <path d="M52 92 Q 63 102 74 92" fill="none" stroke="#1E1B4B" stroke-width="4" stroke-linecap="round"/>
+        <path d="M104 86 L 122 50" stroke="#8B5CF6" stroke-width="9" stroke-linecap="round"/>
+        <g transform="translate(260 0) scale(-1 1)">
+          <g class="value2">
+            <rect x="108" y="18" width="44" height="28" rx="9" fill="#34D399"/>
+            <path d="M120 32 L 127 39 L 140 25" fill="none" stroke="#064E3B" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+  <text x="125" y="388" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">statement</text>
+  <text x="125" y="409" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">same pattern, new page</text>
+  <text x="325" y="388" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">generator</text>
+  <text x="325" y="409" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">in place of the LLM</text>
+  <text x="495" y="388" font-size="17" fill="#F5F3FF" font-family="'Nunito','Avenir Next',ui-rounded,system-ui,sans-serif" font-weight="700" text-anchor="middle">selected</text>
+  <text x="495" y="409" font-size="12.5" fill="#C4B5FD" text-anchor="middle" font-family="system-ui,sans-serif">Jev picks the candidate</text>
+  <g>
+    <path d="M694 98 C748 98, 748 234, 694 234 L360 234 C325 234, 325 248, 325 296" fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" pathLength="1" class="learn"/>
+  </g>
+  <g class="learn-end">
+    <path d="M318 288 L325 297 L332 288" fill="none" stroke="#DDD6FE" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="520" y="224" font-size="13" fill="#F5F3FF" font-weight="600" text-anchor="middle" font-family="system-ui,sans-serif">learn a generator: write · test · publish</text>
+  </g>
+</svg>
