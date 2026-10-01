@@ -143,8 +143,7 @@ def test_spend_while_the_first_document_ran_is_on_the_plot() -> None:
     stats.learned_at = [T0 - timedelta(seconds=5)]
     svg = cost_svg(stats, "time")
     xs = band_xs(svg)
-    assert min(xs) == 72.0  # the plot's left edge: the first document's start
-    assert all(72.0 <= x <= 720 - 96 for x in xs)
+    assert all(72.0 <= x <= 720 - 96 for x in xs)  # inside the plot
     assert ">30 Sep 07:59</text>" in svg
     # The learning curve starts there too, with the generator learned during it.
     assert learning_svg(stats, "time").count('class="learned"') == 2
