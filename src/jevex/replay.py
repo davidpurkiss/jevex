@@ -34,6 +34,13 @@ if TYPE_CHECKING:
     from jevex.store import Store
 
 REPLAY_BATCH_SIZE = 10
+
+
+class LearningStoppedError(Exception):
+    """The learner failed during a replay. The documents after it would learn nothing, so
+    the curve would stop measuring learning: the replay ends instead."""
+
+
 METHODS: tuple[str, ...] = get_args(Method)
 
 CSV_COLUMNS: tuple[str, ...] = (
@@ -210,7 +217,12 @@ async def replay(
 
     Raises ``ValueError`` for a ``batch_size`` below 1, a schema the extractor lacks or a
     store that isn't empty; the :data:`~jevex.eval.RUN_ERRORS` and an error that stopped
-    the learner end the replay. Other per-document errors are scored as all missing.
+    the learner end the replay (:class:`LearningStoppedError`). Other per-document errors
+    are scored as all missing.
+
+    Cost and LLM calls are the documents' own (their ``meta``). What the learner spends
+    between documents (generator LLM calls, Jev requests testing generators) isn't
+    counted.
     """
     if batch_size < 1:
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")
@@ -226,7 +238,11 @@ async def replay(
     generators: list[int] = []
     for item in corpus:
         runs.append(await run_document(extractor, item, resolved))
-        await extractor.wait_for_learning()
+        try:
+            await extractor.wait_for_learning()
+        except RuntimeError as exc:  # the learner's worker failed (GeneratorLearner.drain)
+            cause = exc.__cause__ or exc
+            raise LearningStoppedError(f"learning stopped after {item.path}: {cause}") from exc
         generators.append(len(await store.generators()) if store is not None else 0)
     return ReplayReport(
         report=EvalReport(documents=runs),

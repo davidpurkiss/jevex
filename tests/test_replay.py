@@ -14,6 +14,7 @@ from jevex import (
     Extractor,
     Field,
     GeneratorRegistry,
+    LearningStoppedError,
     LearnStage,
     Pipeline,
     ReplayReport,
@@ -207,6 +208,22 @@ class OverBudget:
         raise JevBudgetExceededError("over the cap")
 
 
+async def test_a_failed_learner_ends_the_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus = load_corpus(car_corpus(tmp_path, [1, 1]))
+    log: list[str] = []
+    extractor = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Spy(log)]))
+
+    async def broken() -> None:
+        raise RuntimeError("the learner worker failed") from KeyError("draft")
+
+    monkeypatch.setattr(extractor, "wait_for_learning", broken)
+    with pytest.raises(LearningStoppedError, match=r"car-0\.html: 'draft'"):
+        await replay(extractor, corpus)
+    assert log == ["car-0.html"]
+
+
 async def test_the_spend_cap_ends_the_replay(tmp_path: Path) -> None:
     corpus = load_corpus(car_corpus(tmp_path, [1, 1]))
     extractor = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([OverBudget()]))
@@ -328,11 +345,17 @@ def test_the_html_charts_each_metric_marks_waves_and_inlines_the_data() -> None:
     assert json.loads(data)["batches"][0]["llm_calls_per_document"] == 3
 
 
-def test_the_inlined_data_cant_close_its_script_tag() -> None:
-    run = doc_run()
-    run.path = "</script><b>x"
-    page = report([run], [1], 1).to_html()
-    assert "</script><b>" not in page
+def test_the_inlined_data_cant_close_its_script_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    sneaky = {"x": "</script><script>alert(1)</script>"}
+
+    def to_dict(_self: ReplayReport) -> dict[str, Any]:
+        return sneaky
+
+    monkeypatch.setattr(ReplayReport, "to_dict", to_dict)
+    page = report([doc_run()], [1], 1).to_html()
+    assert "</script><script>" not in page
+    data = page.split('id="replay-data">')[1].split("</script>")[0]
+    assert json.loads(data) == sneaky
 
 
 def test_a_batch_without_a_value_breaks_the_line() -> None:
@@ -488,6 +511,28 @@ def test_cli_replay_flags_need_replay(
     with pytest.raises(SystemExit) as info:
         run_cli(site, monkeypatch, *flags)
     assert info.value.code == 2
+
+
+def test_cli_replay_runs_one_document_at_a_time(
+    site: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(SystemExit) as info:
+        run_cli(site, monkeypatch, "--replay", "--concurrency", "2")
+    assert info.value.code == 2
+
+
+def test_cli_replay_learner_failure_is_a_clean_error(
+    site: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(_self: Extractor) -> None:
+        raise RuntimeError("the learner worker failed") from KeyError("draft")
+
+    monkeypatch.setattr(Extractor, "wait_for_learning", broken)
+    code, out, err = run_cli(site, monkeypatch, "--replay")
+    assert code == 1
+    assert out == ""
+    assert err.startswith("jevex: error: learning stopped after ")
+    assert err.endswith(": 'draft'\n")
 
 
 @pytest.mark.parametrize("size", ["0", "-1", "x"])

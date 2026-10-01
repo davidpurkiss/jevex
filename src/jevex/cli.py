@@ -44,7 +44,7 @@ from jevex.packs import (
     load_pack,
     pack_generators,
 )
-from jevex.replay import REPLAY_BATCH_SIZE, replay
+from jevex.replay import REPLAY_BATCH_SIZE, LearningStoppedError, replay
 from jevex.schema import UnsupportedFieldError
 from jevex.store import StoreError, open_store
 from jevex.testsite import BUILD_DIR, build, server
@@ -60,6 +60,8 @@ if TYPE_CHECKING:
     from jevex.replay import ReplayReport
     from jevex.store import Store
     from jevex.testsite.waves import Waves
+
+EVAL_CONCURRENCY = 4
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -183,7 +185,8 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None) -> EvalReport:
         raise CliError(str(exc)) from exc
     async with extractor:
         try:
-            return await evaluate(extractor, corpus, concurrency=max(1, args.concurrency))
+            concurrency = EVAL_CONCURRENCY if args.concurrency is None else args.concurrency
+            return await evaluate(extractor, corpus, concurrency=max(1, concurrency))
         except ValueError as exc:
             raise CliError(str(exc)) from exc
         except JevError as exc:  # the spend cap or the API itself: the run can't be scored
@@ -219,7 +222,7 @@ async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | No
         async with extractor:
             try:
                 return await replay(extractor, corpus, batch_size=args.batch_size)
-            except ValueError as exc:
+            except (ValueError, LearningStoppedError) as exc:
                 raise CliError(str(exc)) from exc
             except JevError as exc:
                 raise CliError(f"Jev: {exc}") from exc
@@ -652,7 +655,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Every schema the corpus uses (repeatable), e.g. jevex.testsite:VehicleSpec",
     )
     evaluate.add_argument(
-        "--concurrency", type=int, default=4, help="Documents at a time (not with --replay)"
+        "--concurrency",
+        type=int,
+        help=f"Documents at a time (default {EVAL_CONCURRENCY}; a replay runs one at a time)",
     )
     evaluate.add_argument("--json", action="store_true", help="Print the full report as JSON")
     evaluate.add_argument(
@@ -841,6 +846,8 @@ def main(
         summary, issue = PLANNED[args.command]
         print(f"jevex {args.command}: not implemented yet ({summary}; see #{issue})", file=stderr)
         return EXIT_USAGE
+    if args.command == "eval" and args.replay and args.concurrency is not None:
+        parser.error("--replay runs one document at a time: leave out --concurrency")
     if args.command == "eval" and not args.replay:
         given = [
             flag

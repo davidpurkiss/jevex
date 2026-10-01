@@ -265,7 +265,8 @@ out of `--waves` aren't built.
 pages one at a time in order (letting learning finish after each), and reports accuracy,
 cost per document and LLM calls per document per batch, as CSV and as a self-contained
 HTML chart with the waves marked. `--llm` turns on the LLM fallback and learning; without
-it the replay runs on Jev alone.
+it the replay runs on Jev alone. The curve counts what documents spend; what the learner
+spends between them isn't counted yet.
 
 ```sh
 jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing
