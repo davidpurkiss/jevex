@@ -63,6 +63,10 @@ pdf = [
 gemini = [
     "google-genai>=2.26.0",
 ]
+postgres = [
+    "psycopg[binary]>=3.3.6",
+    "psycopg-pool>=3.3.3",
+]
 
 [tool.hatch.version]
 path = "src/jevex/__init__.py"
@@ -73,6 +77,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    # A bundled Postgres server, so the store tests run against real Postgres anywhere.
+    "pixeltable-pgserver>=0.6.0",
     "pre-commit>=4.6.2",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
