@@ -43,7 +43,7 @@ def check_waves(waves: Sequence[Sequence[str]]) -> Waves:
     schedule = tuple(tuple(wave) for wave in waves)
     if not schedule:
         raise ValueError("a wave schedule needs at least one wave")
-    seen: set[str] = set()
+    seen: dict[str, int] = {}  # family -> its wave
     for number, wave in enumerate(schedule, start=1):
         if isinstance(waves[number - 1], str) or not wave:
             raise ValueError(f"wave {number} must be a non-empty list of families")
@@ -52,9 +52,11 @@ def check_waves(waves: Sequence[Sequence[str]]) -> Waves:
                 raise ValueError(
                     f"wave {number}: unknown family {family!r}; they're {', '.join(FAMILIES)}"
                 )
-            if family in seen:
-                raise ValueError(f"wave {number}: {family!r} is already in an earlier wave")
-            seen.add(family)
+            if (first := seen.get(family)) == number:
+                raise ValueError(f"wave {number} lists {family!r} twice")
+            if first is not None:
+                raise ValueError(f"wave {number}: {family!r} is already in wave {first}")
+            seen[family] = number
     return schedule
 
 

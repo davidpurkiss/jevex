@@ -90,7 +90,7 @@ def _remove_previous_build(out: Path) -> None:
 
 
 def digest(pages: list[Page]) -> str:
-    """A hash of every page's path and bytes: equal digests mean identical sites.
+    """A hash of every page's path and bytes, in order: equal digests mean identical pages.
 
     PDFs and HTML are byte for byte the same everywhere. Rasterised pages (scans and
     infographics) can differ between Pillow versions, which may draw text a pixel apart.

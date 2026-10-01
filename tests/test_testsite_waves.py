@@ -40,8 +40,8 @@ def test_check_waves_accepts_lists() -> None:
         ("table;;kv", "wave 2 must be a non-empty list"),
         ("table;", "wave 2 must be a non-empty list"),
         ("table;tables", "wave 2: unknown family 'tables'; they're table, kv, prose"),
-        ("table,kv;kv", "wave 2: 'kv' is already in an earlier wave"),
-        ("table,table", "wave 1: 'table' is already in an earlier wave"),
+        ("table,kv;kv", "wave 2: 'kv' is already in wave 1"),
+        ("table,table", "wave 1 lists 'table' twice"),
     ],
 )
 def test_bad_schedules_are_refused(text: str, message: str) -> None:
