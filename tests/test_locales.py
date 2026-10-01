@@ -5,10 +5,11 @@ from jevex import (
     LocaleConventions,
     NormaliserStep,
     document_locale,
+    html_language,
     locale_conventions,
     localise_steps,
 )
-from jevex.locales import EN_GB, html_language
+from jevex.locales import EN_GB
 
 
 def steps(*items: object) -> list[NormaliserStep]:
@@ -151,6 +152,11 @@ def test_document_locale_takes_the_caller_then_the_page_then_the_header(
             b'<html><head><script>document.write("<html lang=fr>")</script>'
             b'<meta http-equiv="content-language" content="it"></head>',
             "it",
+        ),
+        (
+            b'<html><head><noscript><img src="/pixel.gif"></noscript>'
+            b'<meta http-equiv="Content-Language" content="sv-SE"></head>',
+            "sv-SE",
         ),
         (b'<html><body><div lang="de">Hallo</div><meta http-equiv="content-language"', None),
         (b'<div lang="de"><html lang="de">', None),

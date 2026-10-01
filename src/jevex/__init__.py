@@ -144,6 +144,7 @@ from jevex.learn import (
 from jevex.locales import (
     LocaleConventions,
     document_locale,
+    html_language,
     locale_conventions,
     localise_steps,
 )
@@ -433,6 +434,7 @@ __all__ = [
     "generator_spec_json_schema",
     "generator_use",
     "header_prefix",
+    "html_language",
     "import_pack",
     "infer_headers",
     "layered_generators",

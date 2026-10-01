@@ -279,8 +279,14 @@ class _HeadReader(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.lang: str | None = None
         self.pragma: str | None = None
+        self.noscript = 0
+        """Open ``<noscript>`` elements: a tracking pixel in one doesn't end the head."""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "noscript":
+            self.noscript += 1
+        if self.noscript:
+            return
         if tag not in _HEAD_TAGS:
             raise _HeadEnded
         values = dict(attrs)
@@ -292,3 +298,7 @@ class _HeadReader(HTMLParser):
             and (values.get("http-equiv") or "").strip().lower() == "content-language"
         ):
             self.pragma = values.get("content")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "noscript" and self.noscript:
+            self.noscript -= 1
