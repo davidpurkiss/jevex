@@ -21,6 +21,7 @@ It's a backstop; per-document and per-run budgets are #34.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Protocol, runtime_checkable
@@ -88,11 +89,23 @@ PRICES: dict[str, ModelPrice] = {
 }
 
 
+_DATED_SNAPSHOT = re.compile(r"-\d{8}$")
+
+
 def cost(
     model: str, input_tokens: int, output_tokens: int, prices: dict[str, ModelPrice] | None = None
 ) -> float | None:
-    """USD for a call, or ``None`` when the model's price isn't known."""
-    price = (prices if prices is not None else PRICES).get(model)
+    """USD for a call, or ``None`` when the model's price isn't known.
+
+    An exact entry in ``prices`` (default :data:`PRICES`) wins. Otherwise a dated snapshot
+    ID (``<name>-YYYYMMDD``) is costed at its base name's price, because APIs report the
+    snapshot that served a call (Anthropic answers a ``claude-haiku-4-5`` request as
+    ``claude-haiku-4-5-20251001``) while price lists name the base model.
+    """
+    table = prices if prices is not None else PRICES
+    price = table.get(model)
+    if price is None and _DATED_SNAPSHOT.search(model):
+        price = table.get(_DATED_SNAPSHOT.sub("", model))
     if price is None:
         return None
     return (input_tokens * price.input + output_tokens * price.output) / 1_000_000
