@@ -34,13 +34,13 @@ from jevex.learn import (
     PackDiff,
     compile_pack,
 )
-from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
+from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
 from jevex.review import REVIEW_THRESHOLD, review_items
-from jevex.schema import ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
+from jevex.schema import FieldSpec, ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
@@ -271,9 +271,9 @@ def _threshold_keys(specs: Sequence[SchemaSpec]) -> set[str]:
     }
 
 
-def _field_keys(specs: Sequence[SchemaSpec]) -> set[str]:
-    """``"Schema.field"`` for every field, nested models' children included."""
-    return {f"{s.name}.{f.name}" for s in [*specs, *_child_specs(specs)] for f in s.fields}
+def _field_specs(specs: Sequence[SchemaSpec]) -> dict[str, FieldSpec]:
+    """Every field by ``"Schema.field"``, nested models' children included."""
+    return {f"{s.name}.{f.name}": f for s in [*specs, *_child_specs(specs)] for f in s.fields}
 
 
 def _statements(ctx: Context) -> dict[str, Statement]:
@@ -642,25 +642,40 @@ class Extractor:
         """Record a person's answer to a review item as a verified example and return it.
 
         ``value`` is the right value for the item's field in its statement (the extracted
-        one, to confirm it); ``evidence`` its ``(start, end)`` span there, if known
+        one, to confirm it), normalised as the field types it (``"9.1"`` → ``9.1``). For a
+        list field it is one item: call again for each item the statement states.
+        ``evidence`` is its ``(start, end)`` span in the statement, if known
         (:meth:`~jevex.review.ReviewItem.example`). The example is stored, replacing an
         LLM example of the same answer, and the learner (inline mode, with a
-        ``generator_llm``) queues it like a verified LLM answer. Needs a ``store`` or a
-        ``generator_llm``.
+        ``generator_llm``) queues it like a verified LLM answer. Needs a ``store=``, or a
+        ``generator_llm`` to learn from it in this process.
 
         Raises ``ValueError`` for an item of a field this extractor doesn't have, an item
-        without a source statement, a ``None`` value, or evidence outside the statement.
+        without a source statement, a ``None`` value, a list for a list field, a value
+        that doesn't fit the field, or evidence outside the statement.
         """
-        if item.field not in _field_keys(self.schemas):
+        spec = _field_specs(self.schemas).get(item.field)
+        if spec is None:
             raise ValueError(f"{item.field} isn't a field of this extractor's schemas")
+        if spec.many and isinstance(value, list):
+            raise ValueError(f"{item.field} is a list field: give one item per feedback call")
+        if value is not None:
+            norm = _stage(self.pipeline, "normalise", NormaliseStage)
+            registry = norm.registry if norm else BUILTIN_NORMALISERS
+            try:
+                value = normalise(value, [], spec, registry=registry)
+            except NormaliseError as exc:
+                raise ValueError(str(exc)) from None
         example = item.example(value, evidence=evidence)
         learner = await self.learner()
         if learner is not None:
             await learner.submit(example)
             return example
-        store = await self.store()
-        if store is None:
+        if self._store_source is None and (self._store is None or self._owns_store):
+            # Not the in-memory store an extractor opens for itself: it'd be lost on close.
             raise ValueError("feedback keeps verified examples in a store: pass store=")
+        store = await self.store()
+        assert store is not None
         await store.add_example(example)
         return example
 

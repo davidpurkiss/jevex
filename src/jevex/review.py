@@ -40,8 +40,8 @@ class ReviewItem(BaseModel):
     in :class:`~jevex.store.VerifiedExample`. ``meta`` is everything known about the value,
     including its source statement and the alternatives. ``threshold`` is the review
     threshold it fell below. ``context`` is what the learner replays the statement with
-    (heading trail and statement kind). ``id`` is stable for the same value from the same
-    statement of the same document, so a sink can drop repeats.
+    (heading trail and statement kind). ``id`` is the same for the same value from the same
+    statement (id and text) of the same entity and URL, so a sink can drop repeats.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -58,7 +58,9 @@ class ReviewItem(BaseModel):
         """A person's answer as a verified example on the item's statement.
 
         ``evidence`` is the ``(start, end)`` span of the value in the statement. Confirming
-        the extracted value without one reuses the value's own span. Raises ``ValueError``
+        the extracted value without one reuses the value's own span (not a list field's:
+        its span is one item's). ``value`` is taken as given; ``Extractor.feedback``
+        normalises it first. Raises ``ValueError``
         when the value has no source statement, ``value`` is ``None``, or ``evidence`` isn't
         within the statement.
         """
@@ -68,7 +70,12 @@ class ReviewItem(BaseModel):
             raise ValueError(f"{self.field} has no source statement to learn from")
         if value is None:
             raise ValueError(f"feedback for {self.field} needs a value, got None")
-        if evidence is None and source.span is not None and value == self.meta.value:
+        if (
+            evidence is None
+            and source.span is not None
+            and not isinstance(self.meta.value, list)
+            and value == self.meta.value
+        ):
             evidence = (source.span.start, source.span.end)
         if evidence is not None:
             start, end = evidence
@@ -159,6 +166,7 @@ def review_items(
 
 
 def _item_id(url: str | None, field: str, entity: str, meta: FieldMeta) -> str:
-    statement_id = meta.source.statement_id if meta.source is not None else None
-    key = f"{url}\0{field}\0{entity}\0{statement_id}\0{meta.value!r}"
+    source = meta.source
+    statement_id, statement = (source.statement_id, source.statement) if source else (None, None)
+    key = f"{url}\0{field}\0{entity}\0{statement_id}\0{statement}\0{meta.value!r}"
     return f"rv-{hashlib.sha256(key.encode()).hexdigest()[:12]}"

@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from jevex import (
+    Budgets,
     Context,
     Document,
     DomLocation,
@@ -16,6 +17,7 @@ from jevex import (
     ReviewItem,
     ReviewQueue,
     ReviewSink,
+    RunBudget,
     SchemaSpec,
     Source,
     Span,
@@ -44,6 +46,7 @@ class Car(BaseModel):
     zero_to_62_s: float = Field(description="0-62 mph time", unit="s")
     launched: date = Field(description="Launch date")
     doors: int = Field(description="Number of doors")
+    colours: list[str] = Field(default_factory=list, description="Paint colours")
 
 
 class Trim(BaseModel):
@@ -151,6 +154,16 @@ def test_item_ids_are_stable_and_tell_entities_apart() -> None:
 
     assert ids("A") == ids("A")
     assert ids("A") != ids("B")
+
+
+def test_item_ids_tell_statements_apart_without_a_url() -> None:
+    def ids(text: str) -> list[str]:
+        m = meta(9.1, 0.6).model_copy(
+            update={"source": Source(statement_id="s1", statement=text, span=SPAN)}
+        )
+        return [i.id for i in review_items([build_extracted(SPEC, "doc", {"zero_to_62_s": m})])]
+
+    assert ids(TEXT) != ids("0-62 mph: 9.1 s")
 
 
 def test_review_queue_is_a_review_sink() -> None:
@@ -313,6 +326,43 @@ async def test_feedback_stores_a_human_example_in_place_of_the_llm_one() -> None
     assert await store.examples("Car.zero_to_62_s") == [got]
 
 
+async def test_feedback_normalises_the_value_like_the_fallback() -> None:
+    store = open_store(":memory:")
+    async with extractor({}, store=store) as ex:
+        got = await ex.feedback(item(), "9.1")
+    assert got.value == 9.1
+    assert got.id == example_id("Car.zero_to_62_s", TEXT, 9.1)
+    assert got.evidence == (13, 16)
+
+
+async def test_feedback_that_doesnt_fit_the_field_is_refused() -> None:
+    store = open_store(":memory:")
+    async with extractor({}, store=store) as ex:
+        with pytest.raises(ValueError, match="doesn't fit zero_to_62_s"):
+            await ex.feedback(item(), "fast")
+    assert await store.examples() == []
+
+
+async def test_list_fields_take_one_item_per_feedback() -> None:
+    text = "Comes in red and blue."
+    m = FieldMeta(
+        value=["red", "green"],
+        confidence=0.5,
+        source=Source(statement_id="s1", statement=text, span=Span(start=9, end=12)),
+    )
+    [review] = review_items([build_extracted(SPEC, "doc", {"colours": m})])
+    store = open_store(":memory:")
+    async with extractor({}, store=store) as ex:
+        with pytest.raises(ValueError, match="give one item per feedback call"):
+            await ex.feedback(review, ["red", "blue"])
+        red = await ex.feedback(review, "red")
+        blue = await ex.feedback(review, "blue", evidence=(17, 21))
+    assert (red.value, red.evidence) == ("red", None)  # the span is one item's, unknown which
+    assert (blue.value, blue.evidence) == ("blue", (17, 21))
+    assert red.id == example_id("Car.colours", text, "red")
+    assert {e.id for e in await store.examples("Car.colours")} == {red.id, blue.id}
+
+
 async def test_feedback_in_compile_mode_is_stored_for_jevex_learn() -> None:
     store = open_store(":memory:")
     async with extractor({}, store=store, learn_mode="compile", generator_llm=FakeLLM([])) as ex:
@@ -322,6 +372,13 @@ async def test_feedback_in_compile_mode_is_stored_for_jevex_learn() -> None:
 
 async def test_feedback_without_a_store_is_refused() -> None:
     async with extractor({}) as ex:
+        with pytest.raises(ValueError, match="pass store="):
+            await ex.feedback(item(), 9.1)
+
+
+async def test_feedback_isnt_kept_in_a_store_the_extractor_opened_for_itself() -> None:
+    budgets = Budgets(run=RunBudget(max_spend=1.0))
+    async with extractor({}, budgets=budgets) as ex:
         with pytest.raises(ValueError, match="pass store="):
             await ex.feedback(item(), 9.1)
 
