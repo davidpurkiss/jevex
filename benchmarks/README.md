@@ -14,6 +14,13 @@ jevex testsite build --seed 42 --out /tmp/testsite
 jevex corpus check /tmp/testsite benchmarks/corpora/testsite.lock
 ```
 
-The other locks are committed when their corpora are first built. `books.lock` comes from
-`jevex corpus books`, which makes real requests to books.toscrape.com. The spec-sheet
-locks follow once their sources are chosen.
+`corpora/books.lock` is the books.toscrape.com sample (seed 42, 200 books), fetched and
+spot-checked on 2026-10-01 (#211). Its pages aren't in the repo. Refetching them makes
+real requests to the site, then the check confirms the site still serves the same bytes:
+
+```sh
+jevex corpus books --out /tmp/books
+jevex corpus check /tmp/books benchmarks/corpora/books.lock
+```
+
+The spec-sheet locks follow once their sources are chosen.

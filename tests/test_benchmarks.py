@@ -405,6 +405,24 @@ def test_the_committed_test_site_lock_matches_a_fresh_build(tmp_path: Path) -> N
     assert lock.settings["seed"] == spec.seed
 
 
+def test_the_committed_books_lock_is_the_configured_sample() -> None:
+    """The books pages live outside the repo, so only the lock can be checked here: it must
+    be the sample the config pins. Refetch it with ``jevex corpus books --out X --lock
+    benchmarks/corpora/books.lock``."""
+    spec = BenchmarkConfig.load(CONFIG).corpus("books")
+    lock = CorpusLock.load(CONFIG.parent / spec.lock)
+    assert lock.name == "books"
+    assert lock.publish == "full"
+    assert lock.settings == {
+        "labels": "markup",
+        "sample": spec.sample,
+        "seed": spec.seed,
+        "source": BOOKS_URL,
+    }
+    assert len(lock.documents) == spec.sample
+    assert all(re.fullmatch(r"pages/[\w.-]+\.html", path) for path in lock.documents)
+
+
 # --- the pinned config -----------------------------------------------------------------
 
 
