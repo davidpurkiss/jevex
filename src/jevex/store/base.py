@@ -158,6 +158,64 @@ class SpendEntry(BaseModel):
     at: datetime = Field(default_factory=utcnow)
 
 
+class ValueStat(BaseModel):
+    """One value a document found, as the stats UI's fields view counts it.
+
+    ``field`` is ``"Schema.field"``; ``value`` is its text, cut to
+    :data:`MAX_STAT_VALUE_CHARS` (the view shows the lowest-confidence ones).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    field: str
+    method: str | None = None
+    confidence: float | None = None
+    value: str = ""
+
+
+MAX_STAT_VALUE_CHARS = 120
+
+
+class DocumentEvent(BaseModel):
+    """Something the stats UI's budget-and-errors view lists: a budget hit
+    (``budget``), a stage stopping the document (``stopped``) or an extraction that
+    raised (``error``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["budget", "stopped", "error"]
+    message: str
+
+
+class DocumentStat(BaseModel):
+    """One extracted document's numbers, for the stats UI (spec: *Stats UI › Data
+    sources*): what it cost, what resolved its values, and what went wrong.
+
+    ``records`` counts its top-level records; ``snapshot`` is the learned-generator
+    snapshot it ran with. A document whose extraction raised has an ``error`` event and
+    whatever it spent before it failed.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    run_id: str | None = None
+    url: str | None = None
+    schemas: list[str] = Field(default_factory=list[str])
+    records: int = 0
+    jev_requests: int = 0
+    jev_questions: int = 0
+    jev_tokens: int = 0
+    jev_cost: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    llm_calls: int = 0
+    llm_cost: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    seconds: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    values: list[ValueStat] = Field(default_factory=list[ValueStat])
+    events: list[DocumentEvent] = Field(default_factory=list[DocumentEvent])
+    snapshot: int | None = None
+    at: datetime = Field(default_factory=utcnow)
+
+
 @runtime_checkable
 class Store(Protocol):
     """Everything jevex learns, shared by every process using the same backend.
@@ -285,6 +343,24 @@ class Store(Protocol):
         whether the entry was recorded. With ``kind`` set, ``entry`` must be of that
         kind (``ValueError`` otherwise).
         """
+        ...
+
+    async def spend_entries(
+        self, *, since: datetime | None = None, kind: SpendKind | None = None
+    ) -> list[SpendEntry]:
+        """The ledger's entries at or after ``since`` (of ``kind``), oldest first."""
+        ...
+
+    # Document stats
+    async def record_document(self, stat: DocumentStat) -> None:
+        """Add a document's stats (insert or replace by ``id``)."""
+        ...
+
+    async def documents(
+        self, *, since: datetime | None = None, limit: int | None = None
+    ) -> list[DocumentStat]:
+        """Documents recorded at or after ``since``, oldest first; with ``limit``, only
+        the newest ``limit`` of them."""
         ...
 
     async def aclose(self) -> None: ...

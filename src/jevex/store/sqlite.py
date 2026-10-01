@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic_core import to_jsonable_python
 
 from jevex.store.base import (
+    DocumentStat,
     GeneratorRecord,
     GeneratorStats,
     KeyMapping,
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Version 1's tables; a new database runs this, then every migration.
 _SCHEMA = """
@@ -123,6 +124,15 @@ CREATE TABLE key_path_unsure (
 """,
     3: """
 ALTER TABLE examples ADD COLUMN document_source TEXT;
+""",
+    4: """
+CREATE TABLE documents (
+    id TEXT PRIMARY KEY,
+    run_id TEXT,
+    data TEXT NOT NULL,
+    at REAL NOT NULL
+);
+CREATE INDEX documents_at ON documents (at);
 """,
 }
 
@@ -610,6 +620,59 @@ class SQLiteStore:
                     return False
                 self._insert_spend(cur, entry)
                 return True
+
+        return await self._call(run)
+
+    async def spend_entries(
+        self, *, since: datetime | None = None, kind: SpendKind | None = None
+    ) -> list[SpendEntry]:
+        where, params = self._spend_filter(since, kind, None)
+        sql = f"SELECT * FROM spend{where} ORDER BY at, id"
+
+        def run() -> list[SpendEntry]:
+            return [
+                SpendEntry(
+                    amount_usd=r["amount_nano_usd"] / _NANO,
+                    kind=r["kind"],
+                    run_id=r["run_id"],
+                    note=r["note"],
+                    at=_dt(r["at"]),
+                )
+                for r in self._rows(sql, params)
+            ]
+
+        return await self._call(run)
+
+    # -- document stats ---------------------------------------------------------------
+
+    async def record_document(self, stat: DocumentStat) -> None:
+        row = (stat.id, stat.run_id, stat.model_dump_json(exclude={"at"}), _ts(stat.at))
+
+        def run() -> None:
+            with self._write() as cur:
+                cur.execute("INSERT OR REPLACE INTO documents VALUES (?, ?, ?, ?)", row)
+
+        await self._call(run)
+
+    async def documents(
+        self, *, since: datetime | None = None, limit: int | None = None
+    ) -> list[DocumentStat]:
+        sql = "SELECT * FROM documents"
+        params: tuple[Any, ...] = ()
+        if since is not None:
+            sql += " WHERE at >= ?"
+            params += (_ts(since),)
+        sql += " ORDER BY at DESC, id DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params += (limit,)
+
+        def run() -> list[DocumentStat]:
+            stats = [
+                DocumentStat.model_validate_json(r["data"]).model_copy(update={"at": _dt(r["at"])})
+                for r in self._rows(sql, params)
+            ]
+            return stats[::-1]
 
         return await self._call(run)
 

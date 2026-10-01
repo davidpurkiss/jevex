@@ -19,6 +19,7 @@ import psycopg
 
 from jevex import Extractor
 from jevex.store import (
+    DocumentStat,
     GeneratorRecord,
     KeyMapping,
     SpendEntry,
@@ -103,6 +104,7 @@ async def test_tables_live_in_the_store_schema(postgres_url: str, pg_schema: str
         f"WHERE table_schema = '{pg_schema}' ORDER BY table_name",
     )
     assert [t for (t,) in tables] == [
+        "documents",
         "examples",
         "generator_disables",
         "generator_stats",
@@ -164,12 +166,16 @@ async def test_a_version_1_schema_is_migrated(postgres_url: str, pg_schema: str)
             VerifiedExample(id="new", field="S.f", statement="t", value=2, document_source="a.com")
         )
         assert [e.document_source for e in await store.examples(limit=1)] == ["a.com"]
+        # v3: document stats.
+        assert await store.documents() == []
+        await store.record_document(DocumentStat(id="d1", at=T0))
+        assert [d.id for d in await store.documents()] == ["d1"]
     finally:
         await store.aclose()
     assert query(postgres_url, f"SELECT version FROM {pg_schema}.schema_version") == [
         (SCHEMA_VERSION,)
     ]
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
 
 
 async def test_newer_schema_is_refused(postgres_url: str, pg_schema: str) -> None:
