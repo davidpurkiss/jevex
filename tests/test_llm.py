@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from jevex.llm import (
     ModelPrice,
     check_budget,
     cost,
+    gemini_flash_3x_price,
     process_llm_cost,
     reset_process_llm_cost,
 )
@@ -37,6 +39,12 @@ def test_cost_from_the_price_table() -> None:
     assert cost("claude-sonnet-5-5", 1_000, 500) == pytest.approx(0.007)
     assert cost("unknown-model", 10, 10) is None
     assert cost("mine", 1_000_000, 0, {"mine": ModelPrice(3, 9)}) == pytest.approx(3.0)
+    assert cost("gemini-3.5-flash", 1_000_000, 1_000_000) == pytest.approx(10.5)
+
+
+def test_gemini_flash_3x_promotion_ends_with_2026() -> None:
+    assert gemini_flash_3x_price(date(2026, 12, 31)) == ModelPrice(0.75, 3.75)
+    assert gemini_flash_3x_price(date(2027, 1, 1)) == ModelPrice(1.50, 7.50)
 
 
 async def test_process_budget_stops_further_calls(monkeypatch: pytest.MonkeyPatch) -> None:

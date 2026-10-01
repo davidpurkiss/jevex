@@ -94,6 +94,13 @@ extractor = Extractor(
 )
 ```
 
+Adapters ship as extras: `jevex[anthropic]` (`jevex.llm.anthropic.AnthropicLLM`),
+`jevex[openai]` (`jevex.llm.openai.OpenAILLM`), `jevex[gemini]`
+(`jevex.llm.gemini.GeminiLLM`, e.g. `GeminiLLM("gemini-3.5-flash")`, with the key in
+`GEMINI_API_KEY`) and `jevex[litellm]` (`jevex.llm.litellm.LiteLLM`, any provider LiteLLM
+supports, including local Ollama). Any object with an async `structured(prompt, schema)`
+method works too.
+
 ## Development
 
 ```sh

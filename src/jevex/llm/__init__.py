@@ -7,8 +7,8 @@ Every adapter implements one small protocol::
 
 ``LLMResponse`` carries the validated output plus token usage and its cost. Adapters live
 in extras: ``jevex.llm.anthropic`` (``jevex[anthropic]``), ``jevex.llm.openai``
-(``jevex[openai]``) and ``jevex.llm.litellm`` (``jevex[litellm]``, which covers any
-provider LiteLLM supports, including local Ollama).
+(``jevex[openai]``), ``jevex.llm.gemini`` (``jevex[gemini]``) and ``jevex.llm.litellm``
+(``jevex[litellm]``, which covers any provider LiteLLM supports, including local Ollama).
 
 Spend is capped process-wide by ``JEVEX_LLM_MAX_COST_USD``: once this process has spent
 the cap, no further call is made. With ``JEVEX_SPEND_LEDGER`` set, the cap counts what
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -44,8 +45,23 @@ class ModelPrice:
     output: float
 
 
-# Anthropic first-party API list prices (docs, 2026-09-25). Other providers' prices change
-# often and aren't bundled: pass ``prices=`` to an adapter, or use LiteLLM's own table.
+def gemini_flash_3x_price(today: date) -> ModelPrice:
+    """Gemini 3.6-3.8 Flash's price on ``today``: half price through 2026-12-31.
+
+    :data:`PRICES` takes it once, at import, so a process running across the new year keeps
+    the old rate until it restarts.
+    """
+    if today < date(2027, 1, 1):
+        return ModelPrice(0.75, 3.75)
+    return ModelPrice(1.50, 7.50)
+
+
+_GEMINI_FLASH_3X = gemini_flash_3x_price(datetime.now(UTC).date())
+
+# Anthropic first-party API list prices (docs, 2026-09-25) and Gemini Developer API standard
+# paid-tier prices for text (ai.google.dev/gemini-api/docs/pricing, 2026-10-01; Pro models at
+# their rate for prompts up to 200k tokens). OpenAI's prices change often and aren't
+# bundled: pass ``prices=`` to an adapter, or use LiteLLM's own table.
 PRICES: dict[str, ModelPrice] = {
     "claude-fable-5-1": ModelPrice(10.00, 50.00),
     "claude-fable-5": ModelPrice(10.00, 50.00),
@@ -58,6 +74,17 @@ PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-5": ModelPrice(2.00, 10.00),
     "claude-sonnet-4-6": ModelPrice(3.00, 15.00),
     "claude-haiku-4-5": ModelPrice(1.00, 5.00),
+    "gemini-3.8-flash": _GEMINI_FLASH_3X,
+    "gemini-3.7-flash": _GEMINI_FLASH_3X,
+    "gemini-3.6-flash": _GEMINI_FLASH_3X,
+    "gemini-3.5-flash": ModelPrice(1.50, 9.00),
+    "gemini-3.5-flash-lite": ModelPrice(0.30, 2.50),
+    "gemini-3.1-flash-lite": ModelPrice(0.25, 1.50),
+    "gemini-3.1-pro-preview": ModelPrice(2.00, 12.00),
+    "gemini-3-flash-preview": ModelPrice(0.50, 3.00),
+    "gemini-2.5-pro": ModelPrice(1.25, 10.00),
+    "gemini-2.5-flash": ModelPrice(0.30, 2.50),
+    "gemini-2.5-flash-lite": ModelPrice(0.10, 0.40),
 }
 
 
@@ -171,6 +198,7 @@ __all__ = [
     "LLMUsage",
     "ModelPrice",
     "cost",
+    "gemini_flash_3x_price",
     "process_llm_cost",
     "reset_process_llm_cost",
 ]
