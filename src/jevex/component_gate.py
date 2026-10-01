@@ -5,7 +5,8 @@ The layout tree is cut into **gate units**: each container's run of direct conte
 blocks (headings, paragraphs, lists, captions, images), chunked to at most ``max_chars``,
 plus each table on its own. An image with text found in it (OCR from the image stage, or
 text Docling found in a PDF picture) is cut like a section: its alt text, then the
-paragraphs and headed sections found in it. A block longer than ``max_chars`` is split
+paragraphs and headed sections found in it. One inside a paragraph or list item (an HTML
+inline image) is lifted out after that block's own text. A block longer than ``max_chars`` is split
 across several units (tables by row groups with their headers repeated) rather than cut,
 and headings with nothing after them join the table or section they introduce. Jev is
 asked one Noul per unit × field group ("Does this section contain the price?"), with every
@@ -61,10 +62,45 @@ def _opens(component: Component) -> bool:
 
 def _blocks(container: Component) -> list[Component]:
     """What ``container`` is cut into: its children, after an image's own alt text (as a
-    block without children, so its unit carries only the image's id)."""
+    block without children, so its unit carries only the image's id), each with the read
+    images inside it lifted out (:func:`_lifted`). A root that's a block is cut into its
+    own text and the read images inside it."""
+    if not _opens(container):
+        return _lifted(container)
+    children = container.children
     if container.type == "image" and container.text.strip():
-        return [container.model_copy(update={"children": []}), *container.children]
-    return container.children
+        children = [container.model_copy(update={"children": []}), *children]
+    return [b for child in children for b in _lifted(child)]
+
+
+def _read_images(block: Component) -> list[Component]:
+    """The images with text found in them below ``block``, in reading order: an HTML
+    inline image under its paragraph or list item. A container inside a block (a product
+    card in a list) is still read as part of the block."""
+    out: list[Component] = []
+    for child in block.children:
+        read = child.type == "image" and _opens(child)
+        out.extend([child] if read else _read_images(child))
+    return out
+
+
+def _lifted(block: Component) -> list[Component]:
+    """``block`` with the read images inside it lifted out: the block without them (when it
+    has text of its own), then each image, so an image is cut like a section and the
+    block's own text is still gated with its neighbours."""
+    if _opens(block):
+        return [block]
+    images = _read_images(block)
+    if not images:
+        return [block]
+    ids = {image.id for image in images}
+
+    def without(component: Component) -> Component:
+        children = [without(c) for c in component.children if c.id not in ids]
+        return component.model_copy(update={"children": children})
+
+    own = without(block)
+    return [own, *images] if _text(own) else images
 
 
 @dataclass(frozen=True)
@@ -286,7 +322,7 @@ def gate_units(root: Component, *, max_chars: int = DEFAULT_MAX_CHARS) -> list[G
         close()
         return []
 
-    if _opens(root):
+    if _opens(root) or _read_images(root):
         leftover = visit(root, [])
         if leftover:
             emit(f"{root.id}#end", leftover)
