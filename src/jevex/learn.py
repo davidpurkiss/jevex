@@ -126,7 +126,8 @@ class LearnedGenerators:
 
     Other processes sharing the store (Scrapy workers, ``jevex serve``) publish and
     disable generators too. :meth:`refresh` reloads at most every ``refresh_after``
-    seconds (``None``: never) and swaps the snapshot if the store changed.
+    seconds (``None``: never) and swaps the snapshot if the store changed. ``clock``
+    gives the seconds ``refresh_after`` is measured in (monotonic; tests pass a fake one).
 
     ``packs`` are the layers below the store: project packs, then community packs
     (:func:`~jevex.packs.layered_generators`). The store's disable list applies to them.
