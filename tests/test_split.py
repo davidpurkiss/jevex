@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from jevex import (
     BBox,
     BoilerplateCleaner,
+    CandidateStage,
     Component,
     Context,
     DefaultSplitter,
@@ -24,11 +25,12 @@ from jevex import (
 )
 from jevex.extractor import default_pipeline
 from jevex.generators import default_registry
-from jevex.interfaces import ParsedDocument, StatementSplitter
+from jevex.interfaces import LocaleAwareSplitter, ParsedDocument, StatementSplitter
 from jevex.jev import Choice
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
 from jevex.normalise import normalise
+from jevex.pipeline import Pipeline
 from jevex.split import (
     MAX_SEGMENT_CHARS,
     MAX_STATEMENT_CHARS,
@@ -727,3 +729,127 @@ async def test_text_values_read_no_break_spaces_as_plain_spaces() -> None:
         if c.generator_id == "whole_statement"
     ]
     assert normalise(whole.raw, whole.normalise, title) == "A Light in the Attic"
+
+
+# --- the page's language (#125) --------------------------------------------------------
+
+GERMAN = "Lieferung z. B. am 3. Mai möglich. Preis auf Anfrage."
+GERMAN_SENTENCES = ["Lieferung z. B. am 3. Mai möglich.", "Preis auf Anfrage."]
+GERMAN_UNDER_ENGLISH = ["Lieferung z.", "B. am 3.", "Mai möglich.", "Preis auf Anfrage."]
+
+
+def test_default_splitter_is_locale_aware() -> None:
+    assert isinstance(DefaultSplitter(), LocaleAwareSplitter)
+
+
+def test_split_in_uses_the_locales_language() -> None:
+    para = comp("paragraph", GERMAN)
+    assert [s.text for s in DefaultSplitter().split(para)] == GERMAN_UNDER_ENGLISH
+    assert [s.text for s in DefaultSplitter().split_in(para, "de-AT")] == GERMAN_SENTENCES
+    assert [s.text for s in DefaultSplitter().split_in(para, "DE")] == GERMAN_SENTENCES
+
+
+@pytest.mark.parametrize("locale", [None, ""])
+def test_split_in_without_a_locale_keeps_the_splitters_language(locale: str | None) -> None:
+    para = comp("paragraph", GERMAN)
+    assert [s.text for s in DefaultSplitter("de").split_in(para, locale)] == GERMAN_SENTENCES
+    assert [s.text for s in DefaultSplitter().split_in(para, locale)] == GERMAN_UNDER_ENGLISH
+
+
+def test_split_in_an_unsupported_language_falls_back_to_english() -> None:
+    para = comp("paragraph", GERMAN)
+    assert [s.text for s in DefaultSplitter("de").split_in(para, "xx-XX")] == GERMAN_UNDER_ENGLISH
+
+
+async def page_context(
+    html: str, *, content_language: str | None = None, pipeline: Pipeline | None = None
+) -> Context:
+    document = Document.from_bytes(
+        html.encode(), content_type="text/html", content_language=content_language
+    )
+    ctx = Context.create(document, [SchemaSpec.from_model(VehicleSpec)], FakeJev().client())
+    ctx.pipeline = pipeline
+    ctx.parsed = ParsedDocument(document=document, root=await HtmlLayoutParser().parse(document))
+    return ctx
+
+
+def texts(ctx: Context) -> list[str]:
+    assert ctx.parsed is not None
+    return [s.text for s in ctx.parsed.statements.values()]
+
+
+async def test_a_german_page_is_split_under_its_own_language() -> None:
+    ctx = await page_context(f'<html lang="de-DE"><body><p>{GERMAN}</p></body></html>')
+    await StatementStage().run(ctx)
+    assert texts(ctx) == GERMAN_SENTENCES
+
+
+async def test_the_content_language_header_picks_the_language() -> None:
+    ctx = await page_context(f"<p>{GERMAN}</p>", content_language="de-CH, en")
+    await StatementStage().run(ctx)
+    assert texts(ctx) == GERMAN_SENTENCES
+
+
+async def test_a_page_without_a_language_is_split_by_the_stages_locale() -> None:
+    ctx = await page_context(f"<p>{GERMAN}</p>")
+    await StatementStage(locale="de-DE").run(ctx)
+    assert texts(ctx) == GERMAN_SENTENCES
+
+
+async def test_the_pages_language_wins_over_the_stages_locale() -> None:
+    ctx = await page_context(f'<html lang="en-GB"><body><p>{GERMAN}</p></body></html>')
+    await StatementStage(locale="de-DE").run(ctx)
+    assert texts(ctx) == GERMAN_UNDER_ENGLISH
+
+
+async def test_without_a_stage_locale_the_candidate_stages_is_used() -> None:
+    pipeline = Pipeline([StatementStage(), CandidateStage(locale="de-DE")])
+    ctx = await page_context(f"<p>{GERMAN}</p>", pipeline=pipeline)
+    await StatementStage().run(ctx)
+    assert texts(ctx) == GERMAN_SENTENCES
+
+    ctx = await page_context(f"<p>{GERMAN}</p>", pipeline=pipeline)
+    await StatementStage(locale="en-GB").run(ctx)
+    assert texts(ctx) == GERMAN_UNDER_ENGLISH
+
+
+async def test_a_page_without_any_language_is_split_as_english() -> None:
+    ctx = await page_context(f"<p>{GERMAN}</p>", pipeline=Pipeline([CandidateStage()]))
+    await StatementStage().run(ctx)
+    assert texts(ctx) == GERMAN_UNDER_ENGLISH
+
+
+async def test_a_page_in_a_language_pysbd_lacks_is_split_as_english() -> None:
+    ctx = await page_context(f'<html lang="xx"><body><p>{GERMAN}</p></body></html>')
+    await StatementStage(DefaultSplitter("de")).run(ctx)
+    assert texts(ctx) == GERMAN_UNDER_ENGLISH
+
+
+async def test_a_locale_aware_splitter_gets_the_documents_tag() -> None:
+    seen: list[str | None] = []
+
+    class Recording:
+        def split(self, component: Component) -> list[Statement]:
+            raise AssertionError("split_in should be called instead")
+
+        def split_in(self, component: Component, locale: str | None) -> list[Statement]:
+            seen.append(locale)
+            return []
+
+    ctx = await page_context('<html lang="de-AT"><body><p>Hallo.</p></body></html>')
+    await StatementStage(Recording()).run(ctx)
+    assert set(seen) == {"de-AT"}
+
+    seen.clear()
+    ctx = await page_context("<p>Hallo.</p>")
+    await StatementStage(Recording()).run(ctx)
+    assert set(seen) == {None}
+
+
+async def test_the_default_pipeline_splits_a_cleaned_german_page_by_its_language() -> None:
+    html = f'<html lang="de"><body><h1>Delmaro</h1><p>{GERMAN}</p></body></html>'
+    document = Document.from_bytes(html.encode(), content_type="text/html")
+    ctx = Context.create(document, [SchemaSpec.from_model(VehicleSpec)], FakeJev().client())
+    wanted = {"clean", "layout", "statements"}
+    await Pipeline([s for s in default_pipeline() if s.name in wanted]).run(ctx)
+    assert texts(ctx) == ["Delmaro", *GERMAN_SENTENCES]

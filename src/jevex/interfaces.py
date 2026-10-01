@@ -242,6 +242,20 @@ class StatementSplitter(Protocol):
 
 
 @runtime_checkable
+class LocaleAwareSplitter(StatementSplitter, Protocol):
+    """A splitter whose sentence rules depend on the document's language.
+
+    ``StatementStage`` calls ``split_in`` when a splitter has it, ahead of ``split``.
+    ``locale`` is the document's BCP 47 tag, else the statement stage's ``locale``, else
+    the candidate stage's; ``None`` when none is known, and the splitter then keeps its
+    own language. :class:`~jevex.DefaultSplitter` is locale-aware:
+    "z. B. am 3. Mai" is one sentence on a ``de`` page and three on an ``en`` one.
+    """
+
+    def split_in(self, component: Component, locale: str | None) -> list[Statement]: ...
+
+
+@runtime_checkable
 class StatementClassifier(Protocol):
     """Categorises statements as one of each schema's fields, or "none".
 
