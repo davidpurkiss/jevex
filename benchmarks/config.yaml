@@ -43,7 +43,14 @@ models:
     input_usd_per_mtok: 4.00
     output_usd_per_mtok: 20.00
     price_date: 2026-10-01
-  # baseline_gemini: chosen in #62.
+  # Gemini's current Flash, the tier most Gemini users extract with. Its price is
+  # Google's offer until 2026-12-31 (from 2027: $1.50 and $7.50).
+  baseline_gemini:
+    provider: gemini
+    model: gemini-3.8-flash
+    input_usd_per_mtok: 0.75
+    output_usd_per_mtok: 3.75
+    price_date: 2026-10-01
 
 # Locks are relative to this file.
 corpora:
