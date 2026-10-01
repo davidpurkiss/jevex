@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read  # the cassette-stale-ok label
 
 jobs:
   lint:
@@ -40,4 +41,17 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --all-extras
       - run: uv run pyright
+      # A stale Jev/LLM recording fails the replay tests in CI (jevex.testing.stale_recording)
+      # unless the PR is labelled cassette-stale-ok. The labels are read now, not from the
+      # event, so re-running the job after adding the label picks it up.
+      - name: Allow stale recordings (cassette-stale-ok label)
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          labels=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          if grep -qx cassette-stale-ok <<< "$labels"; then
+            echo "JEVEX_CASSETTE_STALE_OK=1" >> "$GITHUB_ENV"
+          fi
       - run: uv run pytest

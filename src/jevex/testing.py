@@ -22,7 +22,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -286,6 +286,31 @@ class Cassette:
 def cassette(path: str | Path, *, inner: JevBackend | None = None) -> Cassette:
     """A cassette that records when ``JEVEX_RECORD=1`` and replays otherwise."""
     return Cassette(path, record=os.environ.get(RECORD_ENV) == "1", inner=inner)
+
+
+STALE_OK_ENV = "JEVEX_CASSETTE_STALE_OK"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() not in ("", "0", "false", "no")
+
+
+def stale_recording(reason: str) -> NoReturn:
+    """End a replay test whose recording no longer matches what jevex asks (a
+    :class:`CassetteMissError`, or inputs that changed since recording).
+
+    Outside CI the test xfails, so a build that can't reach the API isn't broken. In CI
+    (``CI`` set, as every CI service does) it fails: an xfail there is easy to miss, and the
+    replay test would quietly stop checking anything. ``JEVEX_CASSETTE_STALE_OK=1``
+    downgrades that to an xfail, for a change that alters the questions on purpose and
+    can't be re-recorded yet. Needs pytest.
+    """
+    import pytest
+
+    message = f"the recording is stale: {reason}; re-record it with {RECORD_ENV}=1"
+    if _env_flag("CI") and not _env_flag(STALE_OK_ENV):
+        pytest.fail(f"{message} (or set {STALE_OK_ENV}=1 to xfail instead)", pytrace=False)
+    pytest.xfail(message)
 
 
 # --- LLMs ------------------------------------------------------------------------------

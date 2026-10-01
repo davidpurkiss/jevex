@@ -14,5 +14,6 @@ Saved on 2026-09-30 with `curl`, unmodified. The "Products you recently viewed" 
 reflect the session that fetched them: the pages were fetched in the order above, so
 later pages list the earlier books.
 
-`jev-cassette.json`, once recorded, holds Jev's answers for these pages (see
-`tests/test_smoke_books.py`).
+`jev-cassette.json` holds Jev's answers for these pages (see
+`tests/test_smoke_books.py`). A change to what jevex asks makes it stale, which fails CI
+unless the PR is labelled `cassette-stale-ok` (see `../testsite_gate/README.md`).

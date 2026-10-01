@@ -25,5 +25,7 @@ the baseline from the recordings, offline:
     JEVEX_UPDATE_BASELINE=1 uv run pytest tests/test_baseline.py -k eval_gate
 
 A change to the questions, the pipeline's states or the test site's pages makes the
-recordings stale. For now the gate then xfails, like the books smoke test; #129 makes a
-stale recording fail in CI.
+recordings stale. The gate then xfails locally and **fails in CI**, like the books smoke
+test (`jevex.testing.stale_recording`): re-record them in the same PR. If nobody with
+keys can, label the PR `cassette-stale-ok` and re-run the failed jobs; CI then xfails
+instead. `main` stays red on a stale recording until it's re-recorded.
