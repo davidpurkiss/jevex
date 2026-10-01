@@ -48,10 +48,10 @@ from jevex.jev import JevBackendError, JevBudgetExceededError
 from jevex.normalise import NormaliseError, canonical_unit, convert
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     from jevex.extractor import ExtractionResult, Extractor
-    from jevex.schema import FieldSpec
+    from jevex.schema import FieldSpec, SchemaSpec
 
 TRUTH_FILE = "truth.json"
 MEASURED_REL_TOL = 0.005
@@ -511,9 +511,19 @@ def score_document(
     document's own schema is scored against its expected records; any record found for
     another schema is wrong by definition, so its values count as spurious there.
     """
+    return score_records(item, _found_records(result), tolerances)
+
+
+def score_records(
+    item: CorpusItem,
+    found: Mapping[str, list[dict[str, Any]]],
+    tolerances: Mapping[str, Mapping[str, Tolerance]],
+) -> dict[str, FieldScore]:
+    """:func:`score_document` for records found some other way (a baseline's): ``found``
+    maps each schema name to its records, each ``{"entity": ..., "values": {...}}`` holding
+    only the values found."""
     own = tolerances[item.schema]
     scores = {f"{item.schema}.{name}": FieldScore() for name in own}
-    found = _found_records(result)
     for exp, rec in match_records(item.records, found.get(item.schema, []), own):
         exp_values = exp.values if exp else {}
         rec_values = cast("dict[str, Any]", rec["values"]) if rec else {}
@@ -537,13 +547,20 @@ def resolve_tolerances(
 ) -> dict[str, dict[str, Tolerance]]:
     """Each schema's per-field tolerance: an override keyed ``Schema.field`` or ``field``,
     else :func:`field_tolerance`."""
+    return schema_tolerances(extractor.schemas, overrides)
+
+
+def schema_tolerances(
+    schemas: Iterable[SchemaSpec], overrides: Mapping[str, Tolerance] | None = None
+) -> dict[str, dict[str, Tolerance]]:
+    """:func:`resolve_tolerances` for schemas without an extractor."""
     given = overrides or {}
     return {
         spec.name: {
             f.name: given.get(f"{spec.name}.{f.name}", given.get(f.name, field_tolerance(f)))
             for f in spec.fields
         }
-        for spec in extractor.schemas
+        for spec in schemas
     }
 
 
@@ -583,7 +600,7 @@ async def run_document(
             llm_calls=0,
             llm_cost=0.0,
             methods=Counter(),
-            fields=_all_missing(item, tolerances[item.schema]),
+            fields=all_missing(item, tolerances[item.schema]),
             error=f"{type(exc).__name__}: {exc}",
         )
     seconds = time.perf_counter() - start
@@ -641,7 +658,9 @@ async def evaluate(
     return EvalReport(documents=list(runs))
 
 
-def _all_missing(item: CorpusItem, tolerances: Mapping[str, Tolerance]) -> dict[str, FieldScore]:
+def all_missing(item: CorpusItem, tolerances: Mapping[str, Tolerance]) -> dict[str, FieldScore]:
+    """Scores for a document nothing was found in (its extraction failed): every expected
+    value missing. ``tolerances`` are its own schema's."""
     scores = {f"{item.schema}.{n}": FieldScore() for n in tolerances}
     for exp in item.records:
         for n, tol in tolerances.items():
