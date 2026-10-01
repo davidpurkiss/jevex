@@ -506,6 +506,17 @@ def test_registry_is_immutable_and_replaces_by_id() -> None:
         GeneratorRegistry([learned, learned])
 
 
+def test_extended_appends_new_ids_and_keeps_its_own() -> None:
+    base = GeneratorRegistry([RegexGenerator(id="a", pattern=r"\d+")])
+    clash = RegexGenerator(id="a", pattern=r"x")
+    extra = RegexGenerator(id="b", pattern=r"y")
+    grown = base.extended([clash, extra])
+    assert grown.ids == ["a", "b"]
+    assert grown.get("a") is base.get("a")
+    assert base.ids == ["a"]
+    assert base.extended([clash]) is base
+
+
 def test_builtins_satisfy_the_protocol() -> None:
     for gen in default_registry():
         assert isinstance(gen, CandidateGenerator)

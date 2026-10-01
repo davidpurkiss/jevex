@@ -24,8 +24,9 @@ if TYPE_CHECKING:
     from jevex.budgets import DocumentBudget
     from jevex.document import Document
     from jevex.entities import EntityScope
-    from jevex.interfaces import GateDecision, ParsedDocument, Selection
+    from jevex.interfaces import GateDecision, Learner, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
+    from jevex.learn import GeneratorSnapshot
     from jevex.llm import LLM
     from jevex.results import FieldMeta
     from jevex.schema import FieldSpec, SchemaSpec
@@ -211,6 +212,12 @@ class Context:
     failed. ``None`` turns the fallback off."""
     verified: list[VerifiedExample] = field(default_factory=list["VerifiedExample"])
     """LLM answers that passed Jev verification on this document, queued for learning."""
+    learner: Learner | None = None
+    """The extractor's learner (set with a ``generator_llm``): the learn stage hands it
+    :attr:`verified`. ``None`` turns learning off."""
+    generators: GeneratorSnapshot | None = None
+    """The learned generators this document runs with, taken when it starts: generators
+    learned meanwhile are for later documents. ``None``: only the stages' own."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:

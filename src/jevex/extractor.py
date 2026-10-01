@@ -15,19 +15,21 @@ from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
-from jevex.fallback import FallbackStage
+from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
+from jevex.generators import GeneratorRegistry
 from jevex.images import ImageStage
 from jevex.interfaces import GateDecision
 from jevex.jev import JevClient, JevRequestCapError
 from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
-from jevex.normalise import NormaliseStage
+from jevex.learn import LEARN_THRESHOLD, GeneratorLearner, LearnedGenerators, LearnStage
+from jevex.normalise import BUILTIN_NORMALISERS, NormaliseStage
 from jevex.pipeline import Context, Pipeline
 from jevex.resolve import EntityStage
 from jevex.results import Extracted, FieldMeta, build_extracted, inherit, select_records
 from jevex.schema import ReservedFieldNameError, SchemaSpec, UnsupportedFieldError
-from jevex.select import CandidateStage, SelectStage
+from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.split import StatementStage
 from jevex.store import Store, open_store
 
@@ -75,6 +77,7 @@ DEFAULT_STAGES: tuple[Stage, ...] = (
     SelectStage(),
     NormaliseStage(),
     FallbackStage(),
+    LearnStage(),
 )
 
 
@@ -140,6 +143,9 @@ class DocumentMeta(BaseModel):
     events: list[EventInfo]
     stopped: bool
     budget_events: list[BudgetEvent] = Field(default_factory=list[BudgetEvent])
+    generator_snapshot: int | None = None
+    """The version of the learned-generator snapshot the document ran with (``None``
+    without a store or learner); see :class:`~jevex.learn.GeneratorSnapshot`."""
 
 
 @dataclass(frozen=True)
@@ -237,6 +243,7 @@ class ExtractionResult:
                 ],
                 stopped=ctx.stopped,
                 budget_events=list(ctx.budget.events) if ctx.budget else [],
+                generator_snapshot=ctx.generators.version if ctx.generators else None,
             ),
         )
 
@@ -320,6 +327,11 @@ def _entity_metas(run: SchemaRun) -> dict[str, dict[str, FieldMeta]]:
     return out
 
 
+def _stage[S](pipeline: Pipeline, name: str, kind: type[S]) -> S | None:
+    found = next((s for s in pipeline if s.name == name), None)
+    return found if isinstance(found, kind) else None
+
+
 def _has_values(metas: Mapping[str, FieldMeta]) -> bool:
     return any(m.found or m.alternatives for m in metas.values())
 
@@ -344,6 +356,8 @@ class Extractor:
         store: Store | str | Path | None = None,
         run_id: str | None = None,
         extraction_llm: LLM | None = None,
+        generator_llm: LLM | None = None,
+        learn_threshold: float = LEARN_THRESHOLD,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -359,7 +373,13 @@ class Extractor:
 
         ``extraction_llm`` turns on the LLM fallback (:mod:`jevex.fallback`): where Jev's
         selection fails, the LLM is asked for the value and its evidence, and Jev verifies
-        the answer before it is used. Off (``None``) by default."""
+        the answer before it is used. Off (``None``) by default.
+
+        ``generator_llm`` turns on learning (:mod:`jevex.learn`): fallback answers Jev
+        verified with probability ``>= learn_threshold`` are turned into generators in
+        the background, and documents started after one is accepted use it. Learned
+        generators and examples go to the store (an in-memory one if none is given); a
+        store's learned generators are used whether or not learning is on."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -386,6 +406,13 @@ class Extractor:
         self._owns_store = False
         self._store_lock: asyncio.Lock | None = None
         self.extraction_llm = extraction_llm
+        self.generator_llm = generator_llm
+        self.learn_threshold = learn_threshold
+        self._learned: LearnedGenerators | None = None
+        self._learner: GeneratorLearner | None = None
+        self._learn_lock: asyncio.Lock | None = None
+        if generator_llm is not None and not 0 <= learn_threshold <= 1:
+            raise ValueError(f"learn_threshold must be between 0 and 1, got {learn_threshold}")
 
     @property
     def jev(self) -> JevClient:
@@ -397,7 +424,7 @@ class Extractor:
         """The store, opened on first use (off the event loop: opening can wait on locks)."""
         if self._store is not None:
             return self._store
-        if self._store_source is None and self.budgets.run is None:
+        if self._store_source is None and self.budgets.run is None and self.generator_llm is None:
             return None
         if self._store_lock is None:
             self._store_lock = asyncio.Lock()
@@ -417,6 +444,55 @@ class Extractor:
             )
         return self._ledger
 
+    async def learned_generators(self) -> LearnedGenerators | None:
+        """The store's learned generators, loaded on first use (``None`` without a store)."""
+        store = await self.store()
+        if store is None:
+            return None
+        if self._learn_lock is None:
+            self._learn_lock = asyncio.Lock()
+        async with self._learn_lock:
+            if self._learned is None or self._learned.store is not store:
+                learned = LearnedGenerators(store)
+                await learned.load()
+                self._learned, self._learner = learned, None
+        return self._learned
+
+    async def learner(self) -> GeneratorLearner | None:
+        """The learner (created on first use), or ``None`` without a ``generator_llm``.
+
+        Its ``outcomes`` say what became of each queued example. It tests generators as
+        the pipeline's default candidate, select, normalise and fallback stages would run
+        them (their generators, locale, selector, normalisers and fallback threshold).
+        """
+        if self.generator_llm is None:
+            return None
+        learned = await self.learned_generators()
+        if self._learner is None:
+            candidates = _stage(self.pipeline, "candidates", CandidateStage)
+            select = _stage(self.pipeline, "select", SelectStage)
+            norm = _stage(self.pipeline, "normalise", NormaliseStage)
+            fallback = _stage(self.pipeline, "fallback", FallbackStage)
+            self._learner = GeneratorLearner(
+                self.schemas,
+                self.generator_llm,
+                self.jev,
+                generators=learned or LearnedGenerators(),
+                ledger=await self.ledger(),
+                base=candidates.registry if candidates else GeneratorRegistry(),
+                locale=candidates.locale if candidates else None,
+                selector=select.selector if select else JevCandidateSelector(),
+                normalisers=norm.registry if norm else BUILTIN_NORMALISERS,
+                fallback_threshold=fallback.fallback_threshold if fallback else FALLBACK_THRESHOLD,
+                learn_threshold=self.learn_threshold,
+            )
+        return self._learner
+
+    async def wait_for_learning(self) -> None:
+        """Wait until every example queued so far has been learned from (or rejected)."""
+        if self._learner is not None:
+            await self._learner.drain()
+
     async def extract(self, document: Document) -> ExtractionResult:
         """Run the pipeline over one document."""
         budget = DocumentBudget(self.budgets, await self.ledger())
@@ -425,6 +501,9 @@ class Extractor:
         ctx.budget = budget
         ctx.store = await self.store()
         ctx.extraction_llm = self.extraction_llm
+        ctx.learner = await self.learner()
+        learned = await self.learned_generators()
+        ctx.generators = learned.current if learned else None
         try:
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")
@@ -459,18 +538,25 @@ class Extractor:
         return self._sync_loop.run_until_complete(self.extract(document))
 
     async def aclose(self) -> None:
-        close = getattr(self._jev.backend, "aclose", None) if self._jev else None
+        """Stop the learner (examples still queued stay in the store, unlearned; call
+        :meth:`wait_for_learning` first to finish them), then close Jev and the store."""
+        learner, self._learner, self._learned, self._learn_lock = self._learner, None, None, None
         try:
-            if close is not None:
-                await close()
+            if learner is not None:
+                await learner.aclose()
         finally:
-            store, owned = self._store, self._owns_store
-            if owned:
-                self._store, self._owns_store, self._ledger = None, False, None
-            # The lock binds to the loop that used it; a reopen may be on another loop.
-            self._store_lock = None
-            if owned and store is not None:
-                await store.aclose()
+            close = getattr(self._jev.backend, "aclose", None) if self._jev else None
+            try:
+                if close is not None:
+                    await close()
+            finally:
+                store, owned = self._store, self._owns_store
+                if owned:
+                    self._store, self._owns_store, self._ledger = None, False, None
+                # The lock binds to the loop that used it; a reopen may be on another loop.
+                self._store_lock = None
+                if owned and store is not None:
+                    await store.aclose()
 
     def close(self) -> None:
         """Close the Jev client and the private loop used by ``extract_sync``."""

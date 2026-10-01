@@ -101,6 +101,32 @@ Adapters ship as extras: `jevex[anthropic]` (`jevex.llm.anthropic.AnthropicLLM`)
 supports, including local Ollama). Any object with an async `structured(prompt, schema)`
 method works too.
 
+## Learning generators
+
+With a `generator_llm` as well, each answer Jev verified with probability at least
+`learn_threshold` (0.9 by default) is turned into a generator in the background, so the
+same pattern never needs the LLM again. The LLM writes an RE2 pattern and a chain of
+built-in normalisers. The generator is kept only if it finds the value in the statement it
+came from, Jev picks that value there, and it doesn't make Jev wrong on the field's stored
+examples. Documents that start after it is accepted use it; documents already running keep
+the generators they started with (`meta.generator_snapshot` says which).
+
+```python
+extractor = Extractor(
+    schemas=[VehicleSpec],
+    extraction_llm=AnthropicLLM(model="claude-sonnet-5-5"),
+    generator_llm=AnthropicLLM(model="claude-opus-5-5"),
+    store="sqlite:///jevex.db",  # keeps learned generators and examples between runs
+)
+result = await extractor.extract(document)
+await extractor.wait_for_learning()  # optional: let queued examples finish
+learner = await extractor.learner()
+print([(o.status, o.spec.id if o.spec else None) for o in learner.outcomes])
+```
+
+Learning stops when the extractor is closed; examples still queued then stay in the store.
+A store's learned generators are used whether or not a `generator_llm` is set.
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the

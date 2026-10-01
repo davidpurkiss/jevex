@@ -70,6 +70,13 @@ from jevex.layout import (
 )
 from jevex.layout_html import HtmlLayoutParser
 from jevex.layout_pdf import DoclingConverter, PdfLayoutError, PdfLayoutParser
+from jevex.learn import (
+    GeneratorLearner,
+    GeneratorSnapshot,
+    LearnedGenerators,
+    LearnOutcome,
+    LearnStage,
+)
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -171,8 +178,10 @@ __all__ = [
     "FlatBlob",
     "FunctionNormaliser",
     "GateUnit",
+    "GeneratorLearner",
     "GeneratorRecord",
     "GeneratorRegistry",
+    "GeneratorSnapshot",
     "GeneratorSpec",
     "GeneratorStats",
     "HtmlLayoutParser",
@@ -193,6 +202,9 @@ __all__ = [
     "LLMFieldExtractor",
     "LayoutStage",
     "Leaf",
+    "LearnOutcome",
+    "LearnStage",
+    "LearnedGenerators",
     "Location",
     "MatchSpec",
     "MultiEntity",

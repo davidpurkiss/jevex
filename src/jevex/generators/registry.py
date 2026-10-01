@@ -91,6 +91,12 @@ class GeneratorRegistry:
             )
         return GeneratorRegistry([*self._generators, generator])
 
+    def extended(self, generators: Iterable[CandidateGenerator]) -> GeneratorRegistry:
+        """This registry followed by ``generators``, leaving out ids it already has (so its
+        own generators keep winning span ties and ids)."""
+        added = [g for g in generators if g.id not in self]
+        return GeneratorRegistry([*self._generators, *added]) if added else self
+
     def without(self, generator_id: str) -> GeneratorRegistry:
         """A registry without this generator; ``KeyError`` if it isn't registered."""
         self.get(generator_id)
