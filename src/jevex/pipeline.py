@@ -57,6 +57,10 @@ class SchemaRun:
     """Component-gate results for the nested models' own field groups, keyed by the
     nested-model field, then group. The entity stage gives them to that field's child run
     as its ``component_ids``."""
+    ungated_groups: set[str] = field(default_factory=set[str])
+    """Field groups the component gate didn't ask about because another route (embedded
+    data, in ``fill_gaps`` mode) had found all their fields. They stay categorise options
+    (:meth:`relevant_fields`), so a statement about one isn't put down to another field."""
     scopes: list[EntityScope] = field(default_factory=list["EntityScope"])
     categories: dict[str, ChoiceAnswer] = field(default_factory=dict[str, "ChoiceAnswer"])
     candidates: dict[tuple[str, str], list[Candidate]] = field(
@@ -95,17 +99,17 @@ class SchemaRun:
         return {cid for ids in self.component_ids.values() for cid in ids}
 
     def relevant_fields(self, component_id: str) -> list[FieldSpec]:
-        """The fields a component can state: those whose group it passed the gate for.
+        """The fields a component can state: those whose group it passed the gate for, and
+        those of :attr:`ungated_groups` if it passed any group.
 
         Every field when no component gate ran.
         """
         if self.component_ids is None:
             return list(self.spec.fields)
-        return [
-            f
-            for f in self.spec.fields
-            if component_id in self.component_ids.get(f.group or f.name, ())
-        ]
+        passed = {g for g, ids in self.component_ids.items() if component_id in ids}
+        if passed:
+            passed |= self.ungated_groups
+        return [f for f in self.spec.fields if (f.group or f.name) in passed]
 
     def shared_statements(self, scope: str) -> set[str]:
         """Ids of the statements ``scope`` shares with every other entity ("all of them").
@@ -198,6 +202,9 @@ class Context:
     store: Store | None = None
     """The extractor's store (learned state: key mappings, generators...), ``None`` without
     one. Stages that learn read and write it here."""
+    pipeline: Pipeline | None = None
+    """The pipeline running this context (set by :meth:`Pipeline.run`), for a stage whose
+    work depends on how a later stage is configured. ``None`` when stages are run by hand."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
@@ -288,6 +295,7 @@ class Pipeline:
 
     async def run(self, ctx: Context) -> Context:
         """Run each stage in order until the context stops or no schema is active."""
+        ctx.pipeline = self
         for stage in self._stages:
             if ctx.stopped:
                 break

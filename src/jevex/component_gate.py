@@ -24,12 +24,13 @@ classifier which fields a component can state.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from jevex._tasks import gather
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
+from jevex.resolve import SINGLE_ENTITY_LABEL, EntityStage, SingleEntity
 from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
 from jevex.tables import infer_headers, row_roles
 
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import ComponentGate, ParsedDocument
     from jevex.jev import JevClient, Noul
     from jevex.layout import Component, TableCell
-    from jevex.pipeline import Context
+    from jevex.pipeline import Context, SchemaRun
     from jevex.schema import SchemaSpec
 
 DEFAULT_THRESHOLD = 0.3
@@ -429,9 +430,19 @@ class ComponentGateStage:
     component is categorised only for the nested fields it passed for. A component that
     passes any of them also passes the nested-model field's group, so the entity resolver
     sees it.
+
+    A group whose fields another route already found (embedded data, in ``fill_gaps``
+    mode) isn't asked about when ``skip_found`` allows it. It goes on
+    ``SchemaRun.ungated_groups`` with a ``groups_not_gated`` event, and its fields stay
+    categorise options. ``skip_found=None`` (the default) skips such groups only when the
+    pipeline's entity stage is :class:`~jevex.resolve.SingleEntity` with its default label,
+    the one structured values are found on. Under any other resolver, a field found for the
+    document can still be empty for each entity, and only the gate passes the components
+    that hold it.
     """
 
     gate: ComponentGate = field(default_factory=NoulComponentGate)
+    skip_found: bool | None = None
     name: str = "component_gate"
 
     async def run(self, ctx: Context) -> None:
@@ -439,11 +450,32 @@ class ComponentGateStage:
         runs = ctx.active
         if parsed is None or not runs:
             return
-        children = {run.name: _child_specs(run.spec) for run in runs}
-        specs = [r.spec for r in runs] + [s for kids in children.values() for s in kids.values()]
-        decisions = await self.gate.gate(parsed, specs, ctx.jev)
+        skip = self.skip_found if self.skip_found is not None else _single_entity(ctx)
+        for run in runs:
+            run.ungated_groups = _found_groups(run) if skip else set()
+        children = {
+            run.name: {
+                name: spec
+                for name, spec in _child_specs(run.spec).items()
+                if (run.spec.field(name).group or name) not in run.ungated_groups
+            }
+            for run in runs
+        }
+        specs = [_without(r.spec, r.ungated_groups) for r in runs]
+        specs = [s for s in specs if s.fields]
+        specs += [s for kids in children.values() for s in kids.values()]
+        decisions = await self.gate.gate(parsed, specs, ctx.jev) if specs else {}
         order = {c.id: i for i, c in enumerate(parsed.root.walk())}
         for run in runs:
+            if run.ungated_groups:
+                skipped = [g for g in run.spec.groups if g in run.ungated_groups]
+                ctx.event(
+                    self.name,
+                    "groups_not_gated",
+                    f"{run.name}: {', '.join(skipped)} already found; not gated",
+                    schema=run.name,
+                    groups=skipped,
+                )
             groups = decisions.get(run.name, {})
             for name, spec in children[run.name].items():
                 child_groups = decisions.get(spec.name)
@@ -457,13 +489,42 @@ class ComponentGateStage:
                 }
                 groups[group] = sorted(passed, key=lambda c: order.get(c, len(order)))
             run.component_ids = groups
-            if not any(groups.values()):
+            gated = set(run.spec.groups) - run.ungated_groups
+            if gated and not any(groups.values()):
                 ctx.event(
                     self.name,
                     "no_relevant_components",
                     f"{run.name}: no component passed the component gate",
                     schema=run.name,
                 )
+
+
+def _single_entity(ctx: Context) -> bool:
+    """Whether the pipeline running ``ctx`` resolves every schema to the one entity that
+    structured values are recorded on."""
+    if ctx.pipeline is None:
+        return False
+    stage = next((s for s in ctx.pipeline if s.name == "entities"), None)
+    return (
+        isinstance(stage, EntityStage)
+        and isinstance(stage.resolver, SingleEntity)
+        and stage.resolver.label == SINGLE_ENTITY_LABEL
+    )
+
+
+def _found_groups(run: SchemaRun) -> set[str]:
+    """The groups whose every field an earlier route found and no route still looks for."""
+    return {
+        group
+        for group, members in run.spec.groups.items()
+        if not any(run.needs(SINGLE_ENTITY_LABEL, f.name) for f in members)
+    }
+
+
+def _without(spec: SchemaSpec, groups: set[str]) -> SchemaSpec:
+    if not groups:
+        return spec
+    return replace(spec, fields=tuple(f for f in spec.fields if (f.group or f.name) not in groups))
 
 
 def _child_specs(spec: SchemaSpec) -> dict[str, SchemaSpec]:
