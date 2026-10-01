@@ -16,9 +16,9 @@ from jevex.baselines import (
     BaselineSetup,
     LLMBaseline,
     ResultRow,
-    charge,
+    baseline_instructions,
+    charge_usage,
     found_records,
-    instructions,
     lenient_records,
     load_prompt,
     pinned_llm,
@@ -31,7 +31,7 @@ from jevex.baselines import (
     schema_specs,
     schemas_text,
     score_results,
-    summarise,
+    summarise_results,
     write_inputs,
 )
 from jevex.benchmarks import PinnedModel, book_values
@@ -173,7 +173,7 @@ async def test_prepare_input_never_asks_jev() -> None:
 
 
 def test_the_committed_prompt_writes_out_the_schemas() -> None:
-    text = instructions(load_prompt(PROMPT), BOOK_SPECS)
+    text = baseline_instructions(load_prompt(PROMPT), BOOK_SPECS)
     assert text.startswith("Extract structured records from the document.")
     assert "{schemas}" not in text
     assert schemas_text(BOOK_SPECS) in text
@@ -340,7 +340,7 @@ def test_charge_records_a_tools_usage_at_the_pinned_prices(
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
     reset_process_llm_cost()
     try:
-        assert charge(HAIKU, 1_000_000, 100_000) == pytest.approx(1.5)
+        assert charge_usage(HAIKU, 1_000_000, 100_000) == pytest.approx(1.5)
         assert process_llm_cost() == pytest.approx(1.5)
         assert ledger.read_text() == "llm 1.500000000\n"
     finally:
@@ -377,7 +377,7 @@ def _output(title: str, cost: float = 0.01) -> BaselineOutput:
 
 async def test_run_baseline_writes_a_row_per_document(corpus: Path, tmp_path: Path) -> None:
     llm = FakeLLM(answer_from_page, model="claude-haiku-4-5-20251001", price=(1.0, 5.0))
-    system = LLMBaseline(llm, BOOK_SPECS, instructions(load_prompt(PROMPT), BOOK_SPECS))
+    system = LLMBaseline(llm, BOOK_SPECS, baseline_instructions(load_prompt(PROMPT), BOOK_SPECS))
     out = tmp_path / "results.jsonl"
     rows = await run_baseline(system, corpus, out, pipeline=books_pipeline(), concurrency=2)
     assert [r.path for r in rows] == [f"pages/{n}.html" for n in PAGES]
@@ -391,7 +391,7 @@ async def test_run_baseline_writes_a_row_per_document(corpus: Path, tmp_path: Pa
     assert report.summary()["llm_calls_per_document"] == 1
     assert report.summary()["cost_per_document"] == pytest.approx(sum(r.cost for r in rows) / 2)
     assert report.summary()["resolution_mix"] == {"llm": 10}
-    assert summarise(rows).startswith("2 documents, 0 failed, $")
+    assert summarise_results(rows).startswith("2 documents, 0 failed, $")
 
 
 async def test_run_baseline_records_a_failed_document_and_carries_on(
@@ -641,7 +641,7 @@ def test_tool_scripts_pin_their_tool_and_lock_their_environment(name: str) -> No
     metadata = text[text.index("# /// script") : text.index("# ///\n", 12)]
     pins = [line for line in metadata.splitlines() if "==" in line]
     assert pins, "the tool's version must be pinned exactly"
-    assert '# jevex = { path = "../.." }' in metadata
+    assert '# jevex = { path = "../..", editable = true }' in metadata
     assert (SCRIPTS / f"{name}.py.lock").is_file()
 
 
@@ -678,13 +678,15 @@ async def test_live_llm_baseline_costs_the_tokens_the_api_reports(corpus: Path) 
         pytest.skip("ANTHROPIC_API_KEY not set")
     pinned = BenchmarkConfig.load(ROOT / "benchmarks" / "config.yaml").models.baseline_fast
     llm = pinned_llm(pinned)
-    system = LLMBaseline(llm, BOOK_SPECS, instructions(load_prompt(PROMPT), BOOK_SPECS))
+    system = LLMBaseline(llm, BOOK_SPECS, baseline_instructions(load_prompt(PROMPT), BOOK_SPECS))
     page = f"pages/{PAGES[0]}.html"
     source = await prepare_input(Document.from_path(corpus / page), books_pipeline())
     try:
         output = await system.extract(source)
     finally:
-        await llm.aclose()  # type: ignore[attr-defined]
+        close = getattr(llm, "aclose", None)  # the LLM protocol has no aclose
+        if close is not None:
+            await close()
     assert output.model == pinned.model
     assert output.input_tokens > 0
     assert output.output_tokens > 0
@@ -692,3 +694,223 @@ async def test_live_llm_baseline_costs_the_tokens_the_api_reports(corpus: Path) 
     row = ResultRow(path=page, records=output.records, seconds=1.0, cost=output.cost)
     report = score_results(corpus, [row], BOOK_SPECS)
     assert report.documents[0].fields["Book.title"].correct == 1
+
+
+# The tools themselves aren't installed here: these stubs stand in for the parts of their
+# APIs the scripts use, to test what the scripts do with what the tools return.
+
+
+@dataclass
+class _TokenUsage:
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class _Crawl4AI:
+    """``crawl4ai``: the crawl returns ``blocks`` and records ``usages`` on the strategy."""
+
+    blocks: list[Any] = []  # noqa: RUF012
+    usages: list[_TokenUsage] = []  # noqa: RUF012
+    fail: Exception | None = None
+
+    class LLMConfig:
+        def __init__(self, provider: str, api_token: str) -> None:
+            self.provider, self.api_token = provider, api_token
+
+    class LLMExtractionStrategy:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+            self.usages: list[_TokenUsage] = []
+
+    class CrawlerRunConfig:
+        def __init__(self, extraction_strategy: Any, cache_mode: Any) -> None:
+            self.strategy = extraction_strategy
+
+    class CacheMode:
+        BYPASS = "bypass"
+
+    class AsyncHTTPCrawlerStrategy:
+        pass
+
+    class AsyncWebCrawler:
+        def __init__(self, crawler_strategy: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            pass
+
+        async def arun(self, url: str, config: Any) -> Any:
+            assert url.startswith("raw:<html>")
+            config.strategy.usages.extend(_Crawl4AI.usages)
+            if _Crawl4AI.fail is not None:
+                raise _Crawl4AI.fail
+            content = json.dumps(_Crawl4AI.blocks)
+            return type("Result", (), {"success": True, "extracted_content": content})()
+
+
+@pytest.fixture
+def crawl4ai(monkeypatch: pytest.MonkeyPatch) -> Any:
+    import sys
+    import types
+
+    module = types.ModuleType("crawl4ai")
+    for name in (
+        "LLMConfig",
+        "LLMExtractionStrategy",
+        "CrawlerRunConfig",
+        "CacheMode",
+        "AsyncWebCrawler",
+    ):
+        setattr(module, name, getattr(_Crawl4AI, name))
+    strategies = types.ModuleType("crawl4ai.async_crawler_strategy")
+    setattr(strategies, "AsyncHTTPCrawlerStrategy", _Crawl4AI.AsyncHTTPCrawlerStrategy)  # noqa: B010
+    monkeypatch.setitem(sys.modules, "crawl4ai", module)
+    monkeypatch.setitem(sys.modules, "crawl4ai.async_crawler_strategy", strategies)
+    monkeypatch.setattr(_Crawl4AI, "fail", None)
+    reset_process_llm_cost()
+    yield _script("crawl4ai_baseline")
+    reset_process_llm_cost()
+
+
+HTML_INPUT = BaselineInput(Document.from_bytes(b"<html><h1>Dune</h1></html>"), "# Dune")
+
+
+async def test_crawl4ai_merges_blocks_and_charges_every_call(
+    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        _Crawl4AI,
+        "blocks",
+        [
+            {"Book": [{"title": "Dune", "price": "9.99", "rating": "NA"}], "error": False},
+            {"Book": [{"title": "Emma"}]},
+            {"index": 2, "error": True, "tags": ["error"], "content": "unparsed: <score>"},
+        ],
+    )
+    monkeypatch.setattr(_Crawl4AI, "usages", [_TokenUsage(1000, 100), _TokenUsage(500, 50)])
+    system = crawl4ai.Crawl4AIBaseline(BaselineSetup(BOOK_SPECS, "Extract books.", HAIKU))
+    output = await system.extract(HTML_INPUT)
+    assert output.records == {
+        "Book": [
+            {"entity": "1", "values": {"title": "Dune", "price": 9.99}},
+            {"entity": "2", "values": {"title": "Emma"}},
+        ]
+    }
+    assert (output.calls, output.input_tokens, output.output_tokens) == (2, 1500, 150)
+    assert output.cost == pytest.approx(HAIKU.cost(1500, 150))
+    assert process_llm_cost() == pytest.approx(HAIKU.cost(1500, 150))
+
+
+async def test_crawl4ai_fails_a_document_only_when_every_chunk_failed(
+    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = {"index": 0, "error": True, "tags": ["error"], "content": "rate limited"}
+    monkeypatch.setattr(_Crawl4AI, "blocks", [error])
+    monkeypatch.setattr(_Crawl4AI, "usages", [])
+    system = crawl4ai.Crawl4AIBaseline(BaselineSetup(BOOK_SPECS, "Extract books.", HAIKU))
+    with pytest.raises(crawl4ai.ToolError, match="rate limited"):
+        await system.extract(HTML_INPUT)
+
+
+async def test_crawl4ai_charges_calls_made_before_the_crawl_failed(
+    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_Crawl4AI, "usages", [_TokenUsage(1000, 100)])
+    monkeypatch.setattr(_Crawl4AI, "fail", RuntimeError("connection reset"))
+    system = crawl4ai.Crawl4AIBaseline(BaselineSetup(BOOK_SPECS, "Extract books.", HAIKU))
+    with pytest.raises(RuntimeError, match="connection reset"):
+        await system.extract(HTML_INPUT)
+    assert process_llm_cost() == pytest.approx(HAIKU.cost(1000, 100))
+
+
+class _ScrapeGraph:
+    """``scrapegraphai`` and the LangChain parts the script uses: the graph calls the
+    model's callbacks once per ``responses`` entry, then returns ``answer``."""
+
+    answer: Any = None
+    responses: list[dict[str, int]] = []  # noqa: RUF012
+    seen: list[dict[str, Any]] = []  # noqa: RUF012
+
+    class BaseCallbackHandler:
+        pass
+
+    class ChatAnthropic:
+        def __init__(self, model: str, max_tokens: int, callbacks: list[Any]) -> None:
+            self.model, self.max_tokens, self.callbacks = model, max_tokens, callbacks
+
+    class SmartScraperGraph:
+        def __init__(self, prompt: str, source: str, config: dict[str, Any], schema: Any):
+            _ScrapeGraph.seen.append(
+                {"prompt": prompt, "source": source, "config": config, "schema": schema}
+            )
+            self.model = config["llm"]["model_instance"]
+
+        def run(self) -> Any:
+            for usage in _ScrapeGraph.responses:
+                message = type("Message", (), {"usage_metadata": usage})()
+                generation = type("Generation", (), {"message": message})()
+                response = type("Result", (), {"generations": [[generation]]})()
+                for callback in self.model.callbacks:
+                    callback.on_llm_end(response)
+            return _ScrapeGraph.answer
+
+
+@pytest.fixture
+def scrapegraphai(monkeypatch: pytest.MonkeyPatch) -> Any:
+    import sys
+    import types
+
+    modules = {
+        "scrapegraphai": {},
+        "scrapegraphai.graphs": {"SmartScraperGraph": _ScrapeGraph.SmartScraperGraph},
+        "langchain_core": {},
+        "langchain_core.callbacks": {"BaseCallbackHandler": _ScrapeGraph.BaseCallbackHandler},
+        "langchain_anthropic": {"ChatAnthropic": _ScrapeGraph.ChatAnthropic},
+    }
+    for name, attrs in modules.items():
+        module = types.ModuleType(name)
+        for attr, value in attrs.items():
+            setattr(module, attr, value)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(_ScrapeGraph, "seen", [])
+    reset_process_llm_cost()
+    yield _script("scrapegraphai_baseline")
+    reset_process_llm_cost()
+
+
+async def test_scrapegraphai_counts_and_charges_each_response(
+    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_ScrapeGraph, "answer", {"Book": [{"title": "Dune", "rating": "NA"}]})
+    monkeypatch.setattr(
+        _ScrapeGraph, "responses", [{"input_tokens": 1000, "output_tokens": 100}, {}]
+    )
+    system = scrapegraphai.ScrapeGraphAIBaseline(BaselineSetup(BOOK_SPECS, "Extract.", HAIKU))
+    output = await system.extract(HTML_INPUT)
+    assert output.records == {"Book": [{"entity": "1", "values": {"title": "Dune"}}]}
+    assert (output.calls, output.input_tokens, output.output_tokens) == (2, 1000, 100)
+    assert output.cost == pytest.approx(HAIKU.cost(1000, 100))
+    assert process_llm_cost() == pytest.approx(HAIKU.cost(1000, 100))
+    (call,) = _ScrapeGraph.seen
+    assert call["prompt"] == "Extract."
+    assert call["source"] == "<html><h1>Dune</h1></html>"
+    assert call["schema"] is records_model(BOOK_SPECS)
+    assert call["config"]["llm"]["model_tokens"] == 200_000
+    assert call["config"]["llm"]["model_instance"].model == "claude-haiku-4-5-20251001"
+
+
+async def test_scrapegraphai_fails_a_document_it_returns_an_error_for(
+    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_ScrapeGraph, "answer", {"error": "timed out", "raw_response": ""})
+    monkeypatch.setattr(_ScrapeGraph, "responses", [{"input_tokens": 10, "output_tokens": 0}])
+    system = scrapegraphai.ScrapeGraphAIBaseline(BaselineSetup(BOOK_SPECS, "Extract.", HAIKU))
+    with pytest.raises(scrapegraphai.ToolError, match="timed out"):
+        await system.extract(HTML_INPUT)
+    assert process_llm_cost() == pytest.approx(HAIKU.cost(10, 0))
+    monkeypatch.setattr(_ScrapeGraph, "answer", ["not", "an", "object"])
+    with pytest.raises(scrapegraphai.ToolError, match="expected an object, got list"):
+        await system.extract(HTML_INPUT)

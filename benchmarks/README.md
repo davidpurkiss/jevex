@@ -6,7 +6,7 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 | --- | --- |
 | `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora (`jevex.benchmarks.BenchmarkConfig`) |
 | `corpora/<name>.lock` | A corpus's lock: hashes of its `truth.json` and of every document (`jevex corpus lock`, `jevex corpus check`) |
-| `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.instructions`) |
+| `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.baseline_instructions`) |
 | `baselines/<tool>_baseline.py` | An open-source tool as a baseline: a uv script with its pinned tool version, run in its own environment (`<tool>_baseline.py.lock`) |
 
 `corpora/testsite.lock` is the seed-42 test site. Rebuild the site and check it:

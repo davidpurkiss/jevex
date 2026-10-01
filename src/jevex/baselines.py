@@ -9,13 +9,13 @@ found and the LLM usage that cost. Two kinds are compared with jevex:
   record of every schema (:func:`records_model`).
 - **Open-source tools** (ScrapeGraphAI, Crawl4AI): scripts in ``benchmarks/baselines/``
   that each run in their own environment and implement the same protocol, charging their
-  token usage through :func:`charge`.
+  token usage through :func:`charge_usage`.
 
 Every system sees the same input (:func:`prepare_input`): the document after the clean
 stage jevex runs with (a site's cleaner too), and the text jevex's layout and image
 stages read from it (:func:`render_text`), so a comparison is about extraction rather than
 input quality. Every system gets the same instructions too: the prompt in
-``benchmarks/baselines/`` with the schemas written out (:func:`instructions`).
+``benchmarks/baselines/`` with the schemas written out (:func:`baseline_instructions`).
 
 :func:`run_baseline` runs a system over a corpus and writes one :class:`ResultRow` per
 document to a JSONL results file as each finishes, so a run stopped by the spend cap keeps
@@ -160,7 +160,7 @@ def load_prompt(path: str | Path) -> str:
     return template
 
 
-def instructions(template: str, schemas: Sequence[SchemaSpec]) -> str:
+def baseline_instructions(template: str, schemas: Sequence[SchemaSpec]) -> str:
     """``template`` with ``{schemas}`` replaced by :func:`schemas_text`. The same
     instructions go to every baseline; the LLM-only one adds the document after them."""
     return template.replace(SCHEMAS_PLACEHOLDER, schemas_text(schemas)).strip()
@@ -313,7 +313,7 @@ class BaselineSetup:
 
     schemas: tuple[SchemaSpec, ...]
     instructions: str
-    """:func:`instructions` for these schemas."""
+    """:func:`baseline_instructions` for these schemas."""
     model: PinnedModel
     """The LLM the system uses, at its pinned version and prices."""
 
@@ -379,7 +379,7 @@ def pinned_llm(pinned: PinnedModel) -> LLM:
     raise ValueError(f"{pinned.spec} is Jev, not an LLM")
 
 
-def charge(pinned: PinnedModel, input_tokens: int, output_tokens: int) -> float:
+def charge_usage(pinned: PinnedModel, input_tokens: int, output_tokens: int) -> float:
     """Record usage an outside tool reported, at ``pinned``'s prices, against
     ``JEVEX_LLM_MAX_COST_USD`` (and the shared ledger), as jevex's adapters do; returns
     the USD. Call :func:`~jevex.llm.check_budget` before each document."""
@@ -646,7 +646,7 @@ def schema_specs(models: Iterable[type[BaseModel]]) -> tuple[SchemaSpec, ...]:
     return tuple(SchemaSpec.from_model(m) for m in models)
 
 
-def summarise(rows: Sequence[ResultRow]) -> str:
+def summarise_results(rows: Sequence[ResultRow]) -> str:
     """One line for a finished run: documents, failures and cost."""
     failed = sum(1 for r in rows if r.error)
     return f"{len(rows)} documents, {failed} failed, ${sum(r.cost for r in rows):.4f}\n"
@@ -663,9 +663,9 @@ __all__ = [
     "InputRow",
     "LLMBaseline",
     "ResultRow",
-    "charge",
+    "baseline_instructions",
+    "charge_usage",
     "found_records",
-    "instructions",
     "lenient_records",
     "load_prompt",
     "pinned_llm",
@@ -679,6 +679,6 @@ __all__ = [
     "schema_specs",
     "schemas_text",
     "score_results",
-    "summarise",
+    "summarise_results",
     "write_inputs",
 ]

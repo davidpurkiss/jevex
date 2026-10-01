@@ -8,7 +8,7 @@ resolution-markers = [
 
 [manifest]
 requirements = [
-    { name = "jevex", directory = "../../" },
+    { name = "jevex", editable = "../../" },
     { name = "langchain-anthropic", specifier = "==1.7.5" },
     { name = "scrapegraphai", specifier = "==2.3.0" },
 ]
@@ -810,7 +810,7 @@ wheels = [
 
 [[package]]
 name = "jevex"
-source = { directory = "../../" }
+source = { editable = "../../" }
 dependencies = [
     { name = "google-re2" },
     { name = "httpx2" },

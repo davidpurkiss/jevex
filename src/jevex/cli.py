@@ -47,7 +47,7 @@ from jevex.baselines import (
     BaselineSetup,
     LLMBaseline,
     ResultRow,
-    instructions,
+    baseline_instructions,
     load_prompt,
     pinned_llm,
     read_inputs,
@@ -55,7 +55,7 @@ from jevex.baselines import (
     run_baseline,
     schema_specs,
     score_results,
-    summarise,
+    summarise_results,
     write_inputs,
 )
 from jevex.benchmarks import (
@@ -293,7 +293,7 @@ async def _baseline(
         prepared = await asyncio.to_thread(read_inputs, args.inputs) if args.inputs else None
     except BaselineRunError as exc:
         raise CliError(str(exc)) from exc
-    setup = BaselineSetup(schemas, instructions(template, schemas), pinned)
+    setup = BaselineSetup(schemas, baseline_instructions(template, schemas), pinned)
     model: LLM | None = None
     if system is None:
         try:
@@ -1566,7 +1566,7 @@ def main(
             return EXIT_OK
         if args.command == "baseline":
             rows = asyncio.run(_baseline(args, llm, system))
-            stdout.write(f"wrote {args.out}: {summarise(rows)}")
+            stdout.write(f"wrote {args.out}: {summarise_results(rows)}")
             for row in rows:
                 if row.error:
                     print(f"jevex: error: {row.path}: {row.error}", file=stderr)

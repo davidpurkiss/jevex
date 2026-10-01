@@ -115,7 +115,9 @@ metrics as jevex.
   layout and image stages of the pipeline jevex uses on that corpus, including a site's
   cleaner such as the books corpus's star ratings. It writes the cleaned document and the
   text those stages read (`render_text`) to one JSONL file, and every system reads that
-  file. Preparing the input isn't timed, because every system shares it.
+  file. A baseline's `seconds` cover only its extraction, because every system shares
+  the prepared input. jevex's own latency includes cleaning and layout, so #63 compares
+  latency with that in mind.
 - **Same instructions.** `benchmarks/baselines/prompt-v1.md` lists the schemas field by
   field: description, unit and type, in the words jevex's fallback prompt uses. Every
   baseline gets it. A changed prompt gets a new file (`prompt-v2.md`), never an edit.
@@ -139,8 +141,10 @@ metrics as jevex.
     `model_tokens`, because ScrapeGraphAI's table doesn't know Haiku 4.5 and would cut
     pages into 8k-token chunks. Telemetry is off.
   - Crawl4AI: `LLMExtractionStrategy(extraction_type="schema")` with its default
-    markdown input and chunking, through the HTTP crawler strategy. It reads `raw:` HTML
-    without starting a browser.
+    markdown input, 2048-token chunking and output limit, through the HTTP crawler
+    strategy. It reads `raw:` HTML without starting a browser. Crawl4AI reports a failed
+    chunk as an error block rather than raising. A document fails only when every chunk
+    failed; otherwise the records the other chunks found count.
 - **Cost from real usage.** Every row records the tokens the API reported and their cost
   at the pinned prices. jevex's adapters report them for LLM-only. For the tools, a
   callback on ScrapeGraphAI's model reads each response's `usage_metadata`, and Crawl4AI

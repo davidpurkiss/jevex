@@ -6,7 +6,7 @@
 # ]
 #
 # [tool.uv.sources]
-# jevex = { path = "../.." }
+# jevex = { path = "../..", editable = true }
 # ///
 """Crawl4AI's LLM extraction as a jevex benchmark baseline (docs/benchmarks.md, #62).
 
@@ -35,9 +35,9 @@ import json
 import os
 import sys
 from html import escape
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from jevex.baselines import BaselineOutput, BaselineSetup, charge, lenient_records
+from jevex.baselines import BaselineOutput, BaselineSetup, charge_usage, lenient_records
 from jevex.cli import main
 
 if TYPE_CHECKING:
@@ -93,24 +93,27 @@ class Crawl4AIBaseline:
             extra_args=extra,
         )
         config = CrawlerRunConfig(extraction_strategy=strategy, cache_mode=CacheMode.BYPASS)
-        async with AsyncWebCrawler(crawler_strategy=AsyncHTTPCrawlerStrategy()) as crawler:
-            result: Any = await crawler.arun(url="raw:" + page_html(source), config=config)
-        usages: list[Any] = list(strategy.usages)
-        input_tokens = sum(u.prompt_tokens or 0 for u in usages)
-        output_tokens = sum(u.completion_tokens or 0 for u in usages)
-        cost = 0.0 if self.fake else charge(pinned, input_tokens, output_tokens)
+        try:
+            async with AsyncWebCrawler(crawler_strategy=AsyncHTTPCrawlerStrategy()) as crawler:
+                result: Any = await crawler.arun(url="raw:" + page_html(source), config=config)
+        finally:  # what was paid for counts even if the crawl then failed
+            usages: list[Any] = list(strategy.usages)
+            input_tokens = sum(u.prompt_tokens or 0 for u in usages)
+            output_tokens = sum(u.completion_tokens or 0 for u in usages)
+            cost = 0.0 if self.fake else charge_usage(pinned, input_tokens, output_tokens)
         if not result.success:
             raise ToolError(result.error_message or "the crawl failed")
-        blocks: list[Any] = json.loads(result.extracted_content or "[]")
-        failed = [b for b in blocks if isinstance(b, dict) and b.get("error") is True]
-        if failed:
-            raise ToolError("; ".join(str(b.get("content", "")) for b in failed))
+        blocks = [b for b in json.loads(result.extracted_content or "[]") if isinstance(b, dict)]
+        good = [b for b in blocks if b.get("error") is not True]
+        if blocks and not good:
+            # Every chunk failed. One failed chunk among good ones (or the unparsed
+            # leftovers Crawl4AI reports as an error block) keeps what the rest found.
+            raise ToolError("; ".join(str(b.get("content", "")) for b in blocks))
         merged: dict[str, list[Any]] = {}
-        for block in blocks:
-            if isinstance(block, dict):
-                for key, value in block.items():
-                    if isinstance(value, list):
-                        merged.setdefault(key, []).extend(value)
+        for block in good:
+            for key, value in block.items():
+                if isinstance(value, list):
+                    merged.setdefault(key, []).extend(cast("list[Any]", value))
         return BaselineOutput(
             records=lenient_records(merged, self.setup.schemas),
             calls=len(usages),

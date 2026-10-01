@@ -7,7 +7,7 @@
 # ]
 #
 # [tool.uv.sources]
-# jevex = { path = "../.." }
+# jevex = { path = "../..", editable = true }
 # ///
 """ScrapeGraphAI's ``SmartScraperGraph`` as a jevex benchmark baseline (docs/benchmarks.md, #62).
 
@@ -34,10 +34,11 @@ import asyncio
 import json
 import os
 import sys
+import threading
 from html import escape
 from typing import TYPE_CHECKING, Any
 
-from jevex.baselines import BaselineOutput, BaselineSetup, charge, lenient_records
+from jevex.baselines import BaselineOutput, BaselineSetup, charge_usage, lenient_records
 from jevex.cli import main
 
 if TYPE_CHECKING:
@@ -45,6 +46,8 @@ if TYPE_CHECKING:
 
 CONTEXT_TOKENS = {"anthropic": 200_000}
 """``model_tokens`` per provider: Claude's context window."""
+CHARGE_LOCK = threading.Lock()
+"""Graphs call the model from worker threads; charges change process-wide totals."""
 MAX_OUTPUT_TOKENS = 16_000
 """As jevex's ``AnthropicLLM`` (LangChain's default would cut long answers short)."""
 
@@ -83,7 +86,7 @@ class ScrapeGraphAIBaseline:
             return GenericFakeChatModel(messages=repeat(message), callbacks=callbacks)
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(  # pyright: ignore[reportCallIssue]
+        return ChatAnthropic(
             model=self.setup.model.model, max_tokens=MAX_OUTPUT_TOKENS, callbacks=callbacks
         )
 
@@ -91,21 +94,32 @@ class ScrapeGraphAIBaseline:
         from langchain_core.callbacks import BaseCallbackHandler
         from scrapegraphai.graphs import SmartScraperGraph
 
+        pinned, fake = self.setup.model, self.fake
+
         class Usage(BaseCallbackHandler):
+            """Charges each response as it arrives, so a call made after this document's
+            task was cancelled (the graph runs on in its thread) still counts."""
+
             def __init__(self) -> None:
                 self.calls = self.input_tokens = self.output_tokens = 0
+                self.cost = 0.0
 
             def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-                self.calls += 1
+                tokens_in = tokens_out = 0
                 for generations in response.generations:
                     for generation in generations:
                         message = getattr(generation, "message", None)
                         usage = getattr(message, "usage_metadata", None) or {}
-                        self.input_tokens += usage.get("input_tokens", 0)
-                        self.output_tokens += usage.get("output_tokens", 0)
+                        tokens_in += usage.get("input_tokens", 0)
+                        tokens_out += usage.get("output_tokens", 0)
+                with CHARGE_LOCK:
+                    self.calls += 1
+                    self.input_tokens += tokens_in
+                    self.output_tokens += tokens_out
+                    if not fake:
+                        self.cost += charge_usage(pinned, tokens_in, tokens_out)
 
         usage = Usage()
-        pinned = self.setup.model
         graph = SmartScraperGraph(
             prompt=self.setup.instructions,
             source=page_html(source),
@@ -118,10 +132,7 @@ class ScrapeGraphAIBaseline:
             },
             schema=self.setup.records_model,
         )
-        try:
-            answer: Any = await asyncio.to_thread(graph.run)
-        finally:
-            cost = 0.0 if self.fake else charge(pinned, usage.input_tokens, usage.output_tokens)
+        answer: Any = await asyncio.to_thread(graph.run)
         if isinstance(answer, dict) and "error" in answer:
             raise ToolError(str(answer["error"]))
         if not isinstance(answer, dict):
@@ -131,7 +142,7 @@ class ScrapeGraphAIBaseline:
             calls=usage.calls,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
-            cost=cost,
+            cost=usage.cost,
             model=pinned.model,
         )
 
