@@ -407,6 +407,20 @@ jevex corpus check DIR NAME.lock                    # exit 1, listing what diffe
 jevex corpus books --out books --lock books.lock    # fetch the books.toscrape.com sample
 ```
 
+Baselines run over the same corpora into results files that `jevex eval` scores like jevex:
+LLM-only extraction with a pinned model, and open-source tools (ScrapeGraphAI, Crawl4AI)
+from scripts in `benchmarks/baselines/`, each in its own environment. They make real LLM
+calls, capped by `JEVEX_LLM_MAX_COST_USD`:
+
+```sh
+jevex baseline inputs books --out inputs.jsonl --pipeline jevex.examples.books:books_pipeline
+jevex baseline run books --schema jevex.examples.books:Book --model fast \
+    --inputs inputs.jsonl --out fast.jsonl                  # fast, strong or gemini
+uv run --script benchmarks/baselines/crawl4ai_baseline.py books \
+    --schema jevex.examples.books:Book --model fast --inputs inputs.jsonl --out crawl4ai.jsonl
+jevex eval books --schema jevex.examples.books:Book --results fast.jsonl
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

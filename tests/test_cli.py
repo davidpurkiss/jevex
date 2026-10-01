@@ -1058,3 +1058,194 @@ def test_corpus_needs_a_subcommand(capsys: pytest.CaptureFixture[str]) -> None:
         run_cli("corpus", "books", "--out", "b", "--sample", "0")
     assert exc.value.code == 2
     assert "must be at least 1, not 0" in capsys.readouterr().err
+
+
+# --- jevex baseline / eval --results ---------------------------------------------------
+
+BOOK_SCHEMA = "jevex.examples.books:Book"
+CONFIG = Path(__file__).parent.parent / "benchmarks" / "config.yaml"
+BOOK_PAGES = ("a-light-in-the-attic_1000", "sapiens-a-brief-history-of-humankind_996")
+
+
+@pytest.fixture
+def books(tmp_path: Path) -> Path:
+    from jevex.benchmarks import book_values
+    from jevex.clean import html_text_of
+
+    root = tmp_path / "books"
+    (root / "pages").mkdir(parents=True)
+    pages: list[dict[str, object]] = []
+    for name in BOOK_PAGES:
+        content = (FIXTURES / "books" / f"{name}.html").read_bytes()
+        (root / "pages" / f"{name}.html").write_bytes(content)
+        values = book_values(html_text_of(content))
+        pages.append(
+            {"path": f"pages/{name}.html", "schema": "Book", "records": [{"values": values}]}
+        )
+    (root / "truth.json").write_text(json.dumps({"pages": pages}))
+    return root
+
+
+def _book_answer(prompt: str, schema: type) -> dict[str, object]:
+    from jevex.benchmarks import book_values
+    from jevex.clean import html_text_of
+
+    for name in BOOK_PAGES:
+        values = book_values(html_text_of((FIXTURES / "books" / f"{name}.html").read_bytes()))
+        if f"# {values['title']}\n" in prompt:
+            return {"Book": [values]}
+    return {"Book": []}
+
+
+def run_baseline_cli(*argv: str, **kwargs: object) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    code = main(list(argv), out=out, err=err, **kwargs)  # type: ignore[arg-type]
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_baseline_inputs_then_run_then_eval_results(books: Path, tmp_path: Path) -> None:
+    inputs, results = tmp_path / "inputs.jsonl", tmp_path / "results.jsonl"
+    code, out, err = run_baseline_cli(
+        "baseline",
+        "inputs",
+        str(books),
+        "--out",
+        str(inputs),
+        "--pipeline",
+        "jevex.examples.books:books_pipeline",
+    )
+    assert (code, err) == (0, "")
+    assert out == f"wrote the inputs of 2 documents to {inputs}\n"
+    assert "out of five stars" in inputs.read_text()
+
+    llm = FakeLLM(_book_answer, model="claude-haiku-4-5-20251001", price=(1.0, 5.0))
+    code, out, err = run_baseline_cli(
+        "baseline",
+        "run",
+        str(books),
+        "--schema",
+        BOOK_SCHEMA,
+        "--model",
+        "fast",
+        "--out",
+        str(results),
+        "--inputs",
+        str(inputs),
+        "--config",
+        str(CONFIG),
+        llm=llm,
+    )
+    assert (code, err) == (0, "")
+    assert out.startswith(f"wrote {results}: 2 documents, 0 failed, $0.00")
+    assert len(llm.calls) == 2
+    assert llm.calls[0].prompt.startswith("Extract structured records from the document.")
+    assert "- price: Price, in GBP. A number." in llm.calls[0].prompt
+
+    code, out, err = run_baseline_cli(
+        "eval", str(books), "--schema", BOOK_SCHEMA, "--results", str(results), "--json"
+    )
+    assert (code, err) == (0, "")
+    summary = json.loads(out)["summary"]
+    assert summary["accuracy"] == 1.0
+    assert summary["llm_calls_per_document"] == 1
+    assert summary["jev_requests_per_document"] == 0
+    assert summary["cost_per_document"] > 0
+
+
+def test_baseline_run_builds_a_given_system_from_the_pinned_setup(
+    books: Path, tmp_path: Path
+) -> None:
+    from jevex.baselines import BaselineInput, BaselineOutput, BaselineSetup
+
+    seen: list[BaselineSetup] = []
+
+    @dataclass
+    class Tool:
+        name: str = "tool"
+        closed: bool = False
+
+        async def extract(self, source: BaselineInput) -> BaselineOutput:
+            if "# Sapiens" in source.text:
+                raise RuntimeError("the tool crashed")
+            return BaselineOutput({"Book": []}, calls=2, input_tokens=10, output_tokens=5, cost=0.5)
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    tool = Tool()
+
+    def make(setup: BaselineSetup) -> Tool:
+        seen.append(setup)
+        return tool
+
+    code, out, err = run_baseline_cli(
+        "baseline",
+        "run",
+        str(books),
+        "--schema",
+        BOOK_SCHEMA,
+        "--model",
+        "strong",
+        "--out",
+        str(tmp_path / "results.jsonl"),
+        "--config",
+        str(CONFIG),
+        "--concurrency",
+        "1",
+        system=make,
+    )
+    assert code == 1
+    assert out == f"wrote {tmp_path / 'results.jsonl'}: 2 documents, 1 failed, $0.5000\n"
+    assert err == (
+        "jevex: error: pages/sapiens-a-brief-history-of-humankind_996.html: "
+        "RuntimeError: the tool crashed\n"
+    )
+    assert seen[0].model.model == "claude-opus-5-5"
+    assert seen[0].instructions.count("## Book") == 1
+    assert tool.closed
+
+
+def test_baseline_run_reports_setup_errors(books: Path, tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    text = CONFIG.read_text()
+    config.write_text(text[: text.index("  baseline_gemini:")] + text[text.index("# Locks are") :])
+    base = ["baseline", "run", str(books), "--schema", BOOK_SCHEMA, "--out", str(tmp_path / "r")]
+    code, _, err = run_baseline_cli(*base, "--model", "gemini", "--config", str(config))
+    assert code == 1
+    assert err == f"jevex: error: {config} pins no models.baseline_gemini\n"
+
+    code, _, err = run_baseline_cli(
+        *base, "--model", "fast", "--config", str(CONFIG), "--prompt", str(tmp_path / "none")
+    )
+    assert code == 1
+    assert err.startswith("jevex: error: can't read prompt")
+
+    lock = tmp_path / "books.lock"
+    assert run_cli("corpus", "lock", str(books), "--name", "books", "--out", str(lock))[0] == 0
+    (books / "pages" / f"{BOOK_PAGES[0]}.html").write_text("<p>changed</p>")
+    code, _, err = run_baseline_cli(
+        *base, "--model", "fast", "--config", str(CONFIG), "--lock", str(lock), llm=FakeLLM([])
+    )
+    assert code == 1
+    assert "doesn't match the 'books' lock" in err
+    assert not (tmp_path / "r").exists()
+
+    code, _, err = run_baseline_cli(
+        *base, "--model", "fast", "--config", str(CONFIG), "--pipeline", "jevex.examples.books:Book"
+    )
+    assert code == 1
+    assert "is not a Pipeline or a function returning one" in err
+
+
+def test_eval_results_takes_no_run_options(
+    books: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["eval", str(books), "--schema", BOOK_SCHEMA, "--results", "r", "--replay"])
+    assert exit_info.value.code == 2
+    assert "--results scores a results file: leave out --replay" in capsys.readouterr().err
+    code, _, err = run_baseline_cli(
+        "eval", str(books), "--schema", BOOK_SCHEMA, "--results", str(tmp_path / "none")
+    )
+    assert code == 1
+    assert err.startswith("jevex: error: can't read results")

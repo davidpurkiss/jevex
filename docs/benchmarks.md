@@ -27,7 +27,8 @@ with a new results run.
 | jevex's learner (`generator_llm`) | `claude-opus-5-5`, the library default |
 | LLM-only, fast | Claude Haiku 4.5, `claude-haiku-4-5-20251001` |
 | LLM-only, strong | Claude Opus 5.5, `claude-opus-5-5` |
-| LLM-only, Gemini | Wanted. #62 picks the model and pins it as `models.baseline_gemini` |
+| LLM-only, Gemini | Gemini 3.8 Flash, `gemini-3.8-flash` (`models.baseline_gemini`), Gemini's current Flash model, the one most Gemini users extract with. Its pinned price is Google's offer that runs until 2026-12-31, so a run in 2027 needs new prices |
+| Open-source tools | ScrapeGraphAI `2.3.0` and Crawl4AI `0.9.4`, each pinned in its script under `benchmarks/baselines/` with a `uv` lock. Both use the fast baseline's model, so they differ from it in method only |
 | Concurrency | 8 documents in flight while latency is measured |
 | Budget | $25 for one full run, hard-capped (Jev and LLMs together) |
 | Bootstrap | 1000 resamples, 95% intervals |
@@ -96,12 +97,69 @@ jevex corpus check DIR benchmarks/corpora/NAME.lock     # exit 1, listing what d
 | **jevex (no LLM)** | Jev plus built-in generators only; the floor for accuracy and cost |
 | **LLM-only, fast** | The same schema as structured output, the whole cleaned document per call (Claude Haiku 4.5) |
 | **LLM-only, strong** | The same with Claude Opus 5.5; the accuracy ceiling |
-| **LLM-only, Gemini** | The same through jevex's native Gemini adapter; #62 picks the model |
-| **Open-source tool** | One existing schema-driven extractor run with its recommended settings (#62 picks it) |
+| **LLM-only, Gemini** | The same through jevex's native Gemini adapter (Gemini 3.8 Flash) |
+| **ScrapeGraphAI** | `SmartScraperGraph` with its recommended settings, on Claude Haiku 4.5 |
+| **Crawl4AI** | `LLMExtractionStrategy` (schema extraction) with its recommended settings, on Claude Haiku 4.5 |
 
 LLM-only baselines get the same cleaned text that jevex's layout stage sees, and the PDF
 text from the same parser. That way the comparison is about extraction rather than input
 quality. Prompts are fixed in `benchmarks/baselines/` and versioned.
+
+### How the baselines run
+
+`jevex.baselines` holds the baselines (#62). Each one runs over a corpus into a results
+file, and `jevex eval --results` scores it with the same record matching, tolerances and
+metrics as jevex.
+
+- **Same input.** `jevex baseline inputs` prepares every document once. It runs the clean,
+  layout and image stages of the pipeline jevex uses on that corpus, including a site's
+  cleaner such as the books corpus's star ratings. It writes the cleaned document and the
+  text those stages read (`render_text`) to one JSONL file, and every system reads that
+  file. A baseline's `seconds` cover only its extraction, because every system shares
+  the prepared input. jevex's own latency includes cleaning and layout, so #63 compares
+  latency with that in mind.
+- **Same instructions.** `benchmarks/baselines/prompt-v1.md` lists the schemas field by
+  field: description, unit and type, in the words jevex's fallback prompt uses. Every
+  baseline gets it. A changed prompt gets a new file (`prompt-v2.md`), never an edit.
+- **Same output.** Every baseline returns `records_model`: one list of records per schema,
+  every field optional. A document can hold several records, as a spec sheet with several
+  trims does, and any of the schemas, so a baseline has to pick the schema just as jevex
+  does. A tool's raw output is checked value by value (`lenient_records`), so an "NA" it
+  writes for a missing value counts as missing, not as a lost record.
+- **LLM-only** (`jevex baseline run --model fast|strong|gemini`): one structured-output
+  call per document through jevex's own adapters: the instructions, then the document's
+  text in `<document>` tags. Anthropic's server-side refusal fallback is off, so every
+  call is served by the pinned model.
+- **Open-source tools** (`uv run --script benchmarks/baselines/<tool>_baseline.py`, with
+  the same arguments): each script runs its tool in its own environment, because
+  Crawl4AI's LiteLLM fork can't share one with `jevex[litellm]`. Each page goes to the
+  tool as HTML, the cleaned document. A PDF or image goes as the text jevex read from it,
+  wrapped in `<pre>`, since neither tool reads PDFs or images from bytes in its
+  recommended setup.
+  - ScrapeGraphAI: `SmartScraperGraph` with the page as `source` and the records model
+    as `schema`. Its model is a `ChatAnthropic` with Claude's context window as
+    `model_tokens`, because ScrapeGraphAI's table doesn't know Haiku 4.5 and would cut
+    pages into 8k-token chunks. Telemetry is off.
+  - Crawl4AI: `LLMExtractionStrategy(extraction_type="schema")` with its default
+    markdown input, 2048-token chunking and output limit, through the HTTP crawler
+    strategy. It reads `raw:` HTML without starting a browser. Crawl4AI reports a failed
+    chunk as an error block rather than raising. A document fails only when every chunk
+    failed; otherwise the records the other chunks found count.
+- **Cost from real usage.** Every row records the tokens the API reported and their cost
+  at the pinned prices. jevex's adapters report them for LLM-only. For the tools, a
+  callback on ScrapeGraphAI's model reads each response's `usage_metadata`, and Crawl4AI
+  gives LiteLLM's per-call usage (`strategy.usages`). Every charge goes through the spend
+  cap and the shared ledger, as jevex's own calls do. A call that fails is in the ledger
+  but not in its document's row.
+- **Choosing the tools.** The owner asked for ScrapeGraphAI, Crawl4AI and any other
+  widely used schema-driven extractor. Others considered:
+  - Instructor-style structured output is what the LLM-only baselines already do.
+  - Firecrawl's `/extract` is a hosted service rather than a library, so it isn't run.
+  - Google's LangExtract is driven by few-shot examples rather than a schema.
+
+Results files hold one JSON object per document (`ResultRow`): its path, the records
+found, seconds, calls, tokens, cost, the model that served it, and an `error` if the system
+failed on it. A document whose system failed scores as all missing.
 
 ## Metrics
 
@@ -128,10 +186,12 @@ allows, to show variance.
 1. Load `benchmarks/config.yaml`. Build or locate each corpus and check it against its
    lock. Stop on any mismatch.
 2. For each system and corpus, run and save the raw per-document results to
-   `benchmarks/results/<date>/<system>/<corpus>.jsonl`. Record the pinned models and
+   `benchmarks/results/<date>/<system>/<corpus>.jsonl` (for the baselines, the results
+   files `jevex baseline run` and the tool scripts write). Record the pinned models and
    prices, the jevex commit and the `uv.lock` hash in `manifest.json`. For an `aggregate`
    corpus, keep only its summary.
-3. `jevex eval` scores every results file against the ground truth. `jevex eval --replay`
+3. `jevex eval` scores every results file against the ground truth (`--results` for a
+   baseline's). `jevex eval --replay`
    produces the learning curves.
 4. `benchmarks/report.py` builds `docs/benchmarks-results.md` and the charts, using the
    same animated SVGs the stats UI exports (#59).

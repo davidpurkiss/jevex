@@ -31,6 +31,7 @@ from jevex.benchmarks import (
 from jevex.eval import load_corpus
 from jevex.examples.books import Book
 from jevex.fetch import RobotsDisallowedError, SimpleFetcher
+from jevex.llm import gemini_flash_3x_price
 from jevex.testsite import build
 
 ROOT = Path(__file__).parent.parent
@@ -434,6 +435,11 @@ def test_the_committed_config_pins_everything() -> None:
     assert config.models.baseline_fast.model == "claude-haiku-4-5-20251001"
     assert config.models.baseline_strong.model == "claude-opus-5-5"
     assert config.models.extraction == config.models.baseline_fast
+    gemini = config.models.baseline_gemini
+    assert gemini is not None
+    assert gemini.spec == "gemini:gemini-3.8-flash"
+    # Pinned at the list price on its price date, so it can't drift with jevex's table.
+    assert gemini.prices() == {"gemini-3.8-flash": gemini_flash_3x_price(gemini.price_date)}
     assert [c.name for c in config.corpora] == [
         "testsite",
         "books",

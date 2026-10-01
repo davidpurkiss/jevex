@@ -43,6 +43,7 @@ from jevex.baseline import corpus_digest
 from jevex.clean import html_text_of
 from jevex.eval import TRUTH_FILE, load_corpus
 from jevex.fetch import SimpleFetcher
+from jevex.llm import ModelPrice
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -461,6 +462,10 @@ class PinnedModel(BaseModel):
             input_tokens * self.input_usd_per_mtok + output_tokens * self.output_usd_per_mtok
         ) / 1_000_000
 
+    def prices(self) -> dict[str, ModelPrice]:
+        """The pinned prices as an LLM adapter's ``prices=`` table."""
+        return {self.model: ModelPrice(self.input_usd_per_mtok, self.output_usd_per_mtok)}
+
 
 class PinnedModels(BaseModel):
     """The LLMs each system uses."""
@@ -474,7 +479,7 @@ class PinnedModels(BaseModel):
     baseline_fast: PinnedModel
     baseline_strong: PinnedModel
     baseline_gemini: PinnedModel | None = None
-    """Wanted by the owner; #62 picks the model."""
+    """LLM-only through jevex's Gemini adapter."""
 
     @model_validator(mode="after")
     def _llms(self) -> Self:

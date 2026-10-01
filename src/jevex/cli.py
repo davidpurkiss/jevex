@@ -2,14 +2,16 @@
 
 ``jevex extract <file|url> --schema module:Class`` prints extracted records as JSON,
 ``jevex eval`` scores a corpus (``--replay``: learning curves; ``--gate``: a regression
-gate against a baseline), ``jevex learn`` compiles
+gate against a baseline; ``--results``: a baseline's results file), ``jevex learn`` compiles
 logged examples into a pack diff, ``jevex pack export|import|diff`` moves learned state
 between stores and packs, ``jevex stats`` serves the stats UI over a store or a replay's
 CSV (``jevex stats export --svg <view>`` writes a chart), ``jevex serve`` runs the
-extraction microservice (``server`` extra, :mod:`jevex.server`), and ``jevex testsite
-build|serve`` writes and serves the synthetic test site, and ``jevex corpus lock|check|books``
-freezes benchmark corpora (:mod:`jevex.benchmarks`). Uses only the standard library
-(argparse), so the CLI adds nothing to a core install.
+extraction microservice (``server`` extra, :mod:`jevex.server`), ``jevex testsite
+build|serve`` writes and serves the synthetic test site, ``jevex corpus lock|check|books``
+freezes benchmark corpora (:mod:`jevex.benchmarks`), and ``jevex baseline inputs|run``
+prepares the benchmark baselines' inputs and runs LLM-only (or a tool's) extraction into a
+results file (:mod:`jevex.baselines`). Uses only the standard library (argparse), so the
+CLI adds nothing to a core install.
 """
 
 from __future__ import annotations
@@ -39,13 +41,33 @@ from jevex.baseline import (
     corpus_digest,
     ensure_comparable,
 )
+from jevex.baselines import (
+    RUN_ERRORS,
+    BaselineRunError,
+    BaselineSetup,
+    LLMBaseline,
+    ResultRow,
+    baseline_instructions,
+    load_prompt,
+    pinned_llm,
+    read_inputs,
+    read_results,
+    run_baseline,
+    schema_specs,
+    score_results,
+    summarise_results,
+    write_inputs,
+)
 from jevex.benchmarks import (
     BOOKS_SAMPLE,
+    BenchmarkConfig,
+    BenchmarkConfigError,
     CorpusLock,
     Publish,
     books_corpus,
     check_lock,
     lock_corpus,
+    verify_lock,
 )
 from jevex.budgets import Budgets, Period, RunBudget
 from jevex.document import Document
@@ -66,6 +88,7 @@ from jevex.packs import (
     load_pack,
     pack_generators,
 )
+from jevex.pipeline import Pipeline
 from jevex.replay import REPLAY_BATCH_SIZE, LearningStoppedError, replay
 from jevex.schema import UnsupportedFieldError
 from jevex.stats import CHART_VIEWS, chart_svg, replay_loader, stats_server, store_loader
@@ -75,9 +98,10 @@ from jevex.testsite import BUILD_DIR, build, server
 from jevex.testsite.waves import DEFAULT_WAVES, format_waves, parse_waves
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from jevex.baseline import EvalMode, GateResult
+    from jevex.baselines import BaselineSystem
     from jevex.eval import EvalReport
     from jevex.generators import GeneratorSpec
     from jevex.jev import JevClient
@@ -89,6 +113,10 @@ if TYPE_CHECKING:
     from jevex.testsite.waves import Waves
 
 EVAL_CONCURRENCY = 4
+BASELINE_CONFIG = "benchmarks/config.yaml"
+BASELINE_PROMPT = "benchmarks/baselines/prompt-v1.md"
+BASELINE_MODELS = ("fast", "strong", "gemini")
+"""``jevex baseline --model``: the config's ``models.baseline_<name>``."""
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -118,6 +146,28 @@ def load_schema(spec: str) -> type[BaseModel]:
         obj = getattr(obj, part)
     if not (isinstance(obj, type) and issubclass(obj, BaseModel)):
         raise CliError(f"{spec!r} is not a Pydantic model")
+    return obj
+
+
+def load_pipeline(spec: str) -> Pipeline:
+    """Import ``module:name`` or ``path/to/file.py:name``: a :class:`Pipeline`, or a function
+    taking no arguments that returns one (``jevex.examples.books:books_pipeline``)."""
+    target, sep, name = spec.rpartition(":")
+    if not sep or not target or not name:
+        raise CliError(f"--pipeline must look like module:name or path.py:name, not {spec!r}")
+    module = _load_file(Path(target)) if target.endswith(".py") else _load_module(target)
+    obj: object = module
+    for part in name.split("."):
+        if not hasattr(obj, part):
+            raise CliError(f"{target!r} has no attribute {name!r}")
+        obj = getattr(obj, part)
+    if callable(obj) and not isinstance(obj, Pipeline | type):
+        try:
+            obj = obj()
+        except Exception as exc:
+            raise CliError(f"--pipeline {spec}: {exc}") from exc
+    if not isinstance(obj, Pipeline):
+        raise CliError(f"{spec!r} is not a Pipeline or a function returning one")
     return obj
 
 
@@ -212,6 +262,92 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None
         close = getattr(model, "aclose", None) if llm is None else None
         if close is not None:
             await close()
+
+
+def _score(args: argparse.Namespace) -> EvalReport:
+    """``jevex eval --results``: score a baseline's results file instead of running jevex."""
+    schemas = schema_specs(load_schema(s) for s in args.schema)
+    try:
+        return score_results(args.corpus, read_results(args.results), schemas)
+    except (ValueError, BaselineRunError) as exc:
+        raise CliError(str(exc)) from exc
+
+
+async def _baseline(
+    args: argparse.Namespace,
+    llm: LLM | None,
+    system: Callable[[BaselineSetup], BaselineSystem] | None,
+) -> list[ResultRow]:
+    schemas = schema_specs(load_schema(s) for s in args.schema)
+    try:
+        config = BenchmarkConfig.load(args.config)
+        template = load_prompt(args.prompt)
+    except (BenchmarkConfigError, BaselineRunError) as exc:
+        raise CliError(str(exc)) from exc
+    pinned = getattr(config.models, f"baseline_{args.model}")
+    if pinned is None:
+        raise CliError(f"{args.config} pins no models.baseline_{args.model}")
+    pipeline = load_pipeline(args.pipeline) if args.pipeline else None
+    await _check_corpus(args)
+    try:
+        prepared = await asyncio.to_thread(read_inputs, args.inputs) if args.inputs else None
+    except BaselineRunError as exc:
+        raise CliError(str(exc)) from exc
+    setup = BaselineSetup(schemas, baseline_instructions(template, schemas), pinned)
+    model: LLM | None = None
+    if system is None:
+        try:
+            model = llm or pinned_llm(pinned)
+        except ImportError as exc:
+            raise CliError(f"{pinned.spec} needs the {pinned.provider} extra: {exc}") from exc
+        except Exception as exc:  # e.g. the provider's client finds no API key
+            raise CliError(f"{pinned.spec}: {exc}") from exc
+        built: BaselineSystem = LLMBaseline(
+            model, schemas, setup.instructions, name=f"llm-only-{args.model}"
+        )
+    else:
+        try:
+            built = system(setup)
+        except Exception as exc:  # e.g. the tool's client finds no API key
+            raise CliError(f"{pinned.spec}: {exc}") from exc
+    try:
+        concurrency = args.concurrency if args.concurrency is not None else config.concurrency
+        return await run_baseline(
+            built,
+            args.corpus,
+            args.out,
+            inputs=prepared,
+            pipeline=pipeline,
+            concurrency=concurrency,
+        )
+    except (ValueError, *RUN_ERRORS) as exc:
+        raise CliError(str(exc)) from exc
+    finally:
+        # An adapter or system built here is ours to close.
+        for owned in (built if system is not None else None, model if llm is None else None):
+            close = getattr(owned, "aclose", None)
+            if close is not None:
+                await close()
+
+
+async def _check_corpus(args: argparse.Namespace) -> None:
+    """``--lock``: refuse to go on unless the corpus matches it."""
+    if args.lock is None:
+        return
+    try:
+        await asyncio.to_thread(verify_lock, args.corpus, CorpusLock.load(args.lock))
+    except ValueError as exc:  # CorpusLockError, or no readable truth.json
+        raise CliError(str(exc)) from exc
+
+
+async def _baseline_inputs(args: argparse.Namespace) -> str:
+    pipeline = load_pipeline(args.pipeline) if args.pipeline else None
+    await _check_corpus(args)
+    try:
+        rows = await write_inputs(args.corpus, args.out, pipeline=pipeline)
+    except (ValueError, BaselineRunError, OSError) as exc:
+        raise CliError(str(exc)) from exc
+    return f"wrote the inputs of {_count(len(rows), 'document')} to {args.out}\n"
 
 
 async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> ReplayReport:
@@ -897,6 +1033,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument("--json", action="store_true", help="Print the full report as JSON")
     evaluate.add_argument(
+        "--results",
+        metavar="PATH",
+        help="Score this results file (from jevex baseline) instead of running jevex; "
+        "needs no API key",
+    )
+    evaluate.add_argument(
         "--replay",
         action="store_true",
         help="Learning curves: start from an empty store, run the documents one at a time "
@@ -1174,6 +1316,69 @@ def build_parser() -> argparse.ArgumentParser:
     site_serve.add_argument("--host", default="127.0.0.1", help="Address (default 127.0.0.1)")
     site_serve.add_argument("--port", type=int, default=8000, help="Port (default 8000)")
 
+    base = commands.add_parser(
+        "baseline",
+        help="Run a baseline (LLM-only, or a tool's) over a corpus",
+        description="Prepare every baseline's input once, then run LLM-only extraction (a "
+        "pinned model from the benchmark config) over a corpus into a results file, one JSON "
+        "line per document; score it with jevex eval --results. See docs/benchmarks.md.",
+    )
+    base_commands = base.add_subparsers(dest="baseline_command", metavar="<baseline command>")
+    base_commands.required = True
+    pipeline_help = (
+        "The pipeline whose clean, layout and image stages prepare the input, as jevex would "
+        "run it (default jevex's own), e.g. jevex.examples.books:books_pipeline"
+    )
+    lock_help = "Check the corpus against this lock first"
+    inputs = base_commands.add_parser(
+        "inputs",
+        help="Prepare every document's input into an inputs file",
+        description="Clean and lay out every corpus document as jevex would, and write the "
+        "cleaned documents and their text to one JSONL file that every baseline reads.",
+    )
+    inputs.add_argument("corpus", help="Directory containing truth.json and the documents")
+    inputs.add_argument("--out", required=True, help="The inputs file to write (must not exist)")
+    inputs.add_argument("--pipeline", metavar="MODULE:NAME", help=pipeline_help)
+    inputs.add_argument("--lock", help=lock_help)
+    base_run = base_commands.add_parser(
+        "run",
+        help="Run a baseline into a results file",
+        description="Run LLM-only extraction over a corpus, one call per document. Makes real "
+        "LLM calls (needs the provider's extra and key); JEVEX_LLM_MAX_COST_USD caps them.",
+    )
+    base_run.add_argument("corpus", help="Directory containing truth.json and the documents")
+    base_run.add_argument(
+        "--schema",
+        action="append",
+        required=True,
+        metavar="MODULE:CLASS",
+        help="Every schema to extract (repeatable), e.g. jevex.testsite:VehicleSpec",
+    )
+    base_run.add_argument(
+        "--model",
+        choices=BASELINE_MODELS,
+        required=True,
+        help="The config's models.baseline_<model>",
+    )
+    base_run.add_argument("--out", required=True, help="The results file to write (must not exist)")
+    base_run.add_argument(
+        "--config",
+        default=BASELINE_CONFIG,
+        help=f"The benchmark config (default {BASELINE_CONFIG})",
+    )
+    base_run.add_argument(
+        "--prompt", default=BASELINE_PROMPT, help=f"The prompt template (default {BASELINE_PROMPT})"
+    )
+    source = base_run.add_mutually_exclusive_group()
+    source.add_argument("--inputs", help="Read each document's input from this inputs file")
+    source.add_argument("--pipeline", metavar="MODULE:NAME", help=pipeline_help)
+    base_run.add_argument("--lock", help=lock_help)
+    base_run.add_argument(
+        "--concurrency",
+        type=_positive_int,
+        help="Documents at a time (default: the config's concurrency)",
+    )
+
     corpus = commands.add_parser(
         "corpus",
         help="Lock, check and fetch benchmark corpora",
@@ -1230,6 +1435,7 @@ def main(
     llm: LLM | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
+    system: Callable[[BaselineSetup], BaselineSystem] | None = None,
 ) -> int:
     """Run the CLI and return its exit code.
 
@@ -1237,8 +1443,10 @@ def main(
     including ``jevex eval`` runs (and replays) where any document failed or ``--gate``
     found a regression (the report is still printed).
     2: a usage error or no command.
-    ``jev``, ``llm`` (the ``--llm`` of ``jevex learn``, ``jevex eval`` and ``jevex serve``),
-    ``out`` and ``err`` are injectable for tests.
+    ``jev``, ``llm`` (the ``--llm`` of ``jevex learn``, ``jevex eval`` and ``jevex serve``,
+    and ``jevex baseline``'s model), ``out`` and ``err`` are injectable for tests.
+    ``system`` makes ``jevex baseline run`` run another system than LLM-only: the scripts
+    in ``benchmarks/baselines/`` pass their tool's (closed with its ``aclose``, if any).
     """
     stdout: TextIO = out or sys.stdout
     stderr: TextIO = err or sys.stderr
@@ -1264,6 +1472,20 @@ def main(
             parser.error("jevex stats export needs --svg and --out")
         if args.action == "serve" and export_only:
             parser.error(f"{', '.join(export_only)} only apply to jevex stats export")
+    if args.command == "eval" and args.results is not None:
+        given = [
+            flag
+            for flag, value in (
+                ("--replay", args.replay or None),
+                ("--llm", args.llm),
+                ("--concurrency", args.concurrency),
+                ("--gate", args.gate),
+                ("--write-baseline", args.write_baseline),
+            )
+            if value is not None
+        ]
+        if given:
+            parser.error(f"--results scores a results file: leave out {', '.join(given)}")
     if args.command == "eval" and args.replay and args.concurrency is not None:
         parser.error("--replay runs one document at a time: leave out --concurrency")
     if args.command == "eval" and not args.replay:
@@ -1301,7 +1523,7 @@ def main(
             gated = EXIT_OK if plan is None else _finish_gate(args, plan, replayed.report, stderr)
             return EXIT_ERROR if replayed.failed else gated
         if args.command == "eval":
-            report = asyncio.run(_eval(args, jev, llm))
+            report = _score(args) if args.results else asyncio.run(_eval(args, jev, llm))
             if args.json:
                 json.dump(report.to_dict(), stdout, indent=2, ensure_ascii=False)
                 stdout.write("\n")
@@ -1339,6 +1561,16 @@ def main(
             else:
                 _testsite_serve(args, stdout)
             return EXIT_OK
+        if args.command == "baseline" and args.baseline_command == "inputs":
+            stdout.write(asyncio.run(_baseline_inputs(args)))
+            return EXIT_OK
+        if args.command == "baseline":
+            rows = asyncio.run(_baseline(args, llm, system))
+            stdout.write(f"wrote {args.out}: {summarise_results(rows)}")
+            for row in rows:
+                if row.error:
+                    print(f"jevex: error: {row.path}: {row.error}", file=stderr)
+            return EXIT_ERROR if any(r.error for r in rows) else EXIT_OK
         if args.command == "corpus":
             if args.corpus_command == "lock":
                 stdout.write(_corpus_lock(args))
