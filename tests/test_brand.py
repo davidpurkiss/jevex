@@ -132,7 +132,7 @@ def test_binary_readers_reject_other_files() -> None:
 @pytest.mark.parametrize("readme", ["README.md", "concepts/README.md"])
 def test_readme_links_resolve(readme: str) -> None:
     path = BRAND / readme
-    assert missing_links(path.read_text(), path.parent) == []
+    assert missing_links(path.read_text(encoding="utf-8"), path.parent) == []
 
 
 def test_missing_links_reports_broken_targets() -> None:
@@ -187,7 +187,9 @@ def test_illustrations_are_labelled_and_on_palette(path: Path) -> None:
     assert svg.get("role") == "img"
     assert svg.get("aria-label")
     assert svg.find(f"{SVG}title") is not None
-    colours = {c.upper() for c in re.findall(r"#[0-9A-Fa-f]{6}\b", path.read_text())}
+    colours = {
+        c.upper() for c in re.findall(r"#[0-9A-Fa-f]{6}\b", path.read_text(encoding="utf-8"))
+    }
     assert colours <= PALETTE
 
 
@@ -201,8 +203,8 @@ def test_only_animated_illustrations_move(path: Path) -> None:
     css = style.text or ""
     assert "@keyframes" in css
     # GitHub shows README images through <img>, where scripts and SMIL don't run.
-    assert "<script" not in path.read_text()
-    assert "<animate" not in path.read_text()
+    assert "<script" not in path.read_text(encoding="utf-8")
+    assert "<animate" not in path.read_text(encoding="utf-8")
     assert "@media (prefers-reduced-motion: reduce)" in css
 
 
@@ -217,6 +219,6 @@ def test_animated_illustrations_rest_on_the_static_picture(drawing: str, theme: 
         svg = re.sub(r' class="[^"]*"', "", svg)
         return re.sub(r'\n\s*<rect [^>]*opacity="0"[^>]*/>', "", svg)
 
-    still = (ILLUSTRATIONS / f"{drawing}{theme}.svg").read_text()
-    moving = (ILLUSTRATIONS / f"{drawing}-animated{theme}.svg").read_text()
+    still = (ILLUSTRATIONS / f"{drawing}{theme}.svg").read_text(encoding="utf-8")
+    moving = (ILLUSTRATIONS / f"{drawing}-animated{theme}.svg").read_text(encoding="utf-8")
     assert picture(moving) == picture(still)

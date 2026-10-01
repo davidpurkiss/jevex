@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" width="960" height="330" role="img" aria-label="How jevex narrows a document: the page is split into components, Jev keeps the relevant ones, splits them into statements, keeps the one that states the field, and picks the value from it">
-  <title>How jevex narrows a document: the page is split into components, Jev keeps the relevant ones, splits them into statements, keeps the one that states the field, and picks the value from it</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" width="960" height="330" role="img" aria-label="How jevex narrows a document: the page is laid out into components and Jev keeps the relevant ones; those are split into statements, Jev keeps the one that states the field, and it picks the value from that statement's candidates">
+  <title>How jevex narrows a document: the page is laid out into components and Jev keeps the relevant ones; those are split into statements, Jev keeps the one that states the field, and it picks the value from that statement's candidates</title>
   <!-- Pipeline narrowing: document → component → statement → value.
        Drawn by scripts/draw_illustrations.py; edit it there. -->
   <path d="M30 30 Q30 14 46 14 L210 14 C380 14 560 110 770 116 L770 144 C560 150 380 246 210 246 L46 246 Q30 246 30 230 Z" fill="#F5F3FF"/>

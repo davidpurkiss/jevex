@@ -314,9 +314,9 @@ def svg(width: int, height: int, label: str, comment: str, body: list[str], styl
 # ---- pipeline narrowing ----------------------------------------------------------------
 
 PIPELINE_LABEL = (
-    "How jevex narrows a document: the page is split into components, Jev keeps the "
-    "relevant ones, splits them into statements, keeps the one that states the field, "
-    "and picks the value from it"
+    "How jevex narrows a document: the page is laid out into components and Jev keeps the "
+    "relevant ones; those are split into statements, Jev keeps the one that states the "
+    "field, and it picks the value from that statement's candidates"
 )
 
 
@@ -672,14 +672,14 @@ def main(argv: list[str]) -> int:
     changed = [
         name
         for name, content in files.items()
-        if not (out / name).is_file() or (out / name).read_text() != content
+        if not (out / name).is_file() or (out / name).read_text(encoding="utf-8") != content
     ]
     # A drawing renamed or dropped here would otherwise leave its old file behind.
     extra = sorted(p.name for p in out.glob("*.svg") if p.name not in files)
     if not args.check:
         out.mkdir(parents=True, exist_ok=True)
         for name in changed:
-            (out / name).write_text(files[name])
+            (out / name).write_text(files[name], encoding="utf-8")
     for name in changed:
         print(f"{'stale' if args.check else 'wrote'}: {out / name}")
     for name in extra:
