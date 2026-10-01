@@ -2,6 +2,8 @@ import asyncio
 import json
 import re
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -13,10 +15,14 @@ from jevex import (
     Context,
     Document,
     DomLocation,
+    ExtractionResult,
+    Extractor,
     Field,
     KeyPathMapper,
+    Pipeline,
     SchemaConfig,
     SchemaSpec,
+    StructuredMode,
     StructuredStage,
     flatten,
 )
@@ -258,7 +264,7 @@ async def test_stage_records_values_on_the_default_entity_and_keeps_statements()
     assert run.fields[SINGLE_ENTITY_LABEL]["model"].value == "Golf"
     assert [s.kind for s in ctx.structured] == ["structured"] * 10
     assert ctx.structured[1].text == "model: Golf"
-    assert [e.kind for e in ctx.events] == ["structured_fields"]
+    assert [e.kind for e in ctx.events] == ["structured_fields", "layout_route_skipped"]
 
 
 async def test_stage_doesnt_overwrite_a_found_field() -> None:
@@ -279,6 +285,88 @@ async def test_a_mapping_from_the_store_can_say_none(store: SQLiteStore) -> None
     fields = await extract(KeyPathMapper(store=store), fake)
     assert fake.calls == []
     assert list(fields) == ["price"]
+
+
+class Book(BaseModel):
+    """A book."""
+
+    title: str = Field(description="Title")
+
+
+@dataclass
+class Look:
+    """Stands in for the layout route: notes which schemas it would work on."""
+
+    seen: list[str] = dc_field(default_factory=list[str])
+    name: str = "layout"
+
+    async def run(self, ctx: Context) -> None:
+        self.seen.extend(run.name for run in ctx.active)
+
+
+async def run_mode(
+    mode: StructuredMode, mapping: dict[str, str] = MAPPING, *models: type[BaseModel]
+) -> tuple[ExtractionResult, Look]:
+    look = Look()
+    ex = Extractor(
+        list(models or (Car,)),
+        jev=mapping_jev(mapping).client(),
+        pipeline=Pipeline([StructuredStage(mode=mode), look]),
+    )
+    return await ex.extract(page(CAR)), look
+
+
+async def test_structured_only_skips_the_layout_route_for_a_schema_the_data_gave_values() -> None:
+    result, look = await run_mode("structured_only", MAPPING, Car, Book)
+    assert look.seen == ["Book"]  # the embedded data gave Book nothing
+    assert result.one(Car).record.model == "Golf"
+    assert not result.meta.stopped
+    [skipped] = [e for e in result.meta.events if e.kind == "layout_route_skipped"]
+    assert skipped.message == (
+        "Car: embedded data gave what structured_only needs; no layout route"
+    )
+    assert skipped.data == {"schema": "Car"}
+
+
+async def test_structured_only_is_the_default_and_one_value_is_enough() -> None:
+    assert StructuredStage().mode == "structured_only"
+    assert {s.mode for s in default_pipeline() if isinstance(s, StructuredStage)} == {
+        "structured_only"
+    }
+    result, look = await run_mode("structured_only", {"model": "model"})
+    assert look.seen == []
+    assert result.one(Car).meta.price.found is False
+
+
+async def test_without_values_from_embedded_data_the_layout_route_runs() -> None:
+    for mode in ("structured_only", "fill_gaps", "merge"):
+        _, look = await run_mode(mode, {})
+        assert look.seen == ["Car"], mode
+
+
+async def test_fill_gaps_runs_the_layout_route_only_while_a_field_is_empty() -> None:
+    partial = {k: v for k, v in MAPPING.items() if v != "colours"}
+    result, look = await run_mode("fill_gaps", partial)
+    assert look.seen == ["Car"]
+    assert "layout_route_skipped" not in [e.kind for e in result.meta.events]
+    result, look = await run_mode("fill_gaps", MAPPING)
+    assert look.seen == []  # every field was found
+    assert result.one(Car).record.colours == ["Red", "Moonstone Grey"]
+
+
+async def test_merge_runs_the_layout_route_for_every_field() -> None:
+    ctx = Context.create(page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client())
+    await StructuredStage(mode="merge").run(ctx)
+    run = ctx.schemas["Car"]
+    assert run.merge
+    assert not run.finished
+    assert run.needs(SINGLE_ENTITY_LABEL, "model")
+    assert [e.kind for e in ctx.events] == ["structured_fields"]
+
+
+def test_an_unknown_mode_is_refused() -> None:
+    with pytest.raises(ValueError, match="unknown structured mode 'both'"):
+        StructuredStage(mode="both")  # pyright: ignore[reportArgumentType]
 
 
 def test_structured_is_a_default_stage_before_layout() -> None:
@@ -345,12 +433,6 @@ async def test_the_test_sites_json_ld_maps_to_the_truth() -> None:
 
 
 # --- review round 1 ------------------------------------------------------------------
-
-
-class Book(BaseModel):
-    """A book."""
-
-    title: str = Field(description="Title")
 
 
 async def test_every_schemas_questions_about_a_blob_go_in_one_request() -> None:
@@ -630,3 +712,27 @@ async def test_list_enum_fallbacks_are_capped_per_document() -> None:
     member_asks = [c for c in fake.calls if any(k.startswith("member") for k in c.questions)]
     assert len(member_asks) == MAX_LIST_FALLBACK_VALUES
     assert not result.fields["Fleet"]["fuels"].found  # FakeJev accepts no member (p=0)
+
+
+async def test_merge_mode_end_to_end_records_the_layout_routes_disagreement() -> None:
+    class Named(BaseModel):
+        """A car."""
+
+        model: str = Field(description="Model name")
+
+    data = {"model": "Golf"}
+    script = f'<script type="application/ld+json">{json.dumps(data)}</script>'
+    doc = Document.from_bytes(
+        f"<html><head>{script}</head><body><p>Model: Polo</p></body></html>".encode()
+    )
+    fake = (
+        FakeJev(default_p=0.9)  # every gate passes
+        .choice('key path "model"', "model")
+        .choice(None, lambda q: "model" if "model" in q.options else "Polo", confidence=0.8)
+    )
+    pipeline = default_pipeline().replace("structured", StructuredStage(mode="merge"))
+    result = await Extractor([Named], jev=fake.client(), pipeline=pipeline).extract(doc)
+    meta = result.one(Named).meta.model
+    assert (meta.value, meta.method) == ("Golf", "structured")
+    [conflict] = meta.conflicts
+    assert (conflict.value, conflict.method, conflict.confidence) == ("Polo", "generator", 0.8)
