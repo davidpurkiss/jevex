@@ -32,6 +32,8 @@ from jevex.layout_html import HtmlLayoutParser
 from jevex.normalise import normalise
 from jevex.pipeline import Pipeline
 from jevex.split import (
+    ABBREVIATIONS,
+    LANGUAGE_ABBREVIATIONS,
     MAX_SEGMENT_CHARS,
     MAX_STATEMENT_CHARS,
     DuplicateStatementError,
@@ -759,6 +761,77 @@ def test_split_in_without_a_locale_keeps_the_splitters_language(locale: str | No
 def test_split_in_an_unsupported_language_falls_back_to_english() -> None:
     para = comp("paragraph", GERMAN)
     assert [s.text for s in DefaultSplitter("de").split_in(para, "xx-XX")] == GERMAN_UNDER_ENGLISH
+
+
+PRICE = "Der Wagen kostet ca. 25.000 € inkl. MwSt. und hat 150 PS."
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (PRICE, [PRICE]),
+        (
+            "Preis 25.000 € zzgl. MwSt. und Überführung.",
+            ["Preis 25.000 € zzgl. MwSt. und Überführung."],
+        ),
+        # German capitalises nouns, so a capitalised word can continue the sentence.
+        (
+            "Preis zzgl. Überführung und inkl. Garantie.",
+            ["Preis zzgl. Überführung und inkl. Garantie."],
+        ),
+        ("Verbrauch ca. 5 l, max. Leistung 150 PS.", ["Verbrauch ca. 5 l, max. Leistung 150 PS."]),
+        ("Preis inkl. Versand.", ["Preis inkl. Versand."]),
+        ("Ein Paket evtl. Ende Mai.", ["Ein Paket evtl. Ende Mai."]),
+        # An article or pronoun after one still starts a new sentence.
+        ("Das kostet 5 € max. Der Rest ist frei.", ["Das kostet 5 € max.", "Der Rest ist frei."]),
+        # So does one after a noun abbreviation, which can end a sentence.
+        (
+            "Der Preis beträgt 300 € zzgl. USt. Lieferung frei.",
+            ["Der Preis beträgt 300 € zzgl. USt.", "Lieferung frei."],
+        ),
+        # English abbreviations keep the English rule on a German page.
+        ("Fahrzeit 5 min. Danach Pause.", ["Fahrzeit 5 min.", "Danach Pause."]),
+        # A word that isn't an abbreviation still ends the sentence.
+        (
+            "Ausstattung inkl. Navi. Danach kam der Test.",
+            ["Ausstattung inkl. Navi.", "Danach kam der Test."],
+        ),
+    ],
+)
+def test_german_mid_sentence_abbreviations_dont_split(text: str, expected: list[str]) -> None:
+    assert sentences(text, language="de") == expected
+
+
+def test_language_abbreviations_add_to_the_english_ones() -> None:
+    assert {"inkl", "zzgl", "ggf", "bzw", "evtl", "max", "nr", "mwst"} <= LANGUAGE_ABBREVIATIONS[
+        "de"
+    ]
+    assert "inkl" not in ABBREVIATIONS
+    # An English abbreviation is still repaired on a German page.
+    assert sentences("Preis 300 € excl. VAT ab Werk.", language="de") == [
+        "Preis 300 € excl. VAT ab Werk."
+    ]
+
+
+@pytest.mark.parametrize("language", ["en", "xx", "fr"])
+def test_other_languages_dont_use_the_german_abbreviations(language: str) -> None:
+    assert sentences(PRICE, language=language) == [
+        "Der Wagen kostet ca. 25.000 € inkl.",
+        "MwSt.",
+        "und hat 150 PS.",
+    ]
+    assert sentences("It costs £300 incl. Delivery is free.", language=language) == [
+        "It costs £300 incl.",
+        "Delivery is free.",
+    ]
+
+
+def test_split_in_keeps_german_abbreviations_in_the_sentence() -> None:
+    para = comp("paragraph", f"{PRICE} Lieferung zzgl. Überführung.")
+    assert [s.text for s in DefaultSplitter().split_in(para, "de-DE")] == [
+        PRICE,
+        "Lieferung zzgl. Überführung.",
+    ]
 
 
 async def page_context(

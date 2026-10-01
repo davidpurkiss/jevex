@@ -37,6 +37,7 @@ import re
 import warnings
 from dataclasses import dataclass, field
 from functools import cache
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, cast
 
 from jevex.interfaces import LocaleAwareSplitter
@@ -47,7 +48,7 @@ from jevex.statements import Statement
 from jevex.tables import header_prefix, table_statements
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from jevex.interfaces import StatementSplitter
     from jevex.layout import Component
@@ -120,10 +121,43 @@ ABBREVIATIONS = frozenset(
         "opt", "rrp", "orig", "wt", "ht", "dia", "qty", "misc",
     }
 )  # fmt: skip
+LANGUAGE_ABBREVIATIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        # "ca. 25.000 € inkl. MwSt.", "zzgl. Überführung", "max. Leistung", "zul. Gesamtgewicht"
+        "de": frozenset(
+            {
+                "inkl", "exkl", "zzgl", "abzgl", "ca", "bzw", "ggf", "evtl", "bspw", "max",
+                "nr", "mwst", "ust", "vgl", "lt", "gem", "mtl", "eff", "zul",
+            }
+        ),
+    }
+)  # fmt: skip
+"""Mid-sentence abbreviations by pysbd language code, used on top of :data:`ABBREVIATIONS`
+for a page in that language."""
 _LAST_WORD = re.compile(r"(\w+)\.$")
 # What may follow a mid-sentence abbreviation: a lowercase word, a number, a symbol or an
 # all-caps acronym ("excl. VAT"). A capitalised word starts a real sentence ("5 min. Then").
 _CONTINUES = re.compile(r"^(?:[a-z0-9£$€(\[%&+\-–]|[A-Z]{2,5}\b)")
+# German capitalises nouns, so a capitalised word after an abbreviation that qualifies what
+# follows it continues the sentence ("inkl. Versand"), unless it's a word that usually opens
+# one. Noun abbreviations ("MwSt.", "Nr.") often end a sentence, so they aren't listed.
+_PREPOSITIVE = {
+    "de": frozenset(
+        {
+            "inkl", "exkl", "zzgl", "abzgl", "ca", "bzw", "ggf", "evtl", "bspw", "max", "vgl",
+            "lt", "gem", "mtl", "eff", "zul",
+        }
+    ),
+}  # fmt: skip
+_SENTENCE_OPENERS = {
+    "de": frozenset(
+        {
+            "Der", "Die", "Das", "Den", "Dem", "Des", "Ein", "Eine", "Einen", "Einem", "Einer",
+            "Eines", "Er", "Sie", "Es", "Wir", "Ich", "Ihr", "Man", "Dieser", "Diese", "Dieses",
+        }
+    ),
+}  # fmt: skip
+_FIRST_WORD = re.compile(r"^[^\W\d_]+")
 # A fragment ending in a dotted model name ("The VW ID.3") has no sentence-ending mark.
 _DOTTED_NAME = re.compile(r"\b\w+\.\d\w*$")
 MAX_SEGMENT_CHARS = 3000
@@ -155,22 +189,32 @@ def _chunks(text: str) -> list[str]:
     return out
 
 
-def _mis_split(fragment: str, following: str) -> bool:
+def _mis_split(fragment: str, following: str, language: str) -> bool:
     if _DOTTED_NAME.search(fragment):
         return True
     word = _LAST_WORD.search(fragment)
+    if word is None:
+        return False
+    abbreviation = word.group(1).lower()
+    if (
+        abbreviation in ABBREVIATIONS
+        or abbreviation in LANGUAGE_ABBREVIATIONS.get(language, frozenset())
+    ) and _CONTINUES.match(following):
+        return True
+    first = _FIRST_WORD.match(following)
     return (
-        word is not None
-        and word.group(1).lower() in ABBREVIATIONS
-        and _CONTINUES.match(following) is not None
+        abbreviation in _PREPOSITIVE.get(language, frozenset())
+        and first is not None
+        and first.group() not in _SENTENCE_OPENERS.get(language, frozenset())
     )
 
 
 def sentences(text: str, *, language: str = "en") -> list[str]:
     """``text`` split into sentences with pysbd, stripped and without empties.
 
-    Fragments pysbd splits after a mid-sentence abbreviation (:data:`ABBREVIATIONS`) or a
-    dotted model name ("ID.3") are joined back up. A new pysbd segmenter is built per call:
+    Fragments pysbd splits after a mid-sentence abbreviation (:data:`ABBREVIATIONS`, plus
+    ``language``'s own in :data:`LANGUAGE_ABBREVIATIONS`) or a dotted model name ("ID.3")
+    are joined back up. A new pysbd segmenter is built per call:
     they keep per-call state, so sharing one across threads loses text.
     """
     segmenter_class, lang = _pysbd_language(language)
@@ -180,7 +224,7 @@ def sentences(text: str, *, language: str = "en") -> list[str]:
         pieces.extend(s for span in segmenter.segment(chunk) if (s := span.sent.strip()))
     out: list[str] = []
     for piece in pieces:
-        if out and _mis_split(out[-1], piece):
+        if out and _mis_split(out[-1], piece, lang):
             out[-1] = f"{out[-1]} {piece}"
         else:
             out.append(piece)
