@@ -556,6 +556,105 @@ async def test_withdraw_makes_a_snapshot_without_the_generators() -> None:
     assert [r.id for r in await store.generators()] == ["gen-a", "gen-b"]
 
 
+@dataclass
+class Clock:
+    now: float = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_refresh_picks_up_generators_another_process_published() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    clock = Clock()
+    learned_gens = LearnedGenerators(store, refresh_after=30, clock=clock)
+    loaded = await learned_gens.load()
+    await store.put_generator(spec_record("gen-b"))  # another worker learned it
+    clock.now = 29.9
+    assert await learned_gens.refresh() is loaded  # not due yet
+    clock.now = 30
+    refreshed = await learned_gens.refresh()
+    assert (refreshed.version, refreshed.registry.ids) == (1, ["gen-a", "gen-b"])
+    assert loaded.registry.ids == ["gen-a"]  # in-flight documents keep theirs
+    clock.now = 60
+    assert await learned_gens.refresh() is refreshed  # the store didn't change
+
+
+async def test_refresh_drops_generators_another_process_disabled() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    await store.put_generator(spec_record("gen-b"))
+    learned_gens = LearnedGenerators(store, packs=[spec_pack("gen-p")], refresh_after=0)
+    assert (await learned_gens.load()).registry.ids == ["gen-a", "gen-b", "gen-p"]
+    await store.set_generator_enabled("gen-a", False)  # pruned elsewhere
+    await store.set_generator_enabled("gen-p", False)  # a pack's, disabled by the store
+    refreshed = await learned_gens.refresh()
+    assert (refreshed.version, refreshed.registry.ids) == (1, ["gen-b"])
+    await learned_gens.publish(GeneratorSpec.parse(spec_record("gen-c").spec))
+    later = await learned_gens.refresh()
+    assert (later.version, later.registry.ids) == (2, ["gen-b", "gen-c"])
+
+
+async def test_refresh_does_nothing_unless_it_can_and_should() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    for learned_gens in [
+        LearnedGenerators(store),  # refresh_after=None
+        LearnedGenerators(store, persist=False, refresh_after=0),
+        LearnedGenerators(packs=[spec_pack("gen-p")], refresh_after=0),
+    ]:
+        loaded = await learned_gens.load()
+        await store.put_generator(spec_record("gen-b"))
+        assert await learned_gens.refresh() is loaded
+        await store.set_generator_enabled("gen-b", False)
+    with pytest.raises(ValueError, match="refresh_after must be at least 0"):
+        LearnedGenerators(store, refresh_after=-1)
+
+
+async def test_a_refresh_overtaken_by_a_local_change_is_dropped() -> None:
+    store = open_store(":memory:")
+    await store.put_generator(spec_record("gen-a"))
+    await store.put_generator(spec_record("gen-b"))
+    learned_gens = LearnedGenerators(store, refresh_after=0)
+    await learned_gens.load()
+    await store.put_generator(spec_record("gen-c"))
+    release = asyncio.Event()
+    reads = 0
+    stored = learned_gens.stored
+
+    async def slow_stored() -> list[GeneratorSpec]:
+        nonlocal reads
+        reads += 1
+        specs = await stored()
+        await release.wait()
+        return specs
+
+    learned_gens.stored = slow_stored
+    running = asyncio.create_task(learned_gens.refresh())
+    await asyncio.sleep(0)
+    # A second document doesn't wait on (or repeat) the running reload.
+    assert (await learned_gens.refresh()).version == 0
+    withdrawn = learned_gens.withdraw(["gen-a"])  # the housekeeper, meanwhile
+    release.set()
+    assert await running is withdrawn  # the reload still held gen-a: dropped
+    assert reads == 1
+    await store.set_generator_enabled("gen-a", False)
+    refreshed = await learned_gens.refresh()  # due again at once
+    assert (refreshed.version, refreshed.registry.ids) == (2, ["gen-b", "gen-c"])
+
+
+async def test_a_failed_refresh_raises_and_can_be_retried() -> None:
+    store = open_store(":memory:")
+    learned_gens = LearnedGenerators(store, refresh_after=0)
+    await learned_gens.load()
+    await store.put_generator(GeneratorRecord(id="gen-x", field=FIELD, spec={"id": "gen-x"}))
+    with pytest.raises(StoreError, match="stored generator 'gen-x' is invalid"):
+        await learned_gens.refresh()
+    await store.put_generator(spec_record("gen-x"))
+    assert (await learned_gens.refresh()).registry.ids == ["gen-x"]
+
+
 async def test_a_document_keeps_the_snapshot_it_started_with() -> None:
     learned_gens = LearnedGenerators()
     statement = Statement(id="s1", text=TEXT, kind="sentence", component_id="c1", location=LOC)
@@ -733,6 +832,59 @@ async def test_the_store_disables_a_packs_generator_for_the_extractor() -> None:
         assert learned.current.registry.ids == []
         result = await ex.extract(Document.from_bytes(b"<p/>"))
     assert result.records == []  # nothing found the value
+
+
+async def test_documents_pick_up_generators_other_workers_learned(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'jevex.db'}"
+    other = open_store(url)  # another worker's connection to the same store
+    fake = FakeJev().choice(None, pick("9.1"))
+    doc = Document.from_bytes(b"<p/>")
+    async with (
+        Extractor(
+            [Car], jev=fake.client(), pipeline=pipeline(), store=url, refresh_generators=0
+        ) as fresh,
+        Extractor(
+            [Car], jev=fake.client(), pipeline=pipeline(), store=url, refresh_generators=None
+        ) as frozen,
+    ):
+        for ex in (fresh, frozen):
+            assert (await ex.extract(doc)).records == []
+        await other.put_generator(spec_record("gen-a", r"(\d+(?:\.\d+)?) seconds"))
+        result = await fresh.extract(doc)
+        assert result.meta.generator_snapshot == 1
+        assert result.one(Car).meta.zero_to_62_s.generator_id == "gen-a"
+        assert (await frozen.extract(doc)).records == []  # never refreshes
+
+        await other.set_generator_enabled("gen-a", False)
+        result = await fresh.extract(doc)
+        assert (result.meta.generator_snapshot, result.records) == (2, [])
+    await other.aclose()
+    with pytest.raises(ValueError, match="refresh_generators must be at least 0"):
+        Extractor([Car], refresh_generators=-1)
+
+
+def test_wait_for_learning_sync_finishes_what_extract_sync_queued() -> None:
+    fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9.1"})
+    fake = FakeJev().noul(VERIFY, p=0.95).choice(None, pick("9.1"))
+    ex = Extractor(
+        [Car],
+        jev=fake.client(),
+        pipeline=pipeline(),
+        extraction_llm=fallback_llm,
+        generator_llm=FakeLLM([DRAFT]),
+    )
+    try:
+        assert ex.extract_sync(Document.from_bytes(b"<p/>")).meta.generator_snapshot == 0
+        ex.wait_for_learning_sync()
+        assert ex.extract_sync(Document.from_bytes(b"<p/>")).meta.generator_snapshot == 1
+        assert len(fallback_llm.calls) == 1
+    finally:
+        ex.close()
+
+
+async def test_wait_for_learning_sync_inside_event_loop_raises() -> None:
+    with pytest.raises(RuntimeError, match=r"wait_for_learning_sync\(\) .* await wait_for"):
+        Extractor([Car], jev=FakeJev().client()).wait_for_learning_sync()
 
 
 async def test_the_extractor_takes_community_packs_as_asked(
