@@ -623,18 +623,32 @@ class NormaliseStage:
             ),
             {c.generator_id for _, _, c, _ in used},
             vision_values(given),
-            [
-                ValuePick(
-                    items=tuple(cast("list[Any]", v) if isinstance(v, list) else [v]),
-                    method=_method(ctx, statement_id),
-                    source=_source(ctx, statement_id, selection),
-                    confidence=selection.confidence,
-                    generator_id=candidate.generator_id,
-                    shared=statement_id in shared,
-                )
-                for statement_id, selection, candidate, v in used
-            ],
+            _picks(ctx, used, shared),
         )
+
+
+def _picks(
+    ctx: Context, used: list[tuple[str, Selection, Candidate, Any]], shared: set[str]
+) -> list[ValuePick]:
+    """One pick per candidate a value took, each with its own span, best first: within a
+    statement, the selection's own candidate first, which is the one the meta describes."""
+    rank: dict[str, int] = {}
+    for i, (statement_id, *_) in enumerate(used):
+        rank.setdefault(statement_id, i)
+    ordered = sorted(used, key=lambda u: (rank[u[0]], u[2] != u[1].candidate))
+    return [
+        ValuePick(
+            items=tuple(cast("list[Any]", v) if isinstance(v, list) else [v]),
+            method=_method(ctx, statement_id),
+            source=_source(ctx, statement_id, selection).model_copy(
+                update={"span": candidate.span}
+            ),
+            confidence=selection.confidence,
+            generator_id=candidate.generator_id,
+            shared=statement_id in shared,
+        )
+        for statement_id, selection, candidate, v in ordered
+    ]
 
 
 def _method(ctx: Context, statement_id: str) -> Method:

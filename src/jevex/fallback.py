@@ -540,7 +540,14 @@ def _described(
     describes it, and ``value_generators`` keeps only the generators of the picks left.
     Nothing changes unless ``meta`` is still the one the picks' route offered."""
     picks = run.value_picks.get(key, [])
-    if not picks or picks[0].source != meta.source:
+    if not picks or meta.source is None:
+        return {}
+    first = picks[0]
+    if (first.source.statement_id, first.method, first.generator_id) != (
+        meta.source.statement_id,
+        meta.method,
+        meta.generator_id,
+    ):
         return {}
     left = [p for p in picks if any(item in value for item in p.items)]
     if not left:
