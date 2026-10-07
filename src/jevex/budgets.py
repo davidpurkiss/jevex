@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex.llm import LLMBudgetExceededError
+from jevex.logs import get_logger
 from jevex.store import SpendEntry
 
 if TYPE_CHECKING:
@@ -66,6 +67,8 @@ if TYPE_CHECKING:
 
     from jevex.llm import LLM, LLMImage, LLMResponse
     from jevex.store import SpendKind, Store
+
+log = get_logger(__name__)
 
 Period = Literal["hour", "day", "week", "month", "run"]
 Scope = Literal["document", "run", "process"]
@@ -272,9 +275,11 @@ class DocumentBudget:
 
     def record_hit(self, scope: Scope, limit: str, message: str) -> None:
         """Report a budget hit in ``meta.budget_events`` (once per scope and limit; a
-        later hit of the same limit replaces the message)."""
-        self.events = [e for e in self.events if not (e.scope == scope and e.limit == limit)]
-        self.events.append(BudgetEvent(scope=scope, limit=limit, message=message))
+        later hit of the same limit replaces the message). The first is logged."""
+        kept = [e for e in self.events if not (e.scope == scope and e.limit == limit)]
+        if len(kept) == len(self.events):
+            log.warning("%s budget %s hit: %s", scope, limit, message)
+        self.events = [*kept, BudgetEvent(scope=scope, limit=limit, message=message)]
 
     def _stop_llm(self, scope: Scope, limit: str, message: str) -> None:
         self.llm_stopped = True

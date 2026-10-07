@@ -11,6 +11,7 @@ questions go out together.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -19,10 +20,15 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from jevex._tasks import gather
 from jevex.errors import PartErrors
 from jevex.locales import canonical_locale, document_locale
+from jevex.logs import get_logger, log_context
 from jevex.results import Conflict
+from jevex.tracing import record_failure, set_attributes, trace_span
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+
+    from opentelemetry.trace import Span as OtelSpan
+    from opentelemetry.trace import Tracer
 
     from jevex.budgets import DocumentBudget
     from jevex.document import Document
@@ -39,6 +45,8 @@ if TYPE_CHECKING:
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Span, Statement
     from jevex.store import Store, VerifiedExample
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -320,6 +328,12 @@ class Context:
     stage: str | None = None
     """The stage running now (set by :meth:`Pipeline.run`); after a stage raised, the
     one that raised."""
+    tracer: Tracer | None = None
+    """The extractor's OpenTelemetry tracer (:mod:`jevex.tracing`): :meth:`Pipeline.run`
+    traces each stage under the document's span. ``None``: no tracing."""
+    span: OtelSpan | None = None
+    """The span of the stage running now (when tracing), which part failures are recorded
+    on."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
@@ -350,12 +364,18 @@ class Context:
         self.event(stage, "stopped", reason)
 
     def event(self, stage: str, kind: str, message: str, **data: Any) -> None:
+        """Report something in the document's meta (and log it: ``stopped`` at ``INFO``,
+        the rest at ``DEBUG``)."""
         self.events.append(Event(stage, kind, message, data))
+        level = logging.INFO if kind == "stopped" else logging.DEBUG
+        log.log(level, "%s: %s", kind, message, extra={"stage": stage})
 
     def part_failed(self, stage: str, kind: PartKind, part: str | None, exc: Exception) -> None:
         """Record that a pluggable part raised on one input and was skipped for it. The
-        result is ``partial``; the pipeline carries on (:mod:`jevex.errors`)."""
+        result is ``partial``; the pipeline carries on (:mod:`jevex.errors`). It's logged
+        and, when tracing, recorded on the stage's span."""
         self.errors.add(stage, kind, part, exc)
+        record_failure(self.span, exc, stage=stage, kind=kind, part=part, fatal=False)
 
 
 async def for_each_scope[T](
@@ -436,10 +456,22 @@ class Pipeline:
                 break
             start = time.perf_counter()
             ctx.stage = stage.name
-            try:
-                await stage.run(ctx)
-            finally:
-                ctx.timings[stage.name] = time.perf_counter() - start
+            with (
+                log_context(stage=stage.name),
+                trace_span(
+                    ctx.tracer, f"jevex.stage {stage.name}", {"jevex.stage": stage.name}
+                ) as now,
+            ):
+                ctx.span = now
+                before = _usage(ctx)
+                log.debug("stage %s started", stage.name)
+                try:
+                    await stage.run(ctx)
+                finally:
+                    elapsed = ctx.timings[stage.name] = time.perf_counter() - start
+                    ctx.span = None
+                    _trace_stage(now, ctx, before)
+                log.debug("stage %s finished in %.3fs", stage.name, elapsed)
         ctx.stage = None
         return ctx
 
@@ -448,3 +480,35 @@ class Pipeline:
             return self.names.index(name)
         except ValueError:
             raise KeyError(f"no stage named {name!r} in {self!r}") from None
+
+
+def _usage(ctx: Context) -> tuple[int, float, int, float]:
+    """The document's Jev requests and cost and LLM calls and cost so far."""
+    budget = ctx.budget
+    return (
+        ctx.jev.usage.requests,
+        ctx.jev.usage.cost,
+        budget.llm_calls if budget else 0,
+        budget.llm_spend if budget else 0.0,
+    )
+
+
+def _trace_stage(
+    current: OtelSpan | None, ctx: Context, before: tuple[int, float, int, float]
+) -> None:
+    """A stage span's attributes: what's active when it ends and what the stage used."""
+    if current is None or not current.is_recording():
+        return
+    after = _usage(ctx)
+    active = ctx.active
+    set_attributes(
+        current,
+        {
+            "jevex.schemas": [run.name for run in active],
+            "jevex.entities": sum(len(run.scopes) for run in active),
+            "jevex.jev.requests": after[0] - before[0],
+            "jevex.jev.cost_usd": after[1] - before[1],
+            "jevex.llm.calls": after[2] - before[2],
+            "jevex.llm.cost_usd": after[3] - before[3],
+        },
+    )

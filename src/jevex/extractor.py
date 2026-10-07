@@ -47,6 +47,7 @@ from jevex.learn import (
 )
 from jevex.llm import LLMBudgetExceededError
 from jevex.locales import canonical_locale
+from jevex.logs import get_logger, log_context
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
@@ -65,10 +66,13 @@ from jevex.store import (
     ValueStat,
     open_store,
 )
+from jevex.tracing import record_failure, resolve_tracer, set_attributes, trace_span
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Mapping, Sequence
     from types import TracebackType
+
+    from opentelemetry.trace import Span, Tracer
 
     from jevex.document import Document
     from jevex.generators import GeneratorSpec
@@ -78,6 +82,8 @@ if TYPE_CHECKING:
     from jevex.review import ReviewItem, ReviewSink
     from jevex.statements import Statement
     from jevex.store import VerifiedExample
+
+log = get_logger(__name__)
 
 # The spec's stage order (see jevex.interfaces). Default stages must use these names; they
 # are sorted into this order, so issues can add their stage without coordinating position.
@@ -137,7 +143,8 @@ def default_pipeline() -> Pipeline:
 
 class JevUsageSummary(BaseModel):
     """The document's Jev requests (``retries``: ones sent again after a transient
-    failure, counted in ``requests`` too)."""
+    failure, counted in ``requests`` too; ``rate_limited``: those Jev answered with 429,
+    retried or not)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -148,6 +155,8 @@ class JevUsageSummary(BaseModel):
     seconds: float
     models: list[str]
     retries: int = 0
+    rate_limited: int = 0
+    """Requests Jev answered with 429 (too many requests)."""
 
 
 class LLMUsageSummary(BaseModel):
@@ -321,6 +330,7 @@ class ExtractionResult:
                     seconds=usage.seconds,
                     models=sorted(usage.models),
                     retries=usage.retries,
+                    rate_limited=usage.rate_limited,
                 ),
                 llm=LLMUsageSummary(
                     calls=ctx.budget.llm_calls,
@@ -448,6 +458,27 @@ def _stage[S](pipeline: Pipeline, name: str, kind: type[S]) -> S | None:
     return found if isinstance(found, kind) else None
 
 
+def _trace_result(current: Span | None, result: ExtractionResult) -> None:
+    """The document span's attributes: what it found, spent and what failed."""
+    meta = result.meta
+    set_attributes(
+        current,
+        {
+            "jevex.content_type": meta.content_type,
+            "jevex.schemas": meta.active_schemas,
+            "jevex.status": meta.status,
+            "jevex.records": len(result.records),
+            "jevex.entities": len({(r.schema_name, r.entity) for r in result.records}),
+            "jevex.errors": len(meta.errors),
+            "jevex.jev.requests": meta.jev.requests,
+            "jevex.jev.cost_usd": meta.jev.cost,
+            "jevex.jev.retries": meta.jev.retries,
+            "jevex.llm.calls": meta.llm.calls,
+            "jevex.llm.cost_usd": meta.llm.cost,
+        },
+    )
+
+
 def _has_values(metas: Mapping[str, FieldMeta]) -> bool:
     return any(m.found or m.alternatives for m in metas.values())
 
@@ -464,11 +495,14 @@ def document_stat(
         for e in meta.budget_events
     ]
     events += [
-        DocumentEvent(kind="stopped", message=f"{e.stage}: {e.message}")
+        DocumentEvent(kind="stopped", message=f"{e.stage}: {e.message}", stage=e.stage)
         for e in meta.events
         if e.kind == "stopped"
     ]
-    events += [DocumentEvent(kind="error", message=e.describe()) for e in meta.errors]
+    events += [
+        DocumentEvent(kind="error", message=e.describe(), stage=e.stage, part=e.part)
+        for e in meta.errors
+    ]
     return DocumentStat(
         id=doc_id,
         run_id=run_id,
@@ -542,6 +576,7 @@ class Extractor:
         record_stats: bool = True,
         locale: str | None = None,
         jev_retry: RetryPolicy | None = None,
+        tracer: Tracer | bool | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -621,6 +656,12 @@ class Extractor:
         ``meta.jev.retries``.
         LLM retries are set on the adapters (``max_retries``).
 
+        ``tracer`` traces each document and its stages with OpenTelemetry
+        (:mod:`jevex.tracing`, the ``otel`` extra): a ``Tracer``, ``False`` for none, or
+        ``None`` (the default) for OpenTelemetry's global tracer when it's installed, which
+        records nothing until the application configures a tracer provider. Logs go to
+        ``logging.getLogger("jevex.<module>")`` (:mod:`jevex.logs`).
+
         :meth:`extract` reports what failed on the result instead of raising
         (:mod:`jevex.errors`)."""
         if not schemas:
@@ -695,6 +736,7 @@ class Extractor:
             )
         self.locale = canonical_locale(locale) if locale is not None else None
         self.jev_retry = jev_retry
+        self.tracer = resolve_tracer(tracer)
 
     @property
     def jev(self) -> JevClient:
@@ -913,7 +955,40 @@ class Extractor:
         problems setting the extractor up on first use (opening its store or packs, loading
         its learned generators). A failing refresh of the learned generators is a core
         ``store`` failure.
+
+        The document is logged (:mod:`jevex.logs`) and, when tracing, traced
+        (:mod:`jevex.tracing`).
         """
+        doc_id = uuid.uuid4().hex
+        attributes: dict[str, str] = {"jevex.run_id": self.run_id, "jevex.document_id": doc_id}
+        if document.url:
+            attributes["jevex.url"] = document.url
+        with (
+            log_context(run_id=self.run_id, document_id=doc_id, url=document.url),
+            trace_span(self.tracer, "jevex.extract", attributes) as doc_span,
+        ):
+            log.debug("extracting %s", document.url or document.content_type)
+            started = time.perf_counter()
+            try:
+                result = await self._extract(document, doc_id, doc_span)
+            except _CAP_ERRORS as exc:
+                log.error("a process spend cap stopped extraction: %s", exc)
+                raise
+            _trace_result(doc_span, result)
+            log.info(
+                "extracted %s: %s, %d records in %.2fs, Jev $%.4f, %d LLM calls",
+                document.url or document.content_type,
+                result.status,
+                len(result.records),
+                time.perf_counter() - started,
+                result.meta.jev.cost,
+                result.meta.llm.calls,
+            )
+            return result
+
+    async def _extract(
+        self, document: Document, doc_id: str, doc_span: Span | None
+    ) -> ExtractionResult:
         budget = DocumentBudget(self.budgets, await self.ledger())
         jev = self.jev.metered(
             max_requests=self.budgets.per_document.max_jev_requests, retry=self.jev_retry
@@ -925,6 +1000,7 @@ class Extractor:
         ctx.packs = await self.packs()
         ctx.extraction_llm = self.extraction_llm
         ctx.vision_llm = self.vision_llm
+        ctx.tracer = self.tracer
         learner = await self.learner()
         if learner is None and self.learn_mode == "compile":
             store = await self.store()
@@ -934,7 +1010,7 @@ class Extractor:
             ctx.learner = learner
         learned = await self.learned_generators()
         ctx.housekeeper = await self.housekeeper()
-        doc_id, started = uuid.uuid4().hex, time.perf_counter()
+        started = time.perf_counter()
         try:
             await self._run_pipeline(ctx, budget, learned)
         except _CAP_ERRORS as exc:
@@ -943,8 +1019,19 @@ class Extractor:
                     self._failed_stat(ctx, exc, doc_id, time.perf_counter() - started)
                 )
             raise
+        ctx.span = doc_span  # for a review sink's failure
         if self.review_sink is not None:
             await self._send_for_review(ctx)
+        if ctx.errors.cause is not None:
+            fatal = next(e for e in ctx.errors.errors if e.fatal)
+            record_failure(
+                doc_span,
+                ctx.errors.cause,
+                stage=fatal.stage,
+                kind=fatal.kind,
+                part=None,
+                fatal=True,
+            )
         result = ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
@@ -956,6 +1043,9 @@ class Extractor:
                 await stats.record_document(stat)
             except Exception as exc:
                 ctx.errors.add("extract", "store", "stats", exc)
+                record_failure(
+                    doc_span, exc, stage="extract", kind="store", part="stats", fatal=False
+                )
                 result = ExtractionResult.from_context(
                     ctx, threshold=self.threshold, thresholds=self.thresholds
                 )
@@ -1035,7 +1125,9 @@ class Extractor:
             llm_calls=ctx.budget.llm_calls if ctx.budget else 0,
             llm_cost=ctx.budget.llm_spend if ctx.budget else 0.0,
             seconds=seconds,
-            events=[DocumentEvent(kind="error", message=f"{type(exc).__name__}: {exc}")],
+            events=[
+                DocumentEvent(kind="error", message=f"{type(exc).__name__}: {exc}", stage=ctx.stage)
+            ],
             status="failed",
         )
 

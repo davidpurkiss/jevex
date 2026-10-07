@@ -209,11 +209,12 @@ def reset_process_llm_cost() -> None:
     _process_cost = 0.0
 
 
-def check_budget() -> None:
-    """Raise before a call if the process cap is already spent."""
+def process_llm_cap() -> tuple[float, float] | None:
+    """``JEVEX_LLM_MAX_COST_USD`` and the spend it's compared against (this process's, or
+    the ``JEVEX_SPEND_LEDGER`` total), or ``None`` when no cap is set."""
     raw = os.environ.get(MAX_COST_ENV)
     if not raw:
-        return
+        return None
     try:
         cap = float(raw)
     except ValueError:
@@ -222,6 +223,15 @@ def check_budget() -> None:
     spent = _process_cost
     if ledger is not None:  # the ledger can only tighten the cap
         spent = max(spent, ledger_total(ledger, "llm", LLMError))
+    return cap, spent
+
+
+def check_budget() -> None:
+    """Raise before a call if the process cap is already spent."""
+    capped = process_llm_cap()
+    if capped is None:
+        return
+    cap, spent = capped
     if spent >= cap:
         raise LLMBudgetExceededError(
             f"LLM spend cap reached: ${spent:.4f} of ${cap:.2f} ({MAX_COST_ENV})"
@@ -263,6 +273,7 @@ __all__ = [
     "ModelPrice",
     "cost",
     "gemini_flash_3x_price",
+    "process_llm_cap",
     "process_llm_cost",
     "reset_process_llm_cost",
 ]

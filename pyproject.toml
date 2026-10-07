@@ -78,6 +78,9 @@ testsite = [
 scrapy = [
     "scrapy>=2.19.0",
 ]
+otel = [
+    "opentelemetry-api>=1.30",
+]
 
 [tool.hatch.version]
 path = "src/jevex/__init__.py"
@@ -99,6 +102,7 @@ dev = [
     "pytest-socket>=0.8.1",
     "ruff>=0.16.9",
     "types-pyyaml>=6.0",
+    "opentelemetry-sdk>=1.30",
 ]
 
 # Docling (the `pdf` extra) needs torch. On Linux, PyPI's torch pulls in several GB of CUDA

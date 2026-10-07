@@ -129,7 +129,9 @@ async def test_a_stopped_document_records_why(store: SQLiteStore) -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Stops()]), store=store)
     await ex.extract(doc())
     [stat] = await store.documents()
-    assert stat.events == [DocumentEvent(kind="stopped", message="select: nothing to read")]
+    assert stat.events == [
+        DocumentEvent(kind="stopped", message="select: nothing to read", stage="select")
+    ]
     assert stat.records == 0
 
 
@@ -143,7 +145,9 @@ async def test_a_failed_document_is_recorded_with_its_error(store: SQLiteStore) 
     )
     assert (stat.status, stat.errors) == ("failed", [error])
     assert stat.events == [
-        DocumentEvent(kind="error", message="select jev: JevBackendError: backend down")
+        DocumentEvent(
+            kind="error", message="select jev: JevBackendError: backend down", stage="select"
+        )
     ]
     assert stat.jev_requests == 1
     assert stat.values == []
@@ -155,7 +159,9 @@ async def test_a_spend_cap_still_raises_and_is_recorded(store: SQLiteStore) -> N
         await ex.extract(doc())
     [stat] = await store.documents()
     assert stat.status == "failed"
-    assert stat.events == [DocumentEvent(kind="error", message="JevBudgetExceededError: capped")]
+    assert stat.events == [
+        DocumentEvent(kind="error", message="JevBudgetExceededError: capped", stage="select")
+    ]
     assert stat.jev_requests == 1
 
 

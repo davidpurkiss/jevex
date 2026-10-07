@@ -40,12 +40,15 @@ from pydantic import BaseModel, ConfigDict
 
 from jevex._tasks import gather
 from jevex.learn import LearnedGenerators, example_statement
+from jevex.logs import get_logger
 
 if TYPE_CHECKING:
     from jevex.generators import GeneratorSpec
     from jevex.pipeline import Context
     from jevex.statements import Candidate
     from jevex.store import Store
+
+log = get_logger(__name__)
 
 PRUNE_AFTER = 50
 """Scoped documents a learned generator gets to win once before it's disabled.
@@ -170,6 +173,12 @@ class Housekeeper:
                     documents=s.documents,
                     hits=s.hits,
                 )
+                log.info(
+                    "pruned generator %s: no wins in %d documents",
+                    s.generator_id,
+                    s.documents,
+                    extra={"part": s.generator_id},
+                )
         self.pruned.extend(pruned)  # before awaiting, so no other document claims them
         await self._disable(pruned)
         return pruned
@@ -190,6 +199,12 @@ class Housekeeper:
                 generator_id=s.generator_id,
                 failures=s.failures,
             )
+            log.warning(
+                "quarantined generator %s: it failed %d times",
+                s.generator_id,
+                s.failures,
+                extra={"part": s.generator_id},
+            )
         self.quarantined.extend(quarantined)  # before awaiting, as for pruning
         await self._disable(quarantined)
 
@@ -209,6 +224,8 @@ class Housekeeper:
             if len(specs) > 1:
                 found.extend(await self._duplicates(name, specs))
         await self._disable([d.id for d in found])
+        for d in found:
+            log.info("disabled generator %s: a duplicate of %s", d.id, d.kept, extra={"part": d.id})
         return found
 
     async def _duplicates(self, name: str, specs: list[GeneratorSpec]) -> list[DuplicateGenerator]:

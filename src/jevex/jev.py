@@ -27,10 +27,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from jevex._spend import ledger_add, ledger_path, ledger_total
 from jevex._tasks import gather
+from jevex.logs import get_logger
 
 if TYPE_CHECKING:
     from typesafe_sdk import AsyncTypeSafeClient, NoulCriteria
     from typesafe_sdk import RetryPolicy as SdkRetryPolicy
+
+log = get_logger(__name__)
 
 type JSONContent = str | Mapping[str, Any] | Sequence[Any]
 
@@ -165,11 +168,20 @@ class JevBackendError(JevError):
 class JevTransientError(JevBackendError):
     """A Jev request failed in a way that may pass on a retry: a timeout, a connection
     error, a 408, 429 or 5xx. :class:`JevClient` retries it by its :class:`RetryPolicy`;
-    ``retry_after`` (seconds) is the server's ``Retry-After``, if it sent one."""
+    ``retry_after`` (seconds) is the server's ``Retry-After``, if it sent one, and
+    ``status`` the HTTP status (``None`` for a timeout or connection error)."""
 
-    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+    def __init__(
+        self, message: str, *, retry_after: float | None = None, status: int | None = None
+    ) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+        self.status = status
+
+    @property
+    def rate_limited(self) -> bool:
+        """Jev said too many requests (429)."""
+        return self.status == 429
 
 
 class JevTokenLimitError(JevBackendError):
@@ -212,6 +224,13 @@ _process_cost = 0.0
 def process_cost() -> float:
     """Estimated USD spent on Jev by this process so far."""
     return _process_cost
+
+
+def process_cap() -> tuple[float, float] | None:
+    """``JEVEX_JEV_MAX_COST_USD`` and the spend it's compared against (this process's, or
+    the ``JEVEX_SPEND_LEDGER`` total), or ``None`` when no cap is set."""
+    cap = _max_cost()
+    return None if cap is None else (cap, _spent())
 
 
 def reset_process_cost() -> None:
@@ -295,6 +314,8 @@ class JevUsage:
     models: set[str] = field(default_factory=set[str])
     retries: int = 0
     """Requests sent again after a transient failure (:class:`RetryPolicy`)."""
+    rate_limited: int = 0
+    """Requests Jev answered with 429 (too many requests), retried or not."""
 
     @property
     def cost(self) -> float:
@@ -308,6 +329,7 @@ class JevUsage:
         self.seconds += other.seconds
         self.models |= other.models
         self.retries += other.retries
+        self.rate_limited += other.rate_limited
 
 
 # --- Backends --------------------------------------------------------------------------
@@ -379,7 +401,7 @@ class TypeSafeBackend:
                 raise JevTransientError(str(exc)) from exc
             if isinstance(exc, TypeSafeAPIError) and _transient_status(exc.status):
                 after = _retry_after(exc.headers.get("retry-after"))
-                raise JevTransientError(str(exc), retry_after=after) from exc
+                raise JevTransientError(str(exc), retry_after=after, status=exc.status) from exc
             raise JevBackendError(str(exc)) from exc
 
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
@@ -712,8 +734,19 @@ class JevClient:
                     raise
                 retries += 1
                 self.usage.retries += 1
-                await asyncio.sleep(self.retry.delay(retries, exc.retry_after))
+                delay = self.retry.delay(retries, exc.retry_after)
+                log.warning(
+                    "Jev request failed (%s), retry %d of %d in %.1fs",
+                    exc,
+                    retries,
+                    self.retry.max_retries,
+                    delay,
+                )
+                await asyncio.sleep(delay)
                 continue
+            log.debug(
+                "Jev request: %d questions, %d tokens", len(batch), response.input_tokens or 0
+            )
             return response
 
     async def _attempt(
@@ -733,11 +766,13 @@ class JevClient:
                 self.usage.input_tokens += estimated
                 self.usage.seconds += time.perf_counter() - start
                 raise
-            except (JevTokenLimitError, JevTransientError):
+            except (JevTokenLimitError, JevTransientError) as exc:
                 # Rejected (or lost) before Jev answered, so nothing is billed, but it was
                 # a request.
                 self.usage.requests += 1
                 self.usage.seconds += time.perf_counter() - start
+                if isinstance(exc, JevTransientError) and exc.rate_limited:
+                    self.usage.rate_limited += 1
                 raise
             elapsed = time.perf_counter() - start
         tokens = response.input_tokens if response.input_tokens is not None else estimated

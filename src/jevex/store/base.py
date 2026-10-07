@@ -213,13 +213,17 @@ MAX_STAT_VALUE_CHARS = 120
 
 class DocumentEvent(BaseModel):
     """Something the stats UI's budget-and-errors view lists: a budget hit
-    (``budget``), a stage stopping the document (``stopped``) or an extraction that
-    raised (``error``)."""
+    (``budget``), a stage stopping the document (``stopped``) or a failure (``error``).
+
+    ``stage`` is the stage it happened in, when known, and ``part`` the part that failed
+    (a generator id, a processor's class; :class:`~jevex.errors.PartError`)."""
 
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["budget", "stopped", "error"]
     message: str
+    stage: str | None = None
+    part: str | None = None
 
 
 class DocumentStat(BaseModel):
