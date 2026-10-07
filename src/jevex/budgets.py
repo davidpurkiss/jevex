@@ -19,9 +19,10 @@ on: affected fields keep the best Jev answer or stay ``None``. Every hit is repo
   (``timeout_s`` from the start of the document), plus an optional cap on Jev requests.
   Reaching the Jev cap stops the document; its results so far are returned.
 - **Per run** (:class:`RunBudget`, kept by a :class:`RunLedger`): LLM spend per period and
-  an LLM rate limit, shared by every worker on the same store through its spend ledger,
-  plus an optional Jev spend cap per period. Without a store, the ledger is kept in
-  memory for the extractor.
+  an LLM rate limit, shared by every worker on the same spend ledger
+  (:class:`~jevex.store.SpendLedger`: the store, or ``Extractor(ledger=)``), plus an
+  optional Jev spend cap per period. Without either, the ledger is kept in memory for the
+  extractor.
 
 **For stage authors** the one entry point is :meth:`DocumentBudget.call_llm` (on
 ``ctx.budget``): it checks the budgets, makes the call and records its cost, and returns
@@ -45,6 +46,11 @@ only the run budget. Every other method is used by the extractor and changes the
   document).
 - ``period="run"`` counts the ledger entries of this run's ``run_id``. Workers share a
   run by passing the same ``run_id`` to their extractors.
+
+**When the ledger fails** (it raises), the spend it was asked about can't be confirmed:
+the LLM call isn't made, and the failure is reported on the document's result (kind
+``ledger``, :mod:`jevex.errors`). A document whose Jev spend cap can't be checked runs,
+and one whose Jev spend can't be recorded keeps its result. Jev and generators carry on.
 """
 
 from __future__ import annotations
@@ -59,13 +65,13 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex.llm import LLMBudgetExceededError
-from jevex.store import SpendEntry
+from jevex.store import LedgerError, SpendEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from jevex.llm import LLM, LLMImage, LLMResponse
-    from jevex.store import SpendKind, Store
+    from jevex.store import SpendKind, SpendLedger
 
 Period = Literal["hour", "day", "week", "month", "run"]
 Scope = Literal["document", "run", "process"]
@@ -97,8 +103,8 @@ class RunBudget(BaseModel):
 
 class Budgets(BaseModel):
     """Every limit an extractor applies: ``per_document`` for each document, and an
-    optional ``run`` budget shared through the store's spend ledger. The defaults set no
-    limits at all."""
+    optional ``run`` budget shared through a spend ledger. The defaults set no limits at
+    all."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -156,37 +162,45 @@ class Refusal:
     stops: bool = True
 
 
+async def _guarded[T](call: Awaitable[T]) -> T:
+    try:
+        return await call
+    except Exception as exc:
+        raise LedgerError(f"{type(exc).__name__}: {exc}") from exc
+
+
 @dataclass
 class RunLedger:
-    """The run budget and the store's spend ledger it is kept in.
+    """The run budget and the spend ledger it is kept in.
 
-    Owned by the extractor and shared by its documents. ``store`` is ``None`` when no
-    run budget is set and no store was given; the ledger then allows everything.
+    Owned by the extractor and shared by its documents. ``ledger`` is ``None`` when no
+    run budget is set and no store or ledger was given; it then allows everything.
+    Whatever the ledger raises comes out as a :class:`~jevex.store.LedgerError`.
     """
 
     budget: RunBudget | None = None
-    store: Store | None = None
+    ledger: SpendLedger | None = None
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     started: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def active(self) -> bool:
-        return self.budget is not None and self.store is not None
+        return self.budget is not None and self.ledger is not None
 
     async def spent(self, kind: SpendKind) -> float:
         """This period's spend of ``kind`` (this run's, for ``period="run"``)."""
-        if self.budget is None or self.store is None:
+        if self.budget is None or self.ledger is None:
             return 0.0
         if self.budget.period == "run":
-            return await self.store.spend(kind=kind, run_id=self.run_id)
+            return await _guarded(self.ledger.spend(kind=kind, run_id=self.run_id))
         since = period_start(self.budget.period, datetime.now(UTC), self.started)
-        return await self.store.spend(since=since, kind=kind)
+        return await _guarded(self.ledger.spend(since=since, kind=kind))
 
     async def refuse_llm(self) -> Refusal | None:
         """Check the run's LLM limits before a call. Mutates: a call that passes the rate
         limit takes one of its slots."""
         run = self.budget
-        if run is None or self.store is None:
+        if run is None or self.ledger is None:
             return None
         if run.max_spend is not None:
             spent = await self.spent("llm")
@@ -196,11 +210,13 @@ class RunLedger:
                     f"${spent:.4f} of LLM spend this {run.period} (limit ${run.max_spend:.2f})",
                 )
         if run.llm_rpm is not None:
-            allowed = await self.store.try_spend(
-                SpendEntry(amount_usd=0, kind="llm_call", run_id=self.run_id),
-                max_count=run.llm_rpm,
-                since=datetime.now(UTC) - timedelta(minutes=1),
-                kind="llm_call",
+            allowed = await _guarded(
+                self.ledger.try_spend(
+                    SpendEntry(amount_usd=0, kind="llm_call", run_id=self.run_id),
+                    max_count=run.llm_rpm,
+                    since=datetime.now(UTC) - timedelta(minutes=1),
+                    kind="llm_call",
+                )
             )
             if not allowed:
                 return Refusal("llm_rpm", f"over {run.llm_rpm} LLM calls a minute", stops=False)
@@ -209,7 +225,7 @@ class RunLedger:
     async def refuse_document(self) -> Refusal | None:
         """Check the run's Jev spend cap before a document starts."""
         run = self.budget
-        if run is None or run.max_jev_spend is None or self.store is None:
+        if run is None or run.max_jev_spend is None or self.ledger is None:
             return None
         spent = await self.spent("jev")
         if spent >= run.max_jev_spend:
@@ -221,33 +237,53 @@ class RunLedger:
 
     async def record(self, kind: SpendKind, cost: float | None) -> None:
         """Add spend to the ledger (only while a run budget is kept, and only real cost)."""
-        if self.active and cost and self.store is not None:
-            await self.store.record_spend(
-                SpendEntry(amount_usd=cost, kind=kind, run_id=self.run_id)
-            )
+        if self.active and cost and self.ledger is not None:
+            entry = SpendEntry(amount_usd=cost, kind=kind, run_id=self.run_id)
+            await _guarded(self.ledger.record_spend(entry))
 
     async def call_llm[T: BaseModel](
-        self, llm: LLM, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+        self,
+        llm: LLM,
+        prompt: str,
+        schema: type[T],
+        *,
+        images: Sequence[LLMImage] = (),
+        on_ledger_error: Callable[[LedgerError], None] | None = None,
     ) -> LLMResponse[T] | None:
         """An LLM call under the run budget only, for work outside a document (the learner).
-        ``None`` when the run budget (or the process backstop) says no."""
+        ``None`` when the run budget (or the process backstop) says no.
+
+        A ledger that fails before the call raises :class:`~jevex.store.LedgerError`, and
+        the call isn't made. One that fails recording its cost afterwards tells
+        ``on_ledger_error`` and the answer is returned (without it, that raises too)."""
         if await self.refuse_llm() is not None:
             return None
         try:
             response = await _structured(llm, prompt, schema, images)
         except LLMBudgetExceededError:
             return None
-        await self.record("llm", response.usage.cost)
+        try:
+            await self.record("llm", response.usage.cost)
+        except LedgerError as exc:
+            if on_ledger_error is None:
+                raise
+            on_ledger_error(exc)
         return response
 
 
 @dataclass
 class DocumentBudget:
     """The budgets as they stand for one document; the extractor creates one per document
-    and puts it on ``ctx.budget``. Stages use only :meth:`call_llm`."""
+    and puts it on ``ctx.budget``. Stages use only :meth:`call_llm`.
+
+    ``on_ledger_error`` is told about each :class:`~jevex.store.LedgerError` (the
+    extractor's records it on the result), which then doesn't propagate: an LLM call the
+    ledger can't clear isn't made, and the rest carries on. Without it they're raised.
+    """
 
     budgets: Budgets = field(default_factory=Budgets)
     ledger: RunLedger = field(default_factory=RunLedger)
+    on_ledger_error: Callable[[LedgerError], None] | None = None
     started: float = field(default_factory=time.monotonic)
     llm_calls: int = 0
     """Calls started (reserved), including ones in flight and ones that failed."""
@@ -279,6 +315,11 @@ class DocumentBudget:
     def _stop_llm(self, scope: Scope, limit: str, message: str) -> None:
         self.llm_stopped = True
         self.record_hit(scope, limit, message)
+
+    def _ledger_failed(self, exc: LedgerError) -> None:
+        if self.on_ledger_error is None:
+            raise exc
+        self.on_ledger_error(exc)
 
     def _calls_full(self) -> bool:
         cap = self.budgets.per_document.max_llm_calls
@@ -322,8 +363,12 @@ class DocumentBudget:
         try:
             refusal = await self.ledger.refuse_llm()
             passed = refusal is None
+        except LedgerError as exc:
+            # The run's spend can't be confirmed, so no call.
+            self._ledger_failed(exc)
+            return False
         finally:
-            # Any exit but "passed" (a refusal, a store error, cancellation) gives the
+            # Any exit but "passed" (a refusal, a ledger error, cancellation) gives the
             # slot back, and waiters are always woken.
             self._pending -= 1
             if not passed:
@@ -354,13 +399,19 @@ class DocumentBudget:
                     f"{self.unpriced_calls} LLM calls with unknown cost counted as $0 "
                     "against spend caps (add the model's price)",
                 )
-        await self.ledger.record("llm", cost)
+        try:
+            await self.ledger.record("llm", cost)
+        except LedgerError as exc:
+            self._ledger_failed(exc)  # the call was made: its answer stands
 
     async def call_llm[T: BaseModel](
         self, llm: LLM, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
     ) -> LLMResponse[T] | None:
         """Make an LLM call (with ``images``, if any) if the budgets allow it; ``None``
         when they don't.
+
+        A call the run ledger can't clear isn't made: ``None`` with ``on_ledger_error``
+        (it's told), else the :class:`~jevex.store.LedgerError` is raised.
 
         A failed call still counts (the provider may bill it), though its cost is
         unknown. Hitting the process backstop (``JEVEX_LLM_MAX_COST_USD``) stops LLM use
@@ -382,8 +433,13 @@ class DocumentBudget:
 
     async def start_document(self) -> bool:
         """Called by the extractor before the pipeline: whether the run's Jev spend cap
-        allows the document. A refusal is recorded."""
-        refusal = await self.ledger.refuse_document()
+        allows the document. A refusal is recorded. A ledger that fails lets it run (Jev
+        carries on when spend can't be checked)."""
+        try:
+            refusal = await self.ledger.refuse_document()
+        except LedgerError as exc:
+            self._ledger_failed(exc)
+            return True
         if refusal is None:
             return True
         self.record_hit("run", refusal.limit, refusal.message)
@@ -392,4 +448,7 @@ class DocumentBudget:
     async def finish_document(self, jev_cost: float) -> None:
         """Called by the extractor after the pipeline (even a failed one): records the
         document's Jev spend in the ledger."""
-        await self.ledger.record("jev", jev_cost)
+        try:
+            await self.ledger.record("jev", jev_cost)
+        except LedgerError as exc:
+            self._ledger_failed(exc)

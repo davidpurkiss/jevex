@@ -26,6 +26,7 @@ from jevex.store import (
     MAX_STAT_VALUE_CHARS,
     DocumentEvent,
     DocumentStat,
+    MemoryLedger,
     SpendEntry,
     SQLiteStore,
     StoreError,
@@ -351,9 +352,49 @@ async def test_a_ledger_that_cant_record_makes_the_result_partial() -> None:
     result = await ex.extract(doc())
     await store.aclose()
     assert result.status == "partial"
-    assert [(e.stage, e.kind, e.part, e.type) for e in result.errors] == [
-        ("extract", "store", "ledger", "StoreError")
+    assert [(e.stage, e.kind, e.part, e.type, e.message) for e in result.errors] == [
+        ("extract", "ledger", "NoLedger", "LedgerError", "StoreError: ledger is read-only")
     ]
+
+
+async def test_a_ledger_that_cant_be_read_skips_llm_calls_and_jev_carries_on() -> None:
+    class DownLedger(MemoryLedger):
+        async def spend(self, **kw: object) -> float:
+            raise ConnectionError("ledger unreachable")
+
+    ledger = DownLedger()
+    llm = FakeLLM(lambda _p, _s: {"model": "x"})
+
+    class AsksAndCalls:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            await ctx.jev.ask("s", {"q": Noul(instructions="a?")})
+            assert ctx.budget is not None
+            for _ in range(2):
+                assert await ctx.budget.call_llm(llm, "p", Car) is None
+
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([AsksAndCalls()]),
+        budgets=Budgets(run=RunBudget(max_spend=1.0, max_jev_spend=1.0)),
+        ledger=ledger,
+    )
+    result = await ex.extract(doc())
+    assert result.status == "partial"
+    assert [(e.stage, e.kind, e.part, e.count, e.fatal) for e in result.errors] == [
+        ("extract", "ledger", "DownLedger", 1, False),  # the Jev cap check: the document ran
+        ("select", "ledger", "DownLedger", 2, False),  # each LLM call it couldn't clear
+    ]
+    assert result.errors[0].message == "ConnectionError: ledger unreachable"
+    assert llm.calls == []
+    assert result.meta.jev.requests == 1
+    assert result.meta.llm.calls == 0
+    assert result.meta.budget_events == []
+    # Writes still work: the document's Jev spend is recorded.
+    assert [e.kind for e in ledger.entries] == ["jev"]
+    await ex.aclose()
 
 
 async def test_stats_that_cant_be_recorded_make_the_result_partial() -> None:
@@ -411,7 +452,7 @@ async def test_jev_retry_policy_applies_to_each_document() -> None:
     assert result.meta.jev.retries == 0
 
 
-async def test_a_failing_refresh_of_learned_generators_fails_the_document(
+async def test_a_failing_refresh_of_learned_generators_keeps_the_ones_in_use(
     monkeypatch: pytest.MonkeyPatch, store: SQLiteStore
 ) -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]), store=store)
@@ -419,12 +460,16 @@ async def test_a_failing_refresh_of_learned_generators_fails_the_document(
     assert learned is not None
 
     async def refresh() -> object:
-        raise StoreError("generator gen-x doesn't validate")
+        raise StoreError("database is locked")
 
     monkeypatch.setattr(learned, "refresh", refresh)
     result = await ex.extract(doc())
-    assert [(e.stage, e.kind, e.fatal) for e in result.errors] == [("extract", "store", True)]
-    assert result.meta.jev.requests == 0  # nothing ran
+    assert [(e.stage, e.kind, e.part, e.fatal) for e in result.errors] == [
+        ("extract", "store", "generators", False)
+    ]
+    assert result.status == "partial"
+    assert result.meta.jev.requests == 1  # the document ran
+    assert result.meta.generator_snapshot == learned.current.version
 
 
 async def test_the_learner_retries_jev_as_documents_do() -> None:
