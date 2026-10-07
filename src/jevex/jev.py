@@ -4,7 +4,7 @@ Stages build :class:`Noul`, :class:`Choice` and :class:`Score` questions and cal
 :meth:`JevClient.ask` once per level. Every question about the same state goes into
 one request, because Jev evaluates them in parallel and extra questions barely change
 latency or cost. The client splits a batch only when it would exceed Jev's context
-budget.
+budget, by a token estimate calibrated on real counts, or when Jev rejects it as too big.
 
 The transport is a :class:`JevBackend`, so tests can script answers without the
 network. :class:`TypeSafeBackend` talks to the real API through ``typesafe-sdk``.
@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 import weakref
 from collections.abc import Mapping, Sequence
@@ -38,6 +39,15 @@ MAX_CHOICE_OPTIONS = 255
 MIN_SCORE_LEVELS = 2
 MAX_SCORE_LEVELS = 10
 PRICE_PER_MILLION_INPUT_TOKENS = 0.042  # USD; output tokens are free
+
+# Measured against jev-1.13.0 in #6: what Jev bills on top of the state and question text.
+REQUEST_OVERHEAD_TOKENS = 260
+"""Tokens every request costs whatever it asks."""
+QUESTION_OVERHEAD_TOKENS = 7
+"""Tokens each question costs on top of its text."""
+OPTION_OVERHEAD_TOKENS = 2
+"""Tokens each Choice option, Score level or Noul criterion costs on top of its text (not
+measured; set to err high)."""
 
 
 # --- Questions -------------------------------------------------------------------------
@@ -148,6 +158,15 @@ class UnexpectedAnswerError(JevError):
 
 class JevBackendError(JevError):
     """The Jev API failed: bad or missing key, network error, rejected request, 5xx."""
+
+
+class JevTokenLimitError(JevBackendError):
+    """Jev rejected a request as over its token limits (``max_tokens_exceeded``).
+
+    A backend raises it and :class:`JevClient` handles it: it asks the questions over more
+    requests, or raises :class:`StateTooLargeError` when the state with a single question
+    is already too big. It never reaches a stage.
+    """
 
 
 class JevRequestCapError(JevError):
@@ -296,7 +315,7 @@ class TypeSafeBackend:
                 case Score():
                     sdk_questions[key] = SdkScore(instructions=q.instructions, criteria=q.levels)
 
-        from typesafe_sdk import TypeSafeError
+        from typesafe_sdk import TypeSafeAPIError, TypeSafeError
 
         try:
             # The SDK's recursive JSON alias reads as partially unknown under strict pyright.
@@ -304,6 +323,8 @@ class TypeSafeBackend:
                 state, sdk_questions, model=self._model
             )
         except TypeSafeError as exc:  # after the SDK's own retries
+            if isinstance(exc, TypeSafeAPIError) and _error_type(exc.body) == TOKEN_LIMIT_ERROR:
+                raise JevTokenLimitError(str(exc)) from exc
             raise JevBackendError(str(exc)) from exc
 
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
@@ -323,6 +344,109 @@ class TypeSafeBackend:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+TOKEN_LIMIT_ERROR = "max_tokens_exceeded"
+"""The ``error_type`` of Jev's 400 for a request over its token limits."""
+
+
+def _error_type(body: object) -> object:
+    """The ``error_type`` of an API error body: ``{"detail": {"error_type": ...}}``, as
+    measured in #6, or at the top level."""
+    if not isinstance(body, dict):
+        return None
+    fields = cast("dict[str, object]", body)
+    detail = fields.get("detail")
+    if isinstance(detail, dict) and "error_type" in detail:
+        return cast("dict[str, object]", detail)["error_type"]
+    return fields.get("error_type")
+
+
+# --- Token estimates -------------------------------------------------------------------
+#
+# Jev's tokeniser isn't published, so requests are planned with an estimate calibrated on
+# real counts (#6). A flat 4 characters per token was close for prose but read tables and
+# JSON at a third of their size: every digit is a token of its own, and so is almost every
+# punctuation mark or separator, while a common English word is one token with the space
+# before it. The estimate counts those pieces. Words cost a token per few characters for
+# states, so names, codes and units err high, and closer to one per word for questions,
+# whose text is plain English.
+
+_TOKEN_PIECES = re.compile(r" ?[A-Za-z]+| ?[^\w\s]|\d|\s+|.", re.DOTALL)
+STATE_WORD_CHARS = 7
+"""Letters per token in a state's ASCII words: errs high (about 1.1x on prose)."""
+QUESTION_WORD_CHARS = 13
+"""Letters per token in a question's ASCII words: close (common words are one token)."""
+
+
+def _piece_tokens(piece: str, word_chars: int) -> int:
+    word = piece.lstrip(" ")
+    return 1 + (len(word) - 1) // word_chars if word.isascii() and word.isalpha() else 1
+
+
+def _text_tokens(text: str, word_chars: int) -> int:
+    return sum(_piece_tokens(piece, word_chars) for piece in _TOKEN_PIECES.findall(text))
+
+
+def _content_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, default=str, ensure_ascii=False)
+
+
+def estimate_tokens(content: object) -> int:
+    """Estimated tokens for ``content`` as a state (JSON as it is serialised), erring high.
+
+    Calibrated on #6's measurements: within about 10% above the real count for prose, and
+    at or just above it for table text and JSON, which a characters-per-token rule reads
+    at a third of their size. Non-ASCII letters count a token each.
+    """
+    return _text_tokens(_content_text(content), STATE_WORD_CHARS)
+
+
+def estimate_question_tokens(question: Noul | Choice | Score) -> int:
+    """Estimated tokens for one question: its text, options and per-question overhead."""
+    match question:
+        case Noul():
+            options = len(question.criteria or {})
+            texts: list[object] = list((question.criteria or {}).values())
+        case Choice():
+            options = len(question.options)
+            texts = [*question.options, *(d for d in question.options.values() if d is not None)]
+        case Score():
+            options = len(question.levels)
+            texts = list(question.levels)
+    return (
+        QUESTION_OVERHEAD_TOKENS
+        + options * OPTION_OVERHEAD_TOKENS
+        + sum(
+            _text_tokens(_content_text(text), QUESTION_WORD_CHARS)
+            for text in (question.instructions, *texts)
+        )
+    )
+
+
+def estimate_request_tokens(state: JSONContent, questions: Mapping[str, Question]) -> int:
+    """Estimated billed tokens for one request: the state once, every question, and Jev's
+    fixed overhead. The spend cap and the cost of a request without a reported count use
+    it."""
+    return (
+        REQUEST_OVERHEAD_TOKENS
+        + estimate_tokens(state)
+        + sum(estimate_question_tokens(q) for q in questions.values())
+    )
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """The longest leading part of ``text`` whose :func:`estimate_tokens` is at most
+    ``max_tokens``, cut between tokens."""
+    tokens = 0
+    for match in _TOKEN_PIECES.finditer(text):
+        cost = _piece_tokens(match.group(), STATE_WORD_CHARS)
+        if tokens + cost > max_tokens:
+            return text[: match.start()]
+        tokens += cost
+    return text
 
 
 # --- Client ----------------------------------------------------------------------------
@@ -346,12 +470,6 @@ class _Limiter:
         if loop not in self._by_loop:
             self._by_loop[loop] = asyncio.Semaphore(self.limit)
         return self._by_loop[loop]
-
-
-def estimate_tokens(content: object) -> int:
-    """Rough token count (about 4 characters per token) used to plan requests."""
-    text = content if isinstance(content, str) else json.dumps(content, default=str)
-    return len(text) // 4 + 1
 
 
 class JevClient:
@@ -398,29 +516,45 @@ class JevClient:
             _limiter=self._limiter,
         )
 
+    def fit_state(self, text: str, questions: Mapping[str, Question]) -> str:
+        """The leading part of ``text`` that fits in one request's state alongside the
+        longest of ``questions``, by the same estimate :meth:`ask` plans with.
+
+        For a stage that would rather read less of a long text than split it.
+        """
+        room = self._state_budget - max(
+            (estimate_question_tokens(q) for q in questions.values()), default=0
+        )
+        if room < 1:
+            raise StateTooLargeError(
+                f"a question alone is ~{self._state_budget - room} tokens, over the "
+                f"~{self._state_budget} for state plus one question"
+            )
+        return truncate_to_tokens(text, room)
+
     async def ask(
         self, state: JSONContent, questions: Mapping[str, Question]
     ) -> dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]:
-        """Ask every question about ``state``, in as few requests as fit the budget."""
+        """Ask every question about ``state``, in as few requests as fit the budget.
+
+        Raises :class:`StateTooLargeError` when the state and one question don't fit,
+        by the estimate or by Jev's own count: a request Jev rejects as too big is asked
+        again in smaller parts, and only a state too big for any request raises.
+        """
         if not questions:
             return {}
         batches = self._plan(state, questions)
-        responses = await gather(self._send(state, batch) for batch in batches)
-        answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
-        for batch, response in zip(batches, responses, strict=True):
-            for key in batch:
-                if key not in response.answers:
-                    raise MissingAnswerError(f"Jev returned no answer for question {key!r}")
-                answers[key] = response.answers[key]
-        return answers
+        parts = await gather(self._ask_batch(state, batch) for batch in batches)
+        answers = {key: answer for part in parts for key, answer in part.items()}
+        return {key: answers[key] for key in questions}
 
     def _plan(
         self, state: JSONContent, questions: Mapping[str, Question]
     ) -> list[dict[str, Question]]:
+        # The budgets cover the state and questions; their 10% headroom covers Jev's fixed
+        # REQUEST_OVERHEAD_TOKENS.
         state_tokens = estimate_tokens(state)
-        sizes = {
-            key: estimate_tokens(q.model_dump(exclude={"type"})) for key, q in questions.items()
-        }
+        sizes = {key: estimate_question_tokens(q) for key, q in questions.items()}
         if state_tokens + max(sizes.values()) > self._state_budget:
             raise StateTooLargeError(
                 f"state is ~{state_tokens} tokens; the limit for state plus one question is "
@@ -436,10 +570,49 @@ class JevClient:
             used += sizes[key]
         return batches
 
-    async def _send(self, state: JSONContent, batch: dict[str, Question]) -> JevResponse:
-        estimated = estimate_tokens(state) + sum(
-            estimate_tokens(q.model_dump()) for q in batch.values()
+    async def _ask_batch(
+        self, state: JSONContent, batch: dict[str, Question]
+    ) -> dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]:
+        try:
+            response = await self._send(state, batch)
+        except JevTokenLimitError as exc:
+            return await self._split_rejected(state, batch, exc)
+        answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
+        for key in batch:
+            if key not in response.answers:
+                raise MissingAnswerError(f"Jev returned no answer for question {key!r}")
+            answers[key] = response.answers[key]
+        return answers
+
+    async def _split_rejected(
+        self, state: JSONContent, batch: dict[str, Question], rejected: JevTokenLimitError
+    ) -> dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]:
+        """Answers for a batch Jev rejected as too big.
+
+        The longest question goes alone first. If Jev rejects that too, the state is too
+        big, and :class:`StateTooLargeError` tells the stage to chunk it, as it would for
+        an estimated overflow. Otherwise the rest go in two halves, each split again if
+        it is rejected. So a too-big state costs one more request, not one per question.
+        """
+        if len(batch) == 1:
+            raise StateTooLargeError(
+                f"Jev rejected the state with a single question as over its token limits "
+                f"(estimated ~{estimate_request_tokens(state, batch)} tokens). Split the "
+                "component before asking."
+            ) from rejected
+        longest = max(batch, key=lambda key: estimate_question_tokens(batch[key]))
+        answers = await self._ask_batch(state, {longest: batch[longest]})
+        rest = [key for key in batch if key != longest]
+        halves = [half for half in (rest[: len(rest) // 2], rest[len(rest) // 2 :]) if half]
+        parts = await gather(
+            self._ask_batch(state, {key: batch[key] for key in half}) for half in halves
         )
+        for part in parts:
+            answers.update(part)
+        return answers
+
+    async def _send(self, state: JSONContent, batch: dict[str, Question]) -> JevResponse:
+        estimated = estimate_request_tokens(state, batch)
         if self.max_requests is not None:
             if self._started >= self.max_requests:
                 raise JevRequestCapError(f"the cap of {self.max_requests} Jev requests is used up")
@@ -461,6 +634,11 @@ class JevClient:
                 self.usage.requests += 1
                 self.usage.questions += len(batch)
                 self.usage.input_tokens += estimated
+                self.usage.seconds += time.perf_counter() - start
+                raise
+            except JevTokenLimitError:
+                # Rejected before Jev read it, so nothing is billed, but it was a request.
+                self.usage.requests += 1
                 self.usage.seconds += time.perf_counter() - start
                 raise
             elapsed = time.perf_counter() - start

@@ -29,6 +29,7 @@ from jevex.jev import (
     ChoiceAnswer,
     JevClient,
     JevResponse,
+    JevTokenLimitError,
     JSONContent,
     Noul,
     NoulAnswer,
@@ -36,6 +37,7 @@ from jevex.jev import (
     ScoreAnswer,
     StateTooLargeError,
     UnexpectedAnswerError,
+    estimate_tokens,
 )
 from jevex.testing import FakeJev
 
@@ -170,10 +172,46 @@ async def test_long_text_is_cut_to_max_chars() -> None:
     assert fake.calls[0].state == "x" * 10
 
 
-async def test_oversized_state_raises_rather_than_being_dropped() -> None:
-    jev = JevClient(FakeJev(), state_token_budget=100)
-    with pytest.raises(StateTooLargeError):
-        await NoulDocumentGate().gate(html(f"<p>{'word ' * 400}</p>"), specs(Car), jev)
+async def test_text_is_cut_to_what_fits_in_one_request() -> None:
+    fake = FakeJev()
+    jev = JevClient(fake, state_token_budget=100)
+    await NoulDocumentGate().gate(html(f"<p>{'| 123 ' * 400}</p>"), specs(Car), jev)
+    (call,) = fake.calls
+    assert isinstance(call.state, str)
+    assert call.state.startswith("| 123")
+    assert estimate_tokens(call.state) < 100
+
+
+class RejectsLongStates(FakeJev):
+    """Rejects states longer than ``max_chars``, as Jev does when its count is higher than
+    the client's estimate."""
+
+    def __init__(self, max_chars: int) -> None:
+        super().__init__()
+        self.max_chars = max_chars
+        self.rejected = 0
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if len(str(state)) > self.max_chars:
+            self.rejected += 1
+            raise JevTokenLimitError("max_tokens_exceeded")
+        return await super().system_one(state, questions)
+
+
+async def test_text_jev_rejects_is_halved_until_it_fits() -> None:
+    fake = RejectsLongStates(max_chars=1000)
+    await NoulDocumentGate().gate(html(f"<p>{'word ' * 1000}</p>"), specs(Car), fake.client())
+    (call,) = fake.calls
+    assert fake.rejected == 3  # 4999 characters, then 2499, then 1249
+    assert call.state == ("word " * 1000).strip()[:624]
+
+
+async def test_a_question_too_big_for_any_state_raises() -> None:
+    jev = JevClient(FakeJev(), state_token_budget=5)
+    with pytest.raises(StateTooLargeError, match="a question alone"):
+        await NoulDocumentGate().gate(html("<p>A car.</p>"), specs(Car), jev)
 
 
 async def test_non_noul_answer_raises() -> None:

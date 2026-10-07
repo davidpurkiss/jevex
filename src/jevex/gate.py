@@ -28,7 +28,7 @@ from jevex import _pdfium
 from jevex._tasks import gather
 from jevex.clean import html_text_of
 from jevex.interfaces import GateDecision
-from jevex.jev import NoulAnswer, UnexpectedAnswerError
+from jevex.jev import NoulAnswer, StateTooLargeError, UnexpectedAnswerError
 
 if TYPE_CHECKING:
     from jevex.document import Document
@@ -39,8 +39,9 @@ if TYPE_CHECKING:
 
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_MAX_CHARS = 60_000
-"""About 15k tokens: enough to tell what a document is about, well inside Jev's 32k state
-limit. Longer text is cut to its leading part."""
+"""About 15k tokens of prose: enough to tell what a document is about. Longer text is cut to
+its leading part, and so is text that wouldn't fit in Jev's state limit (tables and numbers
+take about three times the tokens of prose)."""
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,9 @@ class NoulDocumentGate:
     when any page does, and its ``p`` is the highest page's. Pages with no text aren't
     asked and are left out of ``GateDecision.pages``. A schema whose document (or every
     page) has no readable text gets no decision, so it is neither passed nor ruled out.
-    Text longer than ``max_chars`` (per document or page) is cut to its leading part.
+    Text longer than ``max_chars`` (per document or page), or than fits in one Jev request
+    (:meth:`~jevex.jev.JevClient.fit_state`), is cut to its leading part, and halved again
+    if Jev rejects it as too big.
     """
 
     def __init__(
@@ -162,11 +165,19 @@ class NoulDocumentGate:
 
     async def _ask(self, state: str, schemas: list[SchemaSpec], jev: JevClient) -> dict[str, float]:
         """Every schema's gate question about one state, in one request."""
-        state = state.strip()[: self.max_chars]
-        if not schemas or not state:
+        if not schemas or not state.strip():
             return {}
         questions: dict[str, Noul] = {s.name: s.document_gate_question() for s in schemas}
-        answers = await jev.ask(state, questions)
+        state = jev.fit_state(state.strip()[: self.max_chars], questions)
+        while True:
+            try:
+                answers = await jev.ask(state, questions)
+                break
+            except StateTooLargeError:
+                # Jev counted more tokens than the estimate: read half as much.
+                if len(state) < 2:
+                    raise
+                state = state[: len(state) // 2]
         out: dict[str, float] = {}
         for name, answer in answers.items():
             if not isinstance(answer, NoulAnswer):

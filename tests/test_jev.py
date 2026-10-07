@@ -1,7 +1,9 @@
 import asyncio
 import json
+import random
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pytest
@@ -14,6 +16,7 @@ from jevex.jev import (
     JevClient,
     JevRequestCapError,
     JevResponse,
+    JevTokenLimitError,
     JSONContent,
     MissingAnswerError,
     Noul,
@@ -23,7 +26,10 @@ from jevex.jev import (
     ScoreAnswer,
     StateTooLargeError,
     TypeSafeBackend,
+    estimate_question_tokens,
+    estimate_request_tokens,
     estimate_tokens,
+    truncate_to_tokens,
 )
 
 
@@ -152,9 +158,211 @@ def test_question_validation() -> None:
         Score(instructions="?", levels=[str(i) for i in range(11)])
 
 
+# --- Requests Jev rejects as too big -----------------------------------------------------
+
+
+class TokenLimitedBackend(RecordingBackend):
+    """Rejects, as Jev does with ``max_tokens_exceeded``, any request with more than
+    ``max_questions`` questions or a state longer than ``max_state_chars``: a real count
+    higher than the client's estimate."""
+
+    def __init__(self, *, max_questions: int = 1000, max_state_chars: int = 10_000) -> None:
+        super().__init__()
+        self.rejected: list[list[str]] = []
+        self._max_questions = max_questions
+        self._max_state_chars = max_state_chars
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if len(questions) > self._max_questions or len(str(state)) > self._max_state_chars:
+            self.rejected.append(list(questions))
+            raise JevTokenLimitError('400 {"detail":{"error_type":"max_tokens_exceeded"}}')
+        return await super().system_one(state, questions)
+
+
+def _nouls(n: int) -> dict[str, Question]:
+    return {f"q{i}": Noul(instructions=f"Is question number {i} true?") for i in range(n)}
+
+
+async def test_a_rejected_request_is_asked_again_in_parts() -> None:
+    backend = TokenLimitedBackend(max_questions=3)
+    client = JevClient(backend)
+    answers = await client.ask("state", _nouls(10))
+    assert list(answers) == list(_nouls(10))  # every answer, in the order asked
+    assert all(len(call) <= 3 for call in backend.calls)
+    assert sorted(k for call in backend.calls for k in call) == sorted(_nouls(10))
+    # The longest question goes alone first, then the rest in halves.
+    assert backend.rejected[0] == list(_nouls(10))
+    assert backend.calls[0] == ["q0"]
+    # Rejected requests count as requests but aren't billed.
+    assert client.usage.requests == len(backend.calls) + len(backend.rejected)
+    assert client.usage.questions == 10
+    assert client.usage.input_tokens == 100 * len(backend.calls)
+
+
+async def test_a_state_too_big_for_jev_raises_after_one_more_request() -> None:
+    backend = TokenLimitedBackend(max_state_chars=100)
+    client = JevClient(backend)
+    with pytest.raises(StateTooLargeError, match="rejected the state"):
+        await client.ask("x " * 100, _nouls(50))
+    assert len(backend.rejected) == 2  # the batch, then its longest question alone
+    assert len(backend.rejected[1]) == 1
+    assert backend.calls == []
+    assert client.usage.input_tokens == 0
+
+
+async def test_a_single_rejected_question_raises_at_once() -> None:
+    backend = TokenLimitedBackend(max_state_chars=100)
+    with pytest.raises(StateTooLargeError):
+        await JevClient(backend).ask("x " * 100, {"q": Noul(instructions="?")})
+    assert len(backend.rejected) == 1
+
+
+async def test_fit_state_cuts_text_to_the_state_budget() -> None:
+    client = JevClient(RecordingBackend(), state_token_budget=100)
+    questions = {"q": Noul(instructions="Is this a car?")}
+    text = _table(80)
+    fitted = client.fit_state(text, questions)
+    assert text.startswith(fitted)
+    assert estimate_tokens(fitted) + estimate_question_tokens(questions["q"]) <= 100
+    await client.ask(fitted, questions)  # plans without StateTooLargeError
+    with pytest.raises(StateTooLargeError, match="a question alone"):
+        JevClient(RecordingBackend(), state_token_budget=5).fit_state(text, questions)
+
+
+# --- Token estimates, against #6's measurements ------------------------------------------
+#
+# The states below are the ones #6's probe sent (benchmarks/jev_limits/probe.py, same seeds),
+# each with one Noul; the counts are the input tokens Jev billed for them.
+
+_WORDS = (  # noqa: SIM905 - the probe's word list, as it wrote it
+    "engine power torque gearbox manual automatic hybrid petrol diesel electric range battery "
+    "charge seats boot litres kilowatts emissions mileage warranty trim alloy wheels the a of "
+    "and with in on for to from by is are offers delivers includes standard optional"
+).split()
+
+
+def _prose(chars: int, seed: int = 0) -> str:
+    rng = random.Random(seed)
+    out: list[str] = []
+    n = 0
+    while n < chars:
+        sentence = " ".join(rng.choice(_WORDS) for _ in range(rng.randint(8, 18))).capitalize()
+        sentence += f" {rng.randint(10, 999)} {rng.choice(['kW', 'PS', 'mph', 'g/km', 'l'])}."
+        out.append(sentence)
+        n += len(sentence) + 1
+    return " ".join(out)[:chars]
+
+
+def _table(rows: int) -> str:
+    rng = random.Random(1)
+    lines = ["Specification | SE | SE L | GT | R-Line"]
+    for i in range(rows):
+        lines.append(
+            f"Spec {i} ({rng.choice(['kW', 'mph', 's', 'g/km'])}) | "
+            + " | ".join(str(rng.randint(1, 999)) for _ in range(4))
+        )
+    return "\n".join(lines)
+
+
+def _blob(keys: int) -> dict[str, Any]:
+    rng = random.Random(2)
+    return {
+        "vehicle": {
+            f"field_{i}": {"value": rng.randint(1, 9999), "unit": rng.choice(["kW", "mph"])}
+            for i in range(keys)
+        }
+    }
+
+
+def _spec_noul(i: int) -> Noul:
+    return Noul(instructions=f"Does the text state a value for spec {i}?")
+
+
+MEASURED_STATES: list[tuple[str, JSONContent, int]] = [
+    ("prose", _prose(4000), 1159),
+    ("table", _table(80), 2522),
+    ("json", _blob(60), 1859),
+    ("long prose, 22k", _prose(int(28_000 * 3.451), seed=28_000), 21_905),
+    ("long prose, 31k", _prose(int(40_000 * 3.451), seed=40_000), 31_178),
+    ("largest accepted", _prose(int(32_500 * 4.4), seed=32_500), 32_193),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "state", "real"), MEASURED_STATES, ids=[kind for kind, _, _ in MEASURED_STATES]
+)
+def test_state_estimates_err_high_but_not_far(kind: str, state: JSONContent, real: int) -> None:
+    estimate = estimate_request_tokens(state, {"q": _spec_noul(0)})
+    assert real <= estimate <= real * 1.15, kind
+
+
+def test_tables_and_json_are_no_longer_read_at_a_third_of_their_size() -> None:
+    # The old 4-characters-per-token rule estimated these at 750 and 651.
+    assert estimate_tokens(_table(80)) > 2000
+    assert estimate_tokens(_blob(60)) > 1500
+
+
+_LONG_QUESTION = "Does the text state the value for " + "this particular specification " * 40
+
+
+@pytest.mark.parametrize(
+    ("questions", "real"),
+    [
+        ({f"q{i}": Noul(instructions=f"Is {i} stated?") for i in range(1000)}, 14_160),
+        ({f"q{i}": Noul(instructions=f"Is {i} stated?") for i in range(4400)}, 65_160),
+        ({f"q{i}": Noul(instructions=f"{_LONG_QUESTION} {i}?") for i in range(200)}, 28_160),
+    ],
+    ids=["1000 tiny", "4400 tiny (largest accepted request)", "200 long"],
+)
+def test_question_estimates_are_close(questions: dict[str, Question], real: int) -> None:
+    # The state is a few tokens, so the count is almost all questions.
+    estimate = estimate_request_tokens("Spec 3 is 120 kW.", questions)
+    assert estimate == pytest.approx(real, rel=0.06)
+
+
+@pytest.mark.parametrize(("n", "real"), [(10, 1321), (50, 2081)])
+def test_extra_questions_on_a_state_cost_what_jev_bills(n: int, real: int) -> None:
+    state = _prose(4000)
+    one = estimate_request_tokens(state, {"q": _spec_noul(0)})
+    many = estimate_request_tokens(state, {f"q{i}": _spec_noul(i) for i in range(n)})
+    assert many - one == pytest.approx(real - 1159, rel=0.1)
+
+
+def test_a_short_question_is_estimated_as_measured() -> None:
+    # Each extra Noul on the same state added about 18 tokens: (1321 - 1159) / 9.
+    assert estimate_question_tokens(_spec_noul(0)) == 18
+
+
+def test_options_and_levels_count_towards_a_question() -> None:
+    bare = estimate_question_tokens(Choice(instructions="Which field?", options={"a": None}))
+    described = estimate_question_tokens(
+        Choice(instructions="Which field?", options={"a": None, "price": "The price paid"})
+    )
+    assert described > bare + 4
+    score = Score(instructions="How relevant?", levels=["low", "mid", "high"])
+    assert estimate_question_tokens(score) > estimate_question_tokens(
+        Noul(instructions="How relevant?")
+    )
+
+
 def test_estimate_tokens() -> None:
-    assert estimate_tokens("abcd" * 100) == 101
-    assert estimate_tokens({"k": "v"}) >= 1
+    assert estimate_tokens("") == 0
+    assert estimate_tokens("the engine") == 2
+    assert estimate_tokens("120") == 3  # a token per digit
+    assert estimate_tokens("a | b") == 3
+    assert estimate_tokens("Größe") == 4  # each non-ASCII letter on its own
+    assert estimate_tokens({"k": "ö"}) == estimate_tokens('{"k": "ö"}')
+
+
+def test_truncate_to_tokens_keeps_the_longest_prefix_that_fits() -> None:
+    text = _table(80)
+    cut = truncate_to_tokens(text, 500)
+    assert text.startswith(cut)
+    assert estimate_tokens(cut) <= 500 < estimate_tokens(text[: len(cut) + 1])
+    assert truncate_to_tokens("short text", 500) == "short text"
+    assert truncate_to_tokens("short text", 0) == ""
 
 
 async def test_typesafe_backend_round_trip() -> None:
@@ -225,6 +433,15 @@ async def test_typesafe_backend_round_trip() -> None:
 # --- Process-wide spend cap ------------------------------------------------------------
 
 
+# RecordingBackend bills 100 tokens per request; the cap is checked against each request's
+# estimate before it is sent.
+ESTIMATE = estimate_request_tokens("s", {"q": Noul(instructions="?")})
+
+
+def usd(tokens: float) -> str:
+    return f"{tokens * 0.042 / 1_000_000:.12f}"
+
+
 @pytest.fixture
 def fresh_spend() -> Iterator[None]:
     from jevex.jev import reset_process_cost
@@ -240,9 +457,8 @@ async def test_spend_cap_blocks_request_before_sending(monkeypatch: pytest.Monke
 
     backend = RecordingBackend()  # reports 100 input tokens per request
     client = JevClient(backend)
-    # Each request reports 100 tokens ($0.0000042) and is estimated at ~14 tokens before
-    # sending. Two fit under $0.000007; after that, spend is already past the cap.
-    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000070")
+    # Two requests fit (100 tokens spent, plus the next one's estimate); a third doesn't.
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", usd(150 + ESTIMATE))
     await client.ask("s", {"q": Noul(instructions="?")})
     await client.ask("s", {"q": Noul(instructions="?")})
     assert process_cost() == pytest.approx(2 * 100 * 0.042 / 1_000_000)
@@ -255,8 +471,8 @@ async def test_spend_cap_blocks_request_before_sending(monkeypatch: pytest.Monke
 async def test_spend_cap_is_shared_across_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     from jevex.jev import JevBudgetExceededError
 
-    # One request spends $0.0000042; a second one would pass $0.0000045.
-    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000045")
+    # One request spends 100 tokens; a second one's estimate would pass the cap.
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", usd(50 + ESTIMATE))
     await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
     with pytest.raises(JevBudgetExceededError):
         await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
@@ -287,12 +503,12 @@ async def test_ledger_cap_counts_spend_from_other_processes(
     from jevex.jev import JevBudgetExceededError, process_cost
 
     ledger = tmp_path / "run.ledger"
-    ledger.write_text("jev 0.0000040\nllm 5\n")  # another process's spend
+    ledger.write_text("jev 0.0000040\nllm 5\n")  # another process's spend: ~95 tokens
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
-    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000070")
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", usd(150 + ESTIMATE))
     backend = RecordingBackend()
     client = JevClient(backend)
-    await client.ask("s", {"q": Noul(instructions="?")})  # ~$0.0000006 estimated: fits
+    await client.ask("s", {"q": Noul(instructions="?")})  # 95 + the estimate: fits
     with pytest.raises(JevBudgetExceededError, match="spend cap"):
         await client.ask("s", {"q": Noul(instructions="?")})
     assert len(backend.calls) == 1
@@ -347,7 +563,7 @@ async def test_ledger_never_loosens_the_process_cap(
 ) -> None:
     from jevex.jev import JevBudgetExceededError
 
-    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000045")
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", usd(50 + ESTIMATE))
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "a.ledger"))
     await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})  # $0.0000042
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "b.ledger"))  # empty
@@ -370,6 +586,58 @@ async def test_sdk_errors_become_jev_backend_errors() -> None:
     with pytest.raises(JevBackendError):
         await JevClient(backend).ask("s", {"q": Noul(instructions="?")})
     await backend.aclose()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"detail": {"error_type": "max_tokens_exceeded"}}, {"error_type": "max_tokens_exceeded"}],
+)
+async def test_max_tokens_exceeded_becomes_a_token_limit_error(body: dict[str, Any]) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        questions = json.loads(request.content)["questions"]
+        if len(questions) > 2:
+            return httpx2.Response(400, json=body)
+        return httpx2.Response(
+            200,
+            json={
+                "model": "jev-1.13.0",
+                "answers": {k: {"type": "noul", "noul": 0.5} for k in questions},
+                "usage": {"input_tokens": 300},
+            },
+        )
+
+    sdk = AsyncTypeSafeClient(
+        api_key="ts-test-key",
+        transport=httpx2.MockTransport(handler),
+        retry=RetryPolicy(max_retries=0),
+    )
+    backend = TypeSafeBackend(sdk)
+    with pytest.raises(JevTokenLimitError):
+        await backend.system_one("s", _nouls(3))
+    client = JevClient(backend)
+    answers = await client.ask("s", _nouls(5))
+    await backend.aclose()
+    assert set(answers) == set(_nouls(5))
+    assert client.usage.requests == 4  # rejected; the longest alone; the rest in two halves
+    assert client.usage.input_tokens == 3 * 300
+
+
+async def test_other_bad_requests_are_not_token_limit_errors() -> None:
+    from jevex.jev import JevBackendError
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(400, json={"detail": {"error_type": "invalid_question"}})
+
+    sdk = AsyncTypeSafeClient(
+        api_key="ts-test-key",
+        transport=httpx2.MockTransport(handler),
+        retry=RetryPolicy(max_retries=0),
+    )
+    backend = TypeSafeBackend(sdk)
+    with pytest.raises(JevBackendError) as raised:
+        await JevClient(backend).ask("s", _nouls(3))
+    await backend.aclose()
+    assert not isinstance(raised.value, JevTokenLimitError)
 
 
 def test_missing_key_is_a_jev_backend_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -408,4 +676,6 @@ async def test_a_request_cancelled_mid_flight_is_still_counted() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert client.usage.requests == 1
-    assert client.usage.input_tokens > 0
+    assert client.usage.input_tokens == estimate_request_tokens(
+        "some state", {"q": Noul(instructions="a?")}
+    )
