@@ -203,6 +203,17 @@ def test_a_page_without_a_wave_has_none(tmp_path: Path) -> None:
     assert load_corpus(tmp_path)[0].wave is None
 
 
+def test_a_pages_locale_comes_from_the_manifest(tmp_path: Path) -> None:
+    manifest = build(42, tmp_path, waves=[["table", "pdf", "infographic"]])
+    locales = {i.path.relative_to(tmp_path).as_posix(): i.locale for i in load_corpus(tmp_path)}
+    families = {p["path"]: p["family"] for p in manifest["pages"]}
+    assert {families[path]: locale for path, locale in locales.items()} == {
+        "table": None,  # the page says it (<html lang>)
+        "pdf": "en-GB",
+        "infographic": "en-GB",
+    }
+
+
 def test_load_corpus_errors(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="isn't a corpus manifest"):
         load_corpus(tmp_path)
@@ -226,6 +237,11 @@ MALFORMED: list[tuple[Any, str]] = [
     ([{"path": "x.html", "schema": "X", "records": [], "wave": "2"}], "'wave' must be a number"),
     ([{"path": "x.html", "schema": "X", "records": [], "wave": True}], "'wave' must be a number"),
     ([{"path": "/nope/x.html", "schema": "X", "records": []}], "lists /nope/x.html, which doesn't"),
+    (
+        [{"path": "x.html", "schema": "X", "records": [], "locale": "English"}],
+        "page 0: 'locale' must be a language tag",
+    ),
+    ([{"path": "x.html", "schema": "X", "records": [], "locale": 7}], "'locale' must be"),
 ]
 
 
@@ -283,6 +299,29 @@ async def test_a_perfect_extractor_scores_100_percent(tmp_path: Path) -> None:
     assert summary["accuracy"] == 1.0
     assert summary["resolution_mix"]["jev"] > 0
     assert all(s.wrong == s.missing == s.spurious == 0 for s in report.field_scores().values())
+
+
+@dataclass
+class SeesLocale:
+    seen: dict[str, str | None] = field(default_factory=dict[str, "str | None"])
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        self.seen[Path(ctx.document.url or "").name] = ctx.locale
+
+
+async def test_documents_get_the_manifests_locale(tmp_path: Path) -> None:
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.7")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.7")
+    pages: list[dict[str, Any]] = [
+        {"path": "a.pdf", "schema": "VehicleSpec", "records": [], "locale": "de_de"},
+        {"path": "b.pdf", "schema": "VehicleSpec", "records": []},
+    ]
+    (tmp_path / "truth.json").write_text(json.dumps({"pages": pages}))
+    stage = SeesLocale()
+    ex = Extractor([VehicleSpec], jev=FakeJev().client(), pipeline=Pipeline([stage]))
+    await evaluate(ex, load_corpus(tmp_path))
+    assert stage.seen == {"a.pdf": "de-DE", "b.pdf": None}
 
 
 async def test_mistakes_land_in_the_right_buckets(tmp_path: Path) -> None:

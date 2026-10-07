@@ -531,7 +531,9 @@ def _relative(item: CorpusItem, root: Path) -> str:
 
 
 async def _load(item: CorpusItem) -> Document:
-    return await asyncio.to_thread(Document.from_path, item.path, url=item.path.as_posix())
+    return await asyncio.to_thread(
+        Document.from_path, item.path, url=item.path.as_posix(), locale=item.locale
+    )
 
 
 async def _run_one(
