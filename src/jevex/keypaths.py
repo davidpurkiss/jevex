@@ -448,8 +448,9 @@ class KeyPathMapper:
         packs: Sequence[Pack],
     ) -> dict[str, dict[str, str | None]]:
         """Per schema: collapsed path → field name (or None) for every path known. A store
-        that fails is added to ``failures``: its mappings count as unknown, and what Jev
-        answers isn't stored."""
+        that fails is added to ``failures``: a failed lookup counts as no mappings stored (the
+        paths are asked about), a failed count gives up on no path, and a failed write
+        is skipped."""
         fingerprint = flat.fingerprint
         shapes = flat.shapes()
         known: dict[str, dict[str, str | None]] = {}

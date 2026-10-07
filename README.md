@@ -310,8 +310,9 @@ asked about again, which costs an extra Jev call), and a write that fails is ski
 ### Spend ledger
 
 A run budget (`RunBudget`) is kept in a spend ledger that every worker on the same run
-shares. By default that's the store (SQLite and Postgres are ledgers too). With no store,
-it's a `MemoryLedger` for the extractor. To keep spend somewhere else, such as a Redis
+shares. By default that's the store (SQLite and Postgres are ledgers too; with no store, the
+extractor opens an in-memory SQLite one). A custom store that isn't a ledger gets a
+`MemoryLedger` for the extractor. To keep spend somewhere else, such as a Redis
 counter, a billing system or a per-process cap, implement `SpendLedger` and pass it in:
 
 ```python

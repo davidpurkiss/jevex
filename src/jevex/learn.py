@@ -341,6 +341,7 @@ LearnStatus = Literal[
     "unlearnable",
     "budget",
     "ledger_error",
+    "store_error",
     "llm_error",
     "jev_error",
     "invalid_spec",
@@ -351,7 +352,9 @@ LearnStatus = Literal[
 ``unlearnable``: no registered candidate field, or an example whose value doesn't fit it.
 ``budget``: the run budget (or a process cap) refused the LLM or Jev. ``ledger_error``:
 the spend ledger failed, so the run budget couldn't be checked and the LLM or Jev wasn't
-asked. ``llm_error``, ``jev_error``: a call failed. ``invalid_spec``: the draft didn't validate.
+asked. ``store_error``: the store couldn't be read for the regression test, or the
+accepted generator couldn't be stored, so it wasn't published. ``llm_error``,
+``jev_error``: a call failed. ``invalid_spec``: the draft didn't validate.
 ``missed_trigger``: it didn't give the value on the triggering statement.
 ``regressed``: it lowered accuracy on the field's stored examples."""
 
@@ -556,7 +559,12 @@ class GeneratorLearner:
             raise _Rejected("budget", str(exc), generator_spec) from None
         except JevError as exc:
             raise _Rejected("jev_error", f"{type(exc).__name__}: {exc}", generator_spec) from None
-        snapshot = await self.generators.publish(generator_spec)
+        except StoreError as exc:  # reading the stored examples
+            raise _Rejected("store_error", str(exc), generator_spec) from None
+        try:
+            snapshot = await self.generators.publish(generator_spec)
+        except StoreError as exc:
+            raise _Rejected("store_error", str(exc), generator_spec) from None
         return LearnOutcome(
             example_id=example.id,
             field=example.field,

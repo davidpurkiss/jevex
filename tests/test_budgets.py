@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
@@ -178,15 +178,15 @@ class BrokenLedger(MemoryLedger):
         self.read_fails = read
         self.write_fails = write
 
-    async def spend(self, **kw: object) -> float:
+    async def spend(self, **kw: Any) -> float:
         if self.read_fails:
             raise ConnectionError("redis down")
-        return await super().spend(**kw)  # pyright: ignore[reportArgumentType]
+        return await super().spend(**kw)
 
-    async def try_spend(self, entry: SpendEntry, **kw: object) -> bool:
+    async def try_spend(self, entry: SpendEntry, **kw: Any) -> bool:
         if self.read_fails:
             raise ConnectionError("redis down")
-        return await super().try_spend(entry, **kw)  # pyright: ignore[reportArgumentType]
+        return await super().try_spend(entry, **kw)
 
     async def record_spend(self, entry: SpendEntry) -> None:
         if self.write_fails:

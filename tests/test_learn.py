@@ -579,6 +579,49 @@ async def test_spend_a_ledger_cant_record_is_noted_on_the_outcome() -> None:
     )
 
 
+class NoPublish(SQLiteStore):
+    """A store that can't store generators (``publish``) or read examples (``examples``)."""
+
+    def __init__(self, *, publish: bool = True, examples: bool = False) -> None:
+        super().__init__(":memory:")
+        self.fail_publish, self.fail_examples = publish, examples
+
+    async def put_generator(self, generator: GeneratorRecord) -> None:
+        if self.fail_publish:
+            raise StoreError("disk full")
+        await super().put_generator(generator)
+
+    async def examples(
+        self, field: str | None = None, *, limit: int | None = None
+    ) -> list[VerifiedExample]:
+        if self.fail_examples:
+            raise StoreError("connection reset")
+        return await super().examples(field, limit=limit)
+
+
+@pytest.mark.parametrize(
+    ("store_kw", "message"),
+    [({"publish": True}, "disk full"), ({"publish": False, "examples": True}, "connection reset")],
+)
+async def test_a_store_failure_while_learning_is_an_outcome_and_the_worker_carries_on(
+    store_kw: dict[str, bool], message: str
+) -> None:
+    store = NoPublish(**store_kw)
+    fake = FakeJev().choice(None, pick("9.1"))
+    gl = learner(fake, FakeLLM(lambda _p, _s: DRAFT), store=store)
+    await gl.submit(example())
+    await gl.drain()
+    [outcome] = gl.outcomes
+    assert (outcome.status, outcome.message) == ("store_error", message)
+    assert outcome.spec is not None
+    assert len(gl.snapshot.registry) == 0  # nothing was published
+    await gl.submit(example("9.5 seconds", 9.5, eid="ex-2"))  # the worker is still running
+    await gl.drain()
+    assert len(gl.outcomes) == 2
+    await gl.aclose()
+    await store.aclose()
+
+
 async def test_spend_keeps_running_totals_without_a_run_budget() -> None:
     fake = FakeJev().choice(None, pick("9.1"))
     llm = FakeLLM([DRAFT], price=(1.0, 1.0))

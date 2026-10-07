@@ -1009,7 +1009,9 @@ class Extractor:
             # Every branch has settled (fan-outs cancel on failure, and a request
             # cancelled mid-flight is counted at its estimate), so this is the
             # document's whole Jev spend, recorded even when a stage failed. A ledger
-            # that fails is reported; the result stands.
+            # that fails is reported (as the extractor's: a failed stage leaves its name
+            # on ctx.stage); the result stands.
+            ctx.stage = None
             await budget.finish_document(ctx.jev.usage.cost)
 
     @staticmethod

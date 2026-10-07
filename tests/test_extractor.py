@@ -357,6 +357,33 @@ async def test_a_ledger_that_cant_record_makes_the_result_partial() -> None:
     ]
 
 
+async def test_a_ledger_failure_after_a_failed_stage_is_the_extractors() -> None:
+    class Breaks:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            await ctx.jev.ask("s", {"q": Noul(instructions="a?")})
+            raise RuntimeError("bug")
+
+    class NoWrite(MemoryLedger):
+        async def record_spend(self, entry: SpendEntry) -> None:
+            raise ConnectionError("read-only")
+
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([Breaks()]),
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+        ledger=NoWrite(),
+    )
+    result = await ex.extract(doc())
+    assert [(e.stage, e.kind, e.fatal) for e in result.errors] == [
+        ("select", "stage", True),
+        ("extract", "ledger", False),
+    ]
+    await ex.aclose()
+
+
 async def test_a_ledger_that_cant_be_read_skips_llm_calls_and_jev_carries_on() -> None:
     class DownLedger(MemoryLedger):
         async def spend(self, **kw: object) -> float:
