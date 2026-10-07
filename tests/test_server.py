@@ -597,3 +597,26 @@ def test_a_documents_language_reaches_the_extractor() -> None:
     document = request.document.to_document()
     assert (document.content_language, document.locale) == ("de-DE, en", "de-AT")
     assert DocumentIn(content=HTML).to_document().locale is None
+
+
+async def test_stats_dont_read_spend_from_the_in_memory_ledger(
+    stage: FindValues, fake_jev: FakeJev
+) -> None:
+    store = NotALedger()
+    service = Service(
+        [Book],
+        jev=fake_jev.client(),
+        store=cast("Store", store),
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+        stats=True,
+    )
+    await service.start()
+    result = await service.extract(DocumentIn(content=HTML).to_document(), ["Book"])
+    shared = service.ledger
+    assert isinstance(shared, MemoryLedger)
+    # Only this process's spend is in it; the store's documents may be every process's.
+    await shared.record_spend(SpendEntry(amount_usd=0.5, kind="llm", run_id=service.run_id))
+    stats = await service.read_stats()
+    assert stats.spend[-1].total == pytest.approx(result.meta.jev.cost)
+    await service.aclose()
+    await store.inner.aclose()
