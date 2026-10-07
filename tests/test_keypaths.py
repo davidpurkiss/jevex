@@ -871,3 +871,116 @@ async def test_merge_mode_end_to_end_records_the_layout_routes_disagreement() ->
     assert (meta.value, meta.method) == ("Golf", "structured")
     [conflict] = meta.conflicts
     assert (conflict.value, conflict.method, conflict.confidence) == ("Polo", "generator", 0.8)
+
+
+# --- named items, for multi-entity pages ---------------------------------------------
+
+TRIMS = {
+    "@type": "Car",
+    "model": "Kestrova",
+    "fuelType": "Petrol",
+    "offers": [
+        {"@type": "Offer", "name": "Kestrova SE L", "price": 26995, "fuelType": "Fully electric"},
+        {"@type": "Offer", "itemOffered": {"vehicleConfiguration": "SE"}, "price": 24995},
+        {"@type": "Offer", "price": 1},
+    ],
+    "tags": ["a", "b"],
+}
+
+
+def test_flatten_records_the_array_objects_that_name_something() -> None:
+    flat = flatten(blob(TRIMS))
+    first, second = flat.items
+    assert (first.path, first.names) == ("offers[0]", ("Kestrova SE L",))
+    # A nested object's name key counts (any case); the unnamed offer isn't an item.
+    assert (second.path, second.names) == ("offers[1]", ("SE",))
+    assert [leaf.path for leaf in flat.leaves[second.start : second.end]] == [
+        "offers[1].@type",
+        "offers[1].itemOffered.vehicleConfiguration",
+        "offers[1].price",
+    ]
+    assert flatten(blob(CAR)).items == ()  # no names: nothing to match
+
+
+def test_a_name_inside_a_nested_array_names_the_inner_object_only() -> None:
+    data = {"models": [{"name": "Kestrova", "trims": [{"name": "SE", "power": 150}]}]}
+    outer, inner = flatten(blob(data)).items
+    assert (outer.path, outer.names) == ("models[0]", ("Kestrova",))
+    assert (inner.path, inner.names) == ("models[0].trims[0]", ("SE",))
+    assert (outer.start, outer.end, inner.start, inner.end) == (0, 3, 1, 3)
+
+
+async def test_the_mapper_reads_each_named_item_and_the_rest_on_their_own() -> None:
+    fake = mapping_jev().choice(
+        re.compile("(?i)what is the fuel type"), "ev", confidence=0.8, state="Fully electric"
+    )
+    mapping = {**MAPPING, "offers[].fuelType": "fuel"}
+    for path, name in mapping.items():
+        fake.choice(f'key path "{path}"', _pick(name), confidence=0.9)
+    result = await KeyPathMapper().extract(page(TRIMS), [SchemaSpec.from_model(Car)], fake.client())
+    se_l, se = result.items
+    assert se_l.names == ("Kestrova SE L",)
+    assert {n: m.value for n, m in se_l.fields["Car"].items()} == {"price": 26995, "fuel": "ev"}
+    assert {n: m.value for n, m in se.fields["Car"].items()} == {"price": 24995}
+    assert se.statement_ids == {"structured.0.7", "structured.0.8", "structured.0.9"}
+    # The page's value is the first found anywhere; the rest skips the named offers.
+    page_values = {n: m.value for n, m in result.fields["Car"].items()}
+    assert page_values == {"model": "Kestrova", "fuel": "petrol", "price": 26995}
+    assert {n: m.value for n, m in result.rest["Car"].items()} == {
+        "model": "Kestrova",
+        "fuel": "petrol",
+        "price": 1,
+    }
+    # "Fully electric" was asked once, for the page; the item reused the answer.
+    assert len([c for c in fake.calls if "enum" in c.questions]) == 1
+
+
+async def test_items_use_only_jevs_remembered_readings() -> None:
+    # The page's fuel reads directly from the second offer, so "Fully electric" is never
+    # asked, and the offer that says it gets no fuel rather than a new Jev request.
+    data = {
+        "offers": [
+            {"name": "SE L", "fuelType": "Fully electric"},
+            {"name": "SE", "fuelType": "Petrol"},
+        ]
+    }
+    fake = mapping_jev({"offers[].fuelType": "fuel"}).choice(
+        re.compile("(?i)what is the fuel type"), "ev", state="Fully electric"
+    )
+    result = await KeyPathMapper().extract(page(data), [SchemaSpec.from_model(Car)], fake.client())
+    assert [c for c in fake.calls if "enum" in c.questions] == []
+    assert result.fields["Car"]["fuel"].value == "petrol"
+    se_l, se = (item.fields["Car"]["fuel"] for item in result.items)
+    assert (se_l.found, se.value) == (False, "petrol")
+    assert se_l.error is not None
+
+
+async def test_without_named_items_the_rest_is_the_pages_values() -> None:
+    result = await KeyPathMapper().extract(
+        page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client()
+    )
+    assert result.items == []
+    assert result.rest == result.fields
+
+
+async def test_the_stage_keeps_the_items_and_the_rest_on_each_run() -> None:
+    ctx = Context.create(page(TRIMS), [SchemaSpec.from_model(Car)], mapping_jev().client())
+    await StructuredStage(mode="fill_gaps").run(ctx)
+    run = ctx.schemas["Car"]
+    assert [i.path for i in run.structured_items] == ["offers[0]", "offers[1]"]
+    assert run.structured_rest["price"].value == 1
+
+
+async def test_items_repeating_a_value_reuse_jevs_one_reading_of_it() -> None:
+    data = {
+        "offers": [
+            {"name": "SE", "fuelType": "Fully electric"},
+            {"name": "SE L", "fuelType": "Fully electric"},
+        ]
+    }
+    fake = mapping_jev({"offers[].fuelType": "fuel"}).choice(
+        re.compile("(?i)what is the fuel type"), "ev", state="Fully electric"
+    )
+    result = await KeyPathMapper().extract(page(data), [SchemaSpec.from_model(Car)], fake.client())
+    assert [item.fields["Car"]["fuel"].value for item in result.items] == ["ev", "ev"]
+    assert len([c for c in fake.calls if "enum" in c.questions]) == 1

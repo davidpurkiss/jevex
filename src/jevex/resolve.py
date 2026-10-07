@@ -9,6 +9,7 @@ Jev says is about one trim.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, get_args
 
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from jevex.jev import JevClient, JSONContent
     from jevex.layout import Component
     from jevex.pipeline import Context
+    from jevex.results import FieldMeta
     from jevex.schema import SchemaSpec
     from jevex.statements import Statement
 
@@ -553,6 +555,11 @@ class EntityStage:
     Statements the resolver left out of every scope are reported in an
     ``unassigned_statements`` event.
 
+    Values recorded for the whole document before entities were known (embedded data)
+    move onto the scopes when none of them is the document
+    (:func:`place_document_values`, a ``document_values_placed`` event): each to the
+    entity an embedded object names, else shared by every entity.
+
     Without a parsed document (no layout stage ran), every schema gets one empty scope,
     labelled as the resolver would label a single entity, so structured-data-only
     pipelines still produce a record.
@@ -582,6 +589,7 @@ class EntityStage:
                 run.scopes = [
                     EntityScope(label=label if isinstance(label, str) else SINGLE_ENTITY_LABEL)
                 ]
+                self._place_document_values(ctx, run)
                 return
             relevant = run.relevant_components()
             # The resolver sees only what passed the component gate, so a resolver that
@@ -598,6 +606,7 @@ class EntityStage:
                         s for s in scope.shared_statement_ids if s in view.statements
                     ]
             run.scopes = [s for s in scopes if s.field is None]
+            self._place_document_values(ctx, run)
             children.extend(self._child_runs(ctx, run, scopes))
             if not scopes:
                 ctx.event(self.name, "no_entities", f"{run.name}: the resolver found no entities")
@@ -614,6 +623,21 @@ class EntityStage:
         await for_each_schema(ctx, resolve)
         for child in children:
             ctx.schemas[child.name] = child
+
+    def _place_document_values(self, ctx: Context, run: SchemaRun) -> None:
+        """Give the entities what earlier routes found for the whole document (embedded
+        data), so it isn't a record of its own: see :func:`place_document_values`."""
+        placed = place_document_values(run)
+        if placed is not None:
+            matched, shared = placed
+            ctx.event(
+                self.name,
+                "document_values_placed",
+                f"{run.name}: {matched} value(s) matched to an entity, "
+                f"{shared} shared by every entity",
+                matched=matched,
+                shared=shared,
+            )
 
     def _child_runs(
         self, ctx: Context, run: SchemaRun, scopes: list[EntityScope]
@@ -657,6 +681,103 @@ class EntityStage:
                     labels=[k.label for k in kids[1:]],
                 )
         return [kids[0] for kids in by_parent.values()]
+
+
+def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
+    """Move the values recorded for the whole document (on :data:`SINGLE_ENTITY_LABEL`,
+    by the structured stage, before entities are known) onto ``run``'s scopes, when
+    none of them is the document.
+
+    With one scope, they become its own. With more, each field's value goes:
+
+    - to an entity that one of :attr:`~jevex.pipeline.SchemaRun.structured_items` names
+      (:func:`match_label`), from the first such item that gives the field (an item
+      holding another matched item isn't matched itself);
+    - to every other entity, marked ``shared`` (so a value of the entity's own replaces
+      it, :meth:`~jevex.pipeline.SchemaRun.offer_field`): the document's value, unless it
+      came from an item matched to an entity; then the value from outside every item
+      (:attr:`~jevex.pipeline.SchemaRun.structured_rest`), else from the first item
+      matched to no entity (and not inside one that was).
+
+    Returns how many values went to an entity of its own and how many were shared (each
+    entity counted), or ``None`` when there was nothing to move.
+    """
+    labels = [s.label for s in run.scopes]
+    page = run.fields.get(SINGLE_ENTITY_LABEL)
+    if not page or not labels or SINGLE_ENTITY_LABEL in labels:
+        return None
+    del run.fields[SINGLE_ENTITY_LABEL]
+    if len(labels) == 1:
+        for name, meta in page.items():
+            run.set_field(labels[0], name, meta)
+        return sum(m.found for m in page.values()), 0
+    owner = {item.path: match_label(item.names, labels) for item in run.structured_items}
+    named = [i for i in run.structured_items if owner[i.path] is not None]
+    # An object holding a matched object (a vehicle and its offers) isn't matched itself:
+    # its other values are the page's, and the inner objects' are theirs.
+    matched = [i for i in named if not any(o.statement_ids < i.statement_ids for o in named)]
+    for outer in {i.path for i in named} - {i.path for i in matched}:
+        owner[outer] = None
+    taken = {sid for item in matched for sid in item.statement_ids}
+    loose = [
+        i for i in run.structured_items if owner[i.path] is None and not i.statement_ids & taken
+    ]
+    counts = [0, 0]
+    for name, meta in page.items():
+        own: dict[str, FieldMeta] = {}
+        for item in matched:
+            found = item.fields.get(run.name, {}).get(name)
+            label = owner[item.path]
+            if found is not None and found.found and label is not None:
+                own.setdefault(label, found)
+        shared: FieldMeta | None = meta
+        if meta.found and meta.source is not None and meta.source.statement_id in taken:
+            others = [
+                run.structured_rest.get(name),
+                *(i.fields.get(run.name, {}).get(name) for i in loose),
+            ]
+            shared = next((m for m in others if m is not None and m.found), None)
+        for label in labels:
+            if label in own:
+                run.set_field(label, name, own[label])
+                counts[0] += 1
+            elif shared is not None:
+                run.set_field(label, name, shared.model_copy(update={"shared": True}))
+                counts[1] += shared.found
+    return counts[0], counts[1]
+
+
+def match_label(names: Sequence[str], labels: Sequence[str]) -> str | None:
+    """The entity label one of ``names`` names, if exactly one is best.
+
+    Words are compared ignoring case and punctuation. A name equal to a label is best;
+    otherwise the longest label found whole within a name ("SE L" in "Kestrova SE L",
+    over "SE"). A tie, or no label in any name, gives ``None``: a name inside a label
+    ("SE" in "Kestrova SE") isn't enough, since a model's name is inside all of them.
+    """
+    best: tuple[bool, int] | None = None
+    found: set[str] = set()
+    for name in names:
+        words = _words(name)
+        for label in labels:
+            target = _words(label)
+            if not target or not _contains(words, target):
+                continue
+            rank = (words == target, len(target))
+            if best is None or rank > best:
+                best, found = rank, {label}
+            elif rank == best:
+                found.add(label)
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"\w+", text.casefold())
+
+
+def _contains(words: list[str], part: list[str]) -> bool:
+    n = len(part)
+    return any(words[i : i + n] == part for i in range(len(words) - n + 1))
 
 
 class InvalidScopeError(ValueError):
