@@ -102,6 +102,7 @@ dev = [
     "pytest-socket>=0.8.1",
     "ruff>=0.16.9",
     "types-pyyaml>=6.0",
+    # A tracer provider with an in-memory exporter, for the otel extra's tests.
     "opentelemetry-sdk>=1.30",
 ]
 
