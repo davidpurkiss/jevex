@@ -440,6 +440,8 @@ class GeneratorLearner:
     outcomes: list[LearnOutcome] = field(default_factory=list[LearnOutcome])
     spend: LearningSpend = field(default_factory=LearningSpend, init=False)
     """What :meth:`learn` has spent so far, whatever each example's outcome."""
+    deaths: int = field(default=0, init=False)
+    """How many times the worker has died on an unexpected error (see :attr:`alive`)."""
     _queue: asyncio.Queue[VerifiedExample] | None = field(default=None, init=False, repr=False)
     _worker: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
@@ -797,6 +799,7 @@ class GeneratorLearner:
                     # submit, drain or aclose raise it.
                     log.error("the learner worker died on example %s", item.id, exc_info=exc)
                     self._error = exc
+                    self.deaths += 1
                     return
                 finally:
                     queue.task_done()

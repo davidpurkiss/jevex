@@ -244,6 +244,7 @@ async def test_a_dead_worker_is_not_alive_and_is_logged(
     with pytest.raises(RuntimeError, match="learner worker failed"):
         await lrn.drain()
     assert lrn.alive  # the error is raised; the next submit starts a new worker
+    assert lrn.deaths == 1
     await lrn.aclose()
 
 

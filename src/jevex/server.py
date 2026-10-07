@@ -318,8 +318,15 @@ class Metrics:
             metric(
                 "jevex_learner_alive",
                 "gauge",
-                "1 while every learner's worker can take examples; 0 once one has died.",
+                "1 while every learner's worker can take examples; 0 once one has died "
+                "(until its error is raised and a new worker starts).",
                 [({}, int(all(learner.alive for learner in learners)))],
+            )
+            metric(
+                "jevex_learner_worker_deaths_total",
+                "counter",
+                "Times a learner's worker died on an unexpected error.",
+                [({}, sum(learner.deaths for learner in learners))],
             )
         if headroom:
             metric(

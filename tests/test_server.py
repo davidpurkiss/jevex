@@ -619,6 +619,7 @@ def test_a_dead_learner_flips_health_and_its_gauge(stage: FindValues, fake_jev: 
     assert response.json()["checks"] == {"store": "ok", "learner": "1 worker(s) died"}
     text = client.get("/metrics").text
     assert "jevex_learner_alive 0\n" in text
+    assert "jevex_learner_worker_deaths_total 1\n" in text
     assert 'jevex_learner_outcomes_total{status="accepted"} 0\n' in text
     # Closing the service at shutdown raises the worker's error.
     with pytest.raises(RuntimeError, match="learner worker failed"):

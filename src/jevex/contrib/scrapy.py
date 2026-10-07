@@ -108,8 +108,13 @@ class JevexPipeline:
 
     Counts go to Scrapy's stats under ``jevex/``: ``documents``, ``records``, ``stopped``
     (documents a budget or gate stopped early), ``partial`` and ``failed`` (by status),
-    ``errors/<kind>`` (each result's errors by kind), ``jev_requests``, ``jev_retries``,
-    ``llm_calls``, ``llm_retries``, ``jev_cost_usd`` and ``llm_cost_usd``.
+    ``errors/<kind>`` (each result's errors by kind) and ``errors/<stage>/<kind>/<part>``
+    (by stage, kind and part, ``-`` for none: which generator or processor failed),
+    ``jev_requests``, ``jev_retries``, ``jev_rate_limited``, ``llm_calls``,
+    ``llm_retries``, ``llm_rate_limited``, ``jev_cost_usd``, ``llm_cost_usd`` and
+    ``stage_seconds/<stage>``. When the spider closes, a learner's outcomes go under
+    ``learner/<status>``, ``learner_deaths`` counts its worker's deaths and
+    ``learner_alive`` is 1, or 0 if the worker died during the crawl.
     """
 
     def __init__(self, crawler: Crawler) -> None:
@@ -201,6 +206,7 @@ class JevexPipeline:
             if self.wait_for_learning:
                 await extractor.wait_for_learning()
         finally:
+            self._count_learner(extractor)
             await extractor.aclose()
 
     def _count(self, result: ExtractionResult) -> None:
@@ -210,19 +216,35 @@ class JevexPipeline:
         stats.inc_value("jevex/records", len(result.records))
         stats.inc_value("jevex/jev_requests", meta.jev.requests)
         stats.inc_value("jevex/jev_retries", meta.jev.retries)
+        stats.inc_value("jevex/jev_rate_limited", meta.jev.rate_limited)
         stats.inc_value("jevex/llm_calls", meta.llm.calls)
         stats.inc_value("jevex/llm_retries", meta.llm.retries)
+        stats.inc_value("jevex/llm_rate_limited", meta.llm.rate_limited)
         if meta.stopped:
             stats.inc_value("jevex/stopped")
         if result.status != "ok":
             stats.inc_value(f"jevex/{result.status}")
         for error in result.errors:
             stats.inc_value(f"jevex/errors/{error.kind}", error.count)
-        for key, cost in (
+            where = f"{error.stage}/{error.kind}/{error.part or '-'}"
+            stats.inc_value(f"jevex/errors/{where}", error.count)
+        added = [
             ("jevex/jev_cost_usd", meta.jev.cost),
             ("jevex/llm_cost_usd", meta.llm.cost),
-        ):
-            stats.set_value(key, stats.get_value(key, 0.0) + cost)
+            *((f"jevex/stage_seconds/{stage}", took) for stage, took in meta.timings.items()),
+        ]
+        for key, value in added:
+            stats.set_value(key, stats.get_value(key, 0.0) + value)
+
+    def _count_learner(self, extractor: Extractor) -> None:
+        learner = extractor.running_learner
+        if learner is None:
+            return
+        stats = self.crawler.stats
+        for status, n in learner.outcome_counts().items():
+            stats.set_value(f"jevex/learner/{status}", n)
+        stats.set_value("jevex/learner_deaths", learner.deaths)
+        stats.set_value("jevex/learner_alive", int(learner.alive and not learner.deaths))
 
 
 def _schema(spec: object) -> type[BaseModel]:

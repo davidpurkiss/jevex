@@ -23,8 +23,8 @@ from jevex.extractor import ExtractionResult
 from jevex.jev import JevBudgetExceededError, JevClient, Noul
 from jevex.pipeline import Pipeline
 from jevex.results import FieldMeta
-from jevex.store import SQLiteStore
-from jevex.testing import FakeJev
+from jevex.store import SQLiteStore, VerifiedExample
+from jevex.testing import FakeJev, FakeLLM
 
 HTML = b"<html><body><h1>Dune</h1><p>Title: Dune</p></body></html>"
 PDF = b"%PDF-1.4\n%fake\n"
@@ -313,6 +313,7 @@ async def test_a_failed_extraction_fails_the_item() -> None:
     assert stats.get_value("jevex/documents") == 1
     assert stats.get_value("jevex/failed") == 1
     assert stats.get_value("jevex/errors/stage") == 1
+    assert stats.get_value("jevex/errors/select/stage/-") == 1
 
 
 async def test_a_partial_result_fills_the_item_and_is_counted() -> None:
@@ -325,7 +326,16 @@ async def test_a_partial_result_fills_the_item_and_is_counted() -> None:
     stats = pipeline.crawler.stats
     assert stats.get_value("jevex/partial") == 1
     assert stats.get_value("jevex/errors/generator") == 1
+    assert stats.get_value("jevex/errors/candidates/generator/gen-1") == 1
     assert stats.get_value("jevex/failed") is None
+    assert stats.get_value("jevex/stage_seconds/select") > 0
+    assert (
+        stats.get_value("jevex/jev_rate_limited"),
+        stats.get_value("jevex/llm_rate_limited"),
+    ) == (
+        0,
+        0,
+    )
 
 
 async def test_a_spend_cap_fails_the_item_uncounted() -> None:
@@ -403,6 +413,64 @@ async def test_close_spider_closes_the_extractor_when_learning_fails(
         await pipeline.close_spider()
 
     assert pipeline.closed
+
+
+EXAMPLE = VerifiedExample(
+    id="ex-1",
+    field="Book.title",
+    statement="Title: Dune",
+    value="Dune",
+    evidence=(7, 11),
+    context={"heading_trail": [], "kind": "sentence"},
+    source="llm",
+    probability=0.99,
+)
+
+
+class Learning(FakePipeline):
+    """A pipeline whose stage hands the learner an example."""
+
+    def make_extractor(self) -> Extractor:
+        extractor = super().make_extractor()
+        extractor.generator_llm = FakeLLM(lambda _p, _s: {})
+        stage = self.stage
+        run = stage.run
+
+        async def run_and_learn(ctx: Context) -> None:
+            await run(ctx)
+            assert ctx.learner is not None
+            await ctx.learner.submit(EXAMPLE)
+
+        stage.run = run_and_learn
+        return extractor
+
+
+async def test_close_spider_counts_the_learners_outcomes() -> None:
+    pipeline = await opened(Learning)
+    await pipeline.process_item({"document": document()})
+    await pipeline.close_spider()
+    stats = pipeline.crawler.stats
+    assert stats.get_value("jevex/learner_alive") == 1
+    assert stats.get_value("jevex/learner_deaths") == 0
+    learned = {k: v for k, v in stats.get_stats().items() if k.startswith("jevex/learner/")}
+    assert sum(learned.values()) == 1
+    assert learned["jevex/learner/accepted"] == 0
+
+
+async def test_close_spider_reports_a_dead_learner(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipeline = await opened(Learning)
+    learner = await pipeline.extractor.learner()
+    assert learner is not None
+
+    async def bug(_example: VerifiedExample) -> None:
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(learner, "learn", bug)
+    await pipeline.process_item({"document": document()})
+    with pytest.raises(RuntimeError, match="learner worker failed"):
+        await pipeline.close_spider()
+    assert pipeline.crawler.stats.get_value("jevex/learner_alive") == 0
+    assert pipeline.crawler.stats.get_value("jevex/learner_deaths") == 1
 
 
 async def test_close_spider_before_open_does_nothing() -> None:
