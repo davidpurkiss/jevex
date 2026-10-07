@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jevex.llm import LLMBudgetExceededError
+from jevex.llm import LLMBudgetExceededError, rate_limited
 from jevex.logs import get_logger
 from jevex.store import SpendEntry
 
@@ -259,6 +259,8 @@ class DocumentBudget:
     llm_retries: int = 0
     """Retries the LLM adapters' SDKs took on this document's calls
     (:attr:`~jevex.llm.LLMResponse.retries`)."""
+    llm_rate_limited: int = 0
+    """Calls that failed with a 429 after the SDK's retries (:func:`~jevex.llm.rate_limited`)."""
     rpm_skips: int = 0
     llm_stopped: bool = False
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
@@ -381,6 +383,10 @@ class DocumentBudget:
             self.llm_calls -= 1  # refused before any request was made
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))
             return None
+        except Exception as exc:
+            if rate_limited(exc):
+                self.llm_rate_limited += 1
+            raise
         self.llm_retries += response.retries
         await self._settle(response.usage.cost)
         return response

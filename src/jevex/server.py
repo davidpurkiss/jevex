@@ -5,9 +5,12 @@ A FastAPI app for callers that aren't Python, such as the car finder's Go crawle
 - ``POST /extract`` takes an :class:`ExtractRequest` (a document, its bytes base64, and
   the names of the registered schemas to extract) and answers with the records, as
   ``jevex extract`` prints them (``"meta": true``: with per-field and document meta).
-- ``GET /health`` says the service is up and which schemas it serves.
+- ``GET /health`` says the service is up and which schemas it serves; it answers 503
+  when the store doesn't answer or a learner's worker has died.
 - ``GET /metrics`` is Prometheus text: documents, records, the resolution mix, Jev and
-  LLM calls and spend, budget hits and extraction time, since the process started.
+  LLM calls, retries, rate limits and spend, budget hits and headroom, errors by stage
+  and part, extraction and per-stage time, learner outcomes and liveness, store errors
+  and per-field drift (:mod:`jevex.monitoring`) since the process started.
 - Opt-in (``stats=True``, ``jevex serve --stats``), because it shows URLs and spend: the
   stats UI over the service's store, with the routes ``jevex stats`` serves (``/stats/``,
   ``/stats/api/<view>``, ``/stats/api/chart/<view>.svg``).
@@ -32,7 +35,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import (
@@ -45,10 +48,14 @@ from fastapi.responses import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex import __version__
+from jevex.budgets import RunLedger
 from jevex.document import LOCALE_TAG, Document
 from jevex.extractor import Extractor, document_stat
 from jevex.jev import JevBudgetExceededError, JevClient
+from jevex.learn import LearnStatus
 from jevex.llm import LLMBudgetExceededError
+from jevex.logs import get_logger
+from jevex.monitoring import DRIFT_WINDOW, DriftWindow, budget_headroom, store_error
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
 from jevex.stats.server import redact
@@ -60,11 +67,15 @@ if TYPE_CHECKING:
     from jevex.budgets import Budgets
     from jevex.errors import PartError
     from jevex.extractor import ExtractionResult
+    from jevex.learn import GeneratorLearner
     from jevex.llm import LLM
+    from jevex.monitoring import Headroom
     from jevex.stats import Stats
     from jevex.store import Store
 
 DEFAULT_PORT = 8080
+
+log = get_logger(__name__)
 
 
 class UnknownSchemaError(ValueError):
@@ -130,7 +141,10 @@ class Metrics:
     ``partial`` (a part failed and was skipped) or ``error`` (it failed), with ``stopped``
     for an otherwise ok one a stage or budget stopped. Spend, calls and retries are those
     of the documents with a result; one whose extraction raised (a process spend cap)
-    counts only as an ``error``. ``errors`` counts each result's errors by stage and kind.
+    counts only as an ``error``. ``errors`` counts the documents with each error, by
+    stage, kind and part (``""`` for none). ``store_errors`` counts store failures:
+    those in results and those the service met itself (health checks, headroom and stats
+    reads). ``drift`` keeps the last documents' fields (:class:`~jevex.monitoring.DriftWindow`).
     """
 
     documents: Counter[Outcome] = field(default_factory=Counter[Outcome])
@@ -146,20 +160,30 @@ class Metrics:
     llm_cost: float = 0.0
     jev_retries: int = 0
     llm_retries: int = 0
-    errors: Counter[tuple[str, str]] = field(default_factory=Counter[tuple[str, str]])
+    jev_rate_limited: int = 0
+    llm_rate_limited: int = 0
+    errors: Counter[tuple[str, str, str]] = field(default_factory=Counter[tuple[str, str, str]])
+    store_errors: int = 0
     seconds: float = 0.0
     timed: int = 0
+    stage_seconds: dict[str, float] = field(default_factory=dict[str, float])
+    stage_runs: Counter[str] = field(default_factory=Counter[str])
+    drift: DriftWindow = field(default_factory=DriftWindow)
 
     def add(self, result: ExtractionResult, seconds: float) -> None:
         """Count a document's result (see the class docstring for its outcome)."""
         stat = document_stat(result, doc_id="", run_id=None, seconds=seconds)
+        meta = result.meta
         self.documents[_outcome(result)] += 1
-        self.errors.update((e.stage, e.kind) for e in result.errors)
-        self.jev_retries += result.meta.jev.retries
-        self.llm_retries += result.meta.llm.retries
+        self.errors.update((e.stage, e.kind, e.part or "") for e in result.errors)
+        self.store_errors += sum(e.kind == "store" for e in result.errors)
+        self.jev_retries += meta.jev.retries
+        self.llm_retries += meta.llm.retries
+        self.jev_rate_limited += meta.jev.rate_limited
+        self.llm_rate_limited += meta.llm.rate_limited
         self.records.update(r.schema_name for r in result.records)
         self.values.update((v.field.split(".")[0], v.method or "unknown") for v in stat.values)
-        self.budget_events.update((e.scope, e.limit) for e in result.meta.budget_events)
+        self.budget_events.update((e.scope, e.limit) for e in meta.budget_events)
         self.jev_requests += stat.jev_requests
         self.jev_questions += stat.jev_questions
         self.jev_tokens += stat.jev_tokens
@@ -168,9 +192,20 @@ class Metrics:
         self.llm_cost += stat.llm_cost
         self.seconds += seconds
         self.timed += 1
+        for stage, took in meta.timings.items():
+            self.stage_seconds[stage] = self.stage_seconds.get(stage, 0.0) + took
+            self.stage_runs[stage] += 1
+        self.drift.add(result)
 
-    def render(self) -> str:
-        """The Prometheus text exposition format (version 0.0.4)."""
+    def render(
+        self,
+        *,
+        learners: Sequence[GeneratorLearner] = (),
+        headroom: Sequence[Headroom] = (),
+    ) -> str:
+        """The Prometheus text exposition format (version 0.0.4). ``learners`` are the
+        service's running learners (outcomes summed; alive only if every one is) and
+        ``headroom`` its spend caps; their series are left out when there are none."""
         lines: list[str] = []
 
         def metric(
@@ -181,11 +216,14 @@ class Metrics:
             for labels, value in samples:
                 lines.append(f"{name}{_labels(labels)} {_number(value)}")
 
-        def summary(name: str, help_: str, total: float, count: int) -> None:
+        def summary(
+            name: str, help_: str, samples: list[tuple[dict[str, str], float, int]]
+        ) -> None:
             lines.append(f"# HELP {name} {help_}")
             lines.append(f"# TYPE {name} summary")
-            lines.append(f"{name}_sum {_number(total)}")
-            lines.append(f"{name}_count {count}")
+            for labels, total, count in samples:
+                lines.append(f"{name}_sum{_labels(labels)} {_number(total)}")
+                lines.append(f"{name}_count{_labels(labels)} {count}")
 
         metric("jevex_info", "gauge", "The jevex version.", [({"version": __version__}, 1)])
         metric(
@@ -222,8 +260,11 @@ class Metrics:
         metric(
             "jevex_errors_total",
             "counter",
-            "Failures reported in results, by stage and kind (jevex.errors).",
-            [({"stage": st, "kind": k}, n) for (st, k), n in sorted(self.errors.items())],
+            "Documents with a failure, by stage, kind and part (jevex.errors).",
+            [
+                ({"stage": st, "kind": k, "part": p}, n)
+                for (st, k, p), n in sorted(self.errors.items())
+            ],
         )
         for name, help_, value in (
             ("jevex_jev_requests_total", "Jev requests.", self.jev_requests),
@@ -234,13 +275,111 @@ class Metrics:
             ("jevex_llm_cost_usd_total", "LLM spend in USD.", self.llm_cost),
             ("jevex_jev_retries_total", "Jev requests retried.", self.jev_retries),
             ("jevex_llm_retries_total", "LLM calls retried (as SDKs report).", self.llm_retries),
+            (
+                "jevex_jev_rate_limited_total",
+                "Jev requests answered 429 (retried or not).",
+                self.jev_rate_limited,
+            ),
+            (
+                "jevex_llm_rate_limited_total",
+                "LLM calls that failed on a 429 after the SDK's retries.",
+                self.llm_rate_limited,
+            ),
+            (
+                "jevex_store_errors_total",
+                "Store failures, in documents and in the service's own reads.",
+                self.store_errors,
+            ),
         ):
             metric(name, "counter", help_, [({}, value)])
         summary(
             "jevex_extract_seconds",
             "Time to extract a finished document.",
-            self.seconds,
-            self.timed,
+            [({}, self.seconds, self.timed)],
+        )
+        summary(
+            "jevex_stage_seconds",
+            "Time spent in each pipeline stage.",
+            [
+                ({"stage": st}, self.stage_seconds[st], self.stage_runs[st])
+                for st in sorted(self.stage_seconds)
+            ],
+        )
+        if learners:
+            counts: Counter[LearnStatus] = Counter()
+            for learner in learners:
+                counts.update(learner.outcome_counts())
+            metric(
+                "jevex_learner_outcomes_total",
+                "counter",
+                "Examples the learner finished, by outcome (jevex.learn.LearnStatus).",
+                [({"status": st}, counts[st]) for st in get_args(LearnStatus)],
+            )
+            metric(
+                "jevex_learner_alive",
+                "gauge",
+                "1 while every learner's worker can take examples; 0 once one has died.",
+                [({}, int(all(learner.alive for learner in learners)))],
+            )
+        if headroom:
+            metric(
+                "jevex_budget_remaining_usd",
+                "gauge",
+                "What's left of each spend cap (scope run: the run budget this period; "
+                "process: JEVEX_*_MAX_COST_USD).",
+                [
+                    ({"scope": h.scope, "kind": h.kind, "period": h.period}, h.remaining_usd)
+                    for h in headroom
+                ],
+            )
+            metric(
+                "jevex_budget_limit_usd",
+                "gauge",
+                "Each spend cap.",
+                [
+                    ({"scope": h.scope, "kind": h.kind, "period": h.period}, h.limit_usd)
+                    for h in headroom
+                ],
+            )
+        drift = self.drift.fields()
+        metric(
+            "jevex_drift_documents",
+            "gauge",
+            f"Documents in the drift window (the last {self.drift.size}).",
+            [({}, self.drift.documents)],
+        )
+        for name, help_, values in (
+            (
+                "jevex_field_none_rate",
+                "Share of the window's records with no value for the field.",
+                [d.none_rate for d in drift],
+            ),
+            (
+                "jevex_field_fallback_rate",
+                "Share of the window's values for the field the LLM fallback gave.",
+                [d.fallback_rate for d in drift],
+            ),
+            (
+                "jevex_field_records",
+                "Records in the window with the field.",
+                [d.records for d in drift],
+            ),
+        ):
+            metric(
+                name,
+                "gauge",
+                help_,
+                [({"field": d.field}, v) for d, v in zip(drift, values, strict=True)],
+            )
+        metric(
+            "jevex_field_confidence_mean",
+            "gauge",
+            "Mean confidence of the window's values for the field (those that have one).",
+            [
+                ({"field": d.field}, d.mean_confidence)
+                for d in drift
+                if d.mean_confidence is not None
+            ],
         )
         return "\n".join(lines) + "\n"
 
@@ -280,7 +419,8 @@ class Service:
     for the service). The other options are :class:`~jevex.extractor.Extractor`'s.
 
     ``stats`` mounts the stats UI over the store (it needs a ``store``);
-    ``stats_budget_usd`` draws its budget line.
+    ``stats_budget_usd`` draws its budget line. ``drift_window`` is how many recent
+    documents ``/metrics``' per-field drift covers (:class:`~jevex.monitoring.DriftWindow`).
     """
 
     def __init__(
@@ -296,6 +436,7 @@ class Service:
         close_llms: bool = False,
         stats: bool = False,
         stats_budget_usd: float | None = None,
+        drift_window: int = DRIFT_WINDOW,
     ) -> None:
         if not schemas:
             raise ValueError("register at least one schema")
@@ -314,7 +455,7 @@ class Service:
         self.extraction_llm = extraction_llm
         self.generator_llm = generator_llm
         self.close_llms = close_llms
-        self.metrics = Metrics()
+        self.metrics = Metrics(drift=DriftWindow(drift_window))
         self.run_id = uuid.uuid4().hex[:12]
         self._jev = jev
         self._store_source = store if isinstance(store, str | Path) else None
@@ -393,9 +534,57 @@ class Service:
     async def read_stats(self) -> Stats:
         if self._store is None:
             raise RuntimeError("the service isn't started")
-        return await from_store(
-            self._store, source=self.store_label, budget_usd=self.stats_budget_usd
-        )
+        try:
+            return await from_store(
+                self._store, source=self.store_label, budget_usd=self.stats_budget_usd
+            )
+        except StoreError:
+            self.metrics.store_errors += 1
+            raise
+
+    @property
+    def learners(self) -> list[GeneratorLearner]:
+        """The extractors' running learners (each is made by its first document)."""
+        return [e.running_learner for e in self._extractors.values() if e.running_learner]
+
+    async def headroom(self) -> list[Headroom]:
+        """What's left of each spend cap (:func:`~jevex.monitoring.budget_headroom`):
+        none when the store can't be read, which is counted in ``store_errors``."""
+        run = self.budgets.run if self.budgets else None
+        ledger = RunLedger(run, self._store, run_id=self.run_id) if run else None
+        try:
+            return await budget_headroom(ledger)
+        except Exception as exc:
+            self.metrics.store_errors += 1
+            log.warning("can't read the spend ledger for /metrics: %s", exc, exc_info=exc)
+            return []
+
+    async def render_metrics(self) -> str:
+        """``/metrics``: :attr:`metrics` with the learners and the spend caps."""
+        return self.metrics.render(learners=self.learners, headroom=await self.headroom())
+
+    async def health(self) -> dict[str, Any]:
+        """``/health``'s answer: ``status`` is ``ok``, or ``unhealthy`` when the store
+        doesn't answer (:func:`~jevex.monitoring.store_error`) or a learner's worker has
+        died; ``checks`` says which."""
+        checks: dict[str, str] = {}
+        if self._store is not None:
+            problem = await store_error(self._store)
+            if problem is not None:
+                self.metrics.store_errors += 1
+                log.warning("health check: %s", problem)
+            checks["store"] = problem or "ok"
+        learners = self.learners
+        if learners:
+            dead = sum(not learner.alive for learner in learners)
+            checks["learner"] = f"{dead} worker(s) died" if dead else "ok"
+        healthy = all(v == "ok" for v in checks.values())
+        return {
+            "status": "ok" if healthy else "unhealthy",
+            "version": __version__,
+            "schemas": self.schema_names,
+            "checks": checks,
+        }
 
     async def aclose(self) -> None:
         """Close the extractors (stopping their learners), the LLMs with ``close_llms``,
@@ -440,6 +629,9 @@ def create_app(service: Service) -> FastAPI:
     failed result (:mod:`jevex.errors`) 422 if the document can't be read (a broken PDF or
     image), 502 if Jev failed and 500 otherwise. A ``partial`` result is a 200 whose
     ``status`` and ``errors`` say what was skipped.
+
+    ``GET /health`` answers 503 when the store doesn't answer or a learner's worker has
+    died (:meth:`Service.health`), so an orchestrator restarts the service.
     """
 
     @contextlib.asynccontextmanager
@@ -473,15 +665,17 @@ def create_app(service: Service) -> FastAPI:
         return result.to_dict() if request.meta else result.to_plain_dict()
 
     @app.get("/health")
-    async def health() -> dict[str, Any]:
-        """The service is up: its version and schemas."""
-        return {"status": "ok", "version": __version__, "schemas": service.schema_names}
+    async def health() -> Response:
+        """The service's version and schemas, and whether its store answers and its
+        learners are alive: 200 when healthy, 503 when not."""
+        answer = await service.health()
+        return JSONResponse(answer, status_code=200 if answer["status"] == "ok" else 503)
 
     @app.get("/metrics", response_class=PlainTextResponse)
     async def metrics() -> Response:
         """Prometheus metrics since the process started."""
         return PlainTextResponse(
-            service.metrics.render(), media_type="text/plain; version=0.0.4; charset=utf-8"
+            await service.render_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8"
         )
 
     if service.stats:

@@ -1,9 +1,10 @@
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import pytest
 from pydantic import BaseModel
@@ -48,10 +49,12 @@ from jevex.learn import (
     GeneratorDraft,
     LearningSpend,
     LearnOutcome,
+    LearnStatus,
     draft_spec,
     example_statement,
 )
 from jevex.llm import LLMError
+from jevex.logs import log_context
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
@@ -209,6 +212,59 @@ async def test_an_unexpected_error_stops_the_worker_and_is_raised_by_drain() -> 
         await lrn.drain()
     assert str(info.value.__cause__) == "selector bug"
     await lrn.drain()  # raised once; the next submit starts a new worker
+    await lrn.aclose()
+
+
+async def test_a_dead_worker_is_not_alive_and_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    @dataclass
+    class Broken:
+        def questions(self, *_: Any) -> dict[str, Any]:
+            raise RuntimeError("selector bug")
+
+        def selection(self, *_: Any) -> Any:
+            raise AssertionError
+
+    caplog.set_level(logging.INFO, logger="jevex")
+    lrn = learner(FakeJev(), FakeLLM(lambda _p, _s: DRAFT), selector=Broken())
+    assert lrn.alive  # no worker yet
+    with log_context(url="https://cars.test/a", stage="learn"):
+        await lrn.submit(example(eid="ex-1"))
+    assert lrn.alive  # queued, not yet learned
+    for _ in range(100):  # let the worker run until it dies
+        await asyncio.sleep(0)
+    assert not lrn.alive
+    [died] = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert died.getMessage() == "the learner worker died on example ex-1"
+    assert died.exc_info is not None
+    assert died.exc_info[0] is RuntimeError
+    # The worker logs as the learner, not as the document that happened to start it.
+    assert (died.__dict__["run_id"], died.__dict__["url"]) == (lrn.ledger.run_id, None)
+    with pytest.raises(RuntimeError, match="learner worker failed"):
+        await lrn.drain()
+    assert lrn.alive  # the error is raised; the next submit starts a new worker
+    await lrn.aclose()
+
+
+async def test_outcomes_are_counted_by_status_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="jevex")
+    lrn = learner(FakeJev().choice(None, pick("9.1")), FakeLLM(lambda _p, _s: DRAFT))
+    await lrn.submit(example(eid="a"))
+    await lrn.drain()
+    await lrn.submit(example(eid="b"))  # the published generator finds it now
+    await lrn.drain()
+    counts = lrn.outcome_counts()
+    assert (counts["accepted"], counts["covered"], counts["budget"]) == (1, 1, 0)
+    assert set(counts) == set(get_args(LearnStatus))
+    accepted, covered = (r.getMessage() for r in caplog.records)
+    assert accepted.startswith("learned generator ")
+    assert accepted.endswith(f" for {FIELD} (snapshot 1)")
+    assert covered == (
+        f"example b for {FIELD} not learned: covered: the generators in use already find the value"
+    )
     await lrn.aclose()
 
 

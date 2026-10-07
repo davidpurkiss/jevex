@@ -170,6 +170,8 @@ class LLMUsageSummary(BaseModel):
     cost: float = 0.0
     unpriced_calls: int = 0
     retries: int = 0
+    rate_limited: int = 0
+    """Calls that failed on a 429 after the SDK's retries (:func:`~jevex.llm.rate_limited`)."""
 
 
 class EventInfo(BaseModel):
@@ -337,6 +339,7 @@ class ExtractionResult:
                     cost=ctx.budget.llm_spend,
                     unpriced_calls=ctx.budget.unpriced_calls,
                     retries=ctx.budget.llm_retries,
+                    rate_limited=ctx.budget.llm_rate_limited,
                 )
                 if ctx.budget
                 else LLMUsageSummary(),
@@ -827,6 +830,12 @@ class Extractor:
         if keeper is None:
             raise ValueError("dedupe_generators needs a store: pass store=")
         return await keeper.dedupe()
+
+    @property
+    def running_learner(self) -> GeneratorLearner | None:
+        """The inline learner if :meth:`learner` has made one (no await, nothing made):
+        what monitoring reads (``alive``, ``outcome_counts``)."""
+        return self._learner
 
     async def learner(self) -> GeneratorLearner | None:
         """The inline learner (created on first use), or ``None`` without a

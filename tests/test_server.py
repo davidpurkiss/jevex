@@ -30,7 +30,7 @@ from jevex.server import (
     UnknownSchemaError,
     create_app,
 )
-from jevex.store import open_store
+from jevex.store import SQLiteStore, StoreError, VerifiedExample, open_store
 from jevex.testing import FakeJev, FakeLLM
 
 HTML = b"<html><body><h1>Dune</h1><p>Title: Dune</p></body></html>"
@@ -58,6 +58,8 @@ class FindValues:
     fail: Exception | None = None
     skip: Exception | None = None
     stop: bool = False
+    llm: FakeLLM | None = None
+    learn: VerifiedExample | None = None
 
     async def run(self, ctx: Context) -> None:
         self.seen.append((ctx.document.content_type, [r.spec.name for r in ctx.active]))
@@ -69,6 +71,13 @@ class FindValues:
             run.set_field("document", name, FieldMeta(value="Dune", confidence=0.9, method="jev"))
         if self.skip is not None:
             ctx.part_failed("candidates", "generator", "gen-1", self.skip)
+        if self.llm is not None and ctx.budget is not None:
+            try:
+                await ctx.budget.call_llm(self.llm, "p", Book)
+            except Exception as exc:
+                ctx.part_failed("fallback", "llm_extractor", "FakeLLM", exc)
+        if self.learn is not None and ctx.learner is not None:
+            await ctx.learner.submit(self.learn)
         if self.stop and ctx.budget is not None:
             ctx.budget.record_hit("run", "max_spend", "the day's LLM budget is spent")
             ctx.stop(self.name, "budget")
@@ -111,6 +120,7 @@ def test_health_names_the_schemas(client: TestClient) -> None:
         "status": "ok",
         "version": __version__,
         "schemas": ["Book", "Author"],
+        "checks": {"store": "ok"},
     }
 
 
@@ -239,7 +249,7 @@ def test_a_partial_result_is_a_200_saying_what_was_skipped(
     metrics = client.get("/metrics").text
     assert 'jevex_documents_total{outcome="partial"} 1\n' in metrics
     assert 'jevex_documents_total{outcome="ok"} 0\n' in metrics
-    assert 'jevex_errors_total{stage="candidates",kind="generator"} 1\n' in metrics
+    assert 'jevex_errors_total{stage="candidates",kind="generator",part="gen-1"} 1\n' in metrics
 
 
 def test_a_failed_result_is_counted_with_its_spend(client: TestClient, stage: FindValues) -> None:
@@ -247,7 +257,7 @@ def test_a_failed_result_is_counted_with_its_spend(client: TestClient, stage: Fi
     assert client.post("/extract", json=body()).status_code == 500
     metrics = client.get("/metrics").text
     assert 'jevex_documents_total{outcome="error"} 1\n' in metrics
-    assert 'jevex_errors_total{stage="select",kind="stage"} 1\n' in metrics
+    assert 'jevex_errors_total{stage="select",kind="stage",part=""} 1\n' in metrics
     assert "jevex_extract_seconds_count 1\n" in metrics
 
 
@@ -456,3 +466,186 @@ def test_a_documents_language_reaches_the_extractor() -> None:
     document = request.document.to_document()
     assert (document.content_language, document.locale) == ("de-DE, en", "de-AT")
     assert DocumentIn(content=HTML).to_document().locale is None
+
+
+# --- monitoring ----------------------------------------------------------------------
+
+
+class RateLimited(Exception):
+    """An SDK's 429, as Anthropic's and OpenAI's errors carry it."""
+
+    status_code = 429
+
+
+def raises(exc: Exception) -> FakeLLM:
+    def answer(_prompt: str, _schema: type[BaseModel]) -> object:
+        raise exc
+
+    return FakeLLM(answer)
+
+
+class FlakyOnce429(FlakyOnce):
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if not self.failed:
+            self.failed = True
+            raise JevTransientError("429 slow down", status=429)
+        return await self.inner.system_one(state, questions)
+
+
+def test_metrics_attribute_errors_and_time_stages_and_count_rate_limits(
+    stage: FindValues, fake_jev: FakeJev
+) -> None:
+    stage.skip = RuntimeError("bad regex")
+    stage.llm = raises(RateLimited("too many requests"))
+    jev = JevClient(FlakyOnce429(fake_jev), retry=RetryPolicy(backoff_initial=0))
+    with TestClient(create_app(Service([Book], jev=jev))) as client:
+        assert client.post("/extract", json=body()).json()["status"] == "partial"
+        text = client.get("/metrics").text
+    for line in (
+        'jevex_errors_total{stage="candidates",kind="generator",part="gen-1"} 1',
+        'jevex_errors_total{stage="fallback",kind="llm_extractor",part="FakeLLM"} 1',
+        "jevex_jev_rate_limited_total 1",
+        "jevex_jev_retries_total 1",
+        "jevex_llm_rate_limited_total 1",
+        "# TYPE jevex_stage_seconds summary",
+        'jevex_stage_seconds_count{stage="select"} 1',
+        "jevex_store_errors_total 0",
+    ):
+        assert line + "\n" in text
+    assert 'jevex_stage_seconds_sum{stage="select"} ' in text
+
+
+def test_metrics_report_drift_per_field(client: TestClient) -> None:
+    client.post("/extract", json=body(["Book", "Author"]))
+    client.post("/extract", json=body("Book"))
+    text = client.get("/metrics").text
+    for line in (
+        "jevex_drift_documents 2",
+        'jevex_field_records{field="Book.title"} 2',
+        'jevex_field_records{field="Author.name"} 1',
+        'jevex_field_none_rate{field="Book.title"} 0.0',
+        'jevex_field_fallback_rate{field="Book.title"} 0.0',
+        'jevex_field_confidence_mean{field="Book.title"} 0.9',
+    ):
+        assert line + "\n" in text
+    # No learner and no spend caps: their series are left out.
+    assert "jevex_learner_alive" not in text
+    assert "jevex_budget_remaining_usd" not in text
+
+
+async def test_metrics_report_budget_headroom(
+    stage: FindValues, fake_jev: FakeJev, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jevex import Budgets, RunBudget
+    from jevex.llm import reset_process_llm_cost
+    from jevex.store import SpendEntry
+
+    reset_process_llm_cost()  # other tests' calls
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
+    store = open_store(":memory:")
+    budgets = Budgets(run=RunBudget(max_spend=5.0, period="week", max_jev_spend=1.0))
+    service = Service([Book], jev=fake_jev.client(), store=store, budgets=budgets)
+    await service.start()
+    await store.record_spend(SpendEntry(amount_usd=1.25, kind="llm", run_id="other"))
+    text = await service.render_metrics()
+    for line in (
+        'jevex_budget_remaining_usd{scope="run",kind="llm",period="week"} 3.75',
+        'jevex_budget_remaining_usd{scope="run",kind="jev",period="week"} 1.0',
+        'jevex_budget_remaining_usd{scope="process",kind="llm",period="process"} 2.0',
+        'jevex_budget_limit_usd{scope="run",kind="llm",period="week"} 5.0',
+    ):
+        assert line + "\n" in text
+    await service.aclose()
+    await store.aclose()
+
+
+class BrokenStore(SQLiteStore):
+    """A store that stopped answering reads."""
+
+    async def spend(self, **_: Any) -> float:
+        raise StoreError("database is locked")
+
+
+def test_health_is_503_when_the_store_does_not_answer(stage: FindValues, fake_jev: FakeJev) -> None:
+    from jevex import Budgets, RunBudget
+
+    store = BrokenStore(":memory:")
+    service = Service(
+        [Book], jev=fake_jev.client(), store=store, budgets=Budgets(run=RunBudget(max_spend=1))
+    )
+    with TestClient(create_app(service)) as client:
+        response = client.get("/health")
+        assert response.status_code == 503
+        assert response.json()["status"] == "unhealthy"
+        assert response.json()["checks"] == {"store": "StoreError: database is locked"}
+        text = client.get("/metrics").text  # the headroom read fails too
+    assert "jevex_store_errors_total 2\n" in text
+    assert "jevex_budget_remaining_usd" not in text
+
+
+PRICED = "Price: 9.1"
+
+
+class Priced(BaseModel):
+    """A priced item."""
+
+    price: float = Field(description="Price in GBP")
+
+
+def test_a_dead_learner_flips_health_and_its_gauge(stage: FindValues, fake_jev: FakeJev) -> None:
+    stage.learn = VerifiedExample(
+        id="ex-1",
+        field="Priced.price",
+        statement=PRICED,
+        value=9.1,
+        evidence=(7, 10),
+        context={"heading_trail": [], "kind": "sentence"},
+        source="llm",
+        probability=0.99,
+    )
+    service = Service([Priced], jev=fake_jev.client(), generator_llm=raises(RuntimeError("bug")))
+    client = TestClient(create_app(service))
+    client.__enter__()
+    assert client.get("/health").json()["checks"] == {"store": "ok"}  # no learner yet
+    client.post("/extract", json=body("Priced"))
+    response = client.get("/health")
+    for _ in range(50):  # the worker learns in the background
+        if response.status_code == 503:
+            break
+        response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json()["checks"] == {"store": "ok", "learner": "1 worker(s) died"}
+    text = client.get("/metrics").text
+    assert "jevex_learner_alive 0\n" in text
+    assert 'jevex_learner_outcomes_total{status="accepted"} 0\n' in text
+    # Closing the service at shutdown raises the worker's error.
+    with pytest.raises(RuntimeError, match="learner worker failed"):
+        client.__exit__(None, None, None)
+
+
+def test_learner_outcomes_are_counted(stage: FindValues, fake_jev: FakeJev) -> None:
+    from jevex.llm import LLMError
+
+    stage.learn = VerifiedExample(
+        id="ex-1",
+        field="Priced.price",
+        statement=PRICED,
+        value=9.1,
+        evidence=(7, 10),
+        context={"heading_trail": [], "kind": "sentence"},
+        source="llm",
+        probability=0.99,
+    )
+    service = Service([Priced], jev=fake_jev.client(), generator_llm=raises(LLMError("down")))
+    with TestClient(create_app(service)) as client:
+        client.post("/extract", json=body("Priced"))
+        text = client.get("/metrics").text
+        for _ in range(50):
+            if 'jevex_learner_outcomes_total{status="llm_error"} 1\n' in text:
+                break
+            text = client.get("/metrics").text
+        assert 'jevex_learner_outcomes_total{status="llm_error"} 1\n' in text
+        assert "jevex_learner_alive 1\n" in text
+        assert client.get("/health").status_code == 200

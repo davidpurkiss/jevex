@@ -246,6 +246,13 @@ def record(usage: LLMUsage) -> None:
         ledger_add(ledger, "llm", usage.cost, LLMError)
 
 
+def rate_limited(exc: BaseException) -> bool:
+    """Whether an adapter's SDK raised ``exc`` for a 429 (too many requests): Anthropic's,
+    OpenAI's and LiteLLM's errors carry ``status_code``, Gemini's ``code``. The SDKs'
+    own retries of 429s aren't reported, so this sees only calls that still failed."""
+    return any(getattr(exc, name, None) == 429 for name in ("status_code", "code", "status"))
+
+
 def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:
     """Validate an adapter's parsed payload, raising :class:`LLMError` if it doesn't fit."""
     try:
@@ -275,5 +282,6 @@ __all__ = [
     "gemini_flash_3x_price",
     "process_llm_cap",
     "process_llm_cost",
+    "rate_limited",
     "reset_process_llm_cost",
 ]
