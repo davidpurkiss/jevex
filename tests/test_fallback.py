@@ -33,7 +33,7 @@ from jevex.normalise import NormaliseStage
 from jevex.pipeline import ValuePick, VisionValue
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.select import SelectStage
-from jevex.statements import Candidate
+from jevex.statements import Candidate, NormaliserStep
 from jevex.testing import FakeJev, FakeLLM
 
 LOC = DomLocation(dom_path="/p")
@@ -826,6 +826,23 @@ async def test_a_list_takes_the_span_and_generator_of_the_item_left() -> None:
     assert (m.value, m.method, m.generator_id) == (["R", "SE"], "vision", "g2")
     assert m.source is not None
     assert (m.source.statement_id, m.source.span) == ("v1", Span(start=15, end=16))
+    assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g2", "said"}
+
+
+async def test_a_list_whose_own_pick_failed_to_normalise_is_still_described() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.2).noul('"R"', p=0.9)
+    v1, s1 = seen("v1", "Trims: GTI and R."), st("s1", "Choose the SE.")
+    first = list_pick(v1, 0.95, bad="Trims", g1="GTI", g2="R")
+    unfit = first.accepted[0].model_copy(
+        update={"normalise": [NormaliserStep(name="parse_number")]}
+    )
+    first = first.model_copy(update={"candidate": unfit, "accepted": [unfit, *first.accepted[1:]]})
+    ctx = trims_context(fake, (v1, first), (s1, list_pick(s1, 0.8, said="SE")))
+    await NormaliseStage().run(ctx)
+    assert meta(ctx, "trims").generator_id == "bad"
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.generator_id) == (["R", "SE"], "vision", "g2")
     assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g2", "said"}
 
 

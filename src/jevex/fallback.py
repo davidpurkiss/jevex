@@ -543,11 +543,7 @@ def _described(
     if not picks or meta.source is None:
         return {}
     first = picks[0]
-    if (first.source.statement_id, first.method, first.generator_id) != (
-        meta.source.statement_id,
-        meta.method,
-        meta.generator_id,
-    ):
+    if (first.source.statement_id, first.method) != (meta.source.statement_id, meta.method):
         return {}
     left = [p for p in picks if any(item in value for item in p.items)]
     if not left:
