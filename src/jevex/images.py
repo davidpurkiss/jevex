@@ -317,6 +317,11 @@ class RapidOcrEngine:
     go to ``RapidOCR(params=...)`` (keys as in its ``config.yaml``, e.g.
     ``{"Det.box_thresh": 0.6}``). The model loads on first use, and calls are serialised,
     since one engine isn't safe to share between threads.
+
+    Loading the model turns ONNX Runtime's telemetry off for the whole process first
+    (``onnxruntime.disable_telemetry_events()``): on macOS its telemetry thread can race
+    the interpreter's shutdown and abort a process whose work all finished, and it also
+    stops ONNX Runtime's usage telemetry.
     """
 
     def __init__(
@@ -336,6 +341,7 @@ class RapidOcrEngine:
 
         with self._lock:
             if self._ocr is None:
+                importlib.import_module("onnxruntime").disable_telemetry_events()
                 self._ocr = RapidOCR(params=dict(self._params))
             try:
                 result = self._ocr(image)

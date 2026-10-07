@@ -2,8 +2,6 @@
 ``live`` and only run with ``--live`` or ``JEVEX_LIVE=1``. ``JEVEX_RECORD=1`` re-records
 Jev cassettes, so it also allows the network."""
 
-import importlib
-import importlib.util
 import os
 import shutil
 import tempfile
@@ -16,16 +14,6 @@ import pytest
 # LiteLLM fetches its price map from GitHub at import time unless told to use the bundled
 # copy; set it before any test module imports litellm.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
-
-def _disable_onnxruntime_telemetry() -> None:
-    # onnxruntime's telemetry thread (macOS builds) can race the interpreter's shutdown and
-    # abort it ("recursive_mutex lock failed"), failing a run whose tests all passed.
-    if importlib.util.find_spec("onnxruntime") is not None:
-        importlib.import_module("onnxruntime").disable_telemetry_events()
-
-
-_disable_onnxruntime_telemetry()
 
 
 SPEND_ENV = ("JEVEX_SPEND_LEDGER", "JEVEX_JEV_MAX_COST_USD", "JEVEX_LLM_MAX_COST_USD")
