@@ -308,13 +308,6 @@ def render_pdf(
 # --- Reading -----------------------------------------------------------------------------
 
 
-def _disable_onnxruntime_telemetry() -> None:
-    """Turn ONNX Runtime's telemetry off, before any model loads; without the ``ocr`` extra
-    there's nothing to turn off (the engine fails when it first reads)."""
-    if importlib.util.find_spec("onnxruntime") is not None:
-        importlib.import_module("onnxruntime").disable_telemetry_events()
-
-
 class RapidOcrEngine:
     """OCR with `RapidOCR <https://github.com/RapidAI/RapidOCR>`_ (``ocr`` extra): PaddleOCR's
     PP-OCR models on ONNX Runtime. The models ship in the wheel, so nothing is downloaded.
@@ -325,7 +318,7 @@ class RapidOcrEngine:
     ``{"Det.box_thresh": 0.6}``). The model loads on first use, and calls are serialised,
     since one engine isn't safe to share between threads.
 
-    Creating an engine turns ONNX Runtime's telemetry off for the whole process
+    Loading the model turns ONNX Runtime's telemetry off for the whole process first
     (``onnxruntime.disable_telemetry_events()``): on macOS its telemetry thread can race
     the interpreter's shutdown and abort a process whose work all finished, and it also
     stops ONNX Runtime's usage telemetry.
@@ -336,7 +329,6 @@ class RapidOcrEngine:
     ) -> None:
         if not 0 <= min_confidence <= 1:
             raise ValueError(f"min_confidence must be between 0 and 1, got {min_confidence}")
-        _disable_onnxruntime_telemetry()
         self.min_confidence = min_confidence
         self._params: dict[str, Any] = {"Global.log_level": "error", **(params or {})}
         self._ocr: RapidOCR | None = None
@@ -349,6 +341,7 @@ class RapidOcrEngine:
 
         with self._lock:
             if self._ocr is None:
+                importlib.import_module("onnxruntime").disable_telemetry_events()
                 self._ocr = RapidOCR(params=dict(self._params))
             try:
                 result = self._ocr(image)

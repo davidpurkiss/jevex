@@ -7,6 +7,7 @@ CI installs both. RapidOCR's models ship in its wheel, so the real OCR test is o
 
 import base64
 import io
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -710,24 +711,33 @@ def test_rapidocr_drops_lines_below_min_confidence() -> None:
     assert RapidOcrEngine(min_confidence=1.0).read(out.getvalue()) == []
 
 
-def test_rapidocr_engine_turns_onnxruntime_telemetry_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    onnxruntime = pytest.importorskip("onnxruntime")
-    calls: list[str] = []
-    monkeypatch.setattr(onnxruntime, "disable_telemetry_events", lambda: calls.append("off"))
-    engine = RapidOcrEngine()
-    assert calls == ["off"]
-    assert engine._ocr is None  # pyright: ignore[reportPrivateUsage]  # no model loaded yet
-
-    with pytest.raises(ValueError, match="min_confidence"):
-        RapidOcrEngine(min_confidence=-0.1)
-    assert calls == ["off"]  # a rejected engine changes nothing
-
-
-def test_rapidocr_engine_without_onnxruntime_still_constructs(
+def test_rapidocr_engine_turns_onnxruntime_telemetry_off_before_loading_its_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "onnxruntime", None)  # find_spec → None, import fails
-    assert RapidOcrEngine().min_confidence == 0.5
+    onnxruntime = pytest.importorskip("onnxruntime")
+    rapidocr = pytest.importorskip("rapidocr")
+    calls: list[str] = []
+
+    class Model:
+        def __init__(self, params: dict[str, object]) -> None:
+            calls.append("load")
+
+        def __call__(self, image: bytes) -> None:
+            calls.append("read")
+
+    monkeypatch.setattr(onnxruntime, "disable_telemetry_events", lambda: calls.append("off"))
+    monkeypatch.setattr(rapidocr, "RapidOCR", Model)
+    engine = RapidOcrEngine()
+    assert calls == []  # nothing until the model loads
+    assert engine.read(PNG) == []
+    assert engine.read(PNG) == []
+    assert calls == ["off", "load", "read", "read"]
+
+
+def test_importing_jevex_leaves_onnxruntime_unloaded() -> None:
+    # The default pipeline builds an OCR engine at import; only reading may load ONNX Runtime.
+    code = "import sys, jevex; assert 'onnxruntime' not in sys.modules"
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 # --- the vision processor --------------------------------------------------------------------
