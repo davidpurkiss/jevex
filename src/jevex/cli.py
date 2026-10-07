@@ -434,6 +434,8 @@ class _GatePlan:
 
     corpus: str
     mode: EvalMode
+    locale: str | None
+    """The run's ``--locale``, which a baseline records and is gated on."""
     tolerances: GateTolerances
     baseline: Baseline | None
     """The baseline to gate against (``--gate``); ``None`` when writing one."""
@@ -456,8 +458,8 @@ def _plan_gate(args: argparse.Namespace) -> _GatePlan | None:
         if args.gate is not None:
             baseline = Baseline.load(args.gate)
             tolerances = baseline.tolerances.model_copy(update=overrides)
-            ensure_comparable(baseline, corpus=corpus, mode=mode)
-            return _GatePlan(corpus, mode, tolerances, baseline)
+            ensure_comparable(baseline, corpus=corpus, mode=mode, locale=args.locale)
+            return _GatePlan(corpus, mode, args.locale, tolerances, baseline)
         target = Path(args.write_baseline)
         if not target.parent.is_dir():
             raise CliError(f"no such directory for {target}")
@@ -465,7 +467,7 @@ def _plan_gate(args: argparse.Namespace) -> _GatePlan | None:
         previous = Baseline.load(target).tolerances if target.exists() else GateTolerances()
     except BaselineError as exc:
         raise CliError(str(exc)) from exc
-    return _GatePlan(corpus, mode, previous.model_copy(update=overrides), None)
+    return _GatePlan(corpus, mode, args.locale, previous.model_copy(update=overrides), None)
 
 
 def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, err: TextIO) -> int:
@@ -474,7 +476,11 @@ def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, 
         if report.failed:
             raise CliError("not writing a baseline: documents failed (see above)")
         baseline = Baseline.from_report(
-            report, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+            report,
+            corpus=plan.corpus,
+            mode=plan.mode,
+            locale=plan.locale,
+            tolerances=plan.tolerances,
         )
         try:
             baseline.write(args.write_baseline)
@@ -483,7 +489,12 @@ def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, 
         print(f"jevex: wrote baseline {args.write_baseline}", file=err)
         return EXIT_OK
     result = check_baseline(
-        report, plan.baseline, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+        report,
+        plan.baseline,
+        corpus=plan.corpus,
+        mode=plan.mode,
+        locale=plan.locale,
+        tolerances=plan.tolerances,
     )
     print(format_gate(result, args.gate), file=err, end="")
     return EXIT_OK if result.passed else EXIT_ERROR

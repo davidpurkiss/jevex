@@ -555,8 +555,8 @@ baseline's tolerances. `--write-baseline PATH` records a run as the baseline (a 
 with the numbers, a digest of the corpus, and the tolerances). The default tolerances
 are 0.02 for accuracy, 0.05 per field and 0.1 LLM calls per document;
 `--max-accuracy-drop`, `--max-field-drop` (`none` turns it off) and `--max-llm-rise`
-change them. A baseline only gates runs of the same corpus and mode (plain or
-`--replay`). jevex's own CI gates a small test-site corpus replayed from recorded Jev and
+change them. A baseline only gates runs of the same corpus, mode (plain or `--replay`)
+and `--locale` (it records the run's; a file without one means no `--locale`). jevex's own CI gates a small test-site corpus replayed from recorded Jev and
 LLM answers (`tests/test_baseline.py`).
 
 ```sh
