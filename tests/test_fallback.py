@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel
@@ -24,13 +24,16 @@ from jevex.budgets import DocumentBudget
 from jevex.entities import EntityScope
 from jevex.extractor import default_pipeline
 from jevex.fallback import PROMPT, FallbackStage, LLMFieldExtractor, LLMOutput, output_model
+from jevex.housekeeping import generator_use
 from jevex.interfaces import LLMExtractor, ParsedDocument, Selection
 from jevex.jev import ChoiceAnswer, Noul
 from jevex.layout import Component
 from jevex.llm import LLMError
-from jevex.pipeline import VisionValue
+from jevex.normalise import NormaliseStage
+from jevex.pipeline import ValuePick, VisionValue
 from jevex.results import Alternative, FieldMeta, Source
-from jevex.statements import Candidate
+from jevex.select import SelectStage
+from jevex.statements import Candidate, NormaliserStep
 from jevex.testing import FakeJev, FakeLLM
 
 LOC = DomLocation(dom_path="/p")
@@ -750,3 +753,195 @@ async def test_an_item_two_vision_statements_fail_to_verify_is_listed_once() -> 
     assert not m.found
     assert [(a.value, a.p) for a in m.alternatives] == [("GTI", 0.2), (8.0, 0.02)]
     assert len(ctx.events) == 2
+
+
+def list_pick(statement: Statement, confidence: float, **raws: str) -> Selection:
+    """A list pick of ``statement``: each keyword is a generator id and the raw it found."""
+    candidates = [
+        Candidate.from_statement(
+            statement,
+            Span(start=statement.text.index(raw), end=statement.text.index(raw) + len(raw)),
+            generator_id=generator,
+        )
+        for generator, raw in raws.items()
+    ]
+    return Selection(candidate=candidates[0], confidence=confidence, accepted=candidates)
+
+
+def trims_context(fake: FakeJev, *picks: tuple[Statement, Selection]) -> Context:
+    ctx = context(fake, [s for s, _ in picks], {s.id: "trims" for s, _ in picks})
+    run = ctx.schemas["Car"]
+    for statement, selection in picks:
+        run.selections[("doc", "trims", statement.id)] = selection
+        run.candidates[(statement.id, "trims")] = list(selection.accepted)
+    return ctx
+
+
+async def test_a_list_that_loses_its_best_picks_items_is_described_by_a_pick_left() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.2)
+    v1, s1 = seen("v1", "Trims: GTI."), st("s1", "Choose the SE.")
+    ctx = trims_context(
+        fake, (v1, list_pick(v1, 0.95, seen="GTI")), (s1, list_pick(s1, 0.8, said="SE"))
+    )
+    await NormaliseStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.generator_id) == (["GTI", "SE"], "vision", "seen")
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.confidence, m.generator_id) == (["SE"], "generator", 0.8, "said")
+    assert m.source is not None
+    assert (m.source.statement_id, m.source.span) == ("s1", Span(start=11, end=13))
+    assert m.verified is None
+    assert [(a.value, a.p) for a in m.alternatives] == [("GTI", 0.2)]
+    run = ctx.schemas["Car"]
+    assert run.value_generators[("doc", "trims")] == {"said"}
+    assert generator_use(ctx).wins == {"said"}
+
+
+async def test_a_list_whose_best_pick_keeps_an_item_keeps_its_description() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.9).noul('"R"', p=0.1)
+    v1, s1 = seen("v1", "Trims: GTI and R."), st("s1", "Choose the SE.")
+    ctx = trims_context(
+        fake, (v1, list_pick(v1, 0.95, g1="GTI", g2="R")), (s1, list_pick(s1, 0.8, said="SE"))
+    )
+    await NormaliseStage().run(ctx)
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.confidence, m.verified) == (["GTI", "SE"], "vision", 0.9, True)
+    assert m.source is not None
+    assert m.source.statement_id == "v1"
+    assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g1", "said"}
+    assert generator_use(ctx).wins == {"g1", "said"}
+
+
+async def test_a_list_takes_the_span_and_generator_of_the_item_left() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.2).noul('"R"', p=0.9)
+    v1, s1 = seen("v1", "Trims: GTI and R."), st("s1", "Choose the SE.")
+    ctx = trims_context(
+        fake, (v1, list_pick(v1, 0.95, g1="GTI", g2="R")), (s1, list_pick(s1, 0.8, said="SE"))
+    )
+    await NormaliseStage().run(ctx)
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.generator_id) == (["R", "SE"], "vision", "g2")
+    assert m.source is not None
+    assert (m.source.statement_id, m.source.span) == ("v1", Span(start=15, end=16))
+    assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g2", "said"}
+
+
+async def test_a_list_whose_own_pick_failed_to_normalise_is_still_described() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.2).noul('"R"', p=0.9)
+    v1, s1 = seen("v1", "Trims: GTI and R."), st("s1", "Choose the SE.")
+    first = list_pick(v1, 0.95, bad="Trims", g1="GTI", g2="R")
+    unfit = first.accepted[0].model_copy(
+        update={"normalise": [NormaliserStep(name="parse_number")]}
+    )
+    first = first.model_copy(update={"candidate": unfit, "accepted": [unfit, *first.accepted[1:]]})
+    ctx = trims_context(fake, (v1, first), (s1, list_pick(s1, 0.8, said="SE")))
+    await NormaliseStage().run(ctx)
+    assert meta(ctx, "trims").generator_id == "bad"
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.generator_id) == (["R", "SE"], "vision", "g2")
+    assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g2", "said"}
+
+
+async def test_a_best_pick_that_loses_nothing_keeps_its_description() -> None:
+    fake = FakeJev(strict=True).noul('"X"', p=0.1)
+    v1, v2 = seen("v1", "Trims: GTI and R."), seen("v2", "Also X.")
+    first = list_pick(v1, 0.95, g1="GTI", g2="R")
+    # Jev's own pick is R, though GTI comes first in the statement.
+    first = first.model_copy(update={"candidate": first.accepted[1]})
+    ctx = trims_context(fake, (v1, first), (v2, list_pick(v2, 0.6, other="X")))
+    fake.noul('"GTI"', p=0.9).noul('"R"', p=0.9)
+    await NormaliseStage().run(ctx)
+    before = meta(ctx, "trims")
+    assert before.generator_id == "g2"
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.generator_id, m.source) == (["GTI", "R"], "g2", before.source)
+    assert ctx.schemas["Car"].value_generators[("doc", "trims")] == {"g1", "g2"}
+
+
+class Paint(BaseModel):
+    colours: list[Literal["red", "blue", "grey"]] = Field(
+        default_factory=list, description="Paint colours"
+    )
+
+
+async def test_a_direct_list_is_described_by_the_answer_left() -> None:
+    said = seen("v1", "Grey paint")
+    text = st("s1", "In red")
+    select = (
+        FakeJev(default_p=0.05)
+        .noul('"grey"', p=0.95, state="Grey")
+        .noul('"red"', p=0.8, state="In red")
+    )
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(Paint)], select.client()
+    )
+    ctx.parsed = ParsedDocument(
+        document=ctx.document,
+        root=Component(id="root", type="section", location=LOC),
+        statements={"v1": said, "s1": text},
+    )
+    run = ctx.schemas["Paint"]
+    run.scopes = [EntityScope(label="doc", component_ids=["c1"])]
+    for sid in ("v1", "s1"):
+        run.categories[sid] = ChoiceAnswer(
+            choice="colours", confidence=0.9, probabilities={"colours": 0.9}
+        )
+    await SelectStage().run(ctx)
+    before = run.fields["doc"]["colours"]
+    assert (before.value, before.method) == (["grey", "red"], "vision")
+    [_, text_pick] = run.value_picks[("doc", "colours")]
+    ctx.jev = FakeJev(strict=True).noul('"grey"', p=0.2).client()
+    await FallbackStage().run(ctx)
+    m = run.fields["doc"]["colours"]
+    assert (m.value, m.method, m.generator_id) == (["red"], "jev", None)
+    assert (m.source, m.confidence) == (text_pick.source, text_pick.confidence)
+
+
+async def test_a_list_left_only_with_shared_picks_is_marked_shared() -> None:
+    fake = FakeJev(strict=True).noul('"GTI"', p=0.2)
+    v1, s1 = seen("v1", "Trims: GTI."), st("s1", "Choose the SE.")
+    ctx = trims_context(
+        fake, (v1, list_pick(v1, 0.95, seen="GTI")), (s1, list_pick(s1, 0.8, said="SE"))
+    )
+    ctx.schemas["Car"].scopes[0].shared_statement_ids = ["s1"]
+    await NormaliseStage().run(ctx)
+    assert meta(ctx, "trims").shared is False
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.shared) == (["SE"], True)
+
+
+async def test_a_value_another_route_replaced_keeps_its_own_description() -> None:
+    fake = FakeJev().noul('"R"', p=0.1)
+    ctx = context(fake, [seen("v1", "Trims: GTI and R.")], {"v1": "trims"})
+    from_vision(ctx, "trims", ["GTI", "R"], [VisionValue("v1", "R")])
+    run = ctx.schemas["Car"]
+    run.value_picks[("doc", "trims")] = [
+        ValuePick(
+            items=("GTI", "R"),
+            method="generator",
+            source=Source(statement_id="other"),
+            confidence=0.5,
+            generator_id="other",
+        )
+    ]
+    run.value_generators[("doc", "trims")] = {"other"}
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.method, m.confidence) == (["GTI"], "vision", 0.95)
+    assert run.value_generators[("doc", "trims")] == {"other"}
+
+
+async def test_an_emptied_value_leaves_no_generator_a_win() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.3)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)])
+    run = ctx.schemas["Car"]
+    run.value_generators[("doc", "zero_to_62_s")] = {"seen"}
+    await FallbackStage().run(ctx)
+    assert run.value_generators[("doc", "zero_to_62_s")] == set()

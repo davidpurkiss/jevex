@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from jevex.keypaths import StructuredItem
     from jevex.learn import GeneratorSnapshot
     from jevex.llm import LLM
-    from jevex.results import FieldMeta
+    from jevex.results import FieldMeta, Method, Source
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Span, Statement
     from jevex.store import Store, VerifiedExample
@@ -61,6 +61,19 @@ def vision_values(given: Iterable[tuple[Statement, Any, Span | None]]) -> list[V
         if not any(v.statement_id == statement.id and v.value == value for v in out):
             out.append(VisionValue(statement.id, value, span))
     return out
+
+
+@dataclass(frozen=True)
+class ValuePick:
+    """One pick a route took into a list field's value: the items it gave, and how the
+    field's meta describes the value when this pick is the best one in it."""
+
+    items: tuple[Any, ...]
+    method: Method
+    source: Source
+    confidence: float | None
+    generator_id: str | None = None
+    shared: bool = False
 
 
 @runtime_checkable
@@ -117,6 +130,14 @@ class SchemaRun:
     """Keyed by (scope label, field name): the values (a list field's items) in what the
     select or normalise stage offered that only vision statements gave. The fallback
     stage verifies them, if the offered value stood (:mod:`jevex.fallback`)."""
+    value_picks: dict[tuple[str, str], list[ValuePick]] = field(
+        default_factory=dict[tuple[str, str], list[ValuePick]]
+    )
+    """Keyed by (scope label, field name), for a list field with :attr:`vision_values`:
+    the picks in the value the select or normalise stage offered, best first. When the
+    fallback stage drops some of the vision items, the best pick left in the value
+    describes it (method, source, confidence) and :attr:`value_generators` keeps only
+    the generators of the picks left."""
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     """Bare values by scope label, then field name, for stages with no metadata to give.
     Used only when ``fields`` has no entry for that field."""
