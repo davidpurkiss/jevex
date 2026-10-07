@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from jevex import Context, Extractor, Pipeline
 from jevex.cli import main
+from jevex.errors import ExtractionError
 from jevex.eval import (
     EXACT,
     Expected,
@@ -26,7 +27,7 @@ from jevex.eval import (
     score_value,
     values_match,
 )
-from jevex.jev import JevBudgetExceededError
+from jevex.jev import JevBackendError, JevBudgetExceededError
 from jevex.results import FieldMeta
 from jevex.schema import SchemaSpec
 from jevex.testing import FakeJev, FakeLLM
@@ -449,6 +450,83 @@ async def test_the_spend_cap_stops_the_run(tmp_path: Path) -> None:
     )
     with pytest.raises(JevBudgetExceededError):
         await evaluate(ex, load_corpus(tmp_path))
+
+
+@dataclass
+class SkipsAPart:
+    """The oracle, but a generator failed on every document."""
+
+    oracle: Oracle
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        await self.oracle.run(ctx)
+        ctx.part_failed("candidates", "generator", "gen-1", RuntimeError("bad regex"))
+
+
+async def test_a_partial_document_is_scored_as_found_with_its_errors(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    ex = Extractor(
+        [VehicleSpec, Listing],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([SkipsAPart(oracle_for(tmp_path))]),
+    )
+    report = await evaluate(ex, load_corpus(tmp_path))
+    assert report.failed == []
+    assert report.partial == report.documents
+    assert report.overall().accuracy == 1.0
+    warning = "candidates generator gen-1: RuntimeError: bad regex"
+    assert all(d.warnings == [warning] for d in report.documents)
+    summary = report.summary()
+    assert (summary["errors"], summary["partial"]) == (0, len(report.documents))
+    first = report.to_dict()["documents"][0]
+    assert (first["status"], first["warnings"]) == ("partial", [warning])
+
+
+@dataclass
+class JevDown:
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        raise JevBackendError("401 bad key")
+
+
+async def test_a_jev_api_failure_stops_the_run(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    ex = Extractor([VehicleSpec, Listing], jev=FakeJev().client(), pipeline=Pipeline([JevDown()]))
+    with pytest.raises(ExtractionError, match="401 bad key") as raised:
+        await evaluate(ex, load_corpus(tmp_path))
+    assert isinstance(raised.value.__cause__, JevBackendError)
+
+
+def test_cli_eval_stops_when_jev_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import jevex.extractor as extractor_module
+
+    build(42, tmp_path)
+    monkeypatch.setattr(extractor_module, "DEFAULT_STAGES", (JevDown(),))
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["eval", str(tmp_path), *SCHEMAS], jev=FakeJev().client(), out=out, err=err)
+    assert (code, out.getvalue()) == (1, "")
+    assert err.getvalue() == "jevex: error: Jev: 401 bad key\n"
+
+
+def test_cli_eval_warns_about_partial_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor_module
+
+    build(42, tmp_path)
+    stage = SkipsAPart(oracle_for(tmp_path))
+    monkeypatch.setattr(extractor_module, "DEFAULT_STAGES", (stage,))
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["eval", str(tmp_path), *SCHEMAS], jev=FakeJev().client(), out=out, err=err)
+    assert code == 0  # still a clean measurement
+    lines = err.getvalue().splitlines()
+    assert lines
+    assert all(
+        line.startswith("jevex: warning: ") and line.endswith(": RuntimeError: bad regex")
+        for line in lines
+    )
 
 
 async def test_a_run_error_cancels_the_documents_still_running(tmp_path: Path) -> None:

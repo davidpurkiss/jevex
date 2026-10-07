@@ -45,12 +45,9 @@ from fastapi.responses import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from jevex import __version__
-from jevex._pdfium import UnreadablePdfError
 from jevex.document import LOCALE_TAG, Document
 from jevex.extractor import Extractor, document_stat
-from jevex.images import UnreadableImageError
-from jevex.jev import JevBudgetExceededError, JevClient, JevError
-from jevex.layout_pdf import PdfLayoutError
+from jevex.jev import JevBudgetExceededError, JevClient
 from jevex.llm import LLMBudgetExceededError
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
@@ -61,6 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
 
     from jevex.budgets import Budgets
+    from jevex.errors import PartError
     from jevex.extractor import ExtractionResult
     from jevex.llm import LLM
     from jevex.stats import Stats
@@ -120,14 +118,20 @@ class ExtractRequest(BaseModel):
         return list(dict.fromkeys(names))
 
 
-type Outcome = Literal["ok", "stopped", "error"]
+type Outcome = Literal["ok", "partial", "stopped", "error"]
+OUTCOMES: tuple[Outcome, ...] = ("ok", "partial", "stopped", "error")
 
 
 @dataclass
 class Metrics:
-    """Counters since the process started, for ``/metrics``. Spend and calls are those of
-    the documents that finished: one whose extraction raised counts only as an ``error``
-    (its partial spend is in the store's ledger and stats, with a store)."""
+    """Counters since the process started, for ``/metrics``.
+
+    A document's outcome is its result's status (:mod:`jevex.errors`): ``ok``,
+    ``partial`` (a part failed and was skipped) or ``error`` (it failed), with ``stopped``
+    for an otherwise ok one a stage or budget stopped. Spend, calls and retries are those
+    of the documents with a result; one whose extraction raised (a process spend cap)
+    counts only as an ``error``. ``errors`` counts each result's errors by stage and kind.
+    """
 
     documents: Counter[Outcome] = field(default_factory=Counter[Outcome])
     in_progress: int = 0
@@ -140,13 +144,19 @@ class Metrics:
     jev_cost: float = 0.0
     llm_calls: int = 0
     llm_cost: float = 0.0
+    jev_retries: int = 0
+    llm_retries: int = 0
+    errors: Counter[tuple[str, str]] = field(default_factory=Counter[tuple[str, str]])
     seconds: float = 0.0
     timed: int = 0
 
     def add(self, result: ExtractionResult, seconds: float) -> None:
-        """Count a finished document: ``stopped`` if a stage (or a budget) stopped it."""
+        """Count a document's result (see the class docstring for its outcome)."""
         stat = document_stat(result, doc_id="", run_id=None, seconds=seconds)
-        self.documents["stopped" if result.meta.stopped else "ok"] += 1
+        self.documents[_outcome(result)] += 1
+        self.errors.update((e.stage, e.kind) for e in result.errors)
+        self.jev_retries += result.meta.jev.retries
+        self.llm_retries += result.meta.llm.retries
         self.records.update(r.schema_name for r in result.records)
         self.values.update((v.field.split(".")[0], v.method or "unknown") for v in stat.values)
         self.budget_events.update((e.scope, e.limit) for e in result.meta.budget_events)
@@ -181,8 +191,9 @@ class Metrics:
         metric(
             "jevex_documents_total",
             "counter",
-            "Documents extracted, by outcome (stopped: a stage or budget stopped it).",
-            [({"outcome": o}, self.documents[o]) for o in ("ok", "stopped", "error")],
+            "Documents extracted, by outcome (partial: a part failed and was skipped; "
+            "stopped: a stage or budget stopped it; error: it failed).",
+            [({"outcome": o}, self.documents[o]) for o in OUTCOMES],
         )
         metric(
             "jevex_documents_in_progress",
@@ -208,6 +219,12 @@ class Metrics:
             "Budget limits hit, by scope and limit.",
             [({"scope": s, "limit": lim}, n) for (s, lim), n in sorted(self.budget_events.items())],
         )
+        metric(
+            "jevex_errors_total",
+            "counter",
+            "Failures reported in results, by stage and kind (jevex.errors).",
+            [({"stage": st, "kind": k}, n) for (st, k), n in sorted(self.errors.items())],
+        )
         for name, help_, value in (
             ("jevex_jev_requests_total", "Jev requests.", self.jev_requests),
             ("jevex_jev_questions_total", "Jev questions.", self.jev_questions),
@@ -215,6 +232,8 @@ class Metrics:
             ("jevex_jev_cost_usd_total", "Estimated Jev spend in USD.", self.jev_cost),
             ("jevex_llm_calls_total", "LLM calls (fallback and verification).", self.llm_calls),
             ("jevex_llm_cost_usd_total", "LLM spend in USD.", self.llm_cost),
+            ("jevex_jev_retries_total", "Jev requests retried.", self.jev_retries),
+            ("jevex_llm_retries_total", "LLM calls retried (as SDKs report).", self.llm_retries),
         ):
             metric(name, "counter", help_, [({}, value)])
         summary(
@@ -224,6 +243,14 @@ class Metrics:
             self.timed,
         )
         return "\n".join(lines) + "\n"
+
+
+def _outcome(result: ExtractionResult) -> Outcome:
+    if result.status == "failed":
+        return "error"
+    if result.status == "partial":
+        return "partial"
+    return "stopped" if result.meta.stopped else "ok"
 
 
 def _labels(labels: dict[str, str]) -> str:
@@ -355,7 +382,7 @@ class Service:
         started = time.perf_counter()
         try:
             result = await extractor.extract(document)
-        except Exception:  # not a cancellation (a client gone, or shutdown)
+        except Exception:  # a process spend cap (not a cancellation: a client gone)
             self.metrics.documents["error"] += 1
             raise
         finally:
@@ -395,7 +422,13 @@ class Service:
                 await store.aclose()
 
 
-_DOCUMENT_ERRORS = (UnreadablePdfError, PdfLayoutError, UnreadableImageError)
+def _failure(error: PartError) -> HTTPException:
+    """The HTTP error for a failed result's core failure."""
+    if error.kind == "document":
+        return HTTPException(422, detail=f"can't read the document: {error.message}")
+    if error.kind == "jev":
+        return HTTPException(502, detail=f"Jev: {error.message}")
+    return HTTPException(500, detail=f"extraction failed: {error.describe()}")
 
 
 def create_app(service: Service) -> FastAPI:
@@ -403,9 +436,10 @@ def create_app(service: Service) -> FastAPI:
     starts the service and closes it.
 
     ``POST /extract`` answers 422 for a body that doesn't validate or names an unknown
-    schema, 422 for a document that can't be read (a broken PDF or image), 503 when a
-    process spend cap (``JEVEX_*_MAX_COST_USD``) is reached and 502 for other Jev
-    errors; anything else is a 500.
+    schema, 503 when a process spend cap (``JEVEX_*_MAX_COST_USD``) is reached, and for a
+    failed result (:mod:`jevex.errors`) 422 if the document can't be read (a broken PDF or
+    image), 502 if Jev failed and 500 otherwise. A ``partial`` result is a 200 whose
+    ``status`` and ``errors`` say what was skipped.
     """
 
     @contextlib.asynccontextmanager
@@ -431,12 +465,11 @@ def create_app(service: Service) -> FastAPI:
             result = await service.extract(request.document.to_document(), request.schema_names())
         except UnknownSchemaError as exc:
             raise HTTPException(422, detail=str(exc)) from exc
-        except _DOCUMENT_ERRORS as exc:
-            raise HTTPException(422, detail=f"can't read the document: {exc}") from exc
         except (JevBudgetExceededError, LLMBudgetExceededError) as exc:
             raise HTTPException(503, detail=str(exc)) from exc
-        except JevError as exc:
-            raise HTTPException(502, detail=f"Jev: {exc}") from exc
+        fatal = next((e for e in result.errors if e.fatal), None)
+        if fatal is not None:
+            raise _failure(fatal)
         return result.to_dict() if request.meta else result.to_plain_dict()
 
     @app.get("/health")

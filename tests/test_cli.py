@@ -64,7 +64,9 @@ def test_extract_prints_records_as_json(page: Path) -> None:
     code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
     assert (code, err) == (0, "")
     assert json.loads(out) == {
-        "records": [{"schema": "Book", "entity": "document", "record": {"title": "Dune"}}]
+        "status": "ok",
+        "errors": [],
+        "records": [{"schema": "Book", "entity": "document", "record": {"title": "Dune"}}],
     }
 
 
@@ -265,9 +267,31 @@ def test_jev_errors_are_clean_errors(page: Path, monkeypatch: pytest.MonkeyPatch
             raise StateTooLargeError("state is too big")
 
     monkeypatch.setattr(extractor, "DEFAULT_STAGES", (Boom(),))
-    code, _, err = run_cli("extract", str(page), "--schema", SCHEMA)
-    assert code == 1
-    assert "jevex: error: Jev: state is too big" in err
+    code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert (code, out) == (1, "")
+    assert err == "jevex: error: select jev: StateTooLargeError: state is too big\n"
+
+
+def test_extract_prints_a_partial_result_and_warns(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor
+
+    @dataclass
+    class SkipsAPart:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            await FindTitle().run(ctx)
+            ctx.part_failed("candidates", "generator", "gen-1", RuntimeError("bad regex"))
+
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", (SkipsAPart(),))
+    code, out, err = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert code == 0
+    data = json.loads(out)
+    assert data["status"] == "partial"
+    assert data["records"][0]["record"] == {"title": "Dune"}
+    assert err == "jevex: warning: candidates generator gen-1: RuntimeError: bad regex\n"
 
 
 def test_schema_files_never_shadow_real_modules(tmp_path: Path) -> None:

@@ -18,8 +18,9 @@ from scrapy.utils.test import get_crawler
 import jevex.contrib.scrapy as contrib
 from jevex import Context, Document, Extractor, Field
 from jevex.contrib.scrapy import AsyncioRequiredError, JevexPipeline, document_from_response
+from jevex.errors import ExtractionError
 from jevex.extractor import ExtractionResult
-from jevex.jev import JevClient, Noul
+from jevex.jev import JevBudgetExceededError, JevClient, Noul
 from jevex.pipeline import Pipeline
 from jevex.results import FieldMeta
 from jevex.store import SQLiteStore
@@ -47,6 +48,7 @@ class FindTitle:
 
     name: str = "select"
     fail: Exception | None = None
+    skip: Exception | None = None
     seen: list[str | None] = field(default_factory=list[str | None])
 
     async def run(self, ctx: Context) -> None:
@@ -57,6 +59,8 @@ class FindTitle:
         for run in ctx.active:
             name = run.spec.fields[0].name
             run.set_field("document", name, FieldMeta(value="Dune", confidence=0.9, method="jev"))
+        if self.skip is not None:
+            ctx.part_failed("candidates", "generator", "gen-1", self.skip)
 
 
 class FakePipeline(JevexPipeline):
@@ -295,15 +299,42 @@ async def test_pipeline_rejects_a_document_field_that_isnt_a_document() -> None:
         await pipeline.process_item({"document": response})
 
 
-async def test_pipeline_lets_a_failed_extraction_fail_the_item() -> None:
+async def test_a_failed_extraction_fails_the_item() -> None:
     pipeline = await opened(FakePipeline)
     pipeline.stage.fail = RuntimeError("boom")
     item = {"document": document()}
 
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(ExtractionError, match="select stage: RuntimeError: boom") as raised:
         await pipeline.process_item(item)
 
+    assert isinstance(raised.value.__cause__, RuntimeError)
     assert "records" not in item
+    stats = pipeline.crawler.stats
+    assert stats.get_value("jevex/documents") == 1
+    assert stats.get_value("jevex/failed") == 1
+    assert stats.get_value("jevex/errors/stage") == 1
+
+
+async def test_a_partial_result_fills_the_item_and_is_counted() -> None:
+    pipeline = await opened(FakePipeline)
+    pipeline.stage.skip = RuntimeError("bad regex")
+
+    item = await pipeline.process_item({"document": document()})
+
+    assert item["records"][0]["record"] == {"title": "Dune"}
+    stats = pipeline.crawler.stats
+    assert stats.get_value("jevex/partial") == 1
+    assert stats.get_value("jevex/errors/generator") == 1
+    assert stats.get_value("jevex/failed") is None
+
+
+async def test_a_spend_cap_fails_the_item_uncounted() -> None:
+    pipeline = await opened(FakePipeline)
+    pipeline.stage.fail = JevBudgetExceededError("capped")
+
+    with pytest.raises(JevBudgetExceededError):
+        await pipeline.process_item({"document": document()})
+
     assert pipeline.crawler.stats.get_value("jevex/documents") is None
 
 

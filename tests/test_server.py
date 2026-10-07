@@ -1,5 +1,5 @@
 import base64
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -9,7 +9,17 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from jevex import Context, Field, UnreadablePdfError
-from jevex.jev import JevBackendError, JevBudgetExceededError, Noul
+from jevex.jev import (
+    JevBackendError,
+    JevBudgetExceededError,
+    JevClient,
+    JevResponse,
+    JevTransientError,
+    JSONContent,
+    Noul,
+    Question,
+    RetryPolicy,
+)
 from jevex.llm import LLMBudgetExceededError
 from jevex.results import FieldMeta
 from jevex.server import (
@@ -46,6 +56,7 @@ class FindValues:
     name: str = "select"
     seen: list[tuple[str, list[str]]] = field(default_factory=list[tuple[str, list[str]]])
     fail: Exception | None = None
+    skip: Exception | None = None
     stop: bool = False
 
     async def run(self, ctx: Context) -> None:
@@ -56,6 +67,8 @@ class FindValues:
         for run in ctx.active:
             name = run.spec.fields[0].name
             run.set_field("document", name, FieldMeta(value="Dune", confidence=0.9, method="jev"))
+        if self.skip is not None:
+            ctx.part_failed("candidates", "generator", "gen-1", self.skip)
         if self.stop and ctx.budget is not None:
             ctx.budget.record_hit("run", "max_spend", "the day's LLM budget is spent")
             ctx.stop(self.name, "budget")
@@ -105,7 +118,9 @@ def test_extract_returns_records_like_jevex_extract(client: TestClient) -> None:
     response = client.post("/extract", json=body(url="https://shop.example.com/dune"))
     assert response.status_code == 200
     assert response.json() == {
-        "records": [{"schema": "Book", "entity": "document", "record": {"title": "Dune"}}]
+        "status": "ok",
+        "errors": [],
+        "records": [{"schema": "Book", "entity": "document", "record": {"title": "Dune"}}],
     }
 
 
@@ -199,6 +214,67 @@ def test_extraction_errors_map_to_statuses(
     response = client.post("/extract", json=body())
     assert (response.status_code, response.json()) == (status, {"detail": detail})
     assert 'jevex_documents_total{outcome="error"} 1\n' in client.get("/metrics").text
+
+
+def test_a_partial_result_is_a_200_saying_what_was_skipped(
+    client: TestClient, stage: FindValues
+) -> None:
+    stage.skip = RuntimeError("bad regex")
+    response = client.post("/extract", json=body())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "partial"
+    assert data["errors"] == [
+        {
+            "stage": "candidates",
+            "kind": "generator",
+            "part": "gen-1",
+            "type": "RuntimeError",
+            "message": "bad regex",
+            "count": 1,
+            "fatal": False,
+        }
+    ]
+    assert data["records"][0]["record"] == {"title": "Dune"}
+    metrics = client.get("/metrics").text
+    assert 'jevex_documents_total{outcome="partial"} 1\n' in metrics
+    assert 'jevex_documents_total{outcome="ok"} 0\n' in metrics
+    assert 'jevex_errors_total{stage="candidates",kind="generator"} 1\n' in metrics
+
+
+def test_a_failed_result_is_counted_with_its_spend(client: TestClient, stage: FindValues) -> None:
+    stage.fail = KeyError("bug")
+    assert client.post("/extract", json=body()).status_code == 500
+    metrics = client.get("/metrics").text
+    assert 'jevex_documents_total{outcome="error"} 1\n' in metrics
+    assert 'jevex_errors_total{stage="select",kind="stage"} 1\n' in metrics
+    assert "jevex_extract_seconds_count 1\n" in metrics
+
+
+class FlakyOnce:
+    """A Jev backend whose first request fails transiently."""
+
+    def __init__(self, inner: FakeJev) -> None:
+        self.inner = inner
+        self.failed = False
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if not self.failed:
+            self.failed = True
+            raise JevTransientError("503")
+        return await self.inner.system_one(state, questions)
+
+
+@pytest.mark.usefixtures("stage")
+def test_retries_are_counted(fake_jev: FakeJev) -> None:
+    jev = JevClient(FlakyOnce(fake_jev), retry=RetryPolicy(backoff_initial=0))
+    with TestClient(create_app(Service([Book], jev=jev))) as client:
+        assert client.post("/extract", json=body()).json()["status"] == "ok"
+        metrics = client.get("/metrics").text
+    assert "jevex_jev_retries_total 1\n" in metrics
+    assert "jevex_llm_retries_total 0\n" in metrics
 
 
 def test_unexpected_errors_are_500_and_counted(stage: FindValues, fake_jev: FakeJev) -> None:
