@@ -10,12 +10,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from jevex.errors import PartError
 from jevex.layout import DomLocation
 from jevex.statements import Statement
 from jevex.store import (
     DocumentEvent,
     DocumentStat,
     GeneratorRecord,
+    GeneratorStats,
     KeyMapping,
     SpendEntry,
     SQLiteStore,
@@ -428,9 +430,9 @@ async def test_generator_stats_accumulate(store: Store) -> None:
     assert empty.win_rate is None
 
     await store.record_generator_stats("g1", documents=4, hits=2, wins=1)
-    await store.record_generator_stats("g1", documents=6, hits=3)
+    await store.record_generator_stats("g1", documents=6, hits=3, failures=2)
     stats = await store.generator_stats("g1")
-    assert (stats.documents, stats.hits, stats.wins) == (10, 5, 1)
+    assert (stats.documents, stats.hits, stats.wins, stats.failures) == (10, 5, 1, 2)
     assert stats.hit_rate == 0.5
     assert stats.win_rate == 0.2
 
@@ -500,6 +502,17 @@ async def test_document_stats_round_trip(store: Store) -> None:
         values=[ValueStat(field="VehicleSpec.power_ps", method="llm", confidence=0.7, value="150")],
         events=[DocumentEvent(kind="budget", message="document: max_llm_calls")],
         snapshot=4,
+        status="partial",
+        errors=[
+            PartError(
+                stage="candidates",
+                kind="generator",
+                part="g1",
+                type="RuntimeError",
+                message="boom",
+                count=2,
+            )
+        ],
     )
     await store.record_document(stat)
     assert await store.documents() == [stat]
@@ -688,9 +701,15 @@ async def test_a_version_1_database_is_migrated(tmp_path: Path) -> None:
     assert await store.documents() == []
     await store.record_document(DocumentStat(id="d1", at=T0))
     assert [d.id for d in await store.documents()] == ["d1"]
+    # v5: generator failures, counted from 0 for a generator with stats already.
+    await store.record_generator_stats("g1", documents=1)
+    await store.record_generator_stats("g1", failures=2)
+    assert await store.generator_stats("g1") == GeneratorStats(
+        generator_id="g1", documents=1, failures=2
+    )
     await store.aclose()
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 5
     conn.close()
 
 

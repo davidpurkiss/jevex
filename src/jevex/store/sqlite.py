@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Version 1's tables; a new database runs this, then every migration.
 _SCHEMA = """
@@ -133,6 +133,9 @@ CREATE TABLE documents (
     at REAL NOT NULL
 );
 CREATE INDEX documents_at ON documents (at);
+""",
+    5: """
+ALTER TABLE generator_stats ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
 """,
 }
 
@@ -518,16 +521,24 @@ class SQLiteStore:
     # -- generator stats --------------------------------------------------------------
 
     async def record_generator_stats(
-        self, generator_id: str, *, documents: int = 0, hits: int = 0, wins: int = 0
+        self,
+        generator_id: str,
+        *,
+        documents: int = 0,
+        hits: int = 0,
+        wins: int = 0,
+        failures: int = 0,
     ) -> None:
         def run() -> None:
             with self._write() as cur:
                 cur.execute(
-                    "INSERT INTO generator_stats VALUES (?, ?, ?, ?) "
+                    "INSERT INTO generator_stats (generator_id, documents, hits, wins, failures) "
+                    "VALUES (?, ?, ?, ?, ?) "
                     "ON CONFLICT (generator_id) DO UPDATE SET "
                     "documents = documents + excluded.documents, "
-                    "hits = hits + excluded.hits, wins = wins + excluded.wins",
-                    (generator_id, documents, hits, wins),
+                    "hits = hits + excluded.hits, wins = wins + excluded.wins, "
+                    "failures = failures + excluded.failures",
+                    (generator_id, documents, hits, wins, failures),
                 )
 
         await self._call(run)
@@ -545,6 +556,7 @@ class SQLiteStore:
                 documents=r["documents"],
                 hits=r["hits"],
                 wins=r["wins"],
+                failures=r["failures"],
             )
 
         return await self._call(run)

@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -30,10 +30,11 @@ from jevex import (
     generator_use,
 )
 from jevex.entities import EntityScope
-from jevex.housekeeping import PRUNE_AFTER
-from jevex.interfaces import ParsedDocument, Selection
+from jevex.housekeeping import PRUNE_AFTER, QUARANTINE_AFTER
+from jevex.interfaces import ParsedDocument, Scope, Selection
 from jevex.jev import Choice, ChoiceAnswer
 from jevex.layout import Component
+from jevex.learn import GeneratorSnapshot
 from jevex.normalise import NormaliseStage
 from jevex.select import CandidateStage, SelectStage
 from jevex.store import Store, open_store
@@ -338,6 +339,84 @@ async def test_without_a_snapshot_nothing_is_pruned() -> None:
     keeper = Housekeeper(store, prune_after=1)
     assert await keeper.record(ctx) == []
     assert (await store.generator_stats("gen-x")).documents == 1
+
+
+# --- quarantine ----------------------------------------------------------------------
+
+
+@dataclass
+class Crashes:
+    """A generator that raises on every statement."""
+
+    id: str
+    scope: Scope = field(default_factory=Scope)
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        raise RuntimeError("bad backreference")
+
+
+async def run_crashing(
+    keeper: Housekeeper, learned: LearnedGenerators, base: GeneratorRegistry | None = None
+) -> Context:
+    """A document whose snapshot has the stored ``gen-bad`` as a generator that raises."""
+    ctx = Context.create(
+        Document.from_bytes(b"<p/>"), [SPEC], FakeJev().choice(None, pick("9.1")).client()
+    )
+    registry = learned.current.registry
+    if "gen-bad" in registry:
+        registry = registry.with_generator(Crashes("gen-bad"))
+    ctx.generators = GeneratorSnapshot(learned.current.version, registry)
+    ctx.housekeeper = keeper
+    await pipeline(base).run(ctx)
+    return ctx
+
+
+async def test_a_learned_generator_is_quarantined_after_its_third_failure() -> None:
+    store = new_store()
+    learned = await setup(store, spec("gen-time"), spec("gen-bad"))
+    keeper = Housekeeper(store, learned, prune_after=None)
+    for n in (1, 2):
+        ctx = await run_crashing(keeper, learned)
+        assert (await store.generator_stats("gen-bad")).failures == n
+        assert keeper.quarantined == []
+        assert [e.kind for e in ctx.errors.errors] == ["generator"]
+    third = await run_crashing(keeper, learned)
+    assert keeper.quarantined == ["gen-bad"]
+    [event] = third.events
+    assert (event.stage, event.kind) == ("learn", "generator_quarantined")
+    assert event.message == "generator gen-bad failed 3 times and was disabled"
+    assert event.data == {"generator_id": "gen-bad", "failures": QUARANTINE_AFTER}
+    # Disabled and kept for review; the other generator still covers the field.
+    assert await store.disabled_generator_ids() == {"gen-bad"}
+    assert [r.id for r in await store.generators(include_disabled=True)] == ["gen-time", "gen-bad"]
+    assert learned.current.registry.ids == ["gen-time"]
+    assert third.schemas["Car"].fields["doc"]["zero_to_62_s"].value == 9.1
+    fourth = await run_crashing(keeper, learned)
+    assert "gen-bad" not in fourth.generators_ran
+    assert (fourth.events, fourth.errors.errors) == ([], [])
+
+
+async def test_failures_on_one_document_count_each_statement() -> None:
+    store = new_store()
+    learned = await setup(store, spec("gen-bad"))
+    keeper = Housekeeper(store, learned)
+    ctx = bare_ctx()
+    ctx.generators = GeneratorSnapshot(1, learned.current.registry)
+    for _ in range(QUARANTINE_AFTER):
+        ctx.part_failed("candidates", "generator", "gen-bad", RuntimeError("x"))
+    await keeper.record(ctx)
+    assert keeper.quarantined == ["gen-bad"]
+
+
+async def test_built_in_generators_that_fail_are_counted_but_never_quarantined() -> None:
+    store = new_store()
+    learned = await setup(store, spec("gen-time"))
+    keeper = Housekeeper(store, learned)
+    base = GeneratorRegistry([Crashes("stage-bad")])
+    docs = [await run_crashing(keeper, learned, base) for _ in range(QUARANTINE_AFTER + 1)]
+    assert (await store.generator_stats("stage-bad")).failures == QUARANTINE_AFTER + 1
+    assert keeper.quarantined == []
+    assert all(ctx.events == [] for ctx in docs)
 
 
 def test_prune_after_must_be_positive() -> None:

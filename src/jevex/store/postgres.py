@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 
     from jevex.store.base import SpendKind
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Version 1's tables. ``{s}`` is the store's Postgres schema.
 _SCHEMA: LiteralString = """
@@ -138,6 +138,7 @@ CREATE TABLE {s}.documents (
 );
 CREATE INDEX documents_at ON {s}.documents (at);
 """,
+    4: "ALTER TABLE {s}.generator_stats ADD COLUMN failures BIGINT NOT NULL DEFAULT 0",
 }
 
 # Serialises schema creation and migration across every process opening a store on the
@@ -551,17 +552,26 @@ class PostgresStore:
     # -- generator stats --------------------------------------------------------------
 
     async def record_generator_stats(
-        self, generator_id: str, *, documents: int = 0, hits: int = 0, wins: int = 0
+        self,
+        generator_id: str,
+        *,
+        documents: int = 0,
+        hits: int = 0,
+        wins: int = 0,
+        failures: int = 0,
     ) -> None:
         async def op(conn: AsyncConnection[Any]) -> None:
             await conn.execute(
                 self._q(
-                    "INSERT INTO {s}.generator_stats AS t VALUES (%s, %s, %s, %s) "
+                    "INSERT INTO {s}.generator_stats AS t "
+                    "(generator_id, documents, hits, wins, failures) "
+                    "VALUES (%s, %s, %s, %s, %s) "
                     "ON CONFLICT (generator_id) DO UPDATE SET "
                     "documents = t.documents + excluded.documents, "
-                    "hits = t.hits + excluded.hits, wins = t.wins + excluded.wins"
+                    "hits = t.hits + excluded.hits, wins = t.wins + excluded.wins, "
+                    "failures = t.failures + excluded.failures"
                 ),
-                (generator_id, documents, hits, wins),
+                (generator_id, documents, hits, wins, failures),
             )
 
         await self._run(op)
@@ -575,7 +585,11 @@ class PostgresStore:
             return GeneratorStats(generator_id=generator_id)
         r = rows[0]
         return GeneratorStats(
-            generator_id=generator_id, documents=r["documents"], hits=r["hits"], wins=r["wins"]
+            generator_id=generator_id,
+            documents=r["documents"],
+            hits=r["hits"],
+            wins=r["wins"],
+            failures=r["failures"],
         )
 
     # -- spend ledger -----------------------------------------------------------------
