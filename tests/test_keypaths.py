@@ -466,6 +466,75 @@ async def test_a_mapping_from_the_store_can_say_none(store: SQLiteStore) -> None
     assert list(fields) == ["price"]
 
 
+class FailingStore(SQLiteStore):
+    """A store whose key mapping lookups, unsure counts or key mapping writes fail."""
+
+    def __init__(self, *, reads: bool = False, counts: bool = False, writes: bool = False):
+        super().__init__(":memory:")
+        self.fail_reads, self.fail_counts, self.fail_writes = reads, counts, writes
+
+    async def key_mappings(
+        self, fingerprint: str | None = None, *, schema: str | None = None
+    ) -> list[KeyMapping]:
+        if self.fail_reads:
+            raise StoreError("connection reset")
+        return await super().key_mappings(fingerprint, schema=schema)
+
+    async def count_unsure_key_paths(
+        self, fingerprint: str, schema: str, paths: list[str]
+    ) -> dict[str, int]:
+        if self.fail_counts:
+            raise StoreError("connection reset")
+        return await super().count_unsure_key_paths(fingerprint, schema, paths)
+
+    async def put_key_mappings(self, mappings: Iterable[KeyMapping]) -> None:
+        if self.fail_writes:
+            raise StoreError("disk full")
+        await super().put_key_mappings(mappings)
+
+
+async def test_a_failed_lookup_counts_as_unknown_and_jev_is_asked() -> None:
+    store = FailingStore()
+    await extract(KeyPathMapper(store=store), mapping_jev())  # stores every path
+    store.fail_reads = True
+    fake = mapping_jev()
+    ctx = Context.create(page(CAR), [SchemaSpec.from_model(Car)], fake.client())
+    await StructuredStage(extractor=KeyPathMapper(store=store)).run(ctx)
+    assert len(fake.calls) == 1  # the extra Jev call a hit would have saved
+    assert ctx.schemas["Car"].fields[SINGLE_ENTITY_LABEL]["model"].value == "Golf"
+    assert [(e.stage, e.kind, e.part, e.type, e.message) for e in ctx.errors.errors] == [
+        ("structured", "store", "key_mappings", "StoreError", "connection reset")
+    ]
+    assert ctx.errors.status == "partial"
+    await store.aclose()
+
+
+async def test_a_failed_write_is_reported_and_the_values_still_found() -> None:
+    store = FailingStore(writes=True)
+    result = await KeyPathMapper(store=store).extract(
+        page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client()
+    )
+    assert result.fields["Car"]["model"].value == "Golf"
+    assert [(part, str(exc)) for part, exc in result.store_errors] == [
+        ("key_mappings", "disk full")
+    ]
+    store.fail_writes = False
+    assert await store.key_mappings() == []
+    await store.aclose()
+
+
+async def test_failed_unsure_counts_give_up_on_no_path() -> None:
+    store = FailingStore(counts=True)
+    result = await KeyPathMapper(store=store, unsure_limit=1).extract(
+        page(CAR), [SchemaSpec.from_model(Car)], mapping_jev(confidence=0.4).client()
+    )
+    assert [part for part, _ in result.store_errors] == ["unsure_counts"]
+    # Only the confident "none"s were stored; no unsure path was given up on.
+    assert {m.path for m in await store.key_mappings()} == {"@type", "offers[].@type"}
+    assert not any(m.unsure for m in await store.key_mappings())
+    await store.aclose()
+
+
 class Book(BaseModel):
     """A book."""
 
