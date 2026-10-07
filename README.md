@@ -303,6 +303,45 @@ extractor = Extractor(schemas=[VehicleSpec], store="postgresql://jevex@db.intern
 Its tables go in a `jevex` schema. To choose another, pass a store instead:
 `store=PostgresStore(url, db_schema="jevex_staging")` (from `jevex.store.postgres`).
 
+If the store fails while a document runs, the document carries on and the failure is in
+`result.errors` (kind `store`): a lookup that fails counts as nothing found (a key path is
+asked about again, which costs an extra Jev call), and a write that fails is skipped.
+
+### Spend ledger
+
+A run budget (`RunBudget`) is kept in a spend ledger that every worker on the same run
+shares. By default that's the store (SQLite and Postgres are ledgers too). With no store,
+it's a `MemoryLedger` for the extractor. To keep spend somewhere else, such as a Redis
+counter, a billing system or a per-process cap, implement `SpendLedger` and pass it in:
+
+```python
+from jevex import Budgets, Extractor, RunBudget, SpendEntry
+
+
+class BillingLedger:  # four async methods; see jevex.store.ledger
+    async def record_spend(self, entry: SpendEntry) -> None: ...
+    async def spend(self, *, since=None, kind=None, run_id=None) -> float: ...
+    async def try_spend(
+        self, entry, *, cap_usd=None, max_count=None, since=None, kind=None
+    ) -> bool: ...
+    async def spend_entries(self, *, since=None, kind=None) -> list[SpendEntry]: ...
+
+
+extractor = Extractor(
+    schemas=[VehicleSpec],
+    budgets=Budgets(run=RunBudget(max_spend=5.00, llm_rpm=60)),
+    store="sqlite:///jevex.db",  # learned state stays here
+    ledger=BillingLedger(),  # spend goes here
+)
+```
+
+`try_spend` must check its limits and record the entry atomically, so workers sharing a
+cap can't overshoot it together. Sums should be exact to a nano-dollar, because Jev
+charges a few nano-dollars per token. When the ledger raises, jevex can't confirm the
+spend, so the LLM call that needed it isn't made. The failure is reported in
+`result.errors` (kind `ledger`), and Jev and generators carry on. Retrying, buffering or
+failing open during an outage is up to the ledger, for example a wrapper around it.
+
 ### Packs
 
 A pack is learned state as reviewable YAML: a directory with a `manifest.yaml` (name,
