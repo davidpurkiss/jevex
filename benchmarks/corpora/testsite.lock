@@ -1,5 +1,5 @@
 {
-  "digest": "6dbe972387ff1fbbfcfe77c87d51a5b51018fa126221689e791fc55b2e146dd7",
+  "digest": "266c49c4600e074436e5f204225fd95d07b91ecb367e86814487c5aacd66f7ff",
   "documents": {
     "brochures/aurel-emberly-spec-sheet.pdf": "e6dc9c46bc52822bb40b0d6672decdeb232714ad588fd0da26262651f808d724",
     "brochures/aurel-marlow-spec-sheet.pdf": "79eea67ffc3988ac0dc17c8f342ab20d034ce5596c7b1a7038bc2f63e5a05f9c",
@@ -230,6 +230,6 @@
       ]
     ]
   },
-  "truth": "9a0d951ba94ea448be672ad25325807d60aa0e6d11bb0a934e57f1cfd85b189c",
+  "truth": "4c003feacd86eb20eced2c0c0c9acf3a465a7e4551b3f6d7f8579c846cfc6231",
   "version": 1
 }

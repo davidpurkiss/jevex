@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from jevex.testsite.dataset import Dataset, generate
-from jevex.testsite.render import FAMILIES, Page, render
+from jevex.testsite.render import FAMILIES, SITE_LOCALE, Page, render
 from jevex.testsite.schemas import Listing, VehicleSpec
 from jevex.testsite.waves import DEFAULT_WAVES, Waves, check_waves, parse_waves, wave_numbers
 
@@ -125,17 +125,28 @@ def server(
 
     Raises ``ValueError`` if ``directory`` holds no build (no ``truth.json``), and
     ``OSError`` if the address can't be bound.
+
+    Every response says ``Content-Language: en-GB`` (:data:`SITE_LOCALE`), so a crawler
+    that keeps the header (:attr:`~jevex.Document.content_language`) knows the PDFs' and
+    images' locale too.
     """
     root = Path(directory)
     if not (root / TRUTH_FILE).is_file():
         raise ValueError(f"{root} has no test site; build one first (jevex testsite build)")
-    handler = functools.partial(SimpleHTTPRequestHandler, directory=str(root))
+    handler = functools.partial(_Handler, directory=str(root))
     return ThreadingHTTPServer((host, port), handler)
+
+
+class _Handler(SimpleHTTPRequestHandler):
+    def end_headers(self) -> None:
+        self.send_header("Content-Language", SITE_LOCALE)
+        super().end_headers()
 
 
 __all__ = [
     "DEFAULT_WAVES",
     "FAMILIES",
+    "SITE_LOCALE",
     "Dataset",
     "Listing",
     "Page",

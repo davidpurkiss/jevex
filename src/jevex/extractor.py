@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
+from jevex.document import LOCALE_TAG
 from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
 from jevex.generators import GeneratorRegistry
@@ -36,6 +38,7 @@ from jevex.learn import (
     PackDiff,
     compile_pack,
 )
+from jevex.locales import canonical_locale
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
@@ -465,6 +468,7 @@ class Extractor:
         review_thresholds: Mapping[str, float] | None = None,
         refresh_generators: float | None = REFRESH_GENERATORS,
         record_stats: bool = True,
+        locale: str | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -523,7 +527,20 @@ class Extractor:
         memory for itself), each document's numbers are added to it as a
         :class:`~jevex.store.DocumentStat` (:func:`document_stat`), including one for a
         document whose extraction raised, for the stats UI (:mod:`jevex.stats`,
-        ``jevex stats``)."""
+        ``jevex stats``).
+
+        ``locale`` (a BCP 47 tag such as ``"en-GB"``) is the locale of documents that don't
+        say their own (no :attr:`~jevex.Document.locale`, ``<html lang>`` or
+        ``Content-Language``): their numbers and dates are read by its conventions, the
+        generators scoped to it run on them, and generators learned from them are scoped to
+        it, as for a document that says it. Use it for a corpus of one locale whose PDFs or
+        images carry no tag; it comes before the candidate and statement stages' own
+        ``locale``. ``None`` (the default): such documents have no locale of their own, so
+        generators are scoped and numbers read by the candidate stage's ``locale`` if it
+        has one (else only unscoped generators run), and what is learned from them is
+        unscoped. Tags are kept canonical
+        (:func:`~jevex.locales.canonical_locale`). Raises ``ValueError`` for a value that
+        isn't a language tag."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -590,6 +607,11 @@ class Extractor:
         self._packs: list[Pack] | None = None
         self._packs_lock: asyncio.Lock | None = None
         self.record_stats = record_stats
+        if locale is not None and not re.fullmatch(LOCALE_TAG, locale):
+            raise ValueError(
+                f"locale must be a BCP 47 language tag such as 'en-GB', got {locale!r}"
+            )
+        self.locale = canonical_locale(locale) if locale is not None else None
 
     @property
     def jev(self) -> JevClient:
@@ -687,7 +709,9 @@ class Extractor:
 
         Its ``outcomes`` say what became of each queued example. It tests generators as
         the pipeline's default candidate, select, normalise and fallback stages would run
-        them (their generators, locale, selector, normalisers and fallback threshold).
+        them (their generators, locale, selector, normalisers and fallback threshold); its
+        locale for examples whose document had none is the extractor's ``locale``, else the
+        candidate stage's.
         """
         if self.generator_llm is None or self.learn_mode == "compile":
             return None
@@ -710,7 +734,7 @@ class Extractor:
             generators=generators,
             ledger=await self.ledger(),
             base=candidates.registry if candidates else GeneratorRegistry(),
-            locale=candidates.locale if candidates else None,
+            locale=self.locale or (candidates.locale if candidates else None),
             selector=select.selector if select else JevCandidateSelector(),
             normalisers=norm.registry if norm else BUILTIN_NORMALISERS,
             fallback_threshold=fallback.fallback_threshold if fallback else FALLBACK_THRESHOLD,
@@ -798,6 +822,7 @@ class Extractor:
         budget = DocumentBudget(self.budgets, await self.ledger())
         jev = self.jev.metered(max_requests=self.budgets.per_document.max_jev_requests)
         ctx = Context.create(document, self.schemas, jev)
+        ctx.default_locale = self.locale
         ctx.budget = budget
         ctx.store = await self.store()
         ctx.packs = await self.packs()

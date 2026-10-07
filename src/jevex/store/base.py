@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from jevex.document import LOCALE_TAG
+from jevex.locales import canonical_locale
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -107,10 +108,13 @@ class VerifiedExample(BaseModel):
     @property
     def locale(self) -> str | None:
         """The locale of the document the statement came from (``context["locale"]``), or
-        ``None`` when it didn't say or the value isn't a language tag. The learner scopes
-        what it learns from the example to it."""
+        ``None`` when it didn't say or the value isn't a language tag. Canonical
+        (:func:`~jevex.locales.canonical_locale`), however the context writes it. The
+        learner scopes what it learns from the example to it."""
         locale = self.context.get("locale")
-        return locale if isinstance(locale, str) and _LOCALE.fullmatch(locale) else None
+        if isinstance(locale, str) and _LOCALE.fullmatch(locale):
+            return canonical_locale(locale)
+        return None
 
 
 _LOCALE = re.compile(LOCALE_TAG)

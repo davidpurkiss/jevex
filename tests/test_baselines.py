@@ -50,6 +50,7 @@ from jevex.llm import (
     process_llm_cost,
     reset_process_llm_cost,
 )
+from jevex.locales import document_locale
 from jevex.schema import Field
 from jevex.testing import FakeLLM
 from jevex.testsite.schemas import Listing, VehicleSpec
@@ -572,6 +573,16 @@ async def test_prepared_inputs_give_every_system_the_same_input(
         f"Extract books.\n\n<document>\n{i.text}\n</document>" for i in inputs.values()
     )
     assert score_results(corpus, read_results(out), BOOK_SPECS).overall().accuracy == 1.0
+
+
+async def test_prepared_inputs_keep_the_manifests_locale(corpus: Path, tmp_path: Path) -> None:
+    truth = json.loads((corpus / "truth.json").read_text())
+    truth["pages"][0]["locale"] = "de_de"
+    (corpus / "truth.json").write_text(json.dumps(truth))
+    await write_inputs(corpus, tmp_path / "inputs.jsonl", pipeline=books_pipeline())
+    inputs = read_inputs(tmp_path / "inputs.jsonl")
+    assert document_locale(inputs[f"pages/{PAGES[0]}.html"].document) == "de-DE"
+    assert inputs[f"pages/{PAGES[1]}.html"].document.locale is None
 
 
 async def test_run_baseline_needs_inputs_for_every_document(corpus: Path, tmp_path: Path) -> None:

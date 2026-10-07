@@ -4,6 +4,7 @@ from jevex import (
     Document,
     LocaleConventions,
     NormaliserStep,
+    canonical_locale,
     document_locale,
     html_language,
     locale_conventions,
@@ -160,7 +161,9 @@ def html(
         (html('<html lang="de"><body>', content_language="fr-FR"), "de"),
         (html("<html><body><p>Hallo</p>", content_language="de-CH"), "de-CH"),
         (html("<html><body>", content_language="de-DE, en-GB"), "de-DE"),
-        (html('<html lang="de-DE"><body>', locale="en_US"), "en_US"),
+        (html('<html lang="de-DE"><body>', locale="en_US"), "en-US"),
+        (html('<html lang="en-gb"><body>'), "en-GB"),
+        (html("<html><body>", content_language="DE_de"), "de-DE"),
         (html("<p>Hallo</p>"), None),
         (html('<html lang=""><body>'), None),
         (html('<html lang="English"><body>', content_language="en-GB"), "en-GB"),
@@ -174,6 +177,27 @@ def test_document_locale_takes_the_caller_then_the_page_then_the_header(
     document: Document, expected: str | None
 ) -> None:
     assert document_locale(document) == expected
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        ("de-DE", "de-DE"),
+        ("de_DE", "de-DE"),
+        ("de-de", "de-DE"),
+        ("DE_de", "de-DE"),
+        ("FR", "fr"),
+        ("zh_hant_tw", "zh-Hant-TW"),
+        ("ES-419", "es-419"),
+        ("sr-LATN-rs", "sr-Latn-RS"),
+        ("de-CH-1996", "de-CH-1996"),
+        ("de-DE-u-CO-PhoneBk", "de-DE-u-co-phonebk"),  # extensions are lower case
+        ("en-x-GB", "en-x-gb"),
+    ],
+)
+def test_canonical_locales_write_one_locale_one_way(tag: str, expected: str) -> None:
+    assert canonical_locale(tag) == expected
+    assert canonical_locale(expected) == expected
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,10 @@ A corpus is a directory with a ``truth.json`` in the test site's format (so
         ]
     }
 
+A page may also give its ``locale`` (a BCP 47 tag): the document gets it as
+:attr:`~jevex.Document.locale`, for documents that can't say it themselves (the test
+site's PDFs and images).
+
 :func:`evaluate` runs an :class:`~jevex.Extractor` over every document and scores the
 records it returns against the expected ones:
 
@@ -33,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import time
 import types
 from collections import Counter
@@ -42,7 +47,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
-from jevex.document import Document
+from jevex.document import LOCALE_TAG, Document
 from jevex.generators.units import UNITS
 from jevex.jev import JevBackendError, JevBudgetExceededError
 from jevex.normalise import NormaliseError, canonical_unit, convert
@@ -82,6 +87,9 @@ class CorpusItem:
     records: tuple[Expected, ...]
     wave: int | None = None
     """The test-site wave the page was released in (its ``wave``), if the manifest says."""
+    locale: str | None = None
+    """The page's locale (its ``locale``), if the manifest says: the document's
+    :attr:`~jevex.Document.locale`."""
 
 
 def load_corpus(directory: str | Path) -> list[CorpusItem]:
@@ -126,11 +134,15 @@ def _corpus_item(root: Path, page: Any) -> CorpusItem:
     wave = entry.get("wave")
     if wave is not None and (not isinstance(wave, int) or isinstance(wave, bool)):
         raise TypeError(f"'wave' must be a number, not {wave!r}")
+    locale = entry.get("locale")
+    if locale is not None and not (isinstance(locale, str) and re.fullmatch(LOCALE_TAG, locale)):
+        raise TypeError(f"'locale' must be a language tag such as 'en-GB', not {locale!r}")
     return CorpusItem(
         path=root / str(entry["path"]),
         schema=str(entry["schema"]),
         records=tuple(expected),
         wave=wave,
+        locale=locale,
     )
 
 
@@ -583,7 +595,9 @@ async def run_document(
     Raises the :data:`RUN_ERRORS`; any other extraction error is recorded on the run,
     which then scores as all missing.
     """
-    document = await asyncio.to_thread(Document.from_path, item.path, url=item.path.as_posix())
+    document = await asyncio.to_thread(
+        Document.from_path, item.path, url=item.path.as_posix(), locale=item.locale
+    )
     start = time.perf_counter()
     try:
         result = await extractor.extract(document)
