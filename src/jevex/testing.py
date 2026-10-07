@@ -32,6 +32,7 @@ from jevex.jev import (
     JevBackend,
     JevClient,
     JevResponse,
+    JevTokenLimitError,
     JSONContent,
     Noul,
     NoulAnswer,
@@ -240,8 +241,10 @@ class Cassette:
     """Replays recorded Jev responses from a JSON file; records them when ``record`` is on.
 
     In record mode, requests go to ``inner`` (by default the real API) and each response
-    is saved. In replay mode, an unrecorded request raises :class:`CassetteMissError`,
-    so tests never reach the network by accident. :meth:`aclose` closes ``inner`` (an
+    is saved, as is a request Jev rejects as too big
+    (:class:`~jevex.jev.JevTokenLimitError`), so the client's split replays too. In replay
+    mode, an unrecorded request raises :class:`CassetteMissError`, so tests never reach
+    the network by accident. :meth:`aclose` closes ``inner`` (an
     ``Extractor`` calls it when it closes), so a recording run doesn't leak connections.
     """
 
@@ -263,15 +266,25 @@ class Cassette:
                     f"no recording for request {key} in {self.path}; "
                     f"run with {RECORD_ENV}=1 to record it"
                 )
-            return _RESPONSE.validate_python(self._entries[key]["response"])
+            entry = self._entries[key]
+            if "rejected" in entry:
+                raise JevTokenLimitError(str(entry["rejected"]))
+            return _RESPONSE.validate_python(entry["response"])
         if self._inner is None:
             self._inner = TypeSafeBackend()
-        response = await self._inner.system_one(state, questions)
+        request = {
+            "state": state,
+            "questions": _QUESTIONS.dump_python(dict(questions), mode="json"),
+        }
+        try:
+            response = await self._inner.system_one(state, questions)
+        except JevTokenLimitError as exc:
+            # Part of a normal run (the client asks again in parts), so replay it too.
+            self._entries[key] = {"request": request, "rejected": str(exc)}
+            self.save()
+            raise
         self._entries[key] = {
-            "request": {
-                "state": state,
-                "questions": _QUESTIONS.dump_python(dict(questions), mode="json"),
-            },
+            "request": request,
             "response": _RESPONSE.dump_python(response, mode="json"),
         }
         self.save()
