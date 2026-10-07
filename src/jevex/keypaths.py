@@ -8,8 +8,11 @@
 2. **Fingerprint** the blob's shape: a hash of its source, its schema.org types and its
    sorted key paths with indices collapsed (``offers[].price``), so two pages from the
    same template share a fingerprint but a ``Brand`` and a ``Person`` node don't.
-3. **Look up** learned mappings for the fingerprint in the store. A hit is a pure lookup:
-   no Jev call.
+3. **Look up** learned mappings for the fingerprint in the store, then in the extractor's
+   packs (project packs, then community packs: spec *Layering*). For each path the first
+   layer with a mapping wins, so the store's own answers, "none" and ``unsure`` included,
+   always beat a pack's, and nothing a pack gives is written to the store. A hit is a
+   pure lookup: no Jev call.
 4. **On a miss**, ask Jev about the unmapped key paths: one Choice per path and schema,
    over the schema's fields plus "none", every schema's questions in one request. The
    state shows a few example values per path (never the whole blob), chunked so each
@@ -77,6 +80,7 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.interfaces import StructuredExtractor
     from jevex.jev import JevClient, Question, ScoreAnswer
+    from jevex.packs import Pack
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.store import Store
@@ -274,14 +278,17 @@ class KeyPathMapper:
 
     ``store`` persists mappings across documents and processes; without one, mappings
     are remembered by this mapper (the :data:`MEMORY_SIZE` most recent fingerprints) for
-    its lifetime only. ``registry`` supplies the normaliser chains for values. A path
-    with ``unsure_limit`` unsure answers is stored as "none" (see :data:`UNSURE_LIMIT`).
+    its lifetime only. ``packs`` are the layers looked up under those mappings (the
+    extractor's packs when not given). ``registry`` supplies the normaliser chains for
+    values. A path with ``unsure_limit`` unsure answers is stored as "none" (see
+    :data:`UNSURE_LIMIT`).
     """
 
     def __init__(
         self,
         *,
         store: Store | None = None,
+        packs: Sequence[Pack] | None = None,
         reader: EmbeddedDataReader | None = None,
         registry: GeneratorRegistry | None = None,
         accept_at: float = ACCEPT_AT,
@@ -292,6 +299,7 @@ class KeyPathMapper:
         memory_size: int = MEMORY_SIZE,
     ) -> None:
         self.store = store
+        self.packs = None if packs is None else tuple(packs)
         self.reader = reader or EmbeddedDataReader()
         self.registry = registry or default_registry()
         if unsure_limit < 1:
@@ -306,6 +314,9 @@ class KeyPathMapper:
         self._memory: OrderedDict[tuple[str, str], dict[str, str | None]] = OrderedDict()
         # (fingerprint, schema) → path → unsure answers so far. Used without a store.
         self._unsure: OrderedDict[tuple[str, str], dict[str, int]] = OrderedDict()
+        # The packs last indexed, and per pack (fingerprint, schema) → path → field.
+        self._indexed_packs: tuple[Pack, ...] = ()
+        self._pack_index: list[dict[tuple[str, str], dict[str, str | None]]] = []
         # The exact state and questions sent → Jev's answers, for enum/bool value fallbacks.
         self._values: OrderedDict[str, dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]] = (
             OrderedDict()
@@ -318,9 +329,12 @@ class KeyPathMapper:
         jev: JevClient,
         *,
         store: Store | None = None,
+        packs: Sequence[Pack] = (),
     ) -> StructuredResult:
-        """``store`` (the extractor's) is used when the mapper wasn't given one."""
+        """``store`` and ``packs`` (the extractor's) are used when the mapper wasn't given
+        its own."""
         store = self.store if self.store is not None else store
+        packs = self.packs if self.packs is not None else tuple(packs)
         data = self.reader.read(document)
         events: list[tuple[str, str]] = []
         blobs = data.blobs
@@ -338,7 +352,7 @@ class KeyPathMapper:
         for flat in flats:
             first.setdefault(flat.fingerprint, flat)
         resolved = await gather(
-            self._mappings(flat, schemas, jev, events, store) for flat in first.values()
+            self._mappings(flat, schemas, jev, events, store, packs) for flat in first.values()
         )
         mappings = dict(zip(first, resolved, strict=True))
         per_blob = await gather(
@@ -423,6 +437,7 @@ class KeyPathMapper:
         jev: JevClient,
         events: list[tuple[str, str]],
         store: Store | None,
+        packs: Sequence[Pack],
     ) -> dict[str, dict[str, str | None]]:
         """Per schema: collapsed path → field name (or None) for every path known."""
         fingerprint = flat.fingerprint
@@ -431,12 +446,18 @@ class KeyPathMapper:
         unknown: dict[str, list[str]] = {}
         for schema in schemas:
             fields = _mappable(schema)
-            # A mapping to a field the schema no longer has counts as unknown: re-ask it.
-            mine = {
-                path: name
-                for path, name in (await self._known(fingerprint, schema.name, store)).items()
-                if name is None or name in fields
-            }
+            # Per path, the first layer's mapping wins: the store's, then each pack's. A
+            # mapping to a field the schema no longer has counts as none there: a lower
+            # layer's is used, or else the path is re-asked.
+            layers = [
+                await self._known(fingerprint, schema.name, store),
+                *self._pack_mappings(packs, fingerprint, schema.name),
+            ]
+            mine: dict[str, str | None] = {}
+            for layer in layers:
+                for path, name in layer.items():
+                    if path not in mine and (name is None or name in fields):
+                        mine[path] = name
             known[schema.name] = mine
             if not fields:
                 continue
@@ -488,6 +509,27 @@ class KeyPathMapper:
                 self._memory.move_to_end(key)
             return dict(self._memory.get(key, {}))
         return {m.path: m.field for m in await store.key_mappings(fingerprint, schema=schema)}
+
+    def _pack_mappings(
+        self, packs: Sequence[Pack], fingerprint: str, schema: str
+    ) -> list[dict[str, str | None]]:
+        """Each pack's mappings for (``fingerprint``, ``schema``), in layer order. The
+        index is built once per set of packs (an extractor's are loaded once)."""
+        if not packs:
+            return []
+        indexed = self._indexed_packs
+        if len(indexed) != len(packs) or any(
+            a is not b for a, b in zip(indexed, packs, strict=True)
+        ):
+            self._pack_index = []
+            for pack in packs:
+                mine: dict[tuple[str, str], dict[str, str | None]] = {}
+                for m in pack.key_mappings:
+                    mine.setdefault((m.fingerprint, m.schema_name), {})[m.path] = m.field
+                self._pack_index.append(mine)
+            self._indexed_packs = tuple(packs)
+        key = (fingerprint, schema)
+        return [mine[key] for mine in self._pack_index if key in mine]
 
     async def _count_unsure(
         self, fingerprint: str, schema: str, paths: list[str], store: Store | None
@@ -833,7 +875,7 @@ class StructuredStage:
         if not runs:
             return
         result = await self.extractor.extract(
-            ctx.document, [r.spec for r in runs], ctx.jev, store=ctx.store
+            ctx.document, [r.spec for r in runs], ctx.jev, store=ctx.store, packs=ctx.packs
         )
         ctx.structured.extend(result.statements)
         for kind, message in result.events:

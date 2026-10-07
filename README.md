@@ -267,8 +267,10 @@ jevex pack import packs/cars --store sqlite:///other.db
 
 An extractor uses packs' generators under its store's: the store first, then the project
 packs you pass, then the community packs installed. The first layer with an id wins, and
-any layer can disable a lower layer's generator without editing it. Key mappings and
-examples are used once a pack is imported into a store.
+any layer can disable a lower layer's generator without editing it. Key mappings are
+looked up through the same layers: for each key path the first layer with a mapping wins,
+so the store's own answers (including "none") beat a pack's, and nothing from a pack is
+copied into the store. Examples are used once a pack is imported into a store.
 
 ```python
 extractor = Extractor(schemas=[VehicleSpec], store="sqlite:///jevex.db", packs=["packs/cars"])

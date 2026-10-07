@@ -19,6 +19,8 @@ from jevex import (
     Extractor,
     Field,
     KeyPathMapper,
+    Pack,
+    PackManifest,
     Pipeline,
     SchemaConfig,
     SchemaSpec,
@@ -984,3 +986,150 @@ async def test_items_repeating_a_value_reuse_jevs_one_reading_of_it() -> None:
     result = await KeyPathMapper().extract(page(data), [SchemaSpec.from_model(Car)], fake.client())
     assert [item.fields["Car"]["fuel"].value for item in result.items] == ["ev", "ev"]
     assert len([c for c in fake.calls if "enum" in c.questions]) == 1
+
+
+# --- packs: layered key mappings ---------------------------------------------------------
+
+EVERY_PATH: dict[str, str | None] = {**MAPPING, "@type": None, "offers[].@type": None}
+"""A mapping for every path in :data:`CAR`."""
+
+
+def car_pack(name: str, mapping: dict[str, str | None]) -> Pack:
+    fp = flatten(page_blob(CAR)).fingerprint
+    return Pack(
+        manifest=PackManifest(name=name, version="1.0"),
+        key_mappings=[
+            KeyMapping(fingerprint=fp, schema="Car", path=path, field=name)
+            for path, name in mapping.items()
+        ],
+    )
+
+
+async def put(store: SQLiteStore, mapping: dict[str, str | None], *, unsure: bool = False) -> None:
+    fp = flatten(page_blob(CAR)).fingerprint
+    await store.put_key_mappings(
+        KeyMapping(fingerprint=fp, schema="Car", path=path, field=name, unsure=unsure)
+        for path, name in mapping.items()
+    )
+
+
+async def extract_with_packs(
+    fake: FakeJev, packs: list[Pack], store: SQLiteStore | None = None
+) -> dict[str, FieldMeta]:
+    result = await KeyPathMapper().extract(
+        page(CAR), [SchemaSpec.from_model(Car)], fake.client(), store=store, packs=packs
+    )
+    return result.fields["Car"]
+
+
+async def test_a_packs_key_mappings_are_used_without_an_import(tmp_path: Path) -> None:
+    car_pack("cars", EVERY_PATH).write(tmp_path / "cars")
+    url = f"sqlite:///{tmp_path / 'jevex.db'}"
+    fake = FakeJev(strict=True)
+    async with Extractor(
+        [Car],
+        jev=fake.client(),
+        pipeline=Pipeline([StructuredStage()]),
+        store=url,
+        packs=[tmp_path / "cars"],
+        community_packs=False,
+    ) as ex:
+        result = await ex.extract(page(CAR))
+        store = await ex.store()
+        assert store is not None
+        assert await store.key_mappings() == []  # nothing from a pack is written to the store
+    assert fake.calls == []
+    assert result.values["Car"]["document"]["model"] == "Golf"
+    assert result.values["Car"]["document"]["price"] == Decimal("24995")
+
+
+async def test_the_stores_answers_win_over_a_packs(store: SQLiteStore) -> None:
+    await put(store, {"model": None, "offers[].price": "price"})
+    await put(store, {"fuelType": None}, unsure=True)
+    pack = car_pack("cars", {**EVERY_PATH, "offers[].price": None})
+    fake = FakeJev(strict=True)
+    fields = await extract_with_packs(fake, [pack], store)
+    assert fake.calls == []
+    assert "model" not in fields  # the store's "none"
+    assert "fuel" not in fields  # the store's unsure "none"
+    assert fields["price"].value == Decimal("24995")  # the store's field over the pack's "none"
+    assert fields["engine_size_cc"].value == 1498  # a path only the pack maps
+
+
+async def test_the_first_pack_with_a_mapping_wins() -> None:
+    says_none = car_pack("project", {"model": None})
+    says_model = car_pack("community", EVERY_PATH)
+    fields = await extract_with_packs(FakeJev(strict=True), [says_none, says_model])
+    assert "model" not in fields
+    assert fields["price"].value == Decimal("24995")  # the lower pack fills the rest
+    fields = await extract_with_packs(FakeJev(strict=True), [says_model, says_none])
+    assert fields["model"].value == "Golf"
+
+
+async def test_paths_no_layer_maps_are_asked_and_only_they_are_stored(store: SQLiteStore) -> None:
+    pack = car_pack("cars", {p: f for p, f in EVERY_PATH.items() if p != "fuelType"})
+    fake = mapping_jev()
+    fields = await extract_with_packs(fake, [pack], store)
+    assert fields["fuel"].value == "petrol"
+    [call] = fake.calls
+    assert [q.instructions for q in call.questions.values()] == [
+        "Which detail does the key path \"fuelType\" hold (e.g. 'Petrol')?"
+    ]
+    assert [(m.path, m.field) for m in await store.key_mappings()] == [("fuelType", "fuel")]
+
+
+async def test_a_packs_mapping_to_a_missing_field_is_asked_again() -> None:
+    pack = car_pack("cars", {**EVERY_PATH, "model": "trim"})
+    fake = mapping_jev()
+    fields = await extract_with_packs(fake, [pack])
+    assert fields["model"].value == "Golf"
+    [call] = fake.calls
+    assert [q.instructions for q in call.questions.values()] == [
+        "Which detail does the key path \"model\" hold (e.g. 'Golf')?"
+    ]
+
+
+async def test_a_stale_store_mapping_falls_through_to_a_packs(store: SQLiteStore) -> None:
+    await put(store, {"model": "trim"})
+    fake = FakeJev(strict=True)
+    fields = await extract_with_packs(fake, [car_pack("cars", EVERY_PATH)], store)
+    assert fake.calls == []
+    assert fields["model"].value == "Golf"
+
+
+async def test_without_a_store_the_mappers_own_answers_win_over_a_packs() -> None:
+    mapper = KeyPathMapper()
+    spec = SchemaSpec.from_model(Car)
+    await mapper.extract(page(CAR), [spec], mapping_jev().client())  # remembers MAPPING
+    fake = FakeJev(strict=True)
+    pack = car_pack("cars", {**EVERY_PATH, "model": None})
+    result = await mapper.extract(page(CAR), [spec], fake.client(), packs=[pack])
+    assert fake.calls == []
+    assert result.fields["Car"]["model"].value == "Golf"
+
+
+async def test_a_mappers_own_packs_replace_the_extractors() -> None:
+    mapper = KeyPathMapper(packs=[car_pack("own", EVERY_PATH)])
+    other = car_pack("extractors", {**EVERY_PATH, "model": None})
+    fake = FakeJev(strict=True)
+    result = await mapper.extract(
+        page(CAR), [SchemaSpec.from_model(Car)], fake.client(), packs=[other]
+    )
+    assert fake.calls == []
+    assert result.fields["Car"]["model"].value == "Golf"
+
+
+async def test_the_pack_index_follows_a_new_set_of_packs() -> None:
+    mapper = KeyPathMapper()
+    spec = SchemaSpec.from_model(Car)
+    first = await mapper.extract(
+        page(CAR), [spec], FakeJev(strict=True).client(), packs=[car_pack("a", EVERY_PATH)]
+    )
+    assert first.fields["Car"]["model"].value == "Golf"
+    second = await mapper.extract(
+        page(CAR),
+        [spec],
+        FakeJev(strict=True).client(),
+        packs=[car_pack("b", {**EVERY_PATH, "model": None})],
+    )
+    assert "model" not in second.fields["Car"]

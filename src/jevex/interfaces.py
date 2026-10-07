@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from jevex.images import ImageData, ImageReading
     from jevex.jev import Answer, ChoiceAnswer, JevClient, Question
     from jevex.keypaths import StructuredResult
+    from jevex.packs import Pack
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.store import Store, VerifiedExample
 
@@ -173,8 +174,10 @@ class StructuredExtractor(Protocol):
         jev: JevClient,
         *,
         store: Store | None = None,
+        packs: Sequence[Pack] = (),
     ) -> StructuredResult:
-        """``store`` is the extractor's learned state (``None`` without one)."""
+        """``store`` is the extractor's learned state (``None`` without one), ``packs`` the
+        layers under it: its project packs, then its community packs."""
         ...
 
 

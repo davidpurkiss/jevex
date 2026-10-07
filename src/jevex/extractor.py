@@ -511,7 +511,8 @@ class Extractor:
         ``community_packs`` the installed ones below them: all (``True``, the default),
         none (``False``) or those named. Their generators are used under the store's: the
         first layer with an id wins, and a layer can disable a lower one's generators.
-        Packs are loaded on first use.
+        Their key mappings are used under the store's too, per key path (the store's own
+        answers always win; nothing from a pack is stored). Packs are loaded on first use.
 
         ``review_sink`` (:mod:`jevex.review`) receives each document's found values with a
         confidence below ``review_threshold`` (or ``review_thresholds``, keyed like
@@ -792,6 +793,7 @@ class Extractor:
         ctx = Context.create(document, self.schemas, jev)
         ctx.budget = budget
         ctx.store = await self.store()
+        ctx.packs = await self.packs()
         ctx.extraction_llm = self.extraction_llm
         ctx.vision_llm = self.vision_llm
         learner = await self.learner()
