@@ -166,12 +166,14 @@ same prompt ("Follow .claude/loop.md...").
 
 - `typesafe-sdk` uses `httpx2`, not `httpx`. For tests of the real backend, use
   `httpx2.MockTransport` with `AsyncTypeSafeClient(transport=...)`.
-- Jev limits (Jev 1.13): 32k tokens for state plus the longest question, 64k per
-  request, Choice up to 255 options, Score 2–10 levels. `JevClient` estimates tokens
-  (`estimate_tokens`, content-aware: digits and punctuation are a token each, so tables and
-  JSON cost ~3x prose per character) and splits or raises (`StateTooLargeError`), so stages
-  must chunk oversized components. A `max_tokens_exceeded` rejection is handled the same way
-  (`JevTokenLimitError` never leaves the client); `JevClient.fit_state` cuts a long text to fit.
+- Jev limits (Jev 1.13, measured in `docs/jev-limits.md`): 32k tokens for state plus the
+  longest question, 64k per request (over either: `400 max_tokens_exceeded`), no cap on the
+  number of questions (bounded only by the 64k request), Choice up to 255 options, Score
+  2–10 levels. `JevClient` estimates tokens (`estimate_tokens`, content-aware: digits and
+  punctuation are a token each, so tables and JSON cost ~3x prose per character) and splits
+  or raises (`StateTooLargeError`), so stages must chunk oversized components. A
+  `max_tokens_exceeded` rejection is handled the same way (`JevTokenLimitError` never leaves
+  the client); `JevClient.fit_state` cuts a long text to fit.
 - Noul answers have only a probability (`NoulAnswer.p`) and no confidence.
 - `extract_sync` reuses one private event loop. Don't create per-call loops around the
   shared `JevClient`.
