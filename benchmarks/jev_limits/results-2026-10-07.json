@@ -1,0 +1,330 @@
+{
+  "started": "2026-10-07T17:51:26.591270+00:00",
+  "calibration": {
+    "states": {
+      "prose": {
+        "chars": 4000,
+        "estimate_tokens": 1001,
+        "input_tokens": 1159,
+        "question_estimate": 19
+      },
+      "table": {
+        "chars": 2997,
+        "estimate_tokens": 750,
+        "input_tokens": 2522,
+        "question_estimate": 19
+      },
+      "json": {
+        "chars": 2602,
+        "estimate_tokens": 651,
+        "input_tokens": 1859,
+        "question_estimate": 19
+      }
+    },
+    "billing": {
+      "1": 1159,
+      "10": 1321,
+      "50": 2081
+    }
+  },
+  "chars_per_token_prose": 3.451,
+  "state_limit": [
+    {
+      "target_tokens": 28000,
+      "input_tokens": 21905,
+      "error": null,
+      "detail": null,
+      "seconds": 0.674
+    },
+    {
+      "target_tokens": 31000,
+      "input_tokens": 24202,
+      "error": null,
+      "detail": null,
+      "seconds": 0.601
+    },
+    {
+      "target_tokens": 33000,
+      "input_tokens": 25824,
+      "error": null,
+      "detail": null,
+      "seconds": 0.635
+    },
+    {
+      "target_tokens": 40000,
+      "input_tokens": 31178,
+      "error": null,
+      "detail": null,
+      "seconds": 0.625
+    }
+  ],
+  "request_limit": [
+    {
+      "questions": 200,
+      "kind": "long",
+      "estimate_tokens": 63800,
+      "input_tokens": 28160,
+      "error": null,
+      "detail": null,
+      "seconds": 0.63
+    },
+    {
+      "questions": 1000,
+      "kind": "long",
+      "estimate_tokens": 319000,
+      "input_tokens": null,
+      "error": "TypeSafeBadRequestError",
+      "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177df36f77adbe8e1d2b13318ae8)",
+      "seconds": null
+    },
+    {
+      "questions": 1000,
+      "kind": "tiny",
+      "input_tokens": 14160,
+      "error": null,
+      "detail": null,
+      "seconds": 0.452
+    },
+    {
+      "questions": 3000,
+      "kind": "tiny",
+      "input_tokens": 44160,
+      "error": null,
+      "detail": null,
+      "seconds": 1.625
+    }
+  ],
+  "latency": [
+    {
+      "state_chars": 1000,
+      "questions": 1,
+      "seconds": [
+        0.306,
+        0.37,
+        0.305
+      ],
+      "median": 0.306
+    },
+    {
+      "state_chars": 1000,
+      "questions": 10,
+      "seconds": [
+        0.225,
+        0.235,
+        0.219
+      ],
+      "median": 0.225
+    },
+    {
+      "state_chars": 1000,
+      "questions": 100,
+      "seconds": [
+        0.235,
+        0.415,
+        0.405
+      ],
+      "median": 0.405
+    },
+    {
+      "state_chars": 10000,
+      "questions": 1,
+      "seconds": [
+        0.252,
+        0.262,
+        0.307
+      ],
+      "median": 0.262
+    },
+    {
+      "state_chars": 10000,
+      "questions": 10,
+      "seconds": [
+        0.225,
+        0.226,
+        0.219
+      ],
+      "median": 0.225
+    },
+    {
+      "state_chars": 10000,
+      "questions": 100,
+      "seconds": [
+        0.264,
+        0.237,
+        0.331
+      ],
+      "median": 0.264
+    },
+    {
+      "state_chars": 60000,
+      "questions": 1,
+      "seconds": [
+        0.323,
+        0.359,
+        0.302
+      ],
+      "median": 0.323
+    },
+    {
+      "state_chars": 60000,
+      "questions": 10,
+      "seconds": [
+        0.345,
+        0.36,
+        0.304
+      ],
+      "median": 0.345
+    },
+    {
+      "state_chars": 60000,
+      "questions": 100,
+      "seconds": [
+        0.339,
+        0.346,
+        0.339
+      ],
+      "median": 0.339
+    }
+  ],
+  "batch_accuracy": {
+    "0": {
+      "correct": 10,
+      "of": 10,
+      "p": [
+        0.99,
+        0.01,
+        0.99,
+        0.01,
+        0.93,
+        0.02,
+        0.66,
+        0.01,
+        0.98,
+        0.01
+      ]
+    },
+    "100": {
+      "correct": 10,
+      "of": 10,
+      "p": [
+        0.98,
+        0.01,
+        0.99,
+        0.01,
+        0.93,
+        0.02,
+        0.66,
+        0.01,
+        0.99,
+        0.01
+      ]
+    },
+    "400": {
+      "correct": 10,
+      "of": 10,
+      "p": [
+        0.98,
+        0.01,
+        0.99,
+        0.01,
+        0.94,
+        0.02,
+        0.69,
+        0.01,
+        0.99,
+        0.01
+      ]
+    },
+    "repeat_p": [
+      0.98,
+      0.98,
+      0.98
+    ],
+    "choice_repeat": [
+      {
+        "c": [
+          "plug-in hybrid",
+          0.98
+        ]
+      },
+      {
+        "c": [
+          "plug-in hybrid",
+          0.98
+        ]
+      },
+      {
+        "c": [
+          "plug-in hybrid",
+          0.98
+        ]
+      }
+    ]
+  },
+  "rate": {
+    "requests": 300,
+    "concurrency": 50,
+    "wall_seconds": 1.7,
+    "requests_per_minute": 10574,
+    "errors": {},
+    "median_seconds": 0.234
+  },
+  "input_tokens_total": 545970,
+  "cost_usd": 0.02293,
+  "finished": "2026-10-07T17:51:56.126411+00:00",
+  "edges": {
+    "state": [
+      {
+        "target_tokens": 32500,
+        "input_tokens": 32193,
+        "error": null,
+        "detail": null
+      },
+      {
+        "target_tokens": 34000,
+        "input_tokens": null,
+        "error": "TypeSafeBadRequestError",
+        "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177f01067bf8bcba5b053597abd4)"
+      },
+      {
+        "target_tokens": 38000,
+        "input_tokens": null,
+        "error": "TypeSafeBadRequestError",
+        "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177f027f72d783da15a1c5fa7ac9)"
+      },
+      {
+        "target_tokens": 48000,
+        "input_tokens": null,
+        "error": "TypeSafeBadRequestError",
+        "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177f0486753693a29f7db8d511fd)"
+      }
+    ],
+    "request": [
+      {
+        "questions": 4000,
+        "input_tokens": 59160,
+        "error": null,
+        "detail": null
+      },
+      {
+        "questions": 4400,
+        "input_tokens": 65160,
+        "error": null,
+        "detail": null
+      },
+      {
+        "questions": 4800,
+        "input_tokens": null,
+        "error": "TypeSafeBadRequestError",
+        "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177f147979e486ae0e278c218ca7)"
+      },
+      {
+        "questions": 6000,
+        "input_tokens": null,
+        "error": "TypeSafeBadRequestError",
+        "detail": "POST https://api.typesafe.ai/v1/systemone: 400 {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}} (request_id=req_01a1177f15f4741fa84c66186b6b2d5c)"
+      }
+    ]
+  },
+  "edges_cost_usd": 0.00657
+}
