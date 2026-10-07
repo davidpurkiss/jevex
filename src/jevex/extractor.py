@@ -534,8 +534,11 @@ class Extractor:
         ``Content-Language``): their numbers and dates are read by its conventions, the
         generators scoped to it run on them, and generators learned from them are scoped to
         it, as for a document that says it. Use it for a corpus of one locale whose PDFs or
-        images carry no tag. ``None`` (the default): such documents have no locale, and only
-        unscoped generators run on them. Tags are kept canonical
+        images carry no tag; it comes before the candidate and statement stages' own
+        ``locale``. ``None`` (the default): such documents have no locale of their own, so
+        generators are scoped and numbers read by the candidate stage's ``locale`` if it
+        has one (else only unscoped generators run), and what is learned from them is
+        unscoped. Tags are kept canonical
         (:func:`~jevex.locales.canonical_locale`). Raises ``ValueError`` for a value that
         isn't a language tag."""
         if not schemas:

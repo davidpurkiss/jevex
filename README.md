@@ -105,8 +105,10 @@ extractor = Extractor([VehicleSpec], locale="en-GB")
 ```
 
 Generators scoped to it run on those documents, and what the learner learns from them is
-scoped to it. Without one, such documents have no locale: only unscoped generators run on
-them, and the candidate stage's own locale is used to read numbers and dates:
+scoped to it. It comes before the candidate and statement stages' own `locale`. Without
+one, such documents have no locale of their own: generators are scoped and numbers and dates
+read by the candidate stage's `locale` if it has one (else only unscoped generators run),
+and what the learner learns from them stays unscoped:
 
 ```python
 from jevex import CandidateStage
