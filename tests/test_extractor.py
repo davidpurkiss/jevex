@@ -409,3 +409,30 @@ async def test_jev_retry_policy_applies_to_each_document() -> None:
     assert result.status == "failed"
     assert [(e.kind, e.type) for e in result.errors] == [("jev", "JevTransientError")]
     assert result.meta.jev.retries == 0
+
+
+async def test_a_failing_refresh_of_learned_generators_fails_the_document(
+    monkeypatch: pytest.MonkeyPatch, store: SQLiteStore
+) -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]), store=store)
+    learned = await ex.learned_generators()
+    assert learned is not None
+
+    async def refresh() -> object:
+        raise StoreError("generator gen-x doesn't validate")
+
+    monkeypatch.setattr(learned, "refresh", refresh)
+    result = await ex.extract(doc())
+    assert [(e.stage, e.kind, e.fatal) for e in result.errors] == [("extract", "store", True)]
+    assert result.meta.jev.requests == 0  # nothing ran
+
+
+async def test_the_learner_retries_jev_as_documents_do() -> None:
+    policy = RetryPolicy(max_retries=5)
+    ex = Extractor(
+        [Car], jev=FakeJev().client(), generator_llm=FakeLLM(lambda _p, _s: {}), jev_retry=policy
+    )
+    learner = await ex.learner()
+    assert learner is not None
+    assert learner.jev.retry == policy
+    await ex.aclose()

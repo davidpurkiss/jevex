@@ -44,8 +44,10 @@ PartKind = Literal[
 """What failed. Parts that are skipped: ``generator``, ``normaliser``, ``image_loader``,
 ``image_processor``, ``structured_extractor``, ``llm_extractor`` (the fallback's) and
 ``review_sink``. Core failures, which fail the document: ``jev`` (Jev after retries),
-``store``, ``document`` (it can't be read: :class:`DocumentError`) and ``stage`` (any other
-error a stage raised)."""
+``store`` (while the document runs), ``document`` (it can't be read:
+:class:`DocumentError`) and ``stage`` (any other error a stage raised). A ``store`` error
+writing the spend ledger or stats after the document ran isn't fatal: its result stands,
+``partial``."""
 
 MAX_MESSAGE_CHARS = 500
 """Longer messages are cut: one is kept per error, and results are serialised."""

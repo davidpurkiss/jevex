@@ -615,7 +615,8 @@ class Extractor:
 
         ``jev_retry`` is how Jev requests that fail transiently (timeouts, 429, 5xx) are
         retried (:class:`~jevex.jev.RetryPolicy`; ``None``: the Jev client's own, two
-        retries with backoff by default). Retries are counted in ``meta.jev.retries``.
+        retries with backoff by default), the learner's included. Retries are counted in
+        ``meta.jev.retries``.
         LLM retries are set on the adapters (``max_retries``).
 
         :meth:`extract` reports what failed on the result instead of raising
@@ -810,7 +811,8 @@ class Extractor:
         return GeneratorLearner(
             self.schemas,
             llm,
-            self.jev,
+            # Its requests retry as the documents' do.
+            self.jev.metered(retry=self.jev_retry) if self.jev_retry is not None else self.jev,
             generators=generators,
             ledger=await self.ledger(),
             base=candidates.registry if candidates else GeneratorRegistry(),
@@ -906,7 +908,9 @@ class Extractor:
         stage) ends the document with ``status="failed"``. Call
         :meth:`~ExtractionResult.raise_for_errors` to fail loudly. Only the process spend
         caps (``JEVEX_JEV_MAX_COST_USD``, ``JEVEX_LLM_MAX_COST_USD``) raise, as do
-        problems setting the extractor up (opening its store or packs).
+        problems setting the extractor up on first use (opening its store or packs, loading
+        its learned generators). A failing refresh of the learned generators is a core
+        ``store`` failure.
         """
         budget = DocumentBudget(self.budgets, await self.ledger())
         jev = self.jev.metered(
@@ -927,11 +931,10 @@ class Extractor:
         else:
             ctx.learner = learner
         learned = await self.learned_generators()
-        ctx.generators = await learned.refresh() if learned else None
         ctx.housekeeper = await self.housekeeper()
         doc_id, started = uuid.uuid4().hex, time.perf_counter()
         try:
-            await self._run_pipeline(ctx, budget)
+            await self._run_pipeline(ctx, budget, learned)
         except _CAP_ERRORS as exc:
             if (stats := self._stats_store(ctx)) is not None:
                 await stats.record_document(
@@ -956,10 +959,14 @@ class Extractor:
                 )
         return result
 
-    async def _run_pipeline(self, ctx: Context, budget: DocumentBudget) -> None:
-        """Run the pipeline, recording a core failure on ``ctx`` (raising only the spend
-        caps), then record the document's Jev spend in the ledger."""
+    async def _run_pipeline(
+        self, ctx: Context, budget: DocumentBudget, learned: LearnedGenerators | None
+    ) -> None:
+        """Take the learned generators' snapshot (refreshed from the store) and run the
+        pipeline, recording a core failure on ``ctx`` (raising only the spend caps), then
+        record the document's Jev spend in the ledger."""
         try:
+            ctx.generators = await learned.refresh() if learned else None
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")
             else:

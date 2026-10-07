@@ -64,7 +64,15 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
 from jevex.entities import EntityScope
-from jevex.errors import DocumentError, ExtractionError, PartError, PartErrors
+from jevex.errors import (
+    DocumentError,
+    ExtractionError,
+    PartError,
+    PartErrors,
+    PartKind,
+    Status,
+    status_of,
+)
 from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor, document_stat
 from jevex.fallback import FallbackStage, LLMFieldExtractor
@@ -375,6 +383,7 @@ __all__ = [
     "ParentChild",
     "PartError",
     "PartErrors",
+    "PartKind",
     "PdfLayoutError",
     "PdfLayoutParser",
     "PdfTextReader",
@@ -412,6 +421,7 @@ __all__ = [
     "StatementKind",
     "StatementStage",
     "Stats",
+    "Status",
     "Store",
     "StoreError",
     "StructuredBlob",
@@ -497,6 +507,7 @@ __all__ = [
     "score_results",
     "section_text",
     "stats_server",
+    "status_of",
     "stored_generators",
     "summarise_results",
     "table_statements",

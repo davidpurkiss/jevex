@@ -275,7 +275,7 @@ result = await extractor.extract(document)
 if result.status != "ok":
     for error in result.errors:
         log.warning(error.describe())  # "candidates generator gen-3f2a: IndexError: ..."
-result.raise_for_errors()               # or fail loudly: ExtractionError (partial=False: only failed)
+result.raise_for_errors()  # or fail loudly: ExtractionError (partial=False: only failed)
 ```
 
 Transient Jev errors (timeouts, 429, 5xx) are retried with backoff:
@@ -373,9 +373,10 @@ failed extraction 500, and a process spend cap (`JEVEX_*_MAX_COST_USD`) 503.
 
 `GET /health` names the schemas; `GET /metrics` is Prometheus text (documents by outcome:
 `ok`, `partial`, `stopped` or `error`; errors by stage and kind; records, values by
-resolution method, Jev and LLM calls, retries and spend, budget hits, extraction time). `--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's
-off by default because it shows URLs and spend. The service has no auth of its own: run it
-behind yours.
+resolution method, Jev and LLM calls, retries and spend, budget hits, extraction time).
+`--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's off by
+default because it shows URLs and spend. The service has no auth of its own: run it behind
+yours.
 
 `--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
 across every request. In Python, `jevex.server.create_app(Service([...], store=...))`
