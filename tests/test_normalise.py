@@ -815,6 +815,25 @@ async def test_list_items_only_vision_statements_give_are_left_to_verify() -> No
     assert run.vision_values == {
         ("doc", "colours"): [VisionValue("s1", "grey", Span(start=11, end=15))]
     }
+    picks = run.value_picks[("doc", "colours")]
+    assert [(p.items, p.method, p.confidence) for p in picks] == [
+        (("red",), "vision", 0.9),
+        (("grey",), "vision", 0.9),
+        (("red",), "generator", 0.8),
+    ]
+    assert [p.source.statement_id for p in picks] == ["s1", "s1", "s2"]
+
+
+async def test_scalars_and_lists_with_no_vision_values_record_no_picks() -> None:
+    said = statement("s1", "The dial tops out at 9.1 s").model_copy(update={"kind": "vision"})
+    text = statement("s2", "Painted red")
+    ctx = context(said, text)
+    run = ctx.schemas["Car"]
+    run.selections[("doc", "zero_to_62_s", "s1")] = pick(said, "9.1 s", 0.8, "parse_number")
+    run.selections[("doc", "colours", "s2")] = pick(text, "red", 0.8)
+    await NormaliseStage().run(ctx)
+    assert set(run.vision_values) == {("doc", "zero_to_62_s")}
+    assert run.value_picks == {}
 
 
 async def test_values_from_text_statements_need_no_vision_check() -> None:

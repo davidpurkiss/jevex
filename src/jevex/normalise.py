@@ -28,7 +28,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from jevex.generators.units import spellings
 from jevex.locales import ALL_MONTH_NAMES, ALL_MULTIPLIERS, THOUSANDS_AFTER_DECIMAL_COMMA
-from jevex.pipeline import vision_values
+from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 
 if TYPE_CHECKING:
@@ -528,13 +528,15 @@ class NormaliseStage:
             for (scope, field_name), picks in grouped.items():
                 if not run.needs(scope, field_name):
                     continue
-                meta, generator_ids, checks = self._field_meta(
+                meta, generator_ids, checks, taken = self._field_meta(
                     ctx, run, field_name, picks, shared=run.shared_statements(scope)
                 )
                 run.offer_field(scope, field_name, meta)
                 run.value_generators[(scope, field_name)] = generator_ids
                 if checks:
                     run.vision_values[(scope, field_name)] = checks
+                    if run.spec.field(field_name).many:
+                        run.value_picks[(scope, field_name)] = taken
 
     def _field_meta(
         self,
@@ -544,9 +546,9 @@ class NormaliseStage:
         picks: list[tuple[str, Selection]],
         *,
         shared: set[str],
-    ) -> tuple[FieldMeta, set[str], list[VisionValue]]:
+    ) -> tuple[FieldMeta, set[str], list[VisionValue], list[ValuePick]]:
         """The field's meta, the ids of the generators whose candidates are in its value,
-        and the values in it only vision statements gave."""
+        the values in it only vision statements gave, and the picks it took, best first."""
         field = run.spec.field(field_name)
         # The entity's own statements outrank those it shares with every entity.
         ranked = sorted(picks, key=lambda p: (p[0] in shared, -p[1].confidence))
@@ -584,6 +586,7 @@ class NormaliseStage:
                 ),
                 set(),
                 [],
+                [],
             )
 
         best_id, best, _, best_value = accepted[0]
@@ -620,6 +623,17 @@ class NormaliseStage:
             ),
             {c.generator_id for _, _, c, _ in used},
             vision_values(given),
+            [
+                ValuePick(
+                    items=tuple(cast("list[Any]", v) if isinstance(v, list) else [v]),
+                    method=_method(ctx, statement_id),
+                    source=_source(ctx, statement_id, selection),
+                    confidence=selection.confidence,
+                    generator_id=candidate.generator_id,
+                    shared=statement_id in shared,
+                )
+                for statement_id, selection, candidate, v in used
+            ],
         )
 
 

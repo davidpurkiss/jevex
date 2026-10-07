@@ -34,7 +34,7 @@ from jevex.generators import GeneratorRegistry, default_registry
 from jevex.interfaces import Selection
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, JSONContent, NoulAnswer
 from jevex.layout import section_text
-from jevex.pipeline import vision_values
+from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 
@@ -419,13 +419,7 @@ def _record_direct(
             value=value,
             confidence=best.confidence,
             method="vision" if best.statement.kind == "vision" else "jev",
-            source=Source(
-                url=ctx.document.url,
-                component_id=best.statement.component_id,
-                statement_id=best.statement.id,
-                statement=best.statement.text,
-                location=best.statement.location,
-            ),
+            source=_direct_source(ctx, best.statement),
             alternatives=[
                 Alternative(value=o, raw=o, p=p)
                 for o, p in sorted(weighed.items(), key=lambda kv: -kv[1])
@@ -439,3 +433,25 @@ def _record_direct(
         given = [(best.statement, value, None)]
     if checks := vision_values(given):
         run.vision_values[(scope, spec.name)] = checks
+        if spec.many:
+            run.value_picks[(scope, spec.name)] = [
+                ValuePick(
+                    items=tuple(o.values),
+                    method="vision" if o.statement.kind == "vision" else "jev",
+                    source=_direct_source(ctx, o.statement),
+                    confidence=o.confidence,
+                    shared=o.statement.id in shared,
+                )
+                for o in sorted(ordered, key=lambda o: -o.confidence)
+                if o.values
+            ]
+
+
+def _direct_source(ctx: Context, statement: Statement) -> Source:
+    return Source(
+        url=ctx.document.url,
+        component_id=statement.component_id,
+        statement_id=statement.id,
+        statement=statement.text,
+        location=statement.location,
+    )

@@ -637,3 +637,9 @@ async def test_list_options_a_text_statement_also_gives_need_no_vision_check() -
     run = ctx.schemas["Car"]
     assert run.fields["doc"]["colours"].value == ["grey", "red"]
     assert run.vision_values == {("doc", "colours"): [VisionValue("s1", "grey")]}
+    picks = run.value_picks[("doc", "colours")]
+    assert [(p.items, p.method, p.source.statement_id) for p in picks] == [
+        (("grey", "red"), "vision", "s1"),
+        (("red",), "jev", "s2"),
+    ]
+    assert picks[0].source == run.fields["doc"]["colours"].source

@@ -42,7 +42,10 @@ statement, one request per statement:
   (``source="vision"``).
 - Otherwise it is dropped and listed in the field's ``alternatives`` with its
   verification probability (a ``vision_rejected`` event). A field left empty is then
-  one the LLM fallback may ask about.
+  one the LLM fallback may ask about. A list that keeps some of its items is described
+  by the best pick still in it (its method, source and confidence,
+  :attr:`~jevex.pipeline.SchemaRun.value_picks`), and only the generators of the picks
+  left count as having given it (``value_generators``, for housekeeping).
 
 Jev reads only the statement, not the image, so this checks that the value is what the
 model's statement says, not that the statement is true of the image.
@@ -335,6 +338,7 @@ class FallbackStage:
         value: Any = [v for v in current if v not in gone]
         if not spec.many:
             value = value[0] if value else None
+        key = (check.scope, spec.name)
         if value is None or value == []:
             check.run.set_field(
                 check.scope,
@@ -344,13 +348,17 @@ class FallbackStage:
                     conflicts=meta.conflicts,
                 ),
             )
+            if key in check.run.value_generators:
+                check.run.value_generators[key] = set()
             return []
         update: dict[str, Any] = {"value": value}
         if rejected:
             update["alternatives"] = _ranked([*meta.alternatives, *rejected], value)
+            if spec.many:
+                update.update(_described(check.run, key, meta, value))
         if kept:
             least = min(p for _, p in kept)
-            confidence = meta.confidence
+            confidence = update.get("confidence", meta.confidence)
             update["confidence"] = least if confidence is None else min(confidence, least)
             update["verified"] = True
         check.run.set_field(check.scope, spec.name, meta.model_copy(update=update))
@@ -523,6 +531,30 @@ def _vision_checks(ctx: Context) -> list[_VisionCheck]:
             if pending:
                 checks.append(_VisionCheck(run, scope, spec, meta, pending))
     return checks
+
+
+def _described(
+    run: SchemaRun, key: tuple[str, str], meta: FieldMeta, value: list[Any]
+) -> dict[str, Any]:
+    """A list's meta once some of its items are gone: the best pick with an item left
+    describes it, and ``value_generators`` keeps only the generators of the picks left.
+    Nothing changes unless ``meta`` is still the one the picks' route offered."""
+    picks = run.value_picks.get(key, [])
+    if not picks or picks[0].source != meta.source:
+        return {}
+    left = [p for p in picks if any(item in value for item in p.items)]
+    if not left:
+        return {}
+    if key in run.value_generators:
+        run.value_generators[key] = {p.generator_id for p in left if p.generator_id}
+    best = left[0]
+    return {
+        "method": best.method,
+        "source": best.source,
+        "generator_id": best.generator_id,
+        "confidence": best.confidence,
+        "shared": all(p.shared for p in left),
+    }
 
 
 def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_Ask]) -> None:
