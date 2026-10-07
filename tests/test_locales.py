@@ -9,7 +9,7 @@ from jevex import (
     locale_conventions,
     localise_steps,
 )
-from jevex.locales import EN_GB
+from jevex.locales import EN_GB, MONTH_NAMES, MULTIPLIERS, RANGE_WORDS
 
 
 def steps(*items: object) -> list[NormaliserStep]:
@@ -47,6 +47,38 @@ def test_regions_that_write_a_decimal_point_in_decimal_comma_languages(locale: s
     assert conventions.date_order == "dmy"
     assert not conventions.currency_after
     assert locale_conventions("fr-CH").decimal == ","  # French Switzerland keeps the comma
+
+
+@pytest.mark.parametrize("locale", ["de-CH", "de-LI", "it-CH", "en-CH"])
+def test_swiss_decimal_points_come_with_apostrophe_grouping(locale: str) -> None:
+    conventions = locale_conventions(locale)
+    assert conventions.apostrophe_groups
+    assert conventions.thousands == ",'’"
+
+
+@pytest.mark.parametrize("locale", [None, "en-GB", "de-DE", "fr-CH", "es-MX", "en-US"])
+def test_other_locales_group_without_apostrophes(locale: str | None) -> None:
+    assert not locale_conventions(locale).apostrophe_groups
+    assert "'" not in locale_conventions(locale).thousands
+
+
+@pytest.mark.parametrize("table", [MONTH_NAMES, MULTIPLIERS])
+def test_a_word_means_the_same_in_every_language_that_has_it(
+    table: dict[str, dict[str, int]],
+) -> None:
+    # The normalisers read every language's words, whatever the page's language.
+    meanings: dict[str, set[int]] = {}
+    for words in table.values():
+        for word, value in words.items():
+            assert word == word.lower()
+            meanings.setdefault(word, set()).add(value)
+    assert {word: values for word, values in meanings.items() if len(values) > 1} == {}
+
+
+def test_languages_with_their_own_words() -> None:
+    assert set(MONTH_NAMES) == {"en", "de", "fr", "es", "it", "nl"}
+    assert set(MULTIPLIERS) == set(RANGE_WORDS) == {"de", "fr", "es", "it", "nl"}
+    assert "mil" not in MULTIPLIERS["es"]  # a million, or a thousandth of an inch, in English
 
 
 @pytest.mark.parametrize("locale", ["en-US", "en_us", "es-US", "en-Latn-US"])

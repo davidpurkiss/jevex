@@ -193,7 +193,13 @@ def test_parse_money_with_a_decimal_comma(raw: str, value: Decimal) -> None:
 
 @pytest.mark.parametrize(
     ("raw", "value"),
-    [("1,4–2,0", [1.4, 2.0]), ("1.200 bis 1.500 kg", [1200, 1500]), ("5-7", [5, 7])],
+    [
+        ("1,4–2,0", [1.4, 2.0]),
+        ("1.200 bis 1.500 kg", [1200, 1500]),
+        ("5-7", [5, 7]),
+        ("zwischen 4 und 5", [4, 5]),
+        ("de 4 à 5", [4, 5]),
+    ],
 )
 def test_parse_range_with_a_decimal_comma(raw: str, value: list[float]) -> None:
     assert parse_range(raw, decimal=",") == value
@@ -220,6 +226,97 @@ def test_parse_range_reads_list_items_with_the_decimal_mark() -> None:
 )
 def test_parse_date_in_other_locales(raw: str, args: dict[str, Any], value: date) -> None:
     assert parse_date(raw, **args) == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "args", "value"),
+    [
+        ("12 mars 2024", {}, date(2024, 3, 12)),
+        ("1er août 2024", {}, date(2024, 8, 1)),
+        ("févr. 2025", {"precision": "month"}, date(2025, 2, 1)),
+        ("12 de marzo de 2024", {}, date(2024, 3, 12)),
+        ("septiembre de 2024", {"precision": "month"}, date(2024, 9, 1)),
+        ("3 giugno 2025", {}, date(2025, 6, 3)),
+        ("12 maart 2024", {}, date(2024, 3, 12)),
+        ("1 mei 2024", {}, date(2024, 5, 1)),
+    ],
+)
+def test_parse_date_reads_french_spanish_italian_and_dutch_months(
+    raw: str, args: dict[str, Any], value: date
+) -> None:
+    assert parse_date(raw, **args) == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        # Other languages' short month names are English words: the name by the year counts.
+        ("2 years ago, in March 2024", date(2024, 3, 1)),
+        ("set for May 2025", date(2025, 5, 1)),
+        ("März 2024, nicht Mai", date(2024, 3, 1)),
+    ],
+)
+def test_parse_date_takes_the_month_name_nearest_the_year(raw: str, value: date) -> None:
+    assert parse_date(raw, precision="month") == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("01/05/2022 (3 years ago)", date(2022, 5, 1)),
+        ("Set: 12/03/2024", date(2024, 3, 12)),
+        ("2024-03-12, mag", date(2024, 3, 12)),
+    ],
+)
+def test_an_all_numeric_date_beats_a_month_name(raw: str, value: date) -> None:
+    assert parse_date(raw) == value
+
+
+def test_parse_date_with_month_names_but_no_year_is_refused() -> None:
+    with pytest.raises(NormaliseError, match="not a date"):
+        parse_date("mars ou avril")
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("1,5 Mio. €", Decimal(1500000)),
+        ("1,5 Millionen €", Decimal(1500000)),
+        ("2 Mrd. EUR", Decimal(2000000000)),
+        ("500 Tsd. €", Decimal(500000)),
+        ("2 Mds €", Decimal(2000000000)),
+        ("1,2 milliard €", Decimal(1200000000)),
+        ("2 mil millones €", Decimal(2000000000)),
+        ("3,5 millones €", Decimal(3500000)),
+        ("3 mln €", Decimal(3000000)),
+        ("1,2 miljoen €", Decimal(1200000)),
+        ("18.495,- €", Decimal(18495)),
+        ("€ 18.495,–", Decimal(18495)),
+    ],
+)
+def test_parse_money_reads_other_languages_multipliers(raw: str, value: Decimal) -> None:
+    assert parse_money(raw, decimal=",") == value
+
+
+def test_parse_money_multiplier_words_need_a_word_end() -> None:
+    assert parse_money("2 Mioxx €", decimal=",") == Decimal(2)
+    # Spanish "mil" on its own isn't read: in English it's a million, or a thousandth of an inch.
+    assert parse_money("£5 mil") == Decimal(5)
+    assert parse_money("£1.5 billion") == Decimal(1500000000)  # English is short scale
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [("1’250.50", 1250.5), ("1'250", 1250), ("1’250’000 kg", 1250000), ("12’5", 12)],
+)
+def test_parse_number_reads_swiss_apostrophe_grouping(raw: str, value: float) -> None:
+    assert parse_number(raw) == value
+
+
+def test_parse_money_and_range_read_swiss_apostrophe_grouping() -> None:
+    assert parse_money("CHF 1’250.50") == Decimal("1250.50")
+    assert parse_money("CHF 1’250.–") == Decimal(1250)
+    assert parse_range("1’200–1’500 kg") == [1200, 1500]
 
 
 def test_decimal_comma_chains_validate_against_the_field() -> None:

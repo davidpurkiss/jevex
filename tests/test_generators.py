@@ -28,7 +28,7 @@ from jevex.interfaces import (
     LocaleAwareGenerator,
     Scope,
 )
-from jevex.normalise import NormaliseError, normalise
+from jevex.normalise import NormaliseError, normalise, parse_money
 
 
 def st(text: str) -> Statement:
@@ -639,6 +639,129 @@ def test_german_key_value_chains() -> None:
     ]
     assert kv("Erstzulassung: 12. März 2024", "zugelassen") == [{"parse_date": {"order": "dmy"}}]
     assert values_in("de-DE", "Sitze: 5", "sitze") == {"5": 5}
+
+
+# --- more decimal-comma forms (#219) --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "raw", "value"),
+    [
+        ("de-DE", "Umsatz 1,5 Mio. € im Jahr", "1,5 Mio. €", Decimal(1500000)),
+        ("de-DE", "Budget: 2 Mrd. EUR", "2 Mrd. EUR", Decimal(2000000000)),
+        ("de-AT", "rund 1,5 Millionen € netto", "1,5 Millionen €", Decimal(1500000)),
+        ("de-DE", "ab € 1,5 Mio.", "€ 1,5 Mio.", Decimal(1500000)),
+        ("fr-FR", "un budget de 2 Mds €", "2 Mds €", Decimal(2000000000)),
+        ("es-ES", "unos 2 mil millones €", "2 mil millones €", Decimal(2000000000)),
+        ("it-IT", "circa 3 mln €", "3 mln €", Decimal(3000000)),
+        ("nl-NL", "ruim 1,2 miljoen €", "1,2 miljoen €", Decimal(1200000)),
+    ],
+)
+def test_amounts_with_the_page_languages_multipliers(
+    locale: str, text: str, raw: str, value: Decimal
+) -> None:
+    assert values_in(locale, text, "preis")[raw] == value
+
+
+def test_other_languages_multipliers_are_not_read_on_english_pages() -> None:
+    found = values_in(None, "about 1,5 Mio. € a year", "preis")
+    assert "1,5 Mio. €" not in found
+    assert "€2bn" in values_in("de-DE", "nur €2bn", "preis")  # English ones still are
+
+
+@pytest.mark.parametrize(
+    ("locale", "text"),
+    [("de-DE", "€ 1 Billion"), ("de-DE", "ab € 1,2 Bio."), ("fr-FR", "1 billion €")],
+)
+def test_long_scale_billions_give_no_amount(locale: str, text: str) -> None:
+    # A German or French "billion" is 10^12: no amount, rather than a wrong or truncated one.
+    assert Money().generate_in(st(text), ANGEBOT.field("preis"), locale) == []
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "raw"),
+    [
+        ("de-DE", "Preis: 18.495,- € inkl. MwSt.", "18.495,- €"),
+        ("de-DE", "nur € 18.495,–", "€ 18.495,–"),
+        ("de-DE", "Preis 18.495,-- EUR", "18.495,-- EUR"),
+    ],
+)
+def test_round_amounts_with_a_dash(locale: str, text: str, raw: str) -> None:
+    assert values_in(locale, text, "preis")[raw] == Decimal(18495)
+
+
+def test_swiss_round_amounts_and_apostrophe_grouping() -> None:
+    [cand] = Money().generate_in(st("CHF 1’250.– inkl."), ANGEBOT.field("preis"), "de-CH")
+    assert cand.raw == "CHF 1’250.–"
+    assert [s.model_dump() for s in cand.normalise] == [{"parse_money": {"currency": "CHF"}}]
+    assert parse_money(cand.raw, currency="CHF") == Decimal(1250)
+    assert values_in("de-CH", "Leergewicht 1’250.50 kg", "gewicht_kg") == {"1’250.50 kg": 1250.5}
+    assert values_in("de-CH", "Leergewicht 1'250 kg", "gewicht_kg") == {"1'250 kg": 1250}
+    assert values_in("it-CH", "peso 1’250.50", "gewicht_kg") == {"1’250.50": 1250.5}
+    # Elsewhere an apostrophe doesn't group: en-GB reads as before.
+    assert "1’250.50 kg" not in values_in("en-GB", "Leergewicht 1’250.50 kg", "gewicht_kg")
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "raw", "value"),
+    [
+        ("de-DE", "Verbrauch 4,8 bis 5,6 l/100km", "4,8 bis 5,6 l/100km", [4.8, 5.6]),
+        ("de-DE", "zwischen 4 und 5 Sitze", "zwischen 4 und 5", [4, 5]),
+        ("fr-FR", "de 4,5 à 5,2 l/100km", "4,5 à 5,2 l/100km", [4.5, 5.2]),
+        ("fr-FR", "entre 4 et 5", "entre 4 et 5", [4, 5]),
+        ("es-ES", "de 4 a 5 l/100km", "4 a 5 l/100km", [4, 5]),
+        ("it-IT", "tra 4 e 5", "tra 4 e 5", [4, 5]),
+        ("nl-NL", "van 4 tot 5", "4 tot 5", [4, 5]),
+        ("nl-BE", "tussen 4 en 5", "tussen 4 en 5", [4, 5]),
+        # English words still match on other pages.
+        ("de-DE", "4,8 to 5,6 l/100km", "4,8 to 5,6 l/100km", [4.8, 5.6]),
+    ],
+)
+def test_ranges_in_the_page_languages_words(
+    locale: str, text: str, raw: str, value: list[float]
+) -> None:
+    [cand] = Range().generate_in(st(text), ANGEBOT.field("verbrauch"), locale)
+    assert cand.raw == raw
+    assert values_in(locale, text, "verbrauch")[raw] == value
+
+
+def test_range_words_need_a_space_and_the_page_language() -> None:
+    field = ANGEBOT.field("verbrauch")
+    assert Range().generate_in(st("4 bis 5"), field, "en-GB") == []
+    assert Range().generate_in(st("4 und 5"), field, "de-DE") == []
+    assert Range().generate_in(st("4bis5"), field, "de-DE") == []
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "raw", "value"),
+    [
+        ("fr-FR", "Livraison le 12 mars 2024", "12 mars 2024", date(2024, 3, 12)),
+        ("fr-BE", "le 1er août 2024", "1er août 2024", date(2024, 8, 1)),
+        ("fr-FR", "depuis févr. 2025", "févr. 2025", date(2025, 2, 1)),
+        ("es-ES", "el 12 de marzo de 2024", "12 de marzo de 2024", date(2024, 3, 12)),
+        ("es-AR", "desde septiembre de 2024", "septiembre de 2024", date(2024, 9, 1)),
+        ("it-IT", "dal 3 giugno 2025", "3 giugno 2025", date(2025, 6, 3)),
+        ("nl-NL", "per 12 maart 2024", "12 maart 2024", date(2024, 3, 12)),
+        ("nl-BE", "sinds mei 2024", "mei 2024", date(2024, 5, 1)),
+    ],
+)
+def test_dates_with_the_page_languages_month_names(
+    locale: str, text: str, raw: str, value: date
+) -> None:
+    assert values_in(locale, text, "zugelassen")[raw] == value
+
+
+def test_other_languages_month_names_are_not_matched_on_english_pages() -> None:
+    assert set(values_in(None, "le 12 mars 2024", "zugelassen")) == {"2024"}
+    assert set(values_in("de-DE", "le 12 mars 2024", "zugelassen")) == {"2024"}
+
+
+@pytest.mark.parametrize(
+    "text", ["First registered: 01/05/2022 (3 years ago)", "Registered: 01/05/2022, set"]
+)
+def test_english_words_that_are_month_names_elsewhere_dont_change_en_gb_dates(text: str) -> None:
+    [cand] = KeyValue().generate_in(st(text), ANGEBOT.field("zugelassen"), None)
+    assert normalise(cand.raw, cand.normalise, ANGEBOT.field("zugelassen")) == date(2022, 5, 1)
 
 
 def test_us_dates_are_month_first_and_mpg_is_us_gallons() -> None:
