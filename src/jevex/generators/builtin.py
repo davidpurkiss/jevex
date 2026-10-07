@@ -172,8 +172,8 @@ def _patterns(conventions: LocaleConventions) -> _Patterns:
     units = _unit_alternation()
     mult = _multiplier(language)
     amount = f"(?:{num}){_round(conventions)}{mult}?"
-    # Without a multiplier, "€ 1 Billion" would give a truncated "€ 1".
-    end = rf"(?!\s?(?i:billion)){_END}" if language in LONG_SCALE_BILLION else _END
+    # Without a multiplier, "€ 1 Billion" or "€ 1,2 Bio." would give a truncated "€ 1".
+    end = rf"(?!\s?(?i:billion|bio\b)){_END}" if language in LONG_SCALE_BILLION else _END
     money = (
         rf"(?P<sym>[£$€¥])\s?{amount}{end}"
         rf"|(?<![\w.,]){amount}\s?(?P<c2>{_CODES})\b"

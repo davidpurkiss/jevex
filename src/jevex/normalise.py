@@ -262,6 +262,7 @@ def parse_money(
 # --- dates -----------------------------------------------------------------------------
 
 _WORDS = re.compile(r"[^\W\d_]+|\d+")
+_NUMERIC_DATE = re.compile(r"(?<!\d)\d{1,4}([./-])\d{1,2}\1\d{1,4}(?!\d)")
 
 
 def parse_date(
@@ -277,7 +278,7 @@ def parse_date(
     four-digit first number is always the year. Month names may be in any language in
     :data:`~jevex.locales.MONTH_NAMES` ("12. März 2024", "12 de marzo de 2024"); with
     several, the one nearest the year counts ("2 years ago, in March 2024": March, not
-    Spanish "ago"). ``precision="month"`` gives the
+    Spanish "ago"), and an all-numeric date beats them all. ``precision="month"`` gives the
     1st of the month; ``"year"`` gives an ``int`` year for number fields, or 1 January for
     date fields.
     """
@@ -288,7 +289,9 @@ def parse_date(
     parts = _WORDS.findall(str(value))
     numbers = [int(p) for p in parts if p.isdigit()]
     month_names = [p.lower() for p in parts if not p.isdigit() and p.lower() in ALL_MONTH_NAMES]
-    if len(month_names) > 1:
+    if _NUMERIC_DATE.search(str(value)):
+        month_names = []  # "01/05/2022 (3 years ago)": not August
+    elif len(month_names) > 1:
         month_names = [_month_nearest_year(parts)]
     try:
         if precision == "year":

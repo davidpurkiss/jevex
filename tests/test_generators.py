@@ -669,7 +669,10 @@ def test_other_languages_multipliers_are_not_read_on_english_pages() -> None:
     assert "€2bn" in values_in("de-DE", "nur €2bn", "preis")  # English ones still are
 
 
-@pytest.mark.parametrize(("locale", "text"), [("de-DE", "€ 1 Billion"), ("fr-FR", "1 billion €")])
+@pytest.mark.parametrize(
+    ("locale", "text"),
+    [("de-DE", "€ 1 Billion"), ("de-DE", "ab € 1,2 Bio."), ("fr-FR", "1 billion €")],
+)
 def test_long_scale_billions_give_no_amount(locale: str, text: str) -> None:
     # A German or French "billion" is 10^12: no amount, rather than a wrong or truncated one.
     assert Money().generate_in(st(text), ANGEBOT.field("preis"), locale) == []
@@ -751,6 +754,14 @@ def test_dates_with_the_page_languages_month_names(
 def test_other_languages_month_names_are_not_matched_on_english_pages() -> None:
     assert set(values_in(None, "le 12 mars 2024", "zugelassen")) == {"2024"}
     assert set(values_in("de-DE", "le 12 mars 2024", "zugelassen")) == {"2024"}
+
+
+@pytest.mark.parametrize(
+    "text", ["First registered: 01/05/2022 (3 years ago)", "Registered: 01/05/2022, set"]
+)
+def test_english_words_that_are_month_names_elsewhere_dont_change_en_gb_dates(text: str) -> None:
+    [cand] = KeyValue().generate_in(st(text), ANGEBOT.field("zugelassen"), None)
+    assert normalise(cand.raw, cand.normalise, ANGEBOT.field("zugelassen")) == date(2022, 5, 1)
 
 
 def test_us_dates_are_month_first_and_mpg_is_us_gallons() -> None:

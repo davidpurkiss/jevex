@@ -23,8 +23,8 @@ Beyond the decimal mark, a page's language adds its own words: month names
 
 Out of scope, so not read:
 
-- long-scale "Billion" (German) and "billion" (French), 10^12: on those pages no amount is
-  proposed with them, rather than a wrong one;
+- long-scale "Billion"/"Bio." (German) and "billion" (French), 10^12: on those pages no
+  amount is proposed with them, rather than a wrong one;
 - Spanish "mil" on its own ("15 mil €"): in English it's a million or a thousandth of an
   inch, and the normalisers read multiplier words whatever the page's language;
   "mil millones" is read;

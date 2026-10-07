@@ -260,6 +260,18 @@ def test_parse_date_takes_the_month_name_nearest_the_year(raw: str, value: date)
     assert parse_date(raw, precision="month") == value
 
 
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("01/05/2022 (3 years ago)", date(2022, 5, 1)),
+        ("Set: 12/03/2024", date(2024, 3, 12)),
+        ("2024-03-12, mag", date(2024, 3, 12)),
+    ],
+)
+def test_an_all_numeric_date_beats_a_month_name(raw: str, value: date) -> None:
+    assert parse_date(raw) == value
+
+
 def test_parse_date_with_month_names_but_no_year_is_refused() -> None:
     with pytest.raises(NormaliseError, match="not a date"):
         parse_date("mars ou avril")
