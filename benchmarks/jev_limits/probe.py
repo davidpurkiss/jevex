@@ -22,8 +22,7 @@ import statistics
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from typesafe_sdk import (
     AsyncTypeSafeClient,
@@ -36,6 +35,9 @@ from typesafe_sdk import (
 )
 
 from jevex.jev import PRICE_PER_MILLION_INPUT_TOKENS, estimate_tokens
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 SELF_CAP_USD = min(0.30, float(os.environ.get("JEVEX_JEV_MAX_COST_USD") or 0.30))
 """Per pass: the lower of $0.30 and ``JEVEX_JEV_MAX_COST_USD`` (the SDK calls here bypass
