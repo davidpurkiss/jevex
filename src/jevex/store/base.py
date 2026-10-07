@@ -82,13 +82,13 @@ class KeyMapping(BaseModel):
 class VerifiedExample(BaseModel):
     """A value that passed Jev verification (or came from a human reviewer).
 
-        ``evidence`` is the ``(start, end)`` character span of the value in ``statement``.
-        ``context`` holds whatever the learner needs to replay it (:func:`example_context`:
-        heading trail, statement kind, the document's locale). ``source`` is where the value
+    ``evidence`` is the ``(start, end)`` character span of the value in ``statement``.
+    ``context`` holds whatever the learner needs to replay it (:func:`example_context`:
+    heading trail, statement kind, the document's locale). ``source`` is where the value
     came from: the LLM fallback, a vision model (both verified by Jev) or a human reviewer;
-        ``document_source`` is where the statement came from (:attr:`jevex.Document.source`),
-        so the learner runs the generators scoped to that source on it. ``None`` when unknown:
-        then no source-scoped generator runs on it.
+    ``document_source`` is where the statement came from (:attr:`jevex.Document.source`),
+    so the learner runs the generators scoped to that source on it. ``None`` when unknown:
+    then no source-scoped generator runs on it.
     """
 
     model_config = ConfigDict(frozen=True)

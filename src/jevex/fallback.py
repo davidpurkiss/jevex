@@ -304,18 +304,21 @@ class FallbackStage:
         self, ctx: Context, check: _VisionCheck, item_p: list[float]
     ) -> list[VerifiedExample]:
         """Keep or drop one field's vision values (``item_p``: each one's verification
-        probability); the examples of the ones kept."""
+        probability); the examples of the ones kept. A value one vision statement verified
+        stays, even if another that gave it too wasn't verified."""
         meta, spec = check.meta, check.spec
         statements = ctx.parsed.statements if ctx.parsed else {}
         kept: list[tuple[VisionValue, float]] = []
         dropped: list[tuple[VisionValue, float]] = []
         for item, p in zip(check.items, item_p, strict=True):
             (kept if p >= self.verify_threshold else dropped).append((item, p))
+        verified = [item.value for item, _ in kept]
         rejected: list[Alternative] = []
         for item, p in dropped:
-            statement = statements[item.statement_id]
-            raw = item.span.of(statement.text) if item.span else None
-            rejected.append(Alternative(value=item.value, raw=raw, p=p))
+            if item.value not in verified:
+                statement = statements[item.statement_id]
+                raw = item.span.of(statement.text) if item.span else None
+                rejected.append(Alternative(value=item.value, raw=raw, p=p))
             ctx.event(
                 self.name,
                 "vision_rejected",
@@ -328,7 +331,7 @@ class FallbackStage:
                 p=p,
             )
         current: list[Any] = cast("list[Any]", meta.value) if spec.many else [meta.value]
-        gone = [item.value for item, _ in dropped]
+        gone = [item.value for item, _ in dropped if item.value not in verified]
         value: Any = [v for v in current if v not in gone]
         if not spec.many:
             value = value[0] if value else None

@@ -725,3 +725,16 @@ async def test_a_custom_verify_threshold_applies_to_vision_values() -> None:
     from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)])
     await FallbackStage(verify_threshold=0.5).run(ctx)
     assert meta(ctx).verified is True
+
+
+async def test_an_item_one_vision_statement_verifies_stays_though_another_didnt() -> None:
+    fake = FakeJev().noul('"GTI"', p=0.9, state="Trims: GTI.").noul('"GTI"', p=0.2, state="badge")
+    statements = [seen("v1", "Trims: GTI."), seen("v2", "The badge reads GTI.")]
+    ctx = context(fake, statements, {"v1": "trims", "v2": "trims"})
+    from_vision(ctx, "trims", ["GTI"], [VisionValue("v1", "GTI"), VisionValue("v2", "GTI")])
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert (m.value, m.verified, m.confidence) == (["GTI"], True, 0.9)
+    assert all(a.value != "GTI" for a in m.alternatives)
+    assert [(e.value, e.statement) for e in ctx.verified] == [("GTI", "Trims: GTI.")]
+    assert [e.data["statement_id"] for e in ctx.events] == ["v2"]
