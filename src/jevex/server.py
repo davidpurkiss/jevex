@@ -55,7 +55,13 @@ from jevex.jev import JevBudgetExceededError, JevClient
 from jevex.learn import LearnStatus
 from jevex.llm import LLMBudgetExceededError
 from jevex.logs import get_logger
-from jevex.monitoring import DRIFT_WINDOW, DriftWindow, budget_headroom, store_error
+from jevex.monitoring import (
+    DRIFT_WINDOW,
+    STORE_TIMEOUT_S,
+    DriftWindow,
+    budget_headroom,
+    store_error,
+)
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
 from jevex.stats.server import redact
@@ -175,7 +181,7 @@ class Metrics:
         stat = document_stat(result, doc_id="", run_id=None, seconds=seconds)
         meta = result.meta
         self.documents[_outcome(result)] += 1
-        self.errors.update((e.stage, e.kind, e.part or "") for e in result.errors)
+        self.errors.update({(e.stage, e.kind, e.part or "") for e in result.errors})
         self.store_errors += sum(e.kind == "store" for e in result.errors)
         self.jev_retries += meta.jev.retries
         self.llm_retries += meta.llm.retries
@@ -462,7 +468,8 @@ class Service:
         self.extraction_llm = extraction_llm
         self.generator_llm = generator_llm
         self.close_llms = close_llms
-        self.metrics = Metrics(drift=DriftWindow(drift_window))
+        specs = [SchemaSpec.from_model(m) for m in self.models.values()]
+        self.metrics = Metrics(drift=DriftWindow(drift_window, schemas=specs))
         self.run_id = uuid.uuid4().hex[:12]
         self._jev = jev
         self._store_source = store if isinstance(store, str | Path) else None
@@ -556,11 +563,13 @@ class Service:
 
     async def headroom(self) -> list[Headroom]:
         """What's left of each spend cap (:func:`~jevex.monitoring.budget_headroom`):
-        none when the store can't be read, which is counted in ``store_errors``."""
+        none when the store can't be read within ``STORE_TIMEOUT_S``, which is counted in
+        ``store_errors`` (so ``/metrics`` still answers while the store is down)."""
         run = self.budgets.run if self.budgets else None
         ledger = RunLedger(run, self._store, run_id=self.run_id) if run else None
         try:
-            return await budget_headroom(ledger)
+            async with asyncio.timeout(STORE_TIMEOUT_S):
+                return await budget_headroom(ledger)
         except Exception as exc:
             self.metrics.store_errors += 1
             log.warning("can't read the spend ledger for /metrics: %s", exc, exc_info=exc)

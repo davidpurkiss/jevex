@@ -129,6 +129,33 @@ def test_children_are_observed_but_not_the_nested_field() -> None:
         ("CarModel.model", True),
         ("CarModel.trims.name", True),
     ]
+    # A parent without children doesn't count its nested field as missing.
+    childless = build_extracted(parent, "document", {"model": FieldMeta(value="Polo")})
+    assert [(o.field, o.found) for o in observations([childless])] == [("CarModel.model", True)]
+
+
+@dataclass
+class Finds:
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        await asyncio.sleep(0)
+
+
+async def test_a_document_that_found_nothing_is_all_none() -> None:
+    window = DriftWindow(schemas=[SchemaSpec.from_model(Car)])
+    empty = await extract(Finds())
+    assert (empty.records, empty.meta.active_schemas) == ([], ["Car"])
+    window.add(empty)
+    window.add(await extract(Sets({"model": jev("Golf", 0.9)})))
+    model, power = window.fields()
+    assert (model.field, model.records, model.found) == ("Car.model", 2, 1)
+    assert model.none_rate == 0.5
+    assert (power.field, power.records, power.found) == ("Car.power_ps", 2, 0)
+    # Without the schema's spec, an empty document has no fields to count.
+    blind = DriftWindow()
+    blind.add(empty)
+    assert (blind.documents, blind.fields()) == (1, [])
 
 
 async def test_headroom_of_the_run_budget_and_the_process_caps(

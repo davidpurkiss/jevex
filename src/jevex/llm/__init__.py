@@ -247,10 +247,18 @@ def record(usage: LLMUsage) -> None:
 
 
 def rate_limited(exc: BaseException) -> bool:
-    """Whether an adapter's SDK raised ``exc`` for a 429 (too many requests): Anthropic's,
-    OpenAI's and LiteLLM's errors carry ``status_code``, Gemini's ``code``. The SDKs'
-    own retries of 429s aren't reported, so this sees only calls that still failed."""
-    return any(getattr(exc, name, None) == 429 for name in ("status_code", "code", "status"))
+    """Whether ``exc``, or an exception it was raised from (adapters wrap their SDK's
+    errors in :class:`LLMError`), is the SDK's 429 (too many requests): Anthropic's,
+    OpenAI's and LiteLLM's errors carry ``status_code``, Gemini's ``code``. The SDKs' own
+    retries of 429s aren't reported, so this sees only calls that still failed."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if any(getattr(current, name, None) == 429 for name in ("status_code", "code", "status")):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:

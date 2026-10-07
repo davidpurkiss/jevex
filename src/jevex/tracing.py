@@ -55,6 +55,9 @@ def resolve_tracer(tracer: Tracer | bool | None) -> Tracer | None:
         try:
             from opentelemetry import trace
         except ImportError as exc:
+            # Another opentelemetry-* package without the API: tracing just stays off.
+            if tracer is None:
+                return None
             raise ImportError("tracing needs the otel extra: pip install 'jevex[otel]'") from exc
         return trace.get_tracer(TRACER_NAME, __version__)
     return tracer

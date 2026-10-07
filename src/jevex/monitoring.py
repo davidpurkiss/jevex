@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Literal
 
 from jevex.jev import process_cap
 from jevex.llm import process_llm_cap
+from jevex.schema import SchemaSpec
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -84,8 +85,9 @@ def observations(records: Iterable[Extracted[BaseModel]]) -> list[Observation]:
     but not the nested-model fields themselves, whose values are the children's."""
     out: list[Observation] = []
     for r in records:
+        nested = _nested_fields(r.model)
         for name, meta in r.meta.items():
-            if name in r.children:
+            if name in nested:
                 continue
             out.append(
                 Observation(
@@ -100,14 +102,31 @@ def observations(records: Iterable[Extracted[BaseModel]]) -> list[Observation]:
     return out
 
 
+def _nested_fields(model: type[BaseModel]) -> frozenset[str]:
+    """The names of ``model``'s nested-model fields."""
+    found = _NESTED.get(model)
+    if found is None:
+        found = _NESTED[model] = frozenset(
+            f.name for f in SchemaSpec.from_model(model).child_fields
+        )
+    return found
+
+
+_NESTED: dict[type[BaseModel], frozenset[str]] = {}
+
+
 @dataclass
 class DriftWindow:
     """The fields of the last ``size`` documents' records (see the module docstring).
 
-    A failed document adds nothing: its missing values are an error, not drift.
+    A record is observed once per field. A document whose schema was active but gave no
+    record of it (it found nothing) counts as one record with none of the schema's
+    fields, when the schema is among ``schemas``. A failed document adds nothing: its
+    missing values are an error, not drift.
     """
 
     size: int = DRIFT_WINDOW
+    schemas: Sequence[SchemaSpec] = ()
     _documents: deque[list[Observation]] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -117,8 +136,19 @@ class DriftWindow:
 
     def add(self, result: ExtractionResult) -> None:
         """Add a document's records (dropping the oldest document once full)."""
-        if result.status != "failed":
-            self._documents.append(observations(result.records))
+        if result.status == "failed":
+            return
+        seen = observations(result.records)
+        given = {r.schema_name for r in result.records}
+        for spec in self.schemas:
+            if spec.name in result.meta.active_schemas and spec.name not in given:
+                nested = {f.name for f in spec.child_fields}
+                seen += [
+                    Observation(field=f"{spec.name}.{f.name}", found=False)
+                    for f in spec.fields
+                    if f.name not in nested
+                ]
+        self._documents.append(seen)
 
     @property
     def documents(self) -> int:

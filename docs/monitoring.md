@@ -115,9 +115,11 @@ died. `checks` says which:
  "checks": {"store": "ok", "learner": "1 worker(s) died"}}
 ```
 
-Point your orchestrator's liveness probe at it. A dead learner loses only learning (the
-examples stay in the store), so if restarts are expensive you may prefer to alert on
-`jevex_learner_alive == 0` and keep `/health` for readiness. There is no separate `/ready`:
+Point your orchestrator's liveness probe at it. A dead learner's 503 is short-lived: the
+next document's learn stage raises the worker's error (that document fails, with
+`stage="learn"`) and the next example starts a new worker. So alert on
+`jevex_learner_worker_deaths_total`, which keeps counting. A dead learner loses only
+learning (the examples stay in the store). There is no separate `/ready`:
 the service only answers once its store and Jev client are open.
 
 ## Drift
@@ -130,9 +132,12 @@ the LLM fallback. jevex watches each `"Schema.field"` over a window of recent do
 - the **fallback rate**: values the LLM fallback gave;
 - the **mean confidence** of its values.
 
-The stats UI's fields view shows each field's "none" rate and the same three numbers
-over the last 100 documents, marked when they're more than 10 points worse than over all
-of them.
+On `/metrics` the "none" rate is per record: a document with three entities counts three
+times, and a document that found nothing counts once with every field missing. The stats
+UI's fields view counts per document instead (one with the field's schema that gave the
+field no value at all), from the store's document stats, and shows each field's "none"
+rate and the same three numbers over the last 100 documents, marked when they're more
+than 10 points worse than over all of them.
 
 ## Suggested alerts
 
@@ -157,9 +162,8 @@ groups:
         for: 1h
       - alert: JevexSpendNearCap
         expr: jevex_budget_remaining_usd / jevex_budget_limit_usd < 0.1
-      - alert: JevexLearnerDead
-        expr: jevex_learner_alive == 0
-        for: 5m
+      - alert: JevexLearnerDied        # alive goes back to 1 once a new worker starts
+        expr: increase(jevex_learner_worker_deaths_total[15m]) > 0
       - alert: JevexLLMRateRising      # learning should make LLM calls rarer, not commoner
         expr: |
           (rate(jevex_llm_calls_total[1d]) / rate(jevex_documents_total[1d]))

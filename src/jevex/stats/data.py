@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import io
 import math
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
@@ -604,6 +605,8 @@ def field_stats(
     for i, d in enumerate(docs):
         for v in d.values:
             by_field.setdefault(v.field, []).append((i, v.method, v.confidence, v.value))
+    whole = field_windows(docs, by_field)
+    latest = field_windows(docs[-recent:], by_field) if recent > 0 else None
     out: list[FieldStat] = []
     for name in sorted(by_field):
         values = by_field[name]
@@ -619,8 +622,8 @@ def field_stats(
                 mean_confidence=sum(confident) / len(confident) if confident else None,
                 methods=_count(m for _, m, _, _ in values if m),
                 lowest=tuple((text, c) for _, c, text in low),
-                none_rate=field_window(name, docs).none_rate,
-                recent=field_window(name, docs[-recent:]) if recent > 0 else None,
+                none_rate=whole[name].none_rate,
+                recent=latest[name] if latest is not None else None,
             )
         )
     return out
@@ -629,17 +632,54 @@ def field_stats(
 def field_window(name: str, docs: Sequence[DocumentStat]) -> FieldWindow:
     """``name`` (``"Schema.field"``, a nested model's ``"Parent.nested.field"``) over
     ``docs``: those whose schemas include its top-level schema and that didn't fail."""
-    schema = name.split(".")[0]
-    seen = [d for d in docs if schema in d.schemas and d.status != "failed"]
-    values = [v for d in seen for v in d.values if v.field == name]
-    confident = [v.confidence for v in values if v.confidence is not None]
-    return FieldWindow(
-        documents=len(seen),
-        found=sum(any(v.field == name for v in d.values) for d in seen),
-        values=len(values),
-        llm=sum(v.method == "llm" for v in values),
-        mean_confidence=sum(confident) / len(confident) if confident else None,
-    )
+    return field_windows(docs, [name])[name]
+
+
+def field_windows(
+    docs: Sequence[DocumentStat], names: Iterable[str] = ()
+) -> dict[str, FieldWindow]:
+    """:func:`field_window` of every field with a value in ``docs``, and of ``names``,
+    in one pass over them."""
+
+    @dataclass
+    class Tally:
+        found: int = 0
+        values: int = 0
+        llm: int = 0
+        confidence: float = 0.0
+        confident: int = 0
+
+    schemas: Counter[str] = Counter()
+    tallies: defaultdict[str, Tally] = defaultdict(Tally)
+    for d in docs:
+        if d.status == "failed":
+            continue
+        schemas.update(set(d.schemas))
+        found: set[str] = set()
+        for v in d.values:
+            if v.field.split(".")[0] not in d.schemas:
+                continue
+            t = tallies[v.field]
+            found.add(v.field)
+            t.values += 1
+            t.llm += v.method == "llm"
+            if v.confidence is not None:
+                t.confidence += v.confidence
+                t.confident += 1
+        for name in found:
+            tallies[name].found += 1
+
+    def window(name: str) -> FieldWindow:
+        t = tallies[name] if name in tallies else Tally()
+        return FieldWindow(
+            documents=schemas[name.split(".")[0]],
+            found=t.found,
+            values=t.values,
+            llm=t.llm,
+            mean_confidence=t.confidence / t.confident if t.confident else None,
+        )
+
+    return {name: window(name) for name in [*tallies, *names]}
 
 
 # --- from a replay -------------------------------------------------------------------

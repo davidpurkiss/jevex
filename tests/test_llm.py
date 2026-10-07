@@ -193,3 +193,19 @@ def test_rate_limited(attrs: dict[str, object], expected: bool) -> None:
     from jevex.llm import rate_limited
 
     assert rate_limited(_Status(**attrs)) is expected
+
+
+def test_rate_limited_sees_through_an_adapters_wrapping() -> None:
+    from jevex.llm import LLMError, rate_limited
+
+    def wrapped(sdk: Exception) -> LLMError:
+        try:
+            raise sdk
+        except Exception as exc:  # what the adapters do
+            try:
+                raise LLMError(f"Anthropic request failed: {exc}") from exc
+            except LLMError as error:
+                return error
+
+    assert rate_limited(wrapped(_Status(status_code=429)))
+    assert not rate_limited(wrapped(_Status(status_code=500)))

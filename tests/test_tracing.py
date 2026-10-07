@@ -177,3 +177,15 @@ def test_without_opentelemetry_tracing_is_off(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("importlib.util.find_spec", find_spec)
     assert resolve_tracer(None) is None
+
+
+def test_an_opentelemetry_package_without_the_api_leaves_tracing_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "opentelemetry.trace", None)  # import fails
+    monkeypatch.delattr("opentelemetry.trace", raising=False)
+    assert resolve_tracer(None) is None
+    with pytest.raises(ImportError, match="the otel extra"):
+        resolve_tracer(True)

@@ -442,3 +442,25 @@ async def test_the_learner_retries_jev_as_documents_do() -> None:
     assert learner is not None
     assert learner.jev.retry == policy
     await ex.aclose()
+
+
+def test_a_skipped_parts_stat_event_names_its_stage_and_part() -> None:
+    @dataclass
+    class Skips:
+        name: str = "candidates"
+
+        async def run(self, ctx: Context) -> None:
+            ctx.part_failed(self.name, "generator", "gen-1", IndexError("group 2"))
+
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Skips()]))
+    result = ex.extract_sync(doc())
+    ex.close()
+    stat = document_stat(result, doc_id="d", run_id=None, seconds=0.1)
+    assert stat.events == [
+        DocumentEvent(
+            kind="error",
+            message="candidates generator gen-1: IndexError: group 2",
+            stage="candidates",
+            part="gen-1",
+        )
+    ]

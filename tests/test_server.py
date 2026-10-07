@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from jevex import Context, Field, UnreadablePdfError
+from jevex import Context, Document, Extractor, Field, Pipeline, UnreadablePdfError
 from jevex.jev import (
     JevBackendError,
     JevBudgetExceededError,
@@ -515,6 +516,50 @@ def test_metrics_attribute_errors_and_time_stages_and_count_rate_limits(
     ):
         assert line + "\n" in text
     assert 'jevex_stage_seconds_sum{stage="select"} ' in text
+
+
+@dataclass
+class FailsTwice:
+    """One part raising two exception types in a document."""
+
+    name: str = "candidates"
+
+    async def run(self, ctx: Context) -> None:
+        ctx.part_failed(self.name, "generator", "gen-1", KeyError("k"))
+        ctx.part_failed(self.name, "generator", "gen-1", IndexError("i"))
+
+
+async def test_errors_count_documents_not_exception_types() -> None:
+    ex = Extractor([Book], jev=FakeJev().client(), pipeline=Pipeline([FailsTwice()]))
+    result = await ex.extract(Document.from_bytes(HTML))
+    assert len(result.errors) == 2
+    metrics = Metrics()
+    metrics.add(result, 0.1)
+    assert metrics.errors == {("candidates", "generator", "gen-1"): 1}
+
+
+async def test_a_hung_store_leaves_metrics_without_headroom(
+    stage: FindValues, fake_jev: FakeJev, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.server as server
+    from jevex import Budgets, RunBudget
+
+    class Hangs(SQLiteStore):
+        async def spend(self, **_: Any) -> float:
+            await asyncio.sleep(10)
+            return 0.0
+
+    monkeypatch.setattr(server, "STORE_TIMEOUT_S", 0.01)
+    store = Hangs(":memory:")
+    service = Service(
+        [Book], jev=fake_jev.client(), store=store, budgets=Budgets(run=RunBudget(max_spend=1))
+    )
+    await service.start()
+    text = await service.render_metrics()
+    assert "jevex_budget_remaining_usd" not in text
+    assert "jevex_store_errors_total 1\n" in text
+    await service.aclose()
+    await store.aclose()
 
 
 def test_metrics_report_drift_per_field(client: TestClient) -> None:
