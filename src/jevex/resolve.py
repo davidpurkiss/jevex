@@ -691,7 +691,8 @@ def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
     With one scope, they become its own. With more, each field's value goes:
 
     - to an entity that one of :attr:`~jevex.pipeline.SchemaRun.structured_items` names
-      (:func:`match_label`), from the first such item that gives the field;
+      (:func:`match_label`), from the first such item that gives the field (an item
+      holding another matched item isn't matched itself);
     - to every other entity, marked ``shared`` (so a value of the entity's own replaces
       it, :meth:`~jevex.pipeline.SchemaRun.offer_field`): the document's value, unless it
       came from an item matched to an entity; then the value from outside every item
@@ -711,7 +712,12 @@ def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
             run.set_field(labels[0], name, meta)
         return sum(m.found for m in page.values()), 0
     owner = {item.path: match_label(item.names, labels) for item in run.structured_items}
-    matched = [i for i in run.structured_items if owner[i.path] is not None]
+    named = [i for i in run.structured_items if owner[i.path] is not None]
+    # An object holding a matched object (a vehicle and its offers) isn't matched itself:
+    # its other values are the page's, and the inner objects' are theirs.
+    matched = [i for i in named if not any(o.statement_ids < i.statement_ids for o in named)]
+    for outer in {i.path for i in named} - {i.path for i in matched}:
+        owner[outer] = None
     taken = {sid for item in matched for sid in item.statement_ids}
     loose = [
         i for i in run.structured_items if owner[i.path] is None and not i.statement_ids & taken

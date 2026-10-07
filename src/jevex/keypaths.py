@@ -140,7 +140,7 @@ class Leaf:
 
 
 @dataclass(frozen=True)
-class Item:
+class NamedItem:
     """An object in an array (an entity candidate) that names something: ``offers[1]``
     with ``name: "SE L"``."""
 
@@ -162,7 +162,7 @@ class FlatBlob:
     leaves: tuple[Leaf, ...]
     entities: tuple[str, ...]
     """Collapsed paths of arrays of objects, e.g. ``offers[]`` (entity candidates)."""
-    items: tuple[Item, ...] = ()
+    items: tuple[NamedItem, ...] = ()
     """The entity candidates' objects that name something, in document order."""
 
     @property
@@ -196,7 +196,7 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
     """Leaves of ``blob.data`` with their key paths. ``@context``/``@id`` are skipped."""
     leaves: list[Leaf] = []
     entities: list[str] = []
-    found: list[Item] = []
+    found: list[NamedItem] = []
 
     def walk(value: Any, path: str, shape: str, key: str, names: list[str] | None) -> None:
         if isinstance(value, dict):
@@ -216,7 +216,7 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
                 start, own = len(leaves), list[str]()
                 walk(item, f"{path}[{i}]", f"{shape}[]", key, own)
                 if own:
-                    found.append(Item(f"{path}[{i}]", start, len(leaves), tuple(own)))
+                    found.append(NamedItem(f"{path}[{i}]", start, len(leaves), tuple(own)))
         elif isinstance(value, str | int | float | bool) and not (
             isinstance(value, str) and not value.strip()
         ):
@@ -634,6 +634,12 @@ class KeyPathMapper:
             limit = MAX_FALLBACK_VALUES if not spec.many else MAX_LIST_FALLBACK_VALUES
             raws = list(dict.fromkeys(_text(leaves[i].value) for i in errors))[:limit]
             by_raw = {_text(leaves[i].value): leaves[i] for i in reversed(list(errors))}
+            if not ask:
+                # Jev's readings are remembered by the statement asked about: the shape's
+                # first leaf with the value, wherever the leaves read here sit.
+                by_raw |= {
+                    _text(leaf.value): leaf for leaf in reversed(flat.shapes()[leaves[0].shape])
+                }
             results = await gather(
                 self._ask_value_cached(spec, by_raw[r], jev, ask=ask) for r in raws
             )

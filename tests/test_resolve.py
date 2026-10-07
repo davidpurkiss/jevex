@@ -1425,3 +1425,28 @@ async def test_in_merge_mode_a_trims_own_value_beats_the_shared_one_as_a_conflic
     assert (se_l.meta.price.value, se_l.meta.price.method) == (26995, "structured")
     [conflict] = se_l.meta.price.conflicts
     assert (conflict.value, conflict.method) == (26495, "generator")
+
+
+def test_an_object_holding_matched_objects_isnt_matched_itself() -> None:
+    run = car_run("Sport", "Sport Plus", "GT")
+    run.fields[SINGLE_ENTITY_LABEL] = {
+        "model": structured("Kestrova", "s1"),
+        "price": structured(30000, "s3"),
+    }
+    run.structured_items = [
+        # "Kestrova Sport Tourer" names Sport, but holds the offers that name each trim.
+        item(
+            "vehicles[0]",
+            ("Kestrova Sport Tourer",),
+            {"s0", "s1", "s2", "s3", "s4", "s5"},
+            model=structured("Kestrova", "s1"),
+            price=structured(30000, "s3"),
+        ),
+        item("vehicles[0].offers[0]", ("Sport Plus",), {"s2", "s3"}, price=structured(30000, "s3")),
+        item("vehicles[0].offers[1]", ("Sport",), {"s4", "s5"}, price=structured(25000, "s5")),
+    ]
+    place_document_values(run)
+    assert run.fields["Sport"]["price"].value == 25000
+    assert run.fields["Sport Plus"]["price"].value == 30000
+    assert "price" not in run.fields["GT"]
+    assert all(run.fields[label]["model"].shared for label in ("Sport", "Sport Plus", "GT"))

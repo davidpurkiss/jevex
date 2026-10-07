@@ -969,3 +969,18 @@ async def test_the_stage_keeps_the_items_and_the_rest_on_each_run() -> None:
     run = ctx.schemas["Car"]
     assert [i.path for i in run.structured_items] == ["offers[0]", "offers[1]"]
     assert run.structured_rest["price"].value == 1
+
+
+async def test_items_repeating_a_value_reuse_jevs_one_reading_of_it() -> None:
+    data = {
+        "offers": [
+            {"name": "SE", "fuelType": "Fully electric"},
+            {"name": "SE L", "fuelType": "Fully electric"},
+        ]
+    }
+    fake = mapping_jev({"offers[].fuelType": "fuel"}).choice(
+        re.compile("(?i)what is the fuel type"), "ev", state="Fully electric"
+    )
+    result = await KeyPathMapper().extract(page(data), [SchemaSpec.from_model(Car)], fake.client())
+    assert [item.fields["Car"]["fuel"].value for item in result.items] == ["ev", "ev"]
+    assert len([c for c in fake.calls if "enum" in c.questions]) == 1
