@@ -29,7 +29,10 @@ statement in one request:
 
 Every dropped or rejected answer is reported as a ``fallback`` event. LLM calls go
 through ``ctx.budget.call_llm``, so when a budget is hit the remaining fields keep their
-Jev answers and the hit is in ``meta.budget_events``.
+Jev answers and the hit is in ``meta.budget_events``. A call that fails (an
+:class:`~jevex.llm.LLMError` after the adapter's retries, or anything a custom
+extractor raises) leaves the Jev answer too, and is recorded as a part failure
+(:mod:`jevex.errors`; an ``llm_error`` event as well for an ``LLMError``).
 
 **Vision values** (spec: *Image stage*) are verified the same way, with or without an
 LLM, before anything is asked of one. A value Jev picked from a vision model's statement
@@ -62,14 +65,14 @@ from pydantic import BaseModel, Field, create_model
 from jevex._tasks import gather
 from jevex.budgets import DocumentBudget
 from jevex.interfaces import LLMAnswer
-from jevex.jev import NoulAnswer
+from jevex.jev import JevError, NoulAnswer
 from jevex.layout import section_text
 from jevex.llm import LLMError
 from jevex.normalise import NormaliseError, normalise
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.select import field_statements, statement_state, unique_spans
 from jevex.statements import Span
-from jevex.store import VerifiedExample, example_context, example_id
+from jevex.store import StoreError, VerifiedExample, example_context, example_id
 
 if TYPE_CHECKING:
     from jevex.interfaces import LLMExtractor
@@ -427,9 +430,14 @@ class FallbackStage:
     ) -> LLMAnswer | None:
         try:
             return await extractor.extract(ask.statement, ask.spec, budget)
-        except LLMError as exc:
-            # The fallback is optional: a failed call leaves the Jev answer in place.
-            _event(ctx, ask, "llm_error", f"{type(exc).__name__}: {exc}")
+        except (JevError, StoreError):
+            raise
+        except Exception as exc:
+            # The fallback is optional: a failed call leaves the Jev answer in place, and
+            # the failure is reported (``partial``).
+            if isinstance(exc, LLMError):
+                _event(ctx, ask, "llm_error", f"{type(exc).__name__}: {exc}")
+            ctx.part_failed(self.name, "llm_extractor", type(extractor).__name__, exc)
             return None
 
     def _check(self, ctx: Context, ask: _Ask, answer: LLMAnswer) -> None:

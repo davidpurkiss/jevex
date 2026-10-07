@@ -46,6 +46,7 @@ from io import BytesIO
 from typing import TYPE_CHECKING
 
 from jevex import _pdfium
+from jevex.errors import DocumentError
 from jevex.layout import BBox, Component, PageLocation, TableCell, UnsupportedDocumentError
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ _LIST_MARKER = re.compile(
 )
 
 
-class PdfLayoutError(Exception):
+class PdfLayoutError(DocumentError):
     """Docling couldn't convert the PDF."""
 
 

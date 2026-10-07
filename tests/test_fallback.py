@@ -22,11 +22,12 @@ from jevex import (
 )
 from jevex.budgets import DocumentBudget
 from jevex.entities import EntityScope
+from jevex.errors import PartError
 from jevex.extractor import default_pipeline
 from jevex.fallback import PROMPT, FallbackStage, LLMFieldExtractor, LLMOutput, output_model
 from jevex.housekeeping import generator_use
 from jevex.interfaces import LLMExtractor, ParsedDocument, Selection
-from jevex.jev import ChoiceAnswer, Noul
+from jevex.jev import ChoiceAnswer, JevBackendError, Noul
 from jevex.layout import Component
 from jevex.llm import LLMError
 from jevex.normalise import NormaliseStage
@@ -345,6 +346,51 @@ async def test_an_llm_error_is_an_event_and_other_fields_carry_on() -> None:
     assert [e.kind for e in ctx.events] == ["llm_error"]
     assert "upstream 500" in ctx.events[0].message
     assert meta(ctx, "launched").value == date(2024, 3, 3)
+    assert ctx.errors.errors == [
+        PartError(
+            stage="fallback",
+            kind="llm_extractor",
+            part="LLMFieldExtractor",
+            type="LLMError",
+            message="upstream 500",
+        )
+    ]
+
+
+async def test_an_extractor_that_raises_is_skipped_and_reported() -> None:
+    @dataclass
+    class Buggy:
+        async def extract(
+            self, statement: Statement, field: FieldSpec, budget: DocumentBudget
+        ) -> LLMAnswer | None:
+            raise AttributeError("no such attribute")
+
+    fake = FakeJev(strict=True)
+    ctx = context(fake, [st("s1"), st("s2", "Five seats")], {"s1": "zero_to_62_s", "s2": "seats"})
+    ctx.extraction_llm = llm()
+    await FallbackStage(extractor=Buggy()).run(ctx)
+    assert fake.calls == []
+    assert ctx.events == []
+    [error] = ctx.errors.errors
+    assert (error.kind, error.part, error.type, error.count) == (
+        "llm_extractor",
+        "Buggy",
+        "AttributeError",
+        2,
+    )
+
+
+async def test_a_jev_error_in_an_extractor_isnt_swallowed() -> None:
+    @dataclass
+    class AsksJev:
+        async def extract(
+            self, statement: Statement, field: FieldSpec, budget: DocumentBudget
+        ) -> LLMAnswer | None:
+            raise JevBackendError("down")
+
+    ctx = context(FakeJev(), [st("s1")], {"s1": "zero_to_62_s"})
+    with pytest.raises(JevBackendError):
+        await FallbackStage(extractor=AsksJev()).run(ctx)
 
 
 # --- batching, budgets, scopes ------------------------------------------------------------

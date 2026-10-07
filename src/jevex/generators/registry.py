@@ -8,7 +8,7 @@ from jevex.document import normalise_source
 from jevex.interfaces import FieldAwareGenerator, LocaleAwareGenerator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
     from jevex.interfaces import CandidateGenerator, Scope
     from jevex.schema import FieldSpec
@@ -132,24 +132,38 @@ class GeneratorRegistry:
         schema: str,
         locale: str | None = None,
         source: str | None = None,
+        on_error: Callable[[CandidateGenerator, Exception], None] | None = None,
     ) -> list[Candidate]:
         """Candidates from every applicable generator, one per distinct span, in text order.
 
         A :class:`~jevex.interfaces.LocaleAwareGenerator` is given the field and ``locale``;
-        a :class:`~jevex.interfaces.FieldAwareGenerator`, the field.
+        a :class:`~jevex.interfaces.FieldAwareGenerator`, the field. A generator that
+        raises is skipped for this statement and handed to ``on_error`` with the
+        exception; without ``on_error`` the exception propagates.
         """
         seen: set[tuple[int, int]] = set()
         out: list[Candidate] = []
         for generator in self.for_field(field, schema=schema, locale=locale, source=source):
-            if isinstance(generator, LocaleAwareGenerator):
-                candidates = generator.generate_in(statement, field, locale)
-            elif isinstance(generator, FieldAwareGenerator):
-                candidates = generator.generate_for(statement, field)
-            else:
-                candidates = generator.generate(statement)
+            try:
+                candidates = list(_run(generator, statement, field, locale))
+            except Exception as exc:
+                if on_error is None:
+                    raise
+                on_error(generator, exc)
+                continue
             for candidate in candidates:
                 key = (candidate.span.start, candidate.span.end)
                 if key not in seen:
                     seen.add(key)
                     out.append(candidate)
         return sorted(out, key=lambda c: (c.span.start, c.span.end))
+
+
+def _run(
+    generator: CandidateGenerator, statement: Statement, field: FieldSpec, locale: str | None
+) -> Iterable[Candidate]:
+    if isinstance(generator, LocaleAwareGenerator):
+        return generator.generate_in(statement, field, locale)
+    if isinstance(generator, FieldAwareGenerator):
+        return generator.generate_for(statement, field)
+    return generator.generate(statement)

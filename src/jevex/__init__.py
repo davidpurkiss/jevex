@@ -64,6 +64,7 @@ from jevex.clean import BoilerplateCleaner, CleanStage
 from jevex.component_gate import ComponentGateStage, GateUnit, NoulComponentGate, gate_units
 from jevex.document import Document
 from jevex.entities import EntityScope
+from jevex.errors import DocumentError, ExtractionError, PartError, PartErrors
 from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
 from jevex.extractor import ExtractionResult, Extractor, document_stat
 from jevex.fallback import FallbackStage, LLMFieldExtractor
@@ -88,7 +89,13 @@ from jevex.generators import (
     default_registry,
     generator_spec_json_schema,
 )
-from jevex.housekeeping import DuplicateGenerator, GeneratorUse, Housekeeper, generator_use
+from jevex.housekeeping import (
+    QUARANTINE_AFTER,
+    DuplicateGenerator,
+    GeneratorUse,
+    Housekeeper,
+    generator_use,
+)
 from jevex.images import (
     DefaultImageLoader,
     ImageData,
@@ -104,6 +111,7 @@ from jevex.images import (
     text_components,
 )
 from jevex.interfaces import LLMAnswer
+from jevex.jev import JevTransientError, RetryPolicy
 from jevex.keypaths import (
     FlatBlob,
     KeyPathMapper,
@@ -156,6 +164,7 @@ from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
     NormaliseError,
+    NormaliserFailedError,
     NormaliserRegistry,
     NormaliseStage,
     normalise,
@@ -241,6 +250,7 @@ __version__ = "0.0.1"
 __all__ = [
     "BUILTIN_NORMALISERS",
     "ENTRY_POINT_GROUP",
+    "QUARANTINE_AFTER",
     "BBox",
     "Baseline",
     "BaselineError",
@@ -277,6 +287,7 @@ __all__ = [
     "DoclingConverter",
     "Document",
     "DocumentBudget",
+    "DocumentError",
     "DocumentEvent",
     "DocumentGateStage",
     "DocumentStat",
@@ -291,6 +302,7 @@ __all__ = [
     "EvalReport",
     "ExampleLogger",
     "Extracted",
+    "ExtractionError",
     "ExtractionResult",
     "Extractor",
     "FallbackStage",
@@ -325,6 +337,7 @@ __all__ = [
     "InvalidScopeError",
     "JevCandidateSelector",
     "JevStatementClassifier",
+    "JevTransientError",
     "KeyMapping",
     "KeyPathMapper",
     "LLMAnswer",
@@ -346,6 +359,7 @@ __all__ = [
     "NamedItem",
     "NormaliseError",
     "NormaliseStage",
+    "NormaliserFailedError",
     "NormaliserRegistry",
     "NormaliserStep",
     "NoulComponentGate",
@@ -359,6 +373,8 @@ __all__ = [
     "PackManifest",
     "PageLocation",
     "ParentChild",
+    "PartError",
+    "PartErrors",
     "PdfLayoutError",
     "PdfLayoutParser",
     "PdfTextReader",
@@ -372,6 +388,7 @@ __all__ = [
     "ReplayBatch",
     "ReplayReport",
     "ResultRow",
+    "RetryPolicy",
     "ReviewItem",
     "ReviewQueue",
     "ReviewSink",

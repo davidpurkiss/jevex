@@ -13,6 +13,8 @@ import io
 import threading
 from typing import TYPE_CHECKING, Protocol, cast
 
+from jevex.errors import DocumentError
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -60,7 +62,7 @@ class Pdf(Protocol):
     def close(self) -> None: ...
 
 
-class UnreadablePdfError(Exception):
+class UnreadablePdfError(DocumentError):
     """pdfium couldn't open the PDF (damaged, encrypted, or not a PDF)."""
 
 

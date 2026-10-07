@@ -5,8 +5,9 @@ from typing import Any, Literal
 import pytest
 from pydantic import BaseModel
 
-from jevex import Context, Document, DomLocation, Field, SchemaSpec, Statement
+from jevex import Candidate, Context, Document, DomLocation, Field, SchemaSpec, Statement
 from jevex.entities import EntityScope
+from jevex.errors import PartError
 from jevex.generators import GeneratorRegistry, GeneratorSpec, RegexGenerator
 from jevex.interfaces import CandidateSelector, ParsedDocument, Scope
 from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
@@ -191,6 +192,53 @@ async def test_the_candidate_stage_records_the_generators_it_ran() -> None:
     named = RegexGenerator(id="named", pattern=r"\w+", scope=Scope(fields=frozenset({"model"})))
     await CandidateStage(registry=GeneratorRegistry([timed, named])).run(ctx)
     assert ctx.generators_ran == {"timed"}
+
+
+class Crashes:
+    """A generator with a bug."""
+
+    id = "crashes"
+    scope = Scope(fields=frozenset({"zero_to_62_s"}))
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        raise IndexError("group 2 out of range")
+
+
+async def test_a_generator_that_raises_is_skipped_and_reported() -> None:
+    a, b = st("s1", "0-62 mph in 9.1 s"), st("s2", "0-62 in 8 s")
+    ctx = context(FakeJev(), [a, b], {"s1": "zero_to_62_s", "s2": "zero_to_62_s"})
+    timed = RegexGenerator(
+        id="timed", pattern=r"([\d.]+) s", scope=Scope(fields=frozenset({"zero_to_62_s"}))
+    )
+    await CandidateStage(registry=GeneratorRegistry([Crashes(), timed])).run(ctx)
+    run = ctx.schemas["Car"]
+    # The other generators still give their candidates.
+    assert [c.raw for c in run.candidates[("s1", "zero_to_62_s")]] == ["9.1 s"]
+    assert [c.raw for c in run.candidates[("s2", "zero_to_62_s")]] == ["8 s"]
+    assert ctx.errors.errors == [
+        PartError(
+            stage="candidates",
+            kind="generator",
+            part="crashes",
+            type="IndexError",
+            message="group 2 out of range",
+            count=2,
+        )
+    ]
+    assert ctx.generators_ran == {"crashes", "timed"}
+
+
+def test_the_registry_raises_without_an_error_handler() -> None:
+    registry = GeneratorRegistry([Crashes()])
+    field = SPEC.field("zero_to_62_s")
+    with pytest.raises(IndexError):
+        registry.generate(st("s1", "9 s"), field, schema="Car")
+    failed: list[tuple[str, Exception]] = []
+    found = registry.generate(
+        st("s1", "9 s"), field, schema="Car", on_error=lambda g, e: failed.append((g.id, e))
+    )
+    assert found == []
+    assert [(gid, type(e)) for gid, e in failed] == [("crashes", IndexError)]
 
 
 LEARNED = GeneratorSpec.from_yaml(

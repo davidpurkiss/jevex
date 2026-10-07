@@ -27,6 +27,7 @@ from jevex import (
     review_items,
 )
 from jevex.entities import EntityScope
+from jevex.errors import PartError
 from jevex.interfaces import ParsedDocument
 from jevex.jev import Choice
 from jevex.layout import Component
@@ -337,10 +338,20 @@ async def test_review_thresholds_are_per_field() -> None:
     assert [i.field for i in queue.items] == ["Car.doors"]
 
 
-async def test_a_failing_sink_fails_the_extraction() -> None:
+async def test_a_failing_sink_is_a_part_failure() -> None:
     async with extractor({"zero_to_62_s": meta(9.1, 0.6)}, review_sink=Failing()) as ex:
-        with pytest.raises(RuntimeError, match="review queue is down"):
-            await ex.extract(DOC)
+        result = await ex.extract(DOC)
+    assert result.status == "partial"
+    assert result.errors == [
+        PartError(
+            stage="review",
+            kind="review_sink",
+            part="Failing",
+            type="RuntimeError",
+            message="review queue is down",
+        )
+    ]
+    assert result.one(Car).record.zero_to_62_s == 9.1  # the records stand
 
 
 @pytest.mark.parametrize(

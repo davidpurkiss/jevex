@@ -6,7 +6,7 @@ import asyncio
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, get_args, overload
@@ -18,13 +18,20 @@ from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
 from jevex.document import LOCALE_TAG
+from jevex.errors import DocumentError, ExtractionError, PartError, PartKind, Status, status_of
 from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
 from jevex.generators import GeneratorRegistry
 from jevex.housekeeping import PRUNE_AFTER, DuplicateGenerator, Housekeeper
 from jevex.images import ImageStage
 from jevex.interfaces import GateDecision
-from jevex.jev import JevClient, JevRequestCapError
+from jevex.jev import (
+    JevBudgetExceededError,
+    JevClient,
+    JevError,
+    JevRequestCapError,
+    RetryPolicy,
+)
 from jevex.keypaths import StructuredStage
 from jevex.layout import LayoutStage
 from jevex.learn import (
@@ -38,6 +45,7 @@ from jevex.learn import (
     PackDiff,
     compile_pack,
 )
+from jevex.llm import LLMBudgetExceededError
 from jevex.locales import canonical_locale
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
@@ -53,6 +61,7 @@ from jevex.store import (
     DocumentEvent,
     DocumentStat,
     Store,
+    StoreError,
     ValueStat,
     open_store,
 )
@@ -127,6 +136,9 @@ def default_pipeline() -> Pipeline:
 
 
 class JevUsageSummary(BaseModel):
+    """The document's Jev requests (``retries``: ones sent again after a transient
+    failure, counted in ``requests`` too)."""
+
     model_config = ConfigDict(frozen=True)
 
     requests: int
@@ -135,17 +147,20 @@ class JevUsageSummary(BaseModel):
     cost: float
     seconds: float
     models: list[str]
+    retries: int = 0
 
 
 class LLMUsageSummary(BaseModel):
     """The document's LLM calls through ``ctx.budget.call_llm``. ``unpriced_calls`` had no
-    known price, so ``cost`` leaves them out."""
+    known price, so ``cost`` leaves them out. ``retries`` are those the adapters' SDKs
+    reported (:attr:`~jevex.llm.LLMResponse.retries`)."""
 
     model_config = ConfigDict(frozen=True)
 
     calls: int = 0
     cost: float = 0.0
     unpriced_calls: int = 0
+    retries: int = 0
 
 
 class EventInfo(BaseModel):
@@ -158,7 +173,8 @@ class EventInfo(BaseModel):
 
 
 class DocumentMeta(BaseModel):
-    """Document-level metadata: gates, Jev usage, timings and events."""
+    """Document-level metadata: gates, Jev usage, timings, events and what failed
+    (``status`` and ``errors``, :mod:`jevex.errors`)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -175,6 +191,8 @@ class DocumentMeta(BaseModel):
     generator_snapshot: int | None = None
     """The version of the learned-generator snapshot the document ran with (``None``
     without a store or learner); see :class:`~jevex.learn.GeneratorSnapshot`."""
+    status: Status = "ok"
+    errors: list[PartError] = Field(default_factory=list[PartError])
 
 
 @dataclass(frozen=True)
@@ -185,10 +203,33 @@ class ExtractionResult:
     registration order. Use ``for_schema(Model)`` for typed access, or ``one()`` for
     single-entity documents. Child entities (``ParentChild``) aren't records of their own:
     they're in their parent's nested field and ``children``.
+
+    ``status`` says whether anything failed (:mod:`jevex.errors`): ``ok``, ``partial`` (a
+    part failed and was skipped) or ``failed`` (a core failure ended the document: its
+    records hold what was found before). ``errors`` lists the failures, and
+    :meth:`raise_for_errors` raises them.
     """
 
     records: list[Extracted[BaseModel]]
     meta: DocumentMeta
+    cause: BaseException | None = field(default=None, repr=False, compare=False)
+    """The exception behind a ``failed`` result (not serialised)."""
+
+    @property
+    def status(self) -> Status:
+        return self.meta.status
+
+    @property
+    def errors(self) -> list[PartError]:
+        return self.meta.errors
+
+    def raise_for_errors(self, *, partial: bool = True) -> None:
+        """Raise :class:`~jevex.errors.ExtractionError` unless the result is ``ok``
+        (``partial=False``: only when it ``failed``). A failed result's exception is the
+        error's ``__cause__``."""
+        if self.status == "ok" or (self.status == "partial" and not partial):
+            return
+        raise ExtractionError(self.status, self.errors, self.meta.url) from self.cause
 
     @overload
     def for_schema[T: BaseModel](self, model: type[T]) -> list[Extracted[T]]: ...
@@ -224,14 +265,18 @@ class ExtractionResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "status": self.status,
+            "errors": [e.model_dump(mode="json") for e in self.errors],
             "records": [r.to_dict() for r in self.records],
             "meta": self.meta.model_dump(mode="json"),
         }
 
     def to_plain_dict(self) -> dict[str, Any]:
-        """Each record's schema, entity and values, without meta, as JSON types: what
-        ``jevex extract`` prints and ``jevex serve`` answers."""
+        """The status, errors and each record's schema, entity and values, without meta,
+        as JSON types: what ``jevex extract`` prints and ``jevex serve`` answers."""
         return {
+            "status": self.status,
+            "errors": [e.model_dump(mode="json") for e in self.errors],
             "records": [
                 {
                     "schema": r.schema_name,
@@ -239,7 +284,7 @@ class ExtractionResult:
                     "record": r.record.model_dump(mode="json"),
                 }
                 for r in self.records
-            ]
+            ],
         }
 
     @classmethod
@@ -255,7 +300,9 @@ class ExtractionResult:
         for run in ctx.schemas.values():
             if run.parent is None:
                 records.extend(_records(ctx, run, threshold, thresholds))
+        errors = ctx.errors.errors
         return cls(
+            cause=ctx.errors.cause,
             records=records,
             meta=DocumentMeta(
                 url=ctx.document.url,
@@ -271,11 +318,13 @@ class ExtractionResult:
                     cost=usage.cost,
                     seconds=usage.seconds,
                     models=sorted(usage.models),
+                    retries=usage.retries,
                 ),
                 llm=LLMUsageSummary(
                     calls=ctx.budget.llm_calls,
                     cost=ctx.budget.llm_spend,
                     unpriced_calls=ctx.budget.unpriced_calls,
+                    retries=ctx.budget.llm_retries,
                 )
                 if ctx.budget
                 else LLMUsageSummary(),
@@ -287,6 +336,8 @@ class ExtractionResult:
                 stopped=ctx.stopped,
                 budget_events=list(ctx.budget.events) if ctx.budget else [],
                 generator_snapshot=ctx.generators.version if ctx.generators else None,
+                status=status_of(errors),
+                errors=errors,
             ),
         )
 
@@ -374,6 +425,22 @@ def _entity_metas(run: SchemaRun) -> dict[str, dict[str, FieldMeta]]:
     return out
 
 
+_CAP_ERRORS = (JevBudgetExceededError, LLMBudgetExceededError)
+"""The process spend caps: :meth:`Extractor.extract` raises them rather than reporting
+them, so a batch stops spending."""
+
+
+def _core_kind(exc: Exception) -> PartKind:
+    """What a core failure is (:data:`~jevex.errors.PartKind`)."""
+    if isinstance(exc, JevError):
+        return "jev"
+    if isinstance(exc, StoreError):
+        return "store"
+    if isinstance(exc, DocumentError):
+        return "document"
+    return "stage"
+
+
 def _stage[S](pipeline: Pipeline, name: str, kind: type[S]) -> S | None:
     found = next((s for s in pipeline if s.name == name), None)
     return found if isinstance(found, kind) else None
@@ -387,8 +454,8 @@ def document_stat(
     result: ExtractionResult, *, doc_id: str, run_id: str | None, seconds: float
 ) -> DocumentStat:
     """A finished document's numbers for the stats UI (:class:`~jevex.store.DocumentStat`):
-    every found value of its records and their children, its budget hits and whether a
-    stage stopped it."""
+    every found value of its records and their children, its budget hits, whether a
+    stage stopped it, and its status and errors (each also an ``error`` event)."""
     meta = result.meta
     events = [
         DocumentEvent(kind="budget", message=f"{e.scope} {e.limit}: {e.message}")
@@ -399,6 +466,7 @@ def document_stat(
         for e in meta.events
         if e.kind == "stopped"
     ]
+    events += [DocumentEvent(kind="error", message=e.describe()) for e in meta.errors]
     return DocumentStat(
         id=doc_id,
         run_id=run_id,
@@ -415,6 +483,8 @@ def document_stat(
         values=_value_stats(result.records),
         events=events,
         snapshot=meta.generator_snapshot,
+        status=meta.status,
+        errors=meta.errors,
     )
 
 
@@ -469,6 +539,7 @@ class Extractor:
         refresh_generators: float | None = REFRESH_GENERATORS,
         record_stats: bool = True,
         locale: str | None = None,
+        jev_retry: RetryPolicy | None = None,
     ) -> None:
         """``threshold`` (default 0: keep everything) and per-field ``thresholds`` (keys
         ``"field"`` or ``"Schema.field"``, and ``"Schema.nested_field.field"`` for a nested
@@ -540,7 +611,15 @@ class Extractor:
         has one (else only unscoped generators run), and what is learned from them is
         unscoped. Tags are kept canonical
         (:func:`~jevex.locales.canonical_locale`). Raises ``ValueError`` for a value that
-        isn't a language tag."""
+        isn't a language tag.
+
+        ``jev_retry`` is how Jev requests that fail transiently (timeouts, 429, 5xx) are
+        retried (:class:`~jevex.jev.RetryPolicy`; ``None``: the Jev client's own, two
+        retries with backoff by default). Retries are counted in ``meta.jev.retries``.
+        LLM retries are set on the adapters (``max_retries``).
+
+        :meth:`extract` reports what failed on the result instead of raising
+        (:mod:`jevex.errors`)."""
         if not schemas:
             raise ValueError("register at least one schema")
         self.schemas = [SchemaSpec.from_model(m) for m in schemas]
@@ -612,6 +691,7 @@ class Extractor:
                 f"locale must be a BCP 47 language tag such as 'en-GB', got {locale!r}"
             )
         self.locale = canonical_locale(locale) if locale is not None else None
+        self.jev_retry = jev_retry
 
     @property
     def jev(self) -> JevClient:
@@ -818,9 +898,20 @@ class Extractor:
         self._run_sync(self.wait_for_learning(), "wait_for_learning")
 
     async def extract(self, document: Document) -> ExtractionResult:
-        """Run the pipeline over one document."""
+        """Run the pipeline over one document.
+
+        Everything that happens while extracting it is reported on the result rather than
+        raised (:mod:`jevex.errors`): a part that fails is skipped (``status="partial"``),
+        and a core failure (Jev after retries, a document that can't be read, a bug in a
+        stage) ends the document with ``status="failed"``. Call
+        :meth:`~ExtractionResult.raise_for_errors` to fail loudly. Only the process spend
+        caps (``JEVEX_JEV_MAX_COST_USD``, ``JEVEX_LLM_MAX_COST_USD``) raise, as do
+        problems setting the extractor up (opening its store or packs).
+        """
         budget = DocumentBudget(self.budgets, await self.ledger())
-        jev = self.jev.metered(max_requests=self.budgets.per_document.max_jev_requests)
+        jev = self.jev.metered(
+            max_requests=self.budgets.per_document.max_jev_requests, retry=self.jev_retry
+        )
         ctx = Context.create(document, self.schemas, jev)
         ctx.default_locale = self.locale
         ctx.budget = budget
@@ -840,26 +931,15 @@ class Extractor:
         ctx.housekeeper = await self.housekeeper()
         doc_id, started = uuid.uuid4().hex, time.perf_counter()
         try:
-            try:
-                if not await budget.start_document():
-                    ctx.stop("budget", "the run's Jev spend cap is reached")
-                else:
-                    try:
-                        await self.pipeline.run(ctx)
-                    except JevRequestCapError as exc:
-                        budget.record_hit("document", "max_jev_requests", str(exc))
-                        ctx.stop("budget", str(exc))
-            finally:
-                # Every branch has settled (fan-outs cancel on failure, and a request
-                # cancelled mid-flight is counted at its estimate), so this is the
-                # document's whole Jev spend, recorded even when a stage failed.
-                await budget.finish_document(ctx.jev.usage.cost)
-        except Exception as exc:
+            await self._run_pipeline(ctx, budget)
+        except _CAP_ERRORS as exc:
             if (stats := self._stats_store(ctx)) is not None:
                 await stats.record_document(
                     self._failed_stat(ctx, exc, doc_id, time.perf_counter() - started)
                 )
             raise
+        if self.review_sink is not None:
+            await self._send_for_review(ctx)
         result = ExtractionResult.from_context(
             ctx, threshold=self.threshold, thresholds=self.thresholds
         )
@@ -867,20 +947,62 @@ class Extractor:
             stat = document_stat(
                 result, doc_id=doc_id, run_id=self.run_id, seconds=time.perf_counter() - started
             )
-            await stats.record_document(stat)
-        if self.review_sink is not None:
-            items = review_items(
-                result.records,
-                threshold=self.review_threshold,
-                thresholds=self.review_thresholds,
-                statements=_statements(ctx),
-                url=document.url,
-                document_source=document.source,
-                locale=ctx.locale,
-            )
-            if items:
-                await self.review_sink.send(items)
+            try:
+                await stats.record_document(stat)
+            except Exception as exc:
+                ctx.errors.add("extract", "store", "stats", exc)
+                result = ExtractionResult.from_context(
+                    ctx, threshold=self.threshold, thresholds=self.thresholds
+                )
         return result
+
+    async def _run_pipeline(self, ctx: Context, budget: DocumentBudget) -> None:
+        """Run the pipeline, recording a core failure on ``ctx`` (raising only the spend
+        caps), then record the document's Jev spend in the ledger."""
+        try:
+            if not await budget.start_document():
+                ctx.stop("budget", "the run's Jev spend cap is reached")
+            else:
+                await self.pipeline.run(ctx)
+        except JevRequestCapError as exc:
+            budget.record_hit("document", "max_jev_requests", str(exc))
+            ctx.stop("budget", str(exc))
+        except _CAP_ERRORS:
+            raise
+        except Exception as exc:
+            ctx.errors.add(ctx.stage or "extract", _core_kind(exc), None, exc, fatal=True)
+        finally:
+            # Every branch has settled (fan-outs cancel on failure, and a request
+            # cancelled mid-flight is counted at its estimate), so this is the
+            # document's whole Jev spend, recorded even when a stage failed.
+            try:
+                await budget.finish_document(ctx.jev.usage.cost)
+            except Exception as exc:
+                # The result stands; only the run budget's view of it is behind.
+                ctx.errors.add("extract", "store", "ledger", exc)
+
+    async def _send_for_review(self, ctx: Context) -> None:
+        """Send the document's uncertain values to the review sink; a sink that raises is
+        a part failure."""
+        assert self.review_sink is not None
+        result = ExtractionResult.from_context(
+            ctx, threshold=self.threshold, thresholds=self.thresholds
+        )
+        items = review_items(
+            result.records,
+            threshold=self.review_threshold,
+            thresholds=self.review_thresholds,
+            statements=_statements(ctx),
+            url=ctx.document.url,
+            document_source=ctx.document.source,
+            locale=ctx.locale,
+        )
+        if not items:
+            return
+        try:
+            await self.review_sink.send(items)
+        except Exception as exc:
+            ctx.part_failed("review", "review_sink", type(self.review_sink).__name__, exc)
 
     def _stats_store(self, ctx: Context) -> Store | None:
         """Where to record the document's stats: not in an in-memory store the extractor
@@ -905,6 +1027,7 @@ class Extractor:
             llm_cost=ctx.budget.llm_spend if ctx.budget else 0.0,
             seconds=seconds,
             events=[DocumentEvent(kind="error", message=f"{type(exc).__name__}: {exc}")],
+            status="failed",
         )
 
     def extract_sync(self, document: Document) -> ExtractionResult:
