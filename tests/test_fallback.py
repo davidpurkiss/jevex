@@ -738,3 +738,15 @@ async def test_an_item_one_vision_statement_verifies_stays_though_another_didnt(
     assert all(a.value != "GTI" for a in m.alternatives)
     assert [(e.value, e.statement) for e in ctx.verified] == [("GTI", "Trims: GTI.")]
     assert [e.data["statement_id"] for e in ctx.events] == ["v2"]
+
+
+async def test_an_item_two_vision_statements_fail_to_verify_is_listed_once() -> None:
+    fake = FakeJev().noul('"GTI"', p=0.2)
+    statements = [seen("v1", "Trims: GTI."), seen("v2", "The badge reads GTI.")]
+    ctx = context(fake, statements, {"v1": "trims", "v2": "trims"})
+    from_vision(ctx, "trims", ["GTI"], [VisionValue("v1", "GTI"), VisionValue("v2", "GTI")])
+    await FallbackStage().run(ctx)
+    m = meta(ctx, "trims")
+    assert not m.found
+    assert [(a.value, a.p) for a in m.alternatives] == [("GTI", 0.2), (8.0, 0.02)]
+    assert len(ctx.events) == 2

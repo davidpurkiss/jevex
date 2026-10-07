@@ -340,7 +340,7 @@ class FallbackStage:
                 check.scope,
                 spec.name,
                 FieldMeta(
-                    alternatives=sorted([*meta.alternatives, *rejected], key=lambda a: -a.p),
+                    alternatives=_ranked([*meta.alternatives, *rejected], []),
                     conflicts=meta.conflicts,
                 ),
             )
