@@ -217,10 +217,12 @@ class ExtractionResult:
 
     @property
     def status(self) -> Status:
+        """``ok``, ``partial`` or ``failed`` (``meta.status``)."""
         return self.meta.status
 
     @property
     def errors(self) -> list[PartError]:
+        """What failed, in the order first recorded (``meta.errors``)."""
         return self.meta.errors
 
     def raise_for_errors(self, *, partial: bool = True) -> None:

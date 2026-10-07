@@ -117,6 +117,8 @@ class PartErrors:
         *,
         fatal: bool = False,
     ) -> None:
+        """Record one failure. A repeat of the same stage, kind, part and type adds to its
+        count; the first fatal one's exception becomes :attr:`cause`."""
         key = (stage, kind, part, type(exc).__name__)
         found = self._errors.get(key)
         if found is not None:
@@ -140,6 +142,7 @@ class PartErrors:
 
     @property
     def status(self) -> Status:
+        """The document's status so far (:func:`status_of`)."""
         return status_of(self.errors)
 
     def __len__(self) -> int:
