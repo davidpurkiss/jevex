@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -17,7 +16,6 @@ from jevex.budgets import BudgetEvent, Budgets, DocumentBudget, RunLedger
 from jevex.categorise import CategoriseStage
 from jevex.clean import CleanStage
 from jevex.component_gate import ComponentGateStage
-from jevex.document import LOCALE_TAG
 from jevex.errors import DocumentError, ExtractionError, PartError, PartKind, Status, status_of
 from jevex.fallback import FALLBACK_THRESHOLD, FallbackStage
 from jevex.gate import DocumentGateStage
@@ -46,7 +44,7 @@ from jevex.learn import (
     compile_pack,
 )
 from jevex.llm import LLMBudgetExceededError
-from jevex.locales import canonical_locale
+from jevex.locales import checked_locale
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliseStage, normalise
 from jevex.packs import community_packs, load_pack
 from jevex.pipeline import Context, Pipeline
@@ -620,7 +618,7 @@ class Extractor:
         generators are scoped and numbers read by the candidate stage's ``locale`` if it
         has one (else only unscoped generators run), and what is learned from them is
         unscoped. Tags are kept canonical
-        (:func:`~jevex.locales.canonical_locale`). Raises ``ValueError`` for a value that
+        (:func:`~jevex.locales.checked_locale`). Raises ``ValueError`` for a value that
         isn't a language tag.
 
         ``jev_retry`` is how Jev requests that fail transiently (timeouts, 429, 5xx) are
@@ -699,11 +697,7 @@ class Extractor:
         self._packs: list[Pack] | None = None
         self._packs_lock: asyncio.Lock | None = None
         self.record_stats = record_stats
-        if locale is not None and not re.fullmatch(LOCALE_TAG, locale):
-            raise ValueError(
-                f"locale must be a BCP 47 language tag such as 'en-GB', got {locale!r}"
-            )
-        self.locale = canonical_locale(locale) if locale is not None else None
+        self.locale = checked_locale(locale) if locale is not None else None
         self.jev_retry = jev_retry
 
     @property

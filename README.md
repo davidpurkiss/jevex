@@ -104,6 +104,11 @@ extractor's `locale` is the document's, as if the document had said it:
 extractor = Extractor([VehicleSpec], locale="en-GB")
 ```
 
+The other entry points take it too: `jevex eval --locale en-GB` (plain and `--replay`),
+`jevex serve --locale en-GB`, and the Scrapy pipeline's `JEVEX_LOCALE` setting. Each
+checks the tag the way `Extractor` does (`jevex.checked_locale`), so a bad one is a usage
+error or a settings error before anything runs.
+
 Generators scoped to it run on those documents, and what the learner learns from them is
 scoped to it. It comes before the candidate and statement stages' own `locale`. Without
 one, such documents have no locale of their own: generators are scoped and numbers and dates
@@ -419,7 +424,8 @@ default because it shows URLs and spend. The service has no auth of its own: run
 yours.
 
 `--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
-across every request. In Python, `jevex.server.create_app(Service([...], store=...))`
+across every request. `--locale TAG` is the [locale](#locales) of documents that don't say
+their own; a request's `"locale"` in `document` overrides it for that document. In Python, `jevex.server.create_app(Service([...], store=...))`
 gives the FastAPI app to mount or run yourself.
 
 The `Dockerfile` builds an image that runs `jevex serve` on port 8080. Your schemas'
@@ -457,8 +463,9 @@ class BookSpider(scrapy.Spider):
 
 The pipeline swaps the item's `document` for `records` (each record's schema, entity and
 values, as `jevex extract` prints them), so `scrapy crawl books -O books.jsonl` writes
-them out. Items without a document pass through. `JEVEX_THRESHOLD` and `JEVEX_META`
-(per-field and document meta) work as their `Extractor` and `jevex extract` namesakes,
+them out. Items without a document pass through. `JEVEX_THRESHOLD`, `JEVEX_LOCALE` (the
+locale of documents that don't say their own) and `JEVEX_META` (per-field and document
+meta) work as their `Extractor` and `jevex extract` namesakes,
 and counts go to Scrapy's stats under `jevex/` (with `partial`, `failed` and
 `errors/<kind>`). A [failed](#when-something-fails) document fails its item with an
 `ExtractionError`, which Scrapy logs and drops. For anything else (LLMs, budgets, a
@@ -521,6 +528,8 @@ jevex testsite serve                            # http://127.0.0.1:8000/
 The site is `en-GB`. HTML pages say so in `<html lang>`; PDFs and images can't, so their
 `truth.json` entries carry `"locale": "en-GB"`, which `jevex eval` gives the document
 (any corpus can do the same), and `jevex testsite serve` sends `Content-Language: en-GB`.
+`jevex eval --locale TAG` gives every page without a `locale` of its own (in `truth.json`
+or the page itself) that one instead.
 
 `truth.json` lists the pages wave by wave, so a replay meets each wave's template
 families together and the LLM-call rate spikes, then falls as generators are learned. The

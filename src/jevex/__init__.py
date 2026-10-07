@@ -163,6 +163,7 @@ from jevex.learn import (
 from jevex.locales import (
     LocaleConventions,
     canonical_locale,
+    checked_locale,
     document_locale,
     html_language,
     locale_conventions,
@@ -457,6 +458,7 @@ __all__ = [
     "charge_usage",
     "check_baseline",
     "check_lock",
+    "checked_locale",
     "community_packs",
     "compile_pack",
     "corpus_digest",

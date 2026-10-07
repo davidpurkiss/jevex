@@ -193,6 +193,30 @@ def test_serve_errors_before_serving(argv: list[str], message: str, served: Serv
     assert served == []
 
 
+@pytest.mark.usefixtures("pipeline")
+def test_serve_passes_its_locale_to_the_extractors(served: Served) -> None:
+    from fastapi.testclient import TestClient
+
+    from jevex.server import Service
+
+    code, _, err = run_cli("serve", "--schema", SCHEMA, "--locale", "de_at")
+    assert (code, err) == (0, "")
+    [(app, _)] = served
+    service: object = app.state.service
+    assert isinstance(service, Service)
+    assert service.locale == "de-AT"
+    with TestClient(app):
+        assert service.extractor(["Book"]).locale == "de-AT"
+
+
+def test_serve_rejects_a_bad_locale(served: Served, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("serve", "--schema", SCHEMA, "--locale", "en GB")
+    assert exc.value.code == 2
+    assert "argument --locale: locale must be a BCP 47 language tag" in capsys.readouterr().err
+    assert served == []
+
+
 def test_serve_needs_an_api_key(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     err = io.StringIO()

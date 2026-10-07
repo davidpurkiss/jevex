@@ -642,6 +642,28 @@ def test_cli_replay_stops_on_the_spend_cap(site: Path, monkeypatch: pytest.Monke
     assert out.getvalue() == ""
 
 
+def test_cli_replay_passes_its_locale_to_the_extractor(
+    site: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor_module
+
+    seen: set[str | None] = set()
+
+    @dataclass
+    class SeesLocale:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            seen.add(ctx.default_locale)
+
+    monkeypatch.setattr(extractor_module, "DEFAULT_STAGES", (SeesLocale(),))
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["eval", str(site), *SCHEMAS, "--replay", "--locale", "fr-fr"]
+    code = main(argv, jev=FakeJev().client(), out=out, err=err)
+    assert (code, err.getvalue()) == (0, "")
+    assert seen == {"fr-FR"}
+
+
 def test_the_cli_replay_starts_from_nothing_and_uses_the_llm_for_both(
     site: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

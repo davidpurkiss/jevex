@@ -624,6 +624,49 @@ def test_cli_eval_reports_failed_documents(tmp_path: Path, monkeypatch: pytest.M
     assert all("table" in line for line in lines)
 
 
+def test_cli_eval_locale_is_the_default_for_pages_without_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor_module
+
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.7")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.7")
+    pages: list[dict[str, Any]] = [
+        {"path": "a.pdf", "schema": "VehicleSpec", "records": [], "locale": "de-DE"},
+        {"path": "b.pdf", "schema": "VehicleSpec", "records": []},
+    ]
+    (tmp_path / "truth.json").write_text(json.dumps({"pages": pages}))
+    stage = SeesLocale()
+    monkeypatch.setattr(extractor_module, "DEFAULT_STAGES", (stage,))
+    out, err = io.StringIO(), io.StringIO()
+    argv = ["eval", str(tmp_path), *SCHEMAS, "--locale", "fr_ch"]
+    code = main(argv, jev=FakeJev().client(), out=out, err=err)
+    assert (code, err.getvalue()) == (0, "")
+    assert stage.seen == {"a.pdf": "de-DE", "b.pdf": "fr-CH"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (
+            ["--locale", "German"],
+            "argument --locale: locale must be a BCP 47 language tag such as 'en-GB', got 'German'",
+        ),
+        (
+            ["--results", "r", "--locale", "de"],
+            "--results scores a results file: leave out --locale",
+        ),
+    ],
+)
+def test_cli_eval_rejects_a_bad_or_unused_locale(
+    tmp_path: Path, argv: list[str], message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["eval", str(tmp_path), *SCHEMAS, *argv], jev=FakeJev().client())
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
 def test_cli_eval_bad_corpus_is_a_clean_error(tmp_path: Path) -> None:
     err = io.StringIO()
     code = main(
