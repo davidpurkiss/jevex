@@ -26,6 +26,7 @@ from jevex.store import (
     DocumentEvent,
     DocumentStat,
     GeneratorRecord,
+    MemoryLedger,
     SpendEntry,
     SQLiteStore,
     ValueStat,
@@ -123,6 +124,15 @@ async def test_spend_comes_from_the_ledger_when_it_has_entries(store: SQLiteStor
     assert [(s.documents, s.jev, s.llm) for s in stats.spend] == [(1, 0.5, 0.0), (1, 0.5, 0.25)]
     assert stats.budget_usd == 2.0
     assert summary(stats)["spent_usd"] == 0.75
+
+
+async def test_spend_comes_from_a_ledger_kept_apart_from_the_store(store: SQLiteStore) -> None:
+    await store.record_document(doc(0))
+    await store.record_spend(SpendEntry(amount_usd=9.0, kind="jev", at=T0))  # not this one's
+    ledger = MemoryLedger()
+    await ledger.record_spend(SpendEntry(amount_usd=0.5, kind="jev", at=T0))
+    stats = await from_store(store, source="s", ledger=ledger)
+    assert [(s.documents, s.jev) for s in stats.spend] == [(1, 0.5)]
 
 
 async def test_a_documents_charges_count_against_it(store: SQLiteStore) -> None:

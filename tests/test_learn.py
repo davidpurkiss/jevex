@@ -61,7 +61,7 @@ from jevex.normalise import (
 )
 from jevex.select import CandidateStage, JevCandidateSelector, SelectStage
 from jevex.statements import NormaliserStep
-from jevex.store import Store, open_store
+from jevex.store import MemoryLedger, SpendEntry, SQLiteStore, Store, open_store
 from jevex.testing import FakeJev, FakeLLM
 
 LOC = DomLocation(dom_path="/p")
@@ -503,7 +503,7 @@ async def test_a_jev_error_is_an_outcome() -> None:
 
 
 async def test_the_run_budget_refuses_synthesis() -> None:
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     llm = FakeLLM([DRAFT])
     ledger = RunLedger(RunBudget(max_spend=0.0, period="run"), store)
     outcome = await learned(FakeJev(), llm, example(), store=store, ledger=ledger)
@@ -512,7 +512,7 @@ async def test_the_run_budget_refuses_synthesis() -> None:
 
 
 async def test_the_run_jev_cap_stops_testing() -> None:
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     ledger = RunLedger(RunBudget(max_jev_spend=0.0, period="run"), store)
     fake = FakeJev(strict=True)
     outcome = await learned(fake, FakeLLM([DRAFT]), example(), store=store, ledger=ledger)
@@ -521,7 +521,7 @@ async def test_the_run_jev_cap_stops_testing() -> None:
 
 
 async def test_the_learners_jev_spend_goes_in_the_run_ledger() -> None:
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     ledger = RunLedger(RunBudget(max_spend=5.0, period="run"), store)
     fake = FakeJev().choice(None, pick("9.1"))
     llm = FakeLLM([DRAFT], price=(1.0, 1.0))
@@ -529,6 +529,97 @@ async def test_the_learners_jev_spend_goes_in_the_run_ledger() -> None:
     assert outcome.status == "accepted"
     assert await store.spend(kind="jev", run_id=ledger.run_id) > 0
     assert await store.spend(kind="llm", run_id=ledger.run_id) > 0
+
+
+class DownLedger(MemoryLedger):
+    """A spend ledger that can't be read (``read``) or written (``write``)."""
+
+    def __init__(self, *, read: bool = True, write: bool = True) -> None:
+        super().__init__()
+        self.read_fails, self.write_fails = read, write
+
+    async def spend(self, **kw: Any) -> float:
+        if self.read_fails:
+            raise ConnectionError("ledger unreachable")
+        return await super().spend(**kw)
+
+    async def record_spend(self, entry: SpendEntry) -> None:
+        if self.write_fails:
+            raise ConnectionError("ledger is read-only")
+        await super().record_spend(entry)
+
+
+async def test_a_ledger_that_cant_be_read_makes_no_synthesis_call() -> None:
+    llm = FakeLLM([DRAFT])
+    ledger = RunLedger(RunBudget(max_spend=1.0, period="run"), DownLedger())
+    outcome = await learned(FakeJev(strict=True), llm, example(), ledger=ledger)
+    assert outcome.status == "ledger_error"
+    assert outcome.message == "ConnectionError: ledger unreachable"
+    assert llm.calls == []
+
+
+async def test_a_ledger_that_cant_check_the_jev_cap_stops_testing() -> None:
+    fake = FakeJev(strict=True)
+    ledger = RunLedger(RunBudget(max_jev_spend=1.0, period="run"), DownLedger(write=False))
+    outcome = await learned(fake, FakeLLM([DRAFT]), example(), ledger=ledger)
+    assert outcome.status == "ledger_error"
+    assert outcome.spec is not None
+    assert fake.calls == []
+
+
+async def test_spend_a_ledger_cant_record_is_noted_on_the_outcome() -> None:
+    fake = FakeJev().choice(None, pick("9.1"))
+    llm = FakeLLM([DRAFT], price=(1.0, 1.0))
+    ledger = RunLedger(RunBudget(max_spend=5.0, period="run"), DownLedger(read=False))
+    outcome = await learned(fake, llm, example(), ledger=ledger)
+    assert outcome.status == "accepted"
+    assert outcome.message == (
+        "its LLM spend wasn't recorded: ConnectionError: ledger is read-only; "
+        "its Jev spend wasn't recorded: ConnectionError: ledger is read-only"
+    )
+
+
+class NoPublish(SQLiteStore):
+    """A store that can't store generators (``publish``) or read examples (``examples``)."""
+
+    def __init__(self, *, publish: bool = True, examples: bool = False) -> None:
+        super().__init__(":memory:")
+        self.fail_publish, self.fail_examples = publish, examples
+
+    async def put_generator(self, generator: GeneratorRecord) -> None:
+        if self.fail_publish:
+            raise StoreError("disk full")
+        await super().put_generator(generator)
+
+    async def examples(
+        self, field: str | None = None, *, limit: int | None = None
+    ) -> list[VerifiedExample]:
+        if self.fail_examples:
+            raise StoreError("connection reset")
+        return await super().examples(field, limit=limit)
+
+
+@pytest.mark.parametrize(
+    ("store_kw", "message"),
+    [({"publish": True}, "disk full"), ({"publish": False, "examples": True}, "connection reset")],
+)
+async def test_a_store_failure_while_learning_is_an_outcome_and_the_worker_carries_on(
+    store_kw: dict[str, bool], message: str
+) -> None:
+    store = NoPublish(**store_kw)
+    fake = FakeJev().choice(None, pick("9.1"))
+    gl = learner(fake, FakeLLM(lambda _p, _s: DRAFT), store=store)
+    await gl.submit(example())
+    await gl.drain()
+    [outcome] = gl.outcomes
+    assert (outcome.status, outcome.message) == ("store_error", message)
+    assert outcome.spec is not None
+    assert len(gl.snapshot.registry) == 0  # nothing was published
+    await gl.submit(example("9.5 seconds", 9.5, eid="ex-2"))  # the worker is still running
+    await gl.drain()
+    assert len(gl.outcomes) == 2
+    await gl.aclose()
+    await store.aclose()
 
 
 async def test_spend_keeps_running_totals_without_a_run_budget() -> None:
@@ -554,7 +645,7 @@ async def test_spend_counts_a_failed_llm_call_but_not_a_refused_one() -> None:
     gl = learner(FakeJev(strict=True), FakeLLM(fail))
     assert (await gl.learn(example())).status == "llm_error"
     assert gl.spend == LearningSpend(llm_calls=1)
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     ledger = RunLedger(RunBudget(max_spend=0.0, period="run"), store)
     refused = learner(FakeJev(strict=True), FakeLLM([DRAFT]), store=store, ledger=ledger)
     assert (await refused.learn(example())).status == "budget"
@@ -891,6 +982,34 @@ async def test_the_stage_hands_the_document_to_the_housekeeper_without_a_learner
     ctx.housekeeper = Housekeeper(store)
     await LearnStage().run(ctx)
     assert (await store.generator_stats("gen-a")).documents == 1
+
+
+class DownStore(SQLiteStore):
+    """A store whose example and generator stats writes fail."""
+
+    def __init__(self) -> None:
+        super().__init__(":memory:")
+
+    async def add_example(self, example: VerifiedExample) -> None:
+        raise StoreError("disk full")
+
+    async def record_generator_stats(self, generator_id: str, **counts: int) -> None:
+        raise StoreError("disk full")
+
+
+async def test_the_stage_reports_store_failures_and_carries_on() -> None:
+    store = DownStore()
+    ctx = Context.create(Document.from_bytes(b"<p/>"), [SPEC], FakeJev().client())
+    ctx.verified.extend([example(eid="a"), example(eid="b")])
+    ctx.generators_ran.add("gen-a")
+    ctx.learner = ExampleLogger(store)
+    ctx.housekeeper = Housekeeper(store)
+    await LearnStage().run(ctx)
+    assert [(e.stage, e.kind, e.part, e.count, e.fatal) for e in ctx.errors.errors] == [
+        ("learn", "store", "examples", 2, False),
+        ("learn", "store", "generator_stats", 1, False),
+    ]
+    await store.aclose()
 
 
 @dataclass

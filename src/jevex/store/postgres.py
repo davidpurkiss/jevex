@@ -185,7 +185,8 @@ def _settle(task: asyncio.Task[Any]) -> None:
 
 
 class PostgresStore:
-    """:class:`~jevex.store.Store` on a Postgres database, for several hosts and workers.
+    """:class:`~jevex.store.Store` and :class:`~jevex.store.SpendLedger` on a Postgres
+    database, for several hosts and workers.
 
     ``conninfo`` is a libpq connection string or URL (``postgresql://user@host/db``).
     Opening connects once to create or migrate the tables in ``db_schema`` (several

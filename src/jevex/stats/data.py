@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from jevex.results import Method
+from jevex.store import SpendLedger
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -415,13 +416,15 @@ async def from_store(
     since: datetime | None = None,
     limit: int | None = DOCUMENT_LIMIT,
     budget_usd: float | None = None,
+    ledger: SpendLedger | None = None,
 ) -> Stats:
     """A store's stats: its recorded documents (the newest ``limit``, at or after
     ``since``), its generators with their counts, and its spend.
 
-    Spend comes from the ledger, which also has what the learner spent between
-    documents, from the first document's time on. A store without ledger entries (no
-    run budget was set) gets it from the documents instead.
+    Spend comes from the spend ledger (``ledger``, else the store when it is one), which
+    also has what the learner spent between documents, from the first document's time
+    on. Without ledger entries (no run budget was set, or no ledger) it comes from the
+    documents instead.
     """
     docs = await store.documents(since=since, limit=limit)
     records = await store.generators(include_disabled=True)
@@ -432,7 +435,10 @@ async def from_store(
     # against the documents started by then.
     starts = sorted(d.at - timedelta(seconds=d.seconds) for d in docs)
     start = starts[0] if starts else since
-    entries = [e for e in await store.spend_entries(since=start) if e.kind in ("jev", "llm")]
+    if ledger is None and isinstance(store, SpendLedger):
+        ledger = store
+    spent = await ledger.spend_entries(since=start) if ledger is not None else []
+    entries = [e for e in spent if e.kind in ("jev", "llm")]
     times = [d.at for d in docs]
     learned_at = sorted(g.created_at for g in records if start is None or g.created_at >= start)
     generators = [

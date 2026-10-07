@@ -60,6 +60,8 @@ from jevex.store import (
     MAX_STAT_VALUE_CHARS,
     DocumentEvent,
     DocumentStat,
+    MemoryLedger,
+    SpendLedger,
     Store,
     StoreError,
     ValueStat,
@@ -72,12 +74,13 @@ if TYPE_CHECKING:
 
     from jevex.document import Document
     from jevex.generators import GeneratorSpec
+    from jevex.learn import GeneratorSnapshot
     from jevex.llm import LLM
     from jevex.packs import Pack
     from jevex.pipeline import SchemaRun, Stage
     from jevex.review import ReviewItem, ReviewSink
     from jevex.statements import Statement
-    from jevex.store import VerifiedExample
+    from jevex.store import LedgerError, VerifiedExample
 
 # The spec's stage order (see jevex.interfaces). Default stages must use these names; they
 # are sorted into this order, so issues can add their stage without coordinating position.
@@ -526,6 +529,7 @@ class Extractor:
         thresholds: Mapping[str, float] | None = None,
         budgets: Budgets | None = None,
         store: Store | str | Path | None = None,
+        ledger: SpendLedger | None = None,
         run_id: str | None = None,
         extraction_llm: LLM | None = None,
         vision_llm: LLM | None = None,
@@ -550,10 +554,14 @@ class Extractor:
 
         ``budgets`` limits LLM and Jev use (:mod:`jevex.budgets`). ``store`` (a
         :class:`~jevex.store.Store` or a URL such as ``"sqlite:///jevex.db"``) holds learned
-        state and the spend ledger that shares the run budget across workers; a URL is
-        opened on first use and closed by ``aclose``. With a run budget but no store, the
-        ledger is kept in memory. ``run_id`` labels this run's ledger entries; workers
-        that should share a ``period="run"`` budget pass the same one.
+        state; a URL is opened on first use and closed by ``aclose``. ``ledger`` (a
+        :class:`~jevex.store.SpendLedger`) keeps the run budget's spend, shared by the
+        workers using it; by default that's the store (the built-in ones are ledgers), and
+        with neither a store that is one nor a ``ledger``, a
+        :class:`~jevex.store.MemoryLedger` for this extractor. A ledger that fails is
+        reported on the result, and LLM calls it can't clear aren't made
+        (:mod:`jevex.budgets`). ``run_id`` labels this run's ledger entries; workers that
+        should share a ``period="run"`` budget pass the same one.
 
         ``extraction_llm`` turns on the LLM fallback (:mod:`jevex.fallback`): where Jev's
         selection fails, the LLM is asked for the value and its evidence, and Jev verifies
@@ -656,6 +664,8 @@ class Extractor:
         self.run_id = run_id or uuid.uuid4().hex[:12]
         self.run_started = datetime.now(UTC)
         self._ledger: RunLedger | None = None
+        self._spend_ledger = ledger
+        self._memory_ledger = MemoryLedger()
         self._store_source = store if isinstance(store, str | Path) else None
         self._store: Store | None = None if isinstance(store, str | Path) else store
         self._owns_store = False
@@ -718,11 +728,18 @@ class Extractor:
         return self._store
 
     async def ledger(self) -> RunLedger:
-        """The run ledger shared by this extractor's documents (and by the learner, #38)."""
-        store = await self.store()
-        if self._ledger is None or self._ledger.store is not store:
+        """The run ledger shared by this extractor's documents (and by the learner, #38),
+        kept in the ``ledger`` given, else the store's, else in memory."""
+        spend = self._spend_ledger
+        if spend is None:
+            store = await self.store()
+            if isinstance(store, SpendLedger):
+                spend = store
+            elif self.budgets.run is not None:
+                spend = self._memory_ledger
+        if self._ledger is None or self._ledger.ledger is not spend:
             self._ledger = RunLedger(
-                self.budgets.run, store, run_id=self.run_id, started=self.run_started
+                self.budgets.run, spend, run_id=self.run_id, started=self.run_started
             )
         return self._ledger
 
@@ -911,14 +928,22 @@ class Extractor:
         :meth:`~ExtractionResult.raise_for_errors` to fail loudly. Only the process spend
         caps (``JEVEX_JEV_MAX_COST_USD``, ``JEVEX_LLM_MAX_COST_USD``) raise, as do
         problems setting the extractor up on first use (opening its store or packs, loading
-        its learned generators). A failing refresh of the learned generators is a core
-        ``store`` failure.
+        its learned generators). A store or spend ledger that fails while the document
+        runs is reported and the document carries on: a lookup counts as nothing found
+        (refreshing the learned generators keeps the ones in use), a write is skipped,
+        and an LLM call the ledger can't clear isn't made.
         """
-        budget = DocumentBudget(self.budgets, await self.ledger())
         jev = self.jev.metered(
             max_requests=self.budgets.per_document.max_jev_requests, retry=self.jev_retry
         )
         ctx = Context.create(document, self.schemas, jev)
+        ledger = await self.ledger()
+        part = type(ledger.ledger).__name__
+
+        def ledger_failed(exc: LedgerError) -> None:
+            ctx.errors.add(ctx.stage or "extract", "ledger", part, exc)
+
+        budget = DocumentBudget(self.budgets, ledger, on_ledger_error=ledger_failed)
         ctx.default_locale = self.locale
         ctx.budget = budget
         ctx.store = await self.store()
@@ -964,11 +989,11 @@ class Extractor:
     async def _run_pipeline(
         self, ctx: Context, budget: DocumentBudget, learned: LearnedGenerators | None
     ) -> None:
-        """Take the learned generators' snapshot (refreshed from the store) and run the
-        pipeline, recording a core failure on ``ctx`` (raising only the spend caps), then
-        record the document's Jev spend in the ledger."""
+        """Take the learned generators' snapshot (refreshed from the store: the one in use
+        if that fails) and run the pipeline, recording a core failure on ``ctx`` (raising
+        only the spend caps), then record the document's Jev spend in the ledger."""
         try:
-            ctx.generators = await learned.refresh() if learned else None
+            ctx.generators = await self._snapshot(ctx, learned)
             if not await budget.start_document():
                 ctx.stop("budget", "the run's Jev spend cap is reached")
             else:
@@ -983,12 +1008,25 @@ class Extractor:
         finally:
             # Every branch has settled (fan-outs cancel on failure, and a request
             # cancelled mid-flight is counted at its estimate), so this is the
-            # document's whole Jev spend, recorded even when a stage failed.
-            try:
-                await budget.finish_document(ctx.jev.usage.cost)
-            except Exception as exc:
-                # The result stands; only the run budget's view of it is behind.
-                ctx.errors.add("extract", "store", "ledger", exc)
+            # document's whole Jev spend, recorded even when a stage failed. A ledger
+            # that fails is reported (as the extractor's: a failed stage leaves its name
+            # on ctx.stage); the result stands.
+            ctx.stage = None
+            await budget.finish_document(ctx.jev.usage.cost)
+
+    @staticmethod
+    async def _snapshot(
+        ctx: Context, learned: LearnedGenerators | None
+    ) -> GeneratorSnapshot | None:
+        """The learned generators for a document: refreshed from the store, or the ones in
+        use when the store can't be read (reported)."""
+        if learned is None:
+            return None
+        try:
+            return await learned.refresh()
+        except StoreError as exc:
+            ctx.errors.add("extract", "store", "generators", exc)
+            return learned.current
 
     async def _send_for_review(self, ctx: Context) -> None:
         """Send the document's uncertain values to the review sink; a sink that raises is
