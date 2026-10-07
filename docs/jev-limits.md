@@ -57,7 +57,8 @@ sample.
 ## A spec page, end to end
 
 The default pipeline with `VehicleSpec` on test-site pages (seed 42, `--pipeline`), metered by
-`JevClient`. **One setting differs from the default:** the document-gate wording is
+`JevClient`, which applies the env cap to this pass, with the SDK's default retries.
+**One setting differs from the default:** the document-gate wording is
 `SchemaConfig(document_question="Does this document give technical specifications for one or
 more vehicle variants?")`, because the default wording rules out multi-variant pages (point 5).
 
@@ -86,5 +87,6 @@ cheap at Jev's price, but it sets the latency and request volume.
    generators.
 5. **Found live, not by the scripted tests:** the document gate's question comes from the
    schema docstring. `VehicleSpec` says "for one vehicle variant", so Jev correctly answers
-   *no* for a page with four variants (p = 0.15–0.18 across runs) and the page is skipped.
-   The page-level wording above gives p = 0.99 (#242). Both values are in the results file.
+   *no* for a page with four variants (p = 0.18 in the recorded run, 0.15 in an earlier one)
+   and the page is skipped. The page-level wording above gives p = 0.99 (#242). The recorded
+   values are in the results file.

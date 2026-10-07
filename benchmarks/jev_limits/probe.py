@@ -22,6 +22,7 @@ import statistics
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from typesafe_sdk import (
@@ -321,7 +322,7 @@ async def edges(c: AsyncTypeSafeClient, chars_per_token: float = 4.4) -> dict[st
     return out
 
 
-async def _add_to_results(key: str, run: Any) -> None:
+async def _add_to_results(key: str, run: Callable[[AsyncTypeSafeClient], Awaitable[Any]]) -> None:
     """Run one extra pass and add its section to today's file, even if the cap stops it."""
     c = AsyncTypeSafeClient(retry=RetryPolicy(max_retries=0, timeout=120.0))
     data: dict[str, Any] = json.loads(OUT.read_text()) if OUT.exists() else {}
@@ -344,6 +345,9 @@ PIPELINE_QUESTION = (
 
 async def pipeline(c: AsyncTypeSafeClient) -> dict[str, Any]:
     """The default pipeline on four test-site pages (seed 42), metered by ``JevClient``.
+
+    Unlike the other passes, its spend goes through ``JevClient`` (which applies the env cap)
+    with the SDK's default retries; ``SELF_CAP_USD`` is checked only between documents.
 
     First the default document gate on a 4-trim page (#242: it says no), then every page
     with :data:`PIPELINE_QUESTION` as the gate wording and otherwise default settings.
