@@ -28,21 +28,29 @@ limit wasn't tested, so `JevClient` keeps its concurrency of 16.
 
 ## Tokens: jevex's estimate vs the API's count
 
-`estimate_tokens` assumes about 4 characters per token. Real counts for one request with
-one Noul:
+When this was measured, `estimate_tokens` assumed about 4 characters per token. Real counts
+for one request with one Noul, against that old estimate and the current one (#241, which
+counts the whole request, Jev's fixed overhead included):
 
-| State | Chars | Estimate | Real | Real ÷ estimate |
-| --- | --- | --- | --- | --- |
-| Prose | 4,000 | 1,001 | 1,159 | 1.16 |
-| Table text (`a \| b \| 123`) | 2,997 | 750 | 2,522 | **3.4** |
-| JSON | 2,602 | 651 | 1,859 | **2.9** |
+| State | Chars | Old estimate | Real | Real ÷ old | Current estimate | Current ÷ real |
+| --- | --- | --- | --- | --- | --- | --- |
+| Prose | 4,000 | 1,001 | 1,159 | 1.16 | 1,261 | 1.09 |
+| Table text (`a \| b \| 123`) | 2,997 | 750 | 2,522 | **3.4** | 2,528 | 1.00 |
+| JSON | 2,602 | 651 | 1,859 | **2.9** | 1,888 | 1.02 |
 
-Numbers, separators and punctuation tokenise far more densely than prose. So `JevClient`
-under-plans table and JSON states by about 3x. A table component it thinks fits can be
-rejected with `max_tokens_exceeded`, and cost estimates for table-heavy pages are low.
-Short questions are estimated about right (19 against ~18). One long, repetitive question
-(about 1.2k characters) was over-estimated by about 2.3x, but that is a single artificial
-sample.
+Numbers, separators and punctuation tokenise far more densely than prose: every digit is a
+token, and so is almost every punctuation mark. So the old rule under-planned table and JSON
+states by about 3x. A table component it thought fitted could be rejected with
+`max_tokens_exceeded`, and cost estimates for table-heavy pages were low. Short questions
+were estimated about right (19 against ~18). One long, repetitive question (about 1.2k
+characters) was over-estimated by about 2.3x, but that is a single artificial sample.
+
+The current estimate (`jevex.jev.estimate_tokens`, `estimate_request_tokens`) counts those
+pieces. Each request also costs about 260 tokens of fixed overhead, and each question about
+7 tokens on top of its text (from the tiny-question requests: 1,000 → 14,160 tokens, 4,400
+→ 65,160). The estimate errs high for states (about 1.1x on prose) and is close for
+questions. `JevClient` also asks a request Jev rejects in smaller parts. If the state with a
+single question is rejected, it raises `StateTooLargeError` instead.
 
 ## Billing and latency
 
@@ -77,8 +85,8 @@ cheap at Jev's price, but it sets the latency and request volume.
 
 1. **Batch every question about one state into one request** (as stages already do).
    Extra questions are almost free in tokens and time.
-2. **Fix the token estimate for tables and JSON** (#241), and treat
-   `max_tokens_exceeded` as "split and retry smaller" rather than a failed document.
+2. **Fix the token estimate for tables and JSON**, and treat `max_tokens_exceeded` as
+   "split and retry smaller" rather than a failed document. Done in #241.
 3. **Fan out across states with concurrency.** Latency per request is flat, so wall time
    is the number of sequential rounds, not the number of questions.
 4. **Per-statement requests dominate the request count.** Statements can't share a state

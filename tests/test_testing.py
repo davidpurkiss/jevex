@@ -145,6 +145,33 @@ async def test_cassette_records_then_replays(tmp_path: Path) -> None:
     assert len(live.calls) == 1
 
 
+async def test_cassette_replays_a_request_jev_rejected_so_the_split_replays(
+    tmp_path: Path,
+) -> None:
+    from jevex.jev import JevTokenLimitError
+
+    class RejectsBatches(FakeJev):
+        async def system_one(
+            self, state: JSONContent, questions: Mapping[str, Question]
+        ) -> JevResponse:
+            if len(questions) > 1:
+                raise JevTokenLimitError("max_tokens_exceeded")
+            return await super().system_one(state, questions)
+
+    path = tmp_path / "c.json"
+    questions: dict[str, Question] = {
+        "a": Noul(instructions="Is it fast?"),
+        "b": Noul(instructions="Is it red?"),
+    }
+    live = RejectsBatches().noul("Is it", p=0.8)
+    recorded = await JevClient(Cassette(path, record=True, inner=live)).ask("state", questions)
+    assert len(json.loads(path.read_text())) == 3  # the rejected batch and each question
+
+    replay = JevClient(Cassette(path))
+    assert await replay.ask("state", questions) == recorded
+    assert replay.usage.requests == 3
+
+
 async def test_cassette_miss_raises_with_hint(tmp_path: Path) -> None:
     with pytest.raises(CassetteMissError, match="JEVEX_RECORD=1"):
         await Cassette(tmp_path / "empty.json").system_one("s", {"q": Noul(instructions="?")})
