@@ -145,6 +145,21 @@ def test_extract_asks_only_about_the_schemas_named(client: TestClient, stage: Fi
     ]
 
 
+async def test_the_services_locale_is_its_extractors(fake_jev: FakeJev) -> None:
+    service = Service([Book, Author], jev=fake_jev.client(), locale="pt_br")
+    assert service.locale == "pt-BR"
+    await service.start()
+    assert service.extractor(["Book"]).locale == "pt-BR"
+    assert service.extractor(["Book", "Author"]).locale == "pt-BR"
+    await service.aclose()
+    assert Service([Book]).locale is None
+
+
+def test_the_services_locale_is_checked_before_any_request() -> None:
+    with pytest.raises(ValueError, match="locale must be a BCP 47 language tag"):
+        Service([Book], locale="Portuguese")
+
+
 async def test_extractors_are_made_once_per_set_of_schemas(
     stage: FindValues, fake_jev: FakeJev
 ) -> None:

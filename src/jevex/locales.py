@@ -389,6 +389,19 @@ def canonical_locale(tag: str) -> str:
     return "-".join(out)
 
 
+def checked_locale(tag: str) -> str:
+    """``tag`` made canonical (:func:`canonical_locale`), after checking it's a BCP 47
+    language tag (:data:`~jevex.document.LOCALE_TAG`). Raises ``ValueError`` if it isn't.
+
+    Every option that sets the extractor's ``locale`` checks its value with this
+    (``Extractor(locale=)``, ``jevex eval``/``jevex serve --locale``, the Scrapy
+    pipeline's ``JEVEX_LOCALE``), so all of them accept the same tags.
+    """
+    if not _TAG.fullmatch(tag):
+        raise ValueError(f"locale must be a BCP 47 language tag such as 'en-GB', got {tag!r}")
+    return canonical_locale(tag)
+
+
 def locale_conventions(locale: str | None) -> LocaleConventions:
     """The conventions for a BCP 47 tag; en-GB's when it's ``None``, empty or unknown.
 

@@ -5,6 +5,7 @@ from jevex import (
     LocaleConventions,
     NormaliserStep,
     canonical_locale,
+    checked_locale,
     document_locale,
     html_language,
     locale_conventions,
@@ -198,6 +199,17 @@ def test_document_locale_takes_the_caller_then_the_page_then_the_header(
 def test_canonical_locales_write_one_locale_one_way(tag: str, expected: str) -> None:
     assert canonical_locale(tag) == expected
     assert canonical_locale(expected) == expected
+
+
+def test_checked_locales_come_back_canonical() -> None:
+    assert checked_locale("de_de") == "de-DE"
+    assert checked_locale("zh-hant-tw") == "zh-Hant-TW"
+
+
+@pytest.mark.parametrize("tag", ["English", "", "en GB", "en-GB\n", "e", "en-"])
+def test_checked_locales_must_be_language_tags(tag: str) -> None:
+    with pytest.raises(ValueError, match="locale must be a BCP 47 language tag"):
+        checked_locale(tag)
 
 
 @pytest.mark.parametrize(

@@ -49,6 +49,7 @@ from jevex.document import LOCALE_TAG, Document
 from jevex.extractor import Extractor, document_stat
 from jevex.jev import JevBudgetExceededError, JevClient
 from jevex.llm import LLMBudgetExceededError
+from jevex.locales import checked_locale
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
 from jevex.stats.server import redact
@@ -277,7 +278,9 @@ class Service:
     document stats are recorded (nothing could read them). ``jev`` defaults to a client
     from the ``TYPESAFE_*`` environment variables. The extractors don't close the LLMs
     they're given; ``close_llms`` has :meth:`aclose` close them (for adapters built just
-    for the service). The other options are :class:`~jevex.extractor.Extractor`'s.
+    for the service). The other options are :class:`~jevex.extractor.Extractor`'s;
+    ``locale`` (the extractors' default locale, which a request's ``locale`` overrides for
+    its document) raises ``ValueError`` here if it isn't a language tag.
 
     ``stats`` mounts the stats UI over the store (it needs a ``store``);
     ``stats_budget_usd`` draws its budget line.
@@ -296,6 +299,7 @@ class Service:
         close_llms: bool = False,
         stats: bool = False,
         stats_budget_usd: float | None = None,
+        locale: str | None = None,
     ) -> None:
         if not schemas:
             raise ValueError("register at least one schema")
@@ -310,6 +314,8 @@ class Service:
         self.stats = stats
         self.stats_budget_usd = stats_budget_usd
         self.threshold = threshold
+        # Checked here, not when the first request builds an extractor.
+        self.locale = checked_locale(locale) if locale is not None else None
         self.budgets = budgets
         self.extraction_llm = extraction_llm
         self.generator_llm = generator_llm
@@ -372,6 +378,7 @@ class Service:
                 extraction_llm=self.extraction_llm,
                 generator_llm=self.generator_llm,
                 record_stats=self._record_stats,
+                locale=self.locale,
             )
         return self._extractors[key]
 
