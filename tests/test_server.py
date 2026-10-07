@@ -2,13 +2,13 @@ import base64
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from jevex import Context, Field, UnreadablePdfError
+from jevex import Budgets, Context, ExtractionResult, Field, RunBudget, UnreadablePdfError
 from jevex.jev import (
     JevBackendError,
     JevBudgetExceededError,
@@ -30,7 +30,15 @@ from jevex.server import (
     UnknownSchemaError,
     create_app,
 )
-from jevex.store import open_store
+from jevex.store import (
+    LedgerError,
+    MemoryLedger,
+    SpendEntry,
+    SpendLedger,
+    SQLiteStore,
+    Store,
+    open_store,
+)
 from jevex.testing import FakeJev, FakeLLM
 
 HTML = b"<html><body><h1>Dune</h1><p>Title: Dune</p></body></html>"
@@ -169,10 +177,128 @@ async def test_extractors_are_made_once_per_set_of_schemas(
     book = service.extractor(["Book"])
     assert service.extractor(["Book", "Author"]) is both
     assert book is not both
-    # One store and run for all of them: the run budget's ledger and learned generators.
+    # One store, ledger and run for all of them: the run budget and learned generators.
     assert both.run_id == book.run_id == service.run_id
     assert await both.store() is await book.store() is service.store is not None
+    assert (await both.ledger()).ledger is (await book.ledger()).ledger is service.store
+    assert service.ledger is service.store
     await service.aclose()
+
+
+class NotALedger:
+    """A store that isn't a spend ledger: an SQLite store without the ledger's methods."""
+
+    LEDGER = frozenset({"record_spend", "spend", "try_spend", "spend_entries"})
+
+    def __init__(self) -> None:
+        self.inner = open_store(":memory:")
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self.LEDGER:
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
+
+async def extract_both(service: Service) -> tuple[ExtractionResult, ExtractionResult]:
+    """A Book document, then an Author one: two schema sets, two extractors."""
+    await service.start()
+    book = await service.extract(DocumentIn(content=HTML).to_document(), ["Book"])
+    author = await service.extract(DocumentIn(content=HTML).to_document(), ["Author"])
+    return book, author
+
+
+ONE_DOCUMENT = Budgets(run=RunBudget(max_jev_spend=1e-9))  # the first document spends it
+
+
+async def test_a_ledger_given_keeps_the_run_budget_for_every_schema_set(
+    stage: FindValues, fake_jev: FakeJev
+) -> None:
+    mine = MemoryLedger()
+    store = SQLiteStore(":memory:")
+    service = Service(
+        [Book, Author], jev=fake_jev.client(), store=store, ledger=mine, budgets=ONE_DOCUMENT
+    )
+    book, author = await extract_both(service)
+    assert service.ledger is mine
+    for names in (["Book"], ["Author"]):
+        assert (await service.extractor(names).ledger()).ledger is mine
+    assert not book.meta.stopped
+    assert author.meta.stopped
+    assert [e.limit for e in author.meta.budget_events] == ["max_jev_spend"]
+    assert author.meta.jev.requests == 0
+    assert await mine.spend(kind="jev") == pytest.approx(book.meta.jev.cost)
+    assert await store.spend() == 0.0
+    await service.aclose()
+    await store.aclose()
+
+
+async def test_a_store_that_isnt_a_ledger_gets_one_in_memory_ledger_for_the_service(
+    stage: FindValues, fake_jev: FakeJev
+) -> None:
+    store = NotALedger()
+    assert not isinstance(store, SpendLedger)
+    service = Service(
+        [Book, Author], jev=fake_jev.client(), store=cast("Store", store), budgets=ONE_DOCUMENT
+    )
+    book, author = await extract_both(service)
+    shared = service.ledger
+    assert isinstance(shared, MemoryLedger)
+    for names in (["Book"], ["Author"]):
+        assert (await service.extractor(names).ledger()).ledger is shared
+    assert not book.meta.stopped
+    assert [e.limit for e in author.meta.budget_events] == ["max_jev_spend"]
+    assert await shared.spend(kind="jev") == pytest.approx(book.meta.jev.cost)
+    await service.aclose()
+    await store.inner.aclose()
+
+
+async def test_the_ledger_is_known_only_once_the_store_is_open(fake_jev: FakeJev) -> None:
+    service = Service([Book], jev=fake_jev.client(), store=":memory:")
+    assert service.ledger is None
+    await service.start()
+    assert service.ledger is service.store
+    await service.aclose()
+    mine = MemoryLedger()
+    assert Service([Book], ledger=mine).ledger is mine
+
+
+async def test_a_failing_ledger_is_reported_on_the_result(
+    stage: FindValues, fake_jev: FakeJev
+) -> None:
+    class DownLedger(MemoryLedger):
+        async def spend(self, **_: Any) -> float:
+            raise ConnectionError("ledger is down")
+
+    service = Service([Book], jev=fake_jev.client(), ledger=DownLedger(), budgets=ONE_DOCUMENT)
+    await service.start()
+    result = await service.extract(DocumentIn(content=HTML).to_document(), ["Book"])
+    assert result.status == "partial"
+    assert [(e.kind, e.part, e.type) for e in result.errors] == [
+        ("ledger", "DownLedger", LedgerError.__name__)
+    ]
+    assert service.metrics.documents["partial"] == 1
+    await service.aclose()
+
+
+async def test_stats_read_spend_from_the_ledger_given(stage: FindValues, fake_jev: FakeJev) -> None:
+    mine = MemoryLedger()
+    store = open_store(":memory:")
+    service = Service(
+        [Book],
+        jev=fake_jev.client(),
+        store=store,
+        ledger=mine,
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+        stats=True,
+    )
+    await service.start()
+    result = await service.extract(DocumentIn(content=HTML).to_document(), ["Book"])
+    # What the learner spent after the document: only the ledger has it.
+    await mine.record_spend(SpendEntry(amount_usd=0.5, kind="llm", run_id=service.run_id))
+    stats = await service.read_stats()
+    assert stats.spend[-1].total == pytest.approx(result.meta.jev.cost + 0.5)
+    await service.aclose()
+    await store.aclose()
 
 
 def test_content_type_is_sniffed_or_normalised(client: TestClient, stage: FindValues) -> None:

@@ -426,7 +426,10 @@ yours.
 `--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
 across every request. `--locale TAG` is the [locale](#locales) of documents that don't say
 their own; a request's `"locale"` in `document` overrides it for that document. In Python, `jevex.server.create_app(Service([...], store=...))`
-gives the FastAPI app to mount or run yourself.
+gives the FastAPI app to mount or run yourself. The run budget is kept in the store
+(the built-in ones are [spend ledgers](#spend-ledger)); `Service(ledger=...)` keeps it in another
+`SpendLedger` instead, shared by every schema set the service serves, as is the in-memory
+ledger it makes for a store that isn't one.
 
 The `Dockerfile` builds an image that runs `jevex serve` on port 8080. Your schemas'
 package must be importable inside it (build an image `FROM` it that installs the
