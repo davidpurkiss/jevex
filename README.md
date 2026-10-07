@@ -59,7 +59,10 @@ class VehicleSpec(BaseModel):
 Text in pictures (infographics, scanned PDF pages, image documents) is read with OCR
 when the `ocr` extra is installed: `pip install "jevex[ocr]"`. It uses
 [RapidOCR](https://github.com/RapidAI/RapidOCR), whose models ship with it, so nothing is
-downloaded. jevex makes no requests of its own, so images on a web page are read only
+downloaded. Creating its engine (`RapidOcrEngine`) turns ONNX Runtime's telemetry off for
+the whole process (`onnxruntime.disable_telemetry_events()`). That stops ONNX Runtime's
+usage telemetry, and its telemetry thread can no longer abort a macOS process at exit.
+jevex makes no requests of its own, so images on a web page are read only
 when they're inline (`data:` URIs) unless you give the loader a fetcher:
 
 ```python

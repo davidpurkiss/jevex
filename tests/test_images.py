@@ -710,6 +710,26 @@ def test_rapidocr_drops_lines_below_min_confidence() -> None:
     assert RapidOcrEngine(min_confidence=1.0).read(out.getvalue()) == []
 
 
+def test_rapidocr_engine_turns_onnxruntime_telemetry_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    onnxruntime = pytest.importorskip("onnxruntime")
+    calls: list[str] = []
+    monkeypatch.setattr(onnxruntime, "disable_telemetry_events", lambda: calls.append("off"))
+    engine = RapidOcrEngine()
+    assert calls == ["off"]
+    assert engine._ocr is None  # pyright: ignore[reportPrivateUsage]  # no model loaded yet
+
+    with pytest.raises(ValueError, match="min_confidence"):
+        RapidOcrEngine(min_confidence=-0.1)
+    assert calls == ["off"]  # a rejected engine changes nothing
+
+
+def test_rapidocr_engine_without_onnxruntime_still_constructs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)  # find_spec → None, import fails
+    assert RapidOcrEngine().min_confidence == 0.5
+
+
 # --- the vision processor --------------------------------------------------------------------
 
 
