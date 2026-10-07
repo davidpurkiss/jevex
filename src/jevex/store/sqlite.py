@@ -175,7 +175,8 @@ def _busy(exc: sqlite3.Error) -> bool:
 
 
 class SQLiteStore:
-    """:class:`~jevex.store.Store` on a SQLite file (or ``":memory:"`` for tests).
+    """:class:`~jevex.store.Store` and :class:`~jevex.store.SpendLedger` on a SQLite file
+    (or ``":memory:"`` for tests).
 
     The database and its tables are created on first open; several processes may open a
     new database at once. A database written by a newer jevex (a higher schema version)

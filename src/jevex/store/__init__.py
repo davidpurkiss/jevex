@@ -11,7 +11,7 @@ Record                 Purpose                                      Used by
 unsure counts          unsure answers per key path, until "none"    #137
 ``VerifiedExample``    regression tests and eval corpus             #38, #42
 ``GeneratorStats``     hit and win counts, for pruning              #40
-spend ledger           run-level budgets shared across workers      #34
+spend ledger           run-level budgets shared across workers      #34, #238
 ``DocumentStat``       each document's cost, methods and events     #51 (stats UI)
 =====================  ==========================================  =================
 
@@ -22,6 +22,10 @@ store doesn't interpret them, so a spec written by a newer jevex round-trips unc
 ``open_store("postgresql://host/db")`` returns a
 :class:`~jevex.store.postgres.PostgresStore` (the ``postgres`` extra), for several hosts.
 Other backends implement :class:`Store`.
+
+The spend ledger is its own protocol, :class:`SpendLedger` (:mod:`jevex.store.ledger`):
+``SQLiteStore`` and ``PostgresStore`` implement it as well as :class:`Store`, and
+:class:`MemoryLedger` keeps one in the process.
 """
 
 from __future__ import annotations
@@ -44,6 +48,7 @@ from jevex.store.base import (
     example_context,
     example_id,
 )
+from jevex.store.ledger import LedgerError, MemoryLedger, SpendLedger
 from jevex.store.sqlite import SQLiteStore
 
 
@@ -82,9 +87,12 @@ __all__ = [
     "GeneratorRecord",
     "GeneratorStats",
     "KeyMapping",
+    "LedgerError",
+    "MemoryLedger",
     "SQLiteStore",
     "SpendEntry",
     "SpendKind",
+    "SpendLedger",
     "Store",
     "StoreError",
     "ValueStat",
