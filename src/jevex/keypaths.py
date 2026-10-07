@@ -61,6 +61,7 @@ from jevex.generators import GeneratorRegistry, default_registry
 from jevex.jev import (
     MAX_STATE_TOKENS,
     ChoiceAnswer,
+    JevError,
     NoulAnswer,
     UnexpectedAnswerError,
     estimate_tokens,
@@ -71,7 +72,7 @@ from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.results import FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 from jevex.statements import Statement
-from jevex.store import KeyMapping
+from jevex.store import KeyMapping, StoreError
 from jevex.structured import EmbeddedDataReader, StructuredBlob, schema_type
 
 if TYPE_CHECKING:
@@ -858,6 +859,10 @@ class StructuredStage:
     finished (:meth:`~jevex.pipeline.SchemaRun.finish`) with a ``layout_route_skipped`` event.
     :func:`~jevex.extractor.default_pipeline` builds a fresh stage each time, so the
     mapper's in-memory mappings belong to one pipeline.
+
+    An extractor that raises (other than a Jev or store error, which fail the document)
+    is skipped and recorded with :meth:`Context.part_failed
+    <jevex.pipeline.Context.part_failed>`: the document carries on without embedded data.
     """
 
     extractor: StructuredExtractor = field(default_factory=KeyPathMapper)
@@ -874,9 +879,15 @@ class StructuredStage:
         runs = ctx.active
         if not runs:
             return
-        result = await self.extractor.extract(
-            ctx.document, [r.spec for r in runs], ctx.jev, store=ctx.store, packs=ctx.packs
-        )
+        try:
+            result = await self.extractor.extract(
+                ctx.document, [r.spec for r in runs], ctx.jev, store=ctx.store, packs=ctx.packs
+            )
+        except (JevError, StoreError):
+            raise
+        except Exception as exc:
+            ctx.part_failed(self.name, "structured_extractor", type(self.extractor).__name__, exc)
+            return
         ctx.structured.extend(result.statements)
         for kind, message in result.events:
             ctx.event(self.name, kind, message)

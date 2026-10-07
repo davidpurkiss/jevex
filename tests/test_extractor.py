@@ -1,15 +1,36 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
 import pytest
 from pydantic import BaseModel
 
 from jevex import Budgets, DocBudget, Document, Extractor, Field, Pipeline, RunBudget
+from jevex.errors import ExtractionError, PartError
 from jevex.extractor import document_stat
-from jevex.jev import JevBackendError, Noul
+from jevex.images import UnreadableImageError
+from jevex.jev import (
+    JevBackendError,
+    JevBudgetExceededError,
+    JevClient,
+    JevResponse,
+    JevTransientError,
+    JSONContent,
+    Noul,
+    Question,
+    RetryPolicy,
+)
+from jevex.layout_pdf import PdfLayoutError
 from jevex.pipeline import Context
 from jevex.results import FieldMeta
-from jevex.store import MAX_STAT_VALUE_CHARS, DocumentEvent, SQLiteStore, ValueStat
+from jevex.store import (
+    MAX_STAT_VALUE_CHARS,
+    DocumentEvent,
+    DocumentStat,
+    SpendEntry,
+    SQLiteStore,
+    StoreError,
+    ValueStat,
+)
 from jevex.testing import FakeJev, FakeLLM
 
 
@@ -54,6 +75,15 @@ class Fails:
     async def run(self, ctx: Context) -> None:
         await ctx.jev.ask("s", {"q": Noul(instructions="a?")})
         raise JevBackendError("backend down")
+
+
+@dataclass
+class OverCap:
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        await ctx.jev.ask("s", {"q": Noul(instructions="a?")})
+        raise JevBudgetExceededError("capped")
 
 
 @dataclass
@@ -105,12 +135,28 @@ async def test_a_stopped_document_records_why(store: SQLiteStore) -> None:
 
 async def test_a_failed_document_is_recorded_with_its_error(store: SQLiteStore) -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Fails()]), store=store)
-    with pytest.raises(JevBackendError):
-        await ex.extract(doc())
+    result = await ex.extract(doc())
+    assert result.status == "failed"
     [stat] = await store.documents()
-    assert stat.events == [DocumentEvent(kind="error", message="JevBackendError: backend down")]
+    error = PartError(
+        stage="select", kind="jev", type="JevBackendError", message="backend down", fatal=True
+    )
+    assert (stat.status, stat.errors) == ("failed", [error])
+    assert stat.events == [
+        DocumentEvent(kind="error", message="select jev: JevBackendError: backend down")
+    ]
     assert stat.jev_requests == 1
     assert stat.values == []
+
+
+async def test_a_spend_cap_still_raises_and_is_recorded(store: SQLiteStore) -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([OverCap()]), store=store)
+    with pytest.raises(JevBudgetExceededError):
+        await ex.extract(doc())
+    [stat] = await store.documents()
+    assert stat.status == "failed"
+    assert stat.events == [DocumentEvent(kind="error", message="JevBudgetExceededError: capped")]
+    assert stat.jev_requests == 1
 
 
 async def test_record_stats_off_records_nothing(store: SQLiteStore) -> None:
@@ -145,13 +191,15 @@ async def test_plain_dict_has_each_records_values_without_meta() -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]))
     result = await ex.extract(doc())
     assert result.to_plain_dict() == {
+        "status": "ok",
+        "errors": [],
         "records": [
             {
                 "schema": "Car",
                 "entity": "document",
                 "record": {"model": "Golf " * 50, "power_ps": 150},
             }
-        ]
+        ],
     }
     assert (
         result.to_dict()["records"][0]["record"] == result.to_plain_dict()["records"][0]["record"]
@@ -196,3 +244,195 @@ async def test_without_a_locale_documents_that_dont_say_have_none() -> None:
 def test_the_extractors_locale_must_be_a_language_tag(locale: str) -> None:
     with pytest.raises(ValueError, match="locale must be a BCP 47 language tag"):
         Extractor([Car], jev=FakeJev().client(), locale=locale)
+
+
+# --- status and errors (#230) ----------------------------------------------------------
+
+
+@dataclass
+class Raises:
+    """Finds a value, then raises ``error``."""
+
+    error: Exception
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        ctx.schemas["Car"].set_field("document", "model", FieldMeta(value="Golf", method="jev"))
+        raise self.error
+
+
+@dataclass
+class SkipsAPart:
+    name: str = "candidates"
+
+    async def run(self, ctx: Context) -> None:
+        ctx.schemas["Car"].set_field("document", "model", FieldMeta(value="Golf", method="jev"))
+        ctx.part_failed(self.name, "generator", "gen-1", ValueError("bad regex"))
+
+
+async def test_a_bug_in_a_stage_fails_the_document_instead_of_raising() -> None:
+    boom = RuntimeError("boom")
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Raises(boom)]))
+    result = await ex.extract(doc())
+    error = PartError(stage="select", kind="stage", type="RuntimeError", message="boom", fatal=True)
+    assert (result.status, result.errors) == ("failed", [error])
+    assert result.cause is boom
+    assert result.one(Car).record.model == "Golf"  # what was found before it failed
+    data = result.to_dict()
+    assert (data["status"], data["errors"]) == ("failed", [error.model_dump(mode="json")])
+    assert (data["meta"]["status"], data["meta"]["errors"]) == (data["status"], data["errors"])
+    with pytest.raises(ExtractionError, match="select stage: RuntimeError: boom") as raised:
+        result.raise_for_errors(partial=False)
+    assert raised.value.__cause__ is boom
+    assert raised.value.errors == [error]
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (JevBackendError("down"), "jev"),
+        (StoreError("locked"), "store"),
+        (PdfLayoutError("broken"), "document"),
+        (UnreadableImageError("not an image"), "document"),
+        (KeyError("x"), "stage"),
+    ],
+)
+async def test_core_failures_say_what_failed(error: Exception, kind: str) -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Raises(error)]))
+    result = await ex.extract(doc())
+    [found] = result.errors
+    assert (found.stage, found.kind, found.type, found.fatal) == (
+        "select",
+        kind,
+        type(error).__name__,
+        True,
+    )
+
+
+async def test_a_skipped_part_makes_the_result_partial() -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([SkipsAPart()]))
+    result = await ex.extract(doc())
+    assert result.status == "partial"
+    assert result.errors == [
+        PartError(
+            stage="candidates",
+            kind="generator",
+            part="gen-1",
+            type="ValueError",
+            message="bad regex",
+        )
+    ]
+    assert result.cause is None
+    result.raise_for_errors(partial=False)  # only a failed result raises then
+    with pytest.raises(ExtractionError, match=r"^extraction partial for https://cars\.test/golf"):
+        result.raise_for_errors()
+
+
+async def test_an_ok_result_raises_nothing() -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]))
+    result = await ex.extract(doc())
+    assert (result.status, result.errors) == ("ok", [])
+    result.raise_for_errors()
+
+
+async def test_a_ledger_that_cant_record_makes_the_result_partial() -> None:
+    class NoLedger(SQLiteStore):
+        async def record_spend(self, entry: SpendEntry) -> None:
+            raise StoreError("ledger is read-only")
+
+    store = NoLedger(":memory:")
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([Finds()]),
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+        store=store,
+    )
+    result = await ex.extract(doc())
+    await store.aclose()
+    assert result.status == "partial"
+    assert [(e.stage, e.kind, e.part, e.type) for e in result.errors] == [
+        ("extract", "store", "ledger", "StoreError")
+    ]
+
+
+async def test_stats_that_cant_be_recorded_make_the_result_partial() -> None:
+    class NoStats(SQLiteStore):
+        async def record_document(self, stat: DocumentStat) -> None:
+            raise StoreError("disk full")
+
+    store = NoStats(":memory:")
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]), store=store)
+    result = await ex.extract(doc())
+    await store.aclose()
+    assert [(e.kind, e.part, e.message) for e in result.errors] == [("store", "stats", "disk full")]
+    assert result.one(Car).record.model == "Golf " * 50
+
+
+class FlakyOnce:
+    """A Jev backend whose first request fails transiently."""
+
+    def __init__(self) -> None:
+        self.inner = FakeJev()
+        self.failed = False
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if not self.failed:
+            self.failed = True
+            raise JevTransientError("503")
+        return await self.inner.system_one(state, questions)
+
+
+async def test_jev_retries_are_counted_in_the_result() -> None:
+    ex = Extractor(
+        [Car],
+        jev=JevClient(FlakyOnce()),
+        pipeline=Pipeline([Finds()]),
+        jev_retry=RetryPolicy(backoff_initial=0),
+    )
+    result = await ex.extract(doc())
+    assert result.status == "ok"
+    assert (result.meta.jev.retries, result.meta.jev.requests) == (1, 2)
+    assert result.to_dict()["meta"]["jev"]["retries"] == 1
+
+
+async def test_jev_retry_policy_applies_to_each_document() -> None:
+    ex = Extractor(
+        [Car],
+        jev=JevClient(FlakyOnce()),
+        pipeline=Pipeline([Finds()]),
+        jev_retry=RetryPolicy(max_retries=0),
+    )
+    result = await ex.extract(doc())
+    assert result.status == "failed"
+    assert [(e.kind, e.type) for e in result.errors] == [("jev", "JevTransientError")]
+    assert result.meta.jev.retries == 0
+
+
+async def test_a_failing_refresh_of_learned_generators_fails_the_document(
+    monkeypatch: pytest.MonkeyPatch, store: SQLiteStore
+) -> None:
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Finds()]), store=store)
+    learned = await ex.learned_generators()
+    assert learned is not None
+
+    async def refresh() -> object:
+        raise StoreError("generator gen-x doesn't validate")
+
+    monkeypatch.setattr(learned, "refresh", refresh)
+    result = await ex.extract(doc())
+    assert [(e.stage, e.kind, e.fatal) for e in result.errors] == [("extract", "store", True)]
+    assert result.meta.jev.requests == 0  # nothing ran
+
+
+async def test_the_learner_retries_jev_as_documents_do() -> None:
+    policy = RetryPolicy(max_retries=5)
+    ex = Extractor(
+        [Car], jev=FakeJev().client(), generator_llm=FakeLLM(lambda _p, _s: {}), jev_retry=policy
+    )
+    learner = await ex.learner()
+    assert learner is not None
+    assert learner.jev.retry == policy
+    await ex.aclose()

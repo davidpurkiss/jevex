@@ -255,6 +255,41 @@ for item in queue.items:
 await extractor.feedback(queue.items[0], 7.4)  # the right value in that statement
 ```
 
+## When something fails
+
+`extract()` reports what went wrong on the result instead of raising, and you decide what
+to do about it. `result.status` is `ok`, `partial` or `failed`, and `result.errors` lists
+each failure (`PartError`: stage, kind, part, exception type, message, and how many times
+it happened).
+
+- **A part fails** (a generator, a normaliser, an image loader or processor, the
+  structured extractor, the LLM fallback, the review sink): it's skipped for that input,
+  the rest of the pipeline carries on, and the result is `partial`.
+- **The core fails** (Jev after retries, a document that can't be read, a bug in a stage):
+  the result is `failed`, with what was found before the failure.
+- Only the process spend caps (`JEVEX_*_MAX_COST_USD`) and setup problems (a store or pack
+  that won't open) raise.
+
+```python
+result = await extractor.extract(document)
+if result.status != "ok":
+    for error in result.errors:
+        log.warning(error.describe())  # "candidates generator gen-3f2a: IndexError: ..."
+result.raise_for_errors()  # or fail loudly: ExtractionError (partial=False: only failed)
+```
+
+Transient Jev errors (timeouts, 429, 5xx) are retried with backoff:
+`Extractor(jev_retry=RetryPolicy(max_retries=4))` (default two retries). LLM adapters take
+`max_retries` for their SDKs' retries. Retries are counted in `meta.jev.retries` and
+`meta.llm.retries` (Anthropic and OpenAI report theirs; Gemini and LiteLLM don't).
+Generators and normalisers are never retried. With a store, a learned generator that has
+failed 3 times is disabled (kept for review, like a pruned one) with a
+`generator_quarantined` event; other generators and the LLM fallback still cover its field.
+
+`jevex extract` prints a partial result with a `jevex: warning:` line per error and exits
+1 for a failed one; `jevex eval` scores failed documents as all missing and lists each
+partial one's errors.
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the
@@ -326,20 +361,22 @@ curl -s localhost:8080/extract -H 'content-type: application/json' -d '{
                "url": "https://example.com/cars/1"},
   "schema": "VehicleSpec"
 }'
-# {"records": [{"schema": "VehicleSpec", "entity": "document", "record": {...}}]}
+# {"status": "ok", "errors": [], "records": [{"schema": "VehicleSpec", "entity": "document", "record": {...}}]}
 ```
 
 `schema` is one name or a list (one extractor per set, so a document is only asked about
 the schemas it's for). `"meta": true` adds per-field and document metadata, as
 `jevex extract --meta` does. `content_type` is sniffed from the bytes when left out.
-Unknown schemas and unreadable documents answer 422, a Jev error 502, and a process spend
-cap (`JEVEX_*_MAX_COST_USD`) 503.
+A [partial result](#when-something-fails) is a 200 whose `status` and `errors` say what was
+skipped. Unknown schemas and unreadable documents answer 422, a Jev failure 502, any other
+failed extraction 500, and a process spend cap (`JEVEX_*_MAX_COST_USD`) 503.
 
-`GET /health` names the schemas; `GET /metrics` is Prometheus text (documents by outcome,
-records, values by resolution method, Jev and LLM calls and spend, budget hits, extraction
-time). `--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's
-off by default because it shows URLs and spend. The service has no auth of its own: run it
-behind yours.
+`GET /health` names the schemas; `GET /metrics` is Prometheus text (documents by outcome:
+`ok`, `partial`, `stopped` or `error`; errors by stage and kind; records, values by
+resolution method, Jev and LLM calls, retries and spend, budget hits, extraction time).
+`--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's off by
+default because it shows URLs and spend. The service has no auth of its own: run it behind
+yours.
 
 `--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
 across every request. In Python, `jevex.server.create_app(Service([...], store=...))`
@@ -382,7 +419,9 @@ The pipeline swaps the item's `document` for `records` (each record's schema, en
 values, as `jevex extract` prints them), so `scrapy crawl books -O books.jsonl` writes
 them out. Items without a document pass through. `JEVEX_THRESHOLD` and `JEVEX_META`
 (per-field and document meta) work as their `Extractor` and `jevex extract` namesakes,
-and counts go to Scrapy's stats under `jevex/`. For anything else (LLMs, budgets, a
+and counts go to Scrapy's stats under `jevex/` (with `partial`, `failed` and
+`errors/<kind>`). A [failed](#when-something-fails) document fails its item with an
+`ExtractionError`, which Scrapy logs and drops. For anything else (LLMs, budgets, a
 custom pipeline), subclass `JevexPipeline` and override `make_extractor`; `fill_item`
 decides what the item gets. When the spider closes, the pipeline lets queued learning
 finish (`JEVEX_WAIT_FOR_LEARNING`), then closes the extractor. Several Scrapy workers

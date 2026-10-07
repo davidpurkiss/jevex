@@ -17,12 +17,14 @@ from jevex import (
     Statement,
 )
 from jevex.entities import EntityScope
+from jevex.errors import PartError
 from jevex.interfaces import ParsedDocument, Selection
 from jevex.layout import Component
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
     FunctionNormaliser,
     NormaliseError,
+    NormaliserFailedError,
     NormaliseStage,
     canonical_unit,
     convert,
@@ -485,6 +487,41 @@ async def test_stage_picks_the_most_confident_valid_candidate() -> None:
     assert [(alt.raw, alt.p) for alt in meta.alternatives] == [
         ("9.4 seconds", 0.6),
         ("62 mph", 0.05),
+    ]
+
+
+def _buggy(value: object, *, field: object = None) -> str:
+    raise KeyError("lookup table")
+
+
+BUGGY = BUILTIN_NORMALISERS.with_normaliser(FunctionNormaliser("buggy", _buggy))
+
+
+def test_a_normaliser_bug_isnt_a_value_that_doesnt_fit() -> None:
+    with pytest.raises(NormaliserFailedError) as raised:
+        run_chain("x", steps("strip", "buggy"), registry=BUGGY)
+    assert raised.value.normaliser == "buggy"
+    assert isinstance(raised.value.error, KeyError)
+    assert raised.value.__cause__ is raised.value.error
+    assert not isinstance(raised.value, NormaliseError)
+
+
+async def test_stage_skips_a_candidate_whose_normaliser_raises_and_reports_it() -> None:
+    a, b = statement("s1", "Seats: five"), statement("s2", "Seats 5")
+    ctx = context(a, b)
+    run = ctx.schemas["Car"]
+    run.selections[("doc", "seats", "s1")] = pick(a, "five", 0.9, "buggy")
+    run.selections[("doc", "seats", "s2")] = pick(b, "5", 0.7, "parse_number")
+    await NormaliseStage(registry=BUGGY).run(ctx)
+    assert run.fields["doc"]["seats"].value == 5
+    assert ctx.errors.errors == [
+        PartError(
+            stage="normalise",
+            kind="normaliser",
+            part="buggy",
+            type="KeyError",
+            message="'lookup table'",
+        )
     ]
 
 

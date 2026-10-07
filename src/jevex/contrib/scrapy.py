@@ -101,12 +101,15 @@ class JevexPipeline:
     every setting). The pipeline owns its extractor: it's made when the spider opens
     (:meth:`make_extractor`) and closed when it closes. Items are extracted concurrently:
     up to Scrapy's ``CONCURRENT_ITEMS`` per response, for as many responses as Scrapy is
-    processing at once, so cap spend with a budget rather than concurrency settings. An
-    extraction that raises fails its item, which Scrapy logs and drops.
+    processing at once, so cap spend with a budget rather than concurrency settings. A
+    document whose result ``failed`` (:mod:`jevex.errors`) fails its item with an
+    :class:`~jevex.errors.ExtractionError`, which Scrapy logs and drops; so does a process
+    spend cap. A ``partial`` result fills the item like an ``ok`` one.
 
     Counts go to Scrapy's stats under ``jevex/``: ``documents``, ``records``, ``stopped``
-    (documents a budget or gate stopped early), ``jev_requests``, ``llm_calls``,
-    ``jev_cost_usd`` and ``llm_cost_usd``.
+    (documents a budget or gate stopped early), ``partial`` and ``failed`` (by status),
+    ``errors/<kind>`` (each result's errors by kind), ``jev_requests``, ``jev_retries``,
+    ``llm_calls``, ``llm_retries``, ``jev_cost_usd`` and ``llm_cost_usd``.
     """
 
     def __init__(self, crawler: Crawler) -> None:
@@ -172,6 +175,7 @@ class JevexPipeline:
             )
         result = await self.extractor.extract(document)
         self._count(result)
+        result.raise_for_errors(partial=False)
         return self.fill_item(item, result)
 
     def fill_item(self, item: Any, result: ExtractionResult) -> Any:
@@ -205,9 +209,15 @@ class JevexPipeline:
         stats.inc_value("jevex/documents")
         stats.inc_value("jevex/records", len(result.records))
         stats.inc_value("jevex/jev_requests", meta.jev.requests)
+        stats.inc_value("jevex/jev_retries", meta.jev.retries)
         stats.inc_value("jevex/llm_calls", meta.llm.calls)
+        stats.inc_value("jevex/llm_retries", meta.llm.retries)
         if meta.stopped:
             stats.inc_value("jevex/stopped")
+        if result.status != "ok":
+            stats.inc_value(f"jevex/{result.status}")
+        for error in result.errors:
+            stats.inc_value(f"jevex/errors/{error.kind}", error.count)
         for key, cost in (
             ("jevex/jev_cost_usd", meta.jev.cost),
             ("jevex/llm_cost_usd", meta.llm.cost),

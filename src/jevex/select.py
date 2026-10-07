@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from jevex.entities import EntityScope
-    from jevex.interfaces import CandidateSelector
+    from jevex.interfaces import CandidateGenerator, CandidateSelector
     from jevex.jev import Answer, Question
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import FieldSpec
@@ -187,7 +187,10 @@ class CandidateStage:
     (``ctx.generators``) run after them. Generators are scoped by the document's locale
     (:attr:`Context.locale <jevex.pipeline.Context.locale>`, else the stage's ``locale``)
     and its :attr:`~jevex.Document.source`; locale-aware ones read numbers and dates by
-    that locale too. Every generator it runs is added to ``ctx.generators_ran``.
+    that locale too. Every generator it runs is added to ``ctx.generators_ran``. A
+    generator that raises is skipped for that statement and recorded with
+    :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>` (the housekeeper
+    quarantines a learned one that keeps failing).
     """
 
     registry: GeneratorRegistry = field(default_factory=default_registry)
@@ -200,6 +203,10 @@ class CandidateStage:
             registry = ctx.generators.on(registry)
         source = ctx.document.source
         locale = ctx.locale or self.locale
+
+        def failed(generator: CandidateGenerator, exc: Exception) -> None:
+            ctx.part_failed(self.name, "generator", generator.id, exc)
+
         for run in ctx.active:
             counted: set[str] = set()
             for scope in run.scopes:
@@ -207,7 +214,12 @@ class CandidateStage:
                     key = (statement.id, spec.name)
                     if spec.needs_candidates and key not in run.candidates:
                         run.candidates[key] = registry.generate(
-                            statement, spec, schema=run.name, locale=locale, source=source
+                            statement,
+                            spec,
+                            schema=run.name,
+                            locale=locale,
+                            source=source,
+                            on_error=failed,
                         )
                         if spec.name not in counted:
                             counted.add(spec.name)

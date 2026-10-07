@@ -17,6 +17,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from jevex._tasks import gather
+from jevex.errors import PartErrors
 from jevex.locales import canonical_locale, document_locale
 from jevex.results import Conflict
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from jevex.budgets import DocumentBudget
     from jevex.document import Document
     from jevex.entities import EntityScope
+    from jevex.errors import PartKind
     from jevex.housekeeping import Housekeeper
     from jevex.interfaces import GateDecision, Learner, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
@@ -312,6 +314,12 @@ class Context:
     default_locale: str | None = None
     """The extractor's ``locale``: the locale of a document that doesn't say its own.
     ``None``: such a document has none (stages fall back to their own ``locale``)."""
+    errors: PartErrors = field(default_factory=PartErrors)
+    """What failed on this document (:mod:`jevex.errors`): parts skipped
+    (:meth:`part_failed`) and the core failure that ended it, if any."""
+    stage: str | None = None
+    """The stage running now (set by :meth:`Pipeline.run`); after a stage raised, the
+    one that raised."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
@@ -343,6 +351,11 @@ class Context:
 
     def event(self, stage: str, kind: str, message: str, **data: Any) -> None:
         self.events.append(Event(stage, kind, message, data))
+
+    def part_failed(self, stage: str, kind: PartKind, part: str | None, exc: Exception) -> None:
+        """Record that a pluggable part raised on one input and was skipped for it. The
+        result is ``partial``; the pipeline carries on (:mod:`jevex.errors`)."""
+        self.errors.add(stage, kind, part, exc)
 
 
 async def for_each_scope[T](
@@ -422,10 +435,12 @@ class Pipeline:
                     ctx.stop(stage.name, "no schema is still active")
                 break
             start = time.perf_counter()
+            ctx.stage = stage.name
             try:
                 await stage.run(ctx)
             finally:
                 ctx.timings[stage.name] = time.perf_counter() - start
+        ctx.stage = None
         return ctx
 
     def _index(self, name: str) -> int:

@@ -21,6 +21,10 @@ every process wrote to that shared ledger instead (see ``jevex._spend``). Unlike
 cap it can't pre-estimate a call (output size isn't known), so one call can overshoot,
 concurrent calls can all pass the check, and calls with unknown prices count as $0.
 It's a backstop; per-document and per-run budgets are #34.
+
+Transient API failures are retried by each provider's SDK; every adapter takes
+``max_retries`` (``None``: the SDK's default) and the retries it can see are counted on
+:attr:`LLMResponse.retries` and in a document's ``meta.llm.retries``.
 """
 
 from __future__ import annotations
@@ -130,11 +134,15 @@ class LLMUsage:
 
 @dataclass(frozen=True)
 class LLMResponse[T: BaseModel]:
-    """A validated structured output plus what it cost."""
+    """A validated structured output plus what it cost.
+
+    ``retries`` counts the requests the adapter's SDK sent again after a transient failure
+    (0 when the SDK doesn't say: Gemini's and LiteLLM's don't)."""
 
     output: T
     usage: LLMUsage
     model: str
+    retries: int = 0
 
 
 IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})

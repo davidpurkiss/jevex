@@ -57,9 +57,10 @@ def llm(price: tuple[float, float] = (0.0, 0.0)) -> FakeLLM:
 class ScriptedLLM:
     """An LLM whose cost can be unknown (``None``) and whose calls can take time."""
 
-    def __init__(self, *, cost: float | None = 0.0, delay: float = 0.0) -> None:
+    def __init__(self, *, cost: float | None = 0.0, delay: float = 0.0, retries: int = 0) -> None:
         self.cost = cost
         self.delay = delay
+        self.retries = retries
         self.calls = 0
 
     async def structured[T: BaseModel](
@@ -68,7 +69,9 @@ class ScriptedLLM:
         self.calls += 1
         await asyncio.sleep(self.delay)
         output = schema.model_validate({"title": "Dune"})
-        return LLMResponse(output=output, usage=LLMUsage(10, 5, self.cost), model="scripted")
+        return LLMResponse(
+            output=output, usage=LLMUsage(10, 5, self.cost), model="scripted", retries=self.retries
+        )
 
 
 def doc_budget(**kw: object) -> DocumentBudget:
@@ -87,6 +90,14 @@ async def test_max_llm_calls_stops_llm_use_for_the_document() -> None:
     assert budget.llm_stopped
     [event] = budget.events
     assert (event.scope, event.limit) == ("document", "max_llm_calls")
+
+
+async def test_the_adapters_retries_are_added_up() -> None:
+    budget = doc_budget()
+    flaky = ScriptedLLM(retries=2)
+    for _ in range(3):
+        await budget.call_llm(flaky, "x", Title)
+    assert (budget.llm_calls, budget.llm_retries) == (3, 6)
 
 
 async def test_concurrent_calls_cant_pass_the_call_cap_together() -> None:
@@ -445,8 +456,9 @@ async def test_jev_spend_is_recorded_even_when_a_stage_fails(store: SQLiteStore)
         budgets=Budgets(run=RunBudget(max_jev_spend=10.0)),
         store=store,
     )
-    with pytest.raises(JevBackendError):
-        await ex.extract(doc())
+    result = await ex.extract(doc())
+    assert result.status == "failed"
+    assert isinstance(result.cause, JevBackendError)
     assert await store.spend(kind="jev") > 0
 
 
@@ -464,7 +476,7 @@ async def test_llm_use_and_budget_events_reach_document_meta() -> None:
     assert meta["budget_events"] == [
         {"scope": "document", "limit": "max_llm_calls", "message": "1 LLM calls (the limit)"}
     ]
-    assert meta["llm"] == {"calls": 1, "cost": 0.0, "unpriced_calls": 0}
+    assert meta["llm"] == {"calls": 1, "cost": 0.0, "unpriced_calls": 0, "retries": 0}
     assert not result.meta.stopped  # Jev and generators carry on
 
 

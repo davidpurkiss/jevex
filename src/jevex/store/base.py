@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from jevex.document import LOCALE_TAG
+from jevex.errors import PartError, Status
 from jevex.locales import canonical_locale
 
 if TYPE_CHECKING:
@@ -144,7 +145,9 @@ class GeneratorStats(BaseModel):
     """Counts for one generator (spec: *Housekeeping*).
 
     ``documents``: scoped documents it ran on. ``hits``: it produced a candidate.
-    ``wins``: its candidate was chosen and correct.
+    ``wins``: its candidate was chosen and correct. ``failures``: statements it raised on
+    (the housekeeper quarantines a learned generator at
+    :data:`~jevex.housekeeping.QUARANTINE_AFTER`).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -153,6 +156,7 @@ class GeneratorStats(BaseModel):
     documents: int = 0
     hits: int = 0
     wins: int = 0
+    failures: int = 0
 
     @property
     def hit_rate(self) -> float | None:
@@ -223,8 +227,9 @@ class DocumentStat(BaseModel):
     sources*): what it cost, what resolved its values, and what went wrong.
 
     ``records`` counts its top-level records; ``snapshot`` is the learned-generator
-    snapshot it ran with. A document whose extraction raised has an ``error`` event and
-    whatever it spent before it failed.
+    snapshot it ran with. ``status`` and ``errors`` are the result's (:mod:`jevex.errors`);
+    a failed document has whatever it found and spent before it failed. One whose
+    extraction raised (a process spend cap) has an ``error`` event and ``status="failed"``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -244,6 +249,8 @@ class DocumentStat(BaseModel):
     values: list[ValueStat] = Field(default_factory=list[ValueStat])
     events: list[DocumentEvent] = Field(default_factory=list[DocumentEvent])
     snapshot: int | None = None
+    status: Status = "ok"
+    errors: list[PartError] = Field(default_factory=list[PartError])
     at: datetime = Field(default_factory=utcnow)
 
 
@@ -332,7 +339,13 @@ class Store(Protocol):
 
     # Generator stats
     async def record_generator_stats(
-        self, generator_id: str, *, documents: int = 0, hits: int = 0, wins: int = 0
+        self,
+        generator_id: str,
+        *,
+        documents: int = 0,
+        hits: int = 0,
+        wins: int = 0,
+        failures: int = 0,
     ) -> None:
         """Add to a generator's counts (atomically, so concurrent workers don't race)."""
         ...

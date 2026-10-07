@@ -19,6 +19,12 @@ So ``hit_rate`` is hits per document and ``win_rate`` wins per hit. A learned ge
 and dropped from the snapshot later documents take. Built-in and stage generators are
 counted but never pruned.
 
+A generator that raises is skipped for that statement (:mod:`jevex.errors`), and each
+failure is added to its ``failures``. A learned generator with :data:`QUARANTINE_AFTER`
+failures is **quarantined**: disabled like a pruned one (kept for review) and reported
+with a ``generator_quarantined`` event. Other generators and the LLM fallback still cover
+its field.
+
 :meth:`Housekeeper.dedupe` finds stored generators that are duplicates: same field and
 scope, and the same candidates (spans and normaliser chain) on every stored example of
 the field. It keeps the one with the most wins (the oldest on a tie) and disables the
@@ -44,6 +50,10 @@ if TYPE_CHECKING:
 PRUNE_AFTER = 50
 """Scoped documents a learned generator gets to win once before it's disabled.
 Provisional: the spec's open questions set the defaults from eval runs (#49)."""
+
+QUARANTINE_AFTER = 3
+"""Failures (statements it raised on, over every document) after which a learned
+generator is disabled (#230)."""
 
 
 @dataclass(frozen=True)
@@ -110,26 +120,39 @@ class Housekeeper:
     prune_after: int | None = PRUNE_AFTER
     pruned: list[str] = field(default_factory=list[str])
     """Ids this housekeeper pruned, in order."""
+    quarantined: list[str] = field(default_factory=list[str])
+    """Ids this housekeeper quarantined (disabled for failing), in order."""
 
     def __post_init__(self) -> None:
         if self.prune_after is not None and self.prune_after < 1:
             raise ValueError(f"prune_after must be at least 1, got {self.prune_after}")
 
     async def record(self, ctx: Context) -> list[str]:
-        """Add one document's counts to the store, then prune; return the ids pruned.
+        """Add one document's counts to the store, quarantine, then prune; return the ids
+        pruned.
 
-        Each pruned generator gets a ``generator_pruned`` event on ``ctx``.
+        Each pruned generator gets a ``generator_pruned`` event on ``ctx``, and each
+        quarantined one a ``generator_quarantined`` event.
         """
         use = generator_use(ctx)
+        failures = _failures(ctx)
         await gather(
             self.store.record_generator_stats(
-                gid, documents=1, hits=int(gid in use.hits), wins=int(gid in use.wins)
+                gid,
+                documents=1,
+                hits=int(gid in use.hits),
+                wins=int(gid in use.wins),
+                failures=failures.get(gid, 0),
             )
-            for gid in sorted(use.ran)
+            for gid in sorted(use.ran | set(failures))
         )
-        if self.prune_after is None or ctx.generators is None:
+        if ctx.generators is None:
             return []
         learned = set(ctx.generators.registry.ids)
+        await self._quarantine(ctx, sorted(set(failures) & learned))
+        if self.prune_after is None:
+            return []
+        learned -= set(self.quarantined)
         suspects = sorted((use.ran & learned) - use.wins)
         stats = await gather(self.store.generator_stats(gid) for gid in suspects)
         pruned: list[str] = []
@@ -150,6 +173,25 @@ class Housekeeper:
         self.pruned.extend(pruned)  # before awaiting, so no other document claims them
         await self._disable(pruned)
         return pruned
+
+    async def _quarantine(self, ctx: Context, failed: list[str]) -> None:
+        """Disable the learned generators in ``failed`` that reached
+        :data:`QUARANTINE_AFTER` failures."""
+        stats = await gather(self.store.generator_stats(gid) for gid in failed)
+        quarantined: list[str] = []
+        for s in stats:
+            if s.generator_id in self.quarantined or s.failures < QUARANTINE_AFTER:
+                continue
+            quarantined.append(s.generator_id)
+            ctx.event(
+                "learn",
+                "generator_quarantined",
+                f"generator {s.generator_id} failed {s.failures} times and was disabled",
+                generator_id=s.generator_id,
+                failures=s.failures,
+            )
+        self.quarantined.extend(quarantined)  # before awaiting, as for pruning
+        await self._disable(quarantined)
 
     async def dedupe(self) -> list[DuplicateGenerator]:
         """Disable every enabled stored generator that duplicates another; return them.
@@ -197,6 +239,15 @@ class Housekeeper:
             await self.store.set_generator_enabled(gid, False)
         if self.generators is not None and generator_ids:
             self.generators.withdraw(generator_ids)
+
+
+def _failures(ctx: Context) -> dict[str, int]:
+    """Failures per generator id on this document (the candidate stage's part errors)."""
+    out: dict[str, int] = {}
+    for error in ctx.errors.errors:
+        if error.kind == "generator" and error.part is not None:
+            out[error.part] = out.get(error.part, 0) + error.count
+    return out
 
 
 type _Key = tuple[int, int, tuple[str, ...]]

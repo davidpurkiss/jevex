@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from jevex.errors import DocumentError
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -28,7 +30,7 @@ ComponentType = Literal[
 ]
 
 
-class UnsupportedDocumentError(ValueError):
+class UnsupportedDocumentError(DocumentError, ValueError):
     """A layout parser was given a document type it doesn't read."""
 
 

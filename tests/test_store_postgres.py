@@ -21,6 +21,7 @@ from jevex import Extractor
 from jevex.store import (
     DocumentStat,
     GeneratorRecord,
+    GeneratorStats,
     KeyMapping,
     SpendEntry,
     StoreError,
@@ -170,12 +171,18 @@ async def test_a_version_1_schema_is_migrated(postgres_url: str, pg_schema: str)
         assert await store.documents() == []
         await store.record_document(DocumentStat(id="d1", at=T0))
         assert [d.id for d in await store.documents()] == ["d1"]
+        # v4: generator failures.
+        await store.record_generator_stats("g1", documents=1)
+        await store.record_generator_stats("g1", failures=2)
+        assert await store.generator_stats("g1") == GeneratorStats(
+            generator_id="g1", documents=1, failures=2
+        )
     finally:
         await store.aclose()
     assert query(postgres_url, f"SELECT version FROM {pg_schema}.schema_version") == [
         (SCHEMA_VERSION,)
     ]
-    assert SCHEMA_VERSION == 3
+    assert SCHEMA_VERSION == 4
 
 
 async def test_newer_schema_is_refused(postgres_url: str, pg_schema: str) -> None:

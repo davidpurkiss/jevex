@@ -71,8 +71,9 @@ from jevex.benchmarks import (
 )
 from jevex.budgets import Budgets, Period, RunBudget
 from jevex.document import Document
+from jevex.errors import ExtractionError
 from jevex.eval import evaluate, load_corpus
-from jevex.extractor import Extractor
+from jevex.extractor import ExtractionResult, Extractor
 from jevex.fetch import FetchError, SimpleFetcher
 from jevex.generators import InvalidGeneratorError
 from jevex.jev import JevError
@@ -215,7 +216,7 @@ async def load_document(source: str) -> Document:
     return await asyncio.to_thread(Document.from_path, path)
 
 
-async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str, Any]:
+async def _extract(args: argparse.Namespace, jev: JevClient | None) -> ExtractionResult:
     schemas = [load_schema(s) for s in args.schema]
     if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
@@ -228,11 +229,13 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> dict[str,
     async with extractor:
         try:
             result = await extractor.extract(document)
-        except JevError as exc:
+        except JevError as exc:  # the spend cap
             raise CliError(f"Jev: {exc}") from exc
         except PackError as exc:  # an installed community pack that doesn't load
             raise CliError(f"pack: {exc}") from exc
-    return result.to_dict() if args.meta else result.to_plain_dict()
+    if result.status == "failed":
+        raise CliError("; ".join(e.describe() for e in result.errors if e.fatal))
+    return result
 
 
 async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None) -> EvalReport:
@@ -255,8 +258,10 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None
                 return await evaluate(extractor, corpus, concurrency=max(1, concurrency))
             except ValueError as exc:
                 raise CliError(str(exc)) from exc
-            except JevError as exc:  # the spend cap or the API itself: the run can't be scored
+            except JevError as exc:  # the spend cap: the run can't be scored
                 raise CliError(f"Jev: {exc}") from exc
+            except ExtractionError as exc:  # the Jev API failed: neither can it
+                raise CliError(f"Jev: {exc.__cause__ or exc}") from exc
     finally:
         # The extractor doesn't close an LLM it's given; an adapter built here is ours.
         close = getattr(model, "aclose", None) if llm is None else None
@@ -383,6 +388,8 @@ async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | No
                 raise CliError(str(exc)) from exc
             except JevError as exc:
                 raise CliError(f"Jev: {exc}") from exc
+            except ExtractionError as exc:  # the Jev API failed
+                raise CliError(f"Jev: {exc.__cause__ or exc}") from exc
     finally:
         # The extractor doesn't close an LLM it's given; an adapter built here is ours.
         close = getattr(model, "aclose", None) if llm is None else None
@@ -1518,8 +1525,7 @@ def main(
                 stdout.write(replayed.to_csv())
             else:
                 stdout.write(format_report(replayed.report) + "\n".join(written) + "\n")
-            for doc in replayed.failed:
-                print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
+            _print_failures(replayed.report, stderr)
             gated = EXIT_OK if plan is None else _finish_gate(args, plan, replayed.report, stderr)
             return EXIT_ERROR if replayed.failed else gated
         if args.command == "eval":
@@ -1529,8 +1535,7 @@ def main(
                 stdout.write("\n")
             else:
                 stdout.write(format_report(report))
-            for doc in report.failed:
-                print(f"jevex: error: {doc.path}: {doc.error}", file=stderr)
+            _print_failures(report, stderr)
             gated = EXIT_OK if plan is None else _finish_gate(args, plan, report, stderr)
             # A run with failed documents isn't a clean measurement, even though it's scored.
             return EXIT_ERROR if report.failed else gated
@@ -1587,13 +1592,26 @@ def main(
             else:
                 stdout.write(format_diff(diff, args.out))
             return EXIT_OK
-        payload = asyncio.run(_extract(args, jev))
+        result = asyncio.run(_extract(args, jev))
     except CliError as exc:
         print(f"jevex: error: {exc}", file=stderr)
         return EXIT_ERROR
+    payload = result.to_dict() if args.meta else result.to_plain_dict()
     json.dump(payload, stdout, indent=args.indent or None, ensure_ascii=False)
     stdout.write("\n")
+    for error in result.errors:  # a partial result: what was skipped
+        print(f"jevex: warning: {error.describe()}", file=stderr)
     return EXIT_OK
+
+
+def _print_failures(report: EvalReport, err: TextIO) -> None:
+    """A line per failed document (``error``) and per part a document skipped
+    (``warning``)."""
+    for doc in report.documents:
+        if doc.error:
+            print(f"jevex: error: {doc.path}: {doc.error}", file=err)
+        for warning in doc.warnings:
+            print(f"jevex: warning: {doc.path}: {warning}", file=err)
 
 
 def entrypoint() -> None:

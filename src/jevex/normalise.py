@@ -45,6 +45,18 @@ class NormaliseError(ValueError):
     """A value couldn't be normalised or doesn't fit the field."""
 
 
+class NormaliserFailedError(Exception):
+    """A normaliser raised something other than :class:`NormaliseError` (a bug in it, not
+    a value that doesn't fit). ``normaliser`` is its name and ``error`` what it raised
+    (also the ``__cause__``). The normalise stage skips that candidate and records the
+    failure (:mod:`jevex.errors`)."""
+
+    def __init__(self, normaliser: str, error: Exception) -> None:
+        super().__init__(f"normaliser {normaliser!r} raised {type(error).__name__}: {error}")
+        self.normaliser = normaliser
+        self.error = error
+
+
 @dataclass(frozen=True)
 class FunctionNormaliser:
     """A named normaliser backed by a function ``(value, field, **args) -> value``."""
@@ -410,7 +422,8 @@ def run_chain(
     *,
     registry: NormaliserRegistry = BUILTIN_NORMALISERS,
 ) -> Any:
-    """Apply each step in order. Unknown step names or bad arguments raise NormaliseError."""
+    """Apply each step in order. Unknown step names or bad arguments raise NormaliseError;
+    anything else a normaliser raises, :class:`NormaliserFailedError`."""
     value = raw
     for step in steps:
         normaliser = registry.get(step.name)
@@ -420,6 +433,8 @@ def run_chain(
             raise
         except (TypeError, ValueError, ArithmeticError) as exc:
             raise NormaliseError(f"{step.name} failed on {value!r}: {exc}") from exc
+        except Exception as exc:
+            raise NormaliserFailedError(step.name, exc) from exc
     return value
 
 
@@ -509,7 +524,9 @@ class NormaliseStage:
     and the rest become alternatives. List fields keep every accepted value, deduplicated
     in document order. An entity's own statements win over those it shares with every
     entity (``MultiEntity``'s "all of them"); a value from a shared one is marked
-    ``shared``. If nothing normalises, the field's meta carries the error. A field
+    ``shared``. If nothing normalises, the field's meta carries the error. A normaliser
+    that raises (:class:`NormaliserFailedError`) skips that candidate and is recorded with
+    :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>`. A field
     another route already filled (e.g. structured data) isn't overwritten; in ``merge``
     mode the two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are
     recorded with ``method="generator"``, or ``"vision"`` when the statement came from a
@@ -568,6 +585,10 @@ class NormaliseStage:
                         candidate.raw, candidate.normalise, field, registry=self.registry
                     )
                 except NormaliseError as exc:
+                    errors.append(str(exc))
+                    continue
+                except NormaliserFailedError as exc:
+                    ctx.part_failed(self.name, "normaliser", exc.normaliser, exc.error)
                     errors.append(str(exc))
                     continue
                 accepted.append((statement_id, selection, candidate, value))

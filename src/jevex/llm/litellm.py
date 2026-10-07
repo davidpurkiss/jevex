@@ -48,8 +48,12 @@ class LiteLLM:
         model: str,
         *,
         prices: dict[str, ModelPrice] | None = None,
+        max_retries: int | None = None,
         **completion_kwargs: Any,
     ) -> None:
+        """``max_retries`` is LiteLLM's ``num_retries`` for each call (``None``: its
+        default). LiteLLM doesn't say how many it took, so
+        :attr:`~jevex.llm.LLMResponse.retries` stays 0."""
         # Import here, not in the async call: importing litellm takes about a second and
         # would block the event loop on the first request.
         import litellm
@@ -57,6 +61,8 @@ class LiteLLM:
         litellm.suppress_debug_info = True
         self.model = model
         self.prices = prices
+        if max_retries is not None:
+            completion_kwargs = {**completion_kwargs, "num_retries": max_retries}
         self.completion_kwargs = completion_kwargs
         """Extra ``litellm.acompletion`` arguments, e.g. ``api_base`` for Ollama."""
 

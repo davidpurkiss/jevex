@@ -253,6 +253,9 @@ class DocumentBudget:
     """Calls started (reserved), including ones in flight and ones that failed."""
     llm_spend: float = 0.0
     unpriced_calls: int = 0
+    llm_retries: int = 0
+    """Retries the LLM adapters' SDKs took on this document's calls
+    (:attr:`~jevex.llm.LLMResponse.retries`)."""
     rpm_skips: int = 0
     llm_stopped: bool = False
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
@@ -373,6 +376,7 @@ class DocumentBudget:
             self.llm_calls -= 1  # refused before any request was made
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))
             return None
+        self.llm_retries += response.retries
         await self._settle(response.usage.cost)
         return response
 

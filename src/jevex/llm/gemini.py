@@ -63,9 +63,16 @@ class GeminiLLM:
         thinking_level: ThinkingLevel | None = None,
         max_output_tokens: int | None = None,
         prices: dict[str, ModelPrice] | None = None,
+        max_retries: int | None = None,
     ) -> None:
+        """``max_retries`` sets the SDK's retries of transient failures on each call
+        (``None``: its default). The SDK doesn't say how many it took, so
+        :attr:`~jevex.llm.LLMResponse.retries` stays 0."""
         from google import genai
 
+        if max_retries is not None and max_retries < 0:
+            raise ValueError(f"max_retries must be at least 0, got {max_retries}")
+        self.max_retries = max_retries
         self.model = model
         self.system_instruction = system_instruction
         self.thinking_level = thinking_level
@@ -91,6 +98,14 @@ class GeminiLLM:
                     thinking_level=types.ThinkingLevel(self.thinking_level.upper())
                 )
                 if self.thinking_level
+                else None
+            ),
+            # Per call, merged with the client's own options.
+            http_options=(
+                types.HttpOptions(
+                    retry_options=types.HttpRetryOptions(attempts=self.max_retries + 1)
+                )
+                if self.max_retries is not None
                 else None
             ),
         )

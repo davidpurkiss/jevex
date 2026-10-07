@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from decimal import Decimal
@@ -28,12 +28,14 @@ from jevex import (
     StructuredStage,
     flatten,
 )
+from jevex.errors import PartError
 from jevex.extractor import default_pipeline
 from jevex.interfaces import StructuredExtractor
-from jevex.jev import Choice, JevClient
+from jevex.jev import Choice, JevBackendError, JevClient
+from jevex.keypaths import StructuredResult
 from jevex.resolve import SINGLE_ENTITY_LABEL
 from jevex.results import FieldMeta
-from jevex.store import KeyMapping, SQLiteStore
+from jevex.store import KeyMapping, SQLiteStore, Store, StoreError
 from jevex.structured import EmbeddedDataReader, StructuredBlob
 from jevex.testing import FakeJev
 from jevex.testsite import VehicleSpec, generate, render
@@ -402,6 +404,46 @@ async def test_stage_records_values_on_the_default_entity_and_keeps_statements()
     assert [s.kind for s in ctx.structured] == ["structured"] * 10
     assert ctx.structured[1].text == "model: Golf"
     assert [e.kind for e in ctx.events] == ["structured_fields", "layout_route_skipped"]
+
+
+@dataclass
+class RaisingExtractor:
+    error: Exception
+
+    async def extract(
+        self,
+        document: Document,
+        schemas: list[SchemaSpec],
+        jev: JevClient,
+        *,
+        store: Store | None = None,
+        packs: Sequence[Pack] = (),
+    ) -> StructuredResult:
+        raise self.error
+
+
+async def test_an_extractor_that_raises_is_skipped_and_reported() -> None:
+    ctx = Context.create(page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client())
+    stage = StructuredStage(extractor=RaisingExtractor(ValueError("bad JSON-LD")))
+    await stage.run(ctx)
+    assert ctx.structured == []
+    assert not ctx.schemas["Car"].finished  # the layout route still runs
+    assert ctx.errors.errors == [
+        PartError(
+            stage="structured",
+            kind="structured_extractor",
+            part="RaisingExtractor",
+            type="ValueError",
+            message="bad JSON-LD",
+        )
+    ]
+
+
+@pytest.mark.parametrize("error", [JevBackendError("down"), StoreError("locked")])
+async def test_jev_and_store_errors_in_the_extractor_fail_the_document(error: Exception) -> None:
+    ctx = Context.create(page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client())
+    with pytest.raises(type(error)):
+        await StructuredStage(extractor=RaisingExtractor(error)).run(ctx)
 
 
 async def test_stage_doesnt_overwrite_a_found_field() -> None:

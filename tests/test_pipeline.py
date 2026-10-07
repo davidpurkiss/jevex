@@ -311,6 +311,26 @@ async def test_timing_recorded_even_when_stage_fails() -> None:
     with pytest.raises(RuntimeError):
         await Pipeline([Boom()]).run(ctx)
     assert "boom" in ctx.timings
+    assert ctx.stage == "boom"  # the stage that raised, for the extractor's report
+
+
+async def test_the_running_stage_is_on_the_context() -> None:
+    seen: list[str | None] = []
+
+    @dataclass
+    class Sees:
+        name: str
+
+        async def run(self, ctx: Context) -> None:
+            seen.append(ctx.stage)
+            ctx.part_failed(self.name, "generator", "g", ValueError("x"))
+
+    ctx = ctx_for(Car)
+    await Pipeline([Sees("a"), Sees("b")]).run(ctx)
+    assert seen == ["a", "b"]
+    assert ctx.stage is None
+    assert [(e.stage, e.count) for e in ctx.errors.errors] == [("a", 1), ("b", 1)]
+    assert ctx.errors.status == "partial"
 
 
 async def test_for_each_scope_runs_scopes_concurrently() -> None:

@@ -42,6 +42,7 @@ from jevex import (
     text_components,
 )
 from jevex.budgets import DocumentBudget
+from jevex.errors import PartError
 from jevex.extractor import STAGE_ORDER, default_pipeline
 from jevex.fetch import FetchError
 from jevex.images import (
@@ -556,14 +557,39 @@ async def test_an_engine_that_cant_decode_an_image_is_reported() -> None:
     assert list(event.data["images"].values()) == ["OCR can't decode the image"]
 
 
-async def test_other_errors_propagate() -> None:
+async def test_a_processor_that_raises_is_skipped_and_reported() -> None:
     class Crashes:
         def read(self, image: bytes) -> list[ImageText]:
             raise RuntimeError("model file missing")
 
+    ctx = await html_context(f"<img src='{PNG_URI}'><img src='{PNG_URI}'>")
+    await ImageStage(processors=[OcrProcessor(engine=Crashes())]).run(ctx)
+    assert ctx.errors.errors == [
+        PartError(
+            stage="images",
+            kind="image_processor",
+            part="OcrProcessor",
+            type="RuntimeError",
+            message="model file missing",
+            count=2,
+        )
+    ]
+    assert ctx.events == []
+    assert ctx.errors.status == "partial"
+
+
+async def test_a_loader_that_raises_is_skipped_and_reported() -> None:
+    class Broken:
+        async def load(self, image: Component, document: Document) -> ImageData | None:
+            raise KeyError("cache")
+
     ctx = await html_context(f"<img src='{PNG_URI}'>")
-    with pytest.raises(RuntimeError, match="model file missing"):
-        await ImageStage(processors=[OcrProcessor(engine=Crashes())]).run(ctx)
+    images, ocr = stage(line("x", 0, 0, 9, 9))
+    images.loader = Broken()
+    await images.run(ctx)
+    assert ocr.seen == []
+    [error] = ctx.errors.errors
+    assert (error.kind, error.part, error.type) == ("image_loader", "Broken", "KeyError")
 
 
 async def test_images_beyond_the_cap_are_counted_not_read() -> None:
@@ -794,11 +820,11 @@ async def test_a_refused_budget_leaves_the_image_without_statements() -> None:
     assert [e.limit for e in budget.events] == ["max_llm_calls"]
 
 
-async def test_a_failed_vision_call_is_an_unreadable_image() -> None:
+async def test_a_failed_vision_call_raises_its_llm_error() -> None:
     def fail(_p: str, _s: type[BaseModel]) -> object:
         raise LLMRefusalError("declined")
 
-    with pytest.raises(UnreadableImageError, match="the vision model failed: declined"):
+    with pytest.raises(LLMRefusalError, match="declined"):
         await VisionProcessor(FakeLLM(fail)).process(image_component(), image_data())
 
 
@@ -868,6 +894,7 @@ async def test_one_processor_failing_keeps_what_the_others_read() -> None:
     assert ctx.parsed is not None
     [image] = [c for c in ctx.parsed.root.walk() if c.type == "image"]
     assert [c.text for c in image.children] == ["Golf GTI"]
-    [event] = ctx.events
-    assert event.kind == "images_unread"
-    assert event.data["images"] == {image.id: "the vision model failed: HTTP 529 overloaded"}
+    assert ctx.events == []
+    [error] = ctx.errors.errors
+    assert (error.stage, error.kind, error.part) == ("images", "image_processor", "VisionProcessor")
+    assert (error.type, error.message) == ("LLMError", "HTTP 529 overloaded")

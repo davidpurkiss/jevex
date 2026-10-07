@@ -65,10 +65,11 @@ from jevex import _pdfium
 from jevex._tasks import gather
 from jevex.budgets import DocumentBudget
 from jevex.document import sniff_content_type
+from jevex.errors import DocumentError
 from jevex.fetch import FetchError
 from jevex.interfaces import BudgetedImageProcessor, ParsedDocument
 from jevex.layout import BBox, Component, ImageLocation, PageLocation, section_text
-from jevex.llm import IMAGE_TYPES, LLMError, LLMImage
+from jevex.llm import IMAGE_TYPES, LLMImage
 from jevex.split import cut_statement, is_key_value
 from jevex.statements import Statement
 
@@ -97,7 +98,7 @@ MAX_IMAGES = 50
 """The most images the stage reads per document; OCR takes a second or so each."""
 
 
-class UnreadableImageError(Exception):
+class UnreadableImageError(DocumentError):
     """An image couldn't be loaded or read: a broken ``data:`` URI, a failed fetch, bytes
     that aren't a raster image. The image stage records it and moves on."""
 
@@ -402,8 +403,10 @@ class VisionProcessor:
     (OCR, if it runs too, still reads it). The model's statements become ``vision``
     statements; Jev picks values from them like any other and the fallback stage verifies
     those values. An image that isn't PNG, JPEG or WebP is converted to PNG first, which
-    needs Pillow (the ``ocr`` extra has it). A failed call (an API error, a refusal) is
-    raised as :class:`UnreadableImageError`, so the stage records it and moves on.
+    needs Pillow (the ``ocr`` extra has it). A failed call (an API error after the
+    adapter's retries, a refusal) raises its :class:`~jevex.llm.LLMError`; the image stage
+    records it as a part failure (:mod:`jevex.errors`) and keeps the other processors'
+    readings.
     """
 
     llm: LLM
@@ -424,10 +427,7 @@ class VisionProcessor:
             section=f"Section: {section}\n" if section else "",
             alt=f"Alt text: {alt}\n" if alt else "",
         )
-        try:
-            response = await budget.call_llm(self.llm, prompt, VisionOutput, images=[picture])
-        except LLMError as exc:
-            raise UnreadableImageError(f"the vision model failed: {exc}") from exc
+        response = await budget.call_llm(self.llm, prompt, VisionOutput, images=[picture])
         if response is None:
             return ImageReading()
         said = dict.fromkeys(" ".join(s.split()) for s in response.output.statements)
@@ -691,6 +691,12 @@ class ImageStage:
     ``Extractor(vision_llm=llm)``, which adds a :class:`VisionProcessor` over
     ``ctx.vision_llm`` (unless the stage already has one). At most ``max_images`` images
     are read per document, in reading order; an ``images_capped`` event counts the rest.
+
+    An image that can't be read (:class:`UnreadableImageError`) is an ``images_unread``
+    event. A loader or processor raising anything else is skipped for that image and
+    recorded with :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>`
+    (kinds ``image_loader`` and ``image_processor``, named by class); the other
+    processors' readings are kept.
     """
 
     processors: list[ImageProcessor] = field(default_factory=_default_processors)
@@ -739,7 +745,7 @@ class ImageStage:
             )
             images = images[: self.max_images]
         budget = ctx.budget or DocumentBudget()
-        reads = await gather(self._read(image, document, processors, budget) for image in images)
+        reads = await gather(self._read(ctx, image, processors, budget) for image in images)
 
         unread = {r.image.id: "; ".join(r.errors) for r in reads if r.errors}
         if unread:
@@ -796,16 +802,19 @@ class ImageStage:
 
     async def _read(
         self,
+        ctx: Context,
         image: Component,
-        document: Document,
         processors: list[ImageProcessor],
         budget: DocumentBudget,
     ) -> _Read:
         read = _Read(image)
         try:
-            read.data = await self.loader.load(image, document)
+            read.data = await self.loader.load(image, ctx.document)
         except UnreadableImageError as exc:
             read.errors.append(str(exc))
+        except Exception as exc:
+            ctx.part_failed(self.name, "image_loader", type(self.loader).__name__, exc)
+            return read
         if read.data is None:
             return read
         data = read.data
@@ -816,8 +825,11 @@ class ImageStage:
                     return await processor.process_within(image, data, budget)
                 return await processor.process(image, data)
             except UnreadableImageError as exc:
-                # One processor failing (a vision model's API error) leaves the others'.
                 read.errors.append(str(exc))
+                return None
+            except Exception as exc:
+                # One processor failing (a vision model's API error) leaves the others'.
+                ctx.part_failed(self.name, "image_processor", type(processor).__name__, exc)
                 return None
 
         readings = await gather(run(p) for p in processors)

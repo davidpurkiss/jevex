@@ -28,8 +28,9 @@ records it returns against the expected ones:
   calls, and the resolution mix (how many values each method produced).
 
 Errors that make the whole run meaningless (Jev's spend cap, a bad key or an unreachable
-API: :data:`RUN_ERRORS`) stop :func:`evaluate`. Any other error in one document is
-recorded on its :class:`DocumentRun` and the document is scored as all missing.
+API: :data:`RUN_ERRORS`) stop :func:`evaluate`. Any other failed document (its result's
+``status`` is ``failed``, :mod:`jevex.errors`) is recorded on its :class:`DocumentRun`
+and scored as all missing; a ``partial`` one is scored as it is, with its errors listed.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
 
 from jevex.document import LOCALE_TAG, Document
+from jevex.errors import ExtractionError
 from jevex.generators.units import UNITS
 from jevex.jev import JevBackendError, JevBudgetExceededError
 from jevex.normalise import NormaliseError, canonical_unit, convert
@@ -62,9 +64,11 @@ TRUTH_FILE = "truth.json"
 MEASURED_REL_TOL = 0.005
 """±0.5% for measured quantities (floats), per docs/benchmarks.md."""
 
-RUN_ERRORS: tuple[type[Exception], ...] = (JevBudgetExceededError, JevBackendError)
+RUN_ERRORS: tuple[type[Exception], ...] = (JevBudgetExceededError, ExtractionError)
 """Errors that stop :func:`evaluate` instead of being scored against one document: the
-spend cap, and the Jev API failing (bad key, network, 5xx after retries)."""
+spend cap, and a document failed by the Jev API (bad key, network, 5xx after retries),
+raised as its result's :class:`~jevex.errors.ExtractionError` (the
+:class:`~jevex.jev.JevBackendError` is its ``__cause__``)."""
 
 
 # --- corpus ----------------------------------------------------------------------------
@@ -412,8 +416,12 @@ class DocumentRun:
     """Keyed ``Schema.field``. Usually the document's own schema, plus spurious counts for
     any other schema the extractor wrongly found records of."""
     error: str | None = None
-    """Set when extraction raised; the document then scores as all missing, and its usage
-    is 0 because the partial usage is lost with the exception."""
+    """Set when extraction failed (``status="failed"``): what failed. The document then
+    scores as all missing."""
+    status: str = "ok"
+    """The result's ``status``: ``ok``, ``partial`` or ``failed``."""
+    warnings: list[str] = field(default_factory=list[str])
+    """A ``partial`` document's errors: the parts that failed and were skipped."""
 
     @property
     def cost(self) -> float:
@@ -428,8 +436,13 @@ class EvalReport:
 
     @property
     def failed(self) -> list[DocumentRun]:
-        """Documents whose extraction raised."""
+        """Documents whose extraction failed."""
         return [d for d in self.documents if d.error]
+
+    @property
+    def partial(self) -> list[DocumentRun]:
+        """Documents where a part failed and was skipped (scored as found)."""
+        return [d for d in self.documents if d.status == "partial"]
 
     def field_scores(self) -> dict[str, FieldScore]:
         """Per ``Schema.field`` totals across documents."""
@@ -457,6 +470,7 @@ class EvalReport:
         return {
             "documents": len(self.documents),
             "errors": len(self.failed),
+            "partial": len(self.partial),
             "precision": overall.precision,
             "recall": overall.recall,
             "accuracy": overall.accuracy,
@@ -488,6 +502,8 @@ class EvalReport:
                     "llm_calls": d.llm_calls,
                     "methods": dict(sorted(d.methods.items())),
                     "error": d.error,
+                    "status": d.status,
+                    "warnings": d.warnings,
                 }
                 for d in self.documents
             ],
@@ -592,32 +608,19 @@ async def run_document(
     """Extract one corpus document and score it (``tolerances`` as for
     :func:`score_document`).
 
-    Raises the :data:`RUN_ERRORS`; any other extraction error is recorded on the run,
+    Raises the :data:`RUN_ERRORS`; any other failed document is recorded on the run,
     which then scores as all missing.
     """
     document = await asyncio.to_thread(
         Document.from_path, item.path, url=item.path.as_posix(), locale=item.locale
     )
     start = time.perf_counter()
-    try:
-        result = await extractor.extract(document)
-    except RUN_ERRORS:
-        raise
-    except Exception as exc:  # scored as all-missing; the run carries on
-        return DocumentRun(
-            path=item.path.as_posix(),
-            schema=item.schema,
-            seconds=time.perf_counter() - start,
-            jev_requests=0,
-            jev_questions=0,
-            jev_cost=0.0,
-            llm_calls=0,
-            llm_cost=0.0,
-            methods=Counter(),
-            fields=all_missing(item, tolerances[item.schema]),
-            error=f"{type(exc).__name__}: {exc}",
-        )
+    result = await extractor.extract(document)
     seconds = time.perf_counter() - start
+    if isinstance(result.cause, JevBackendError):
+        result.raise_for_errors()
+    meta = result.meta
+    failed = result.status == "failed"
     methods: Counter[str] = Counter(
         m.method
         for r in result.records
@@ -628,13 +631,20 @@ async def run_document(
         path=item.path.as_posix(),
         schema=item.schema,
         seconds=seconds,
-        jev_requests=result.meta.jev.requests,
-        jev_questions=result.meta.jev.questions,
-        jev_cost=result.meta.jev.cost,
-        llm_calls=result.meta.llm.calls,
-        llm_cost=result.meta.llm.cost,
-        methods=methods,
-        fields=score_document(item, result, tolerances),
+        jev_requests=meta.jev.requests,
+        jev_questions=meta.jev.questions,
+        jev_cost=meta.jev.cost,
+        llm_calls=meta.llm.calls,
+        llm_cost=meta.llm.cost,
+        methods=Counter() if failed else methods,
+        fields=(
+            all_missing(item, tolerances[item.schema])
+            if failed
+            else score_document(item, result, tolerances)
+        ),
+        error="; ".join(e.describe() for e in result.errors if e.fatal) if failed else None,
+        status=result.status,
+        warnings=[] if failed else [e.describe() for e in result.errors],
     )
 
 
