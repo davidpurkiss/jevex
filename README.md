@@ -91,8 +91,9 @@ English.
 
 | Locale | Reads |
 | --- | --- |
-| unset, `en-GB`, other decimal-point languages, and regions such as `de-CH` and `es-MX` | "1,234.5", "£18,495", "03/12/2024" as 3 December, mpg in UK gallons |
-| decimal-comma languages (`de`, `fr`, `es`, `it`, `nl`, `pt`, `pl`, `sv`, ...) | "1.234,5 kg", "18 495 €" grouped with a dot or a no-break space (not a plain one), "01.12.2023" day first; German month names ("12. März 2024") |
+| unset, `en-GB`, other decimal-point languages, and regions such as `de-CH` and `es-MX` | "1,234.5", "£18,495", "03/12/2024" as 3 December, mpg in UK gallons; Swiss regions also "1’250.50" and "CHF 1’250.–" |
+| decimal-comma languages (`de`, `fr`, `es`, `it`, `nl`, `pt`, `pl`, `sv`, ...) | "1.234,5 kg", "18 495 €" grouped with a dot or a no-break space (not a plain one), "18.495,- €", "01.12.2023" day first |
+| German, French, Spanish, Italian, Dutch (`de`, `fr`, `es`, `it`, `nl`) | their month names ("12. März 2024", "1er août 2024", "12 de marzo de 2024"), multipliers ("1,5 Mio. €", "2 Mds €") and range words ("1,4 bis 2,0 l", "zwischen 4 und 5"), on top of English ones |
 | a US region (`en-US`, `es-US`) | "03/12/2024" as 12 March, mpg in US gallons |
 
 Normaliser steps take the matching arguments (`{parse_number: {decimal: ","}}`,

@@ -17,9 +17,11 @@ Normaliser steps these generators emit:
 
 The number, money, range, date and key-value generators match the way the document's
 locale writes numbers and dates (:mod:`jevex.locales`): on a ``de-DE`` page "1.234,5 kg"
-is one number, "18.495 €" an amount and "12. März 2024" a date, and their chains carry
-``decimal: ","``; on an ``en-US`` page "03/12/2024" is read month first and mpg in US
-gallons. An unknown locale is read as en-GB.
+is one number, "18.495 €", "18.495,- €" and "1,5 Mio. €" amounts, "1,4 bis 2,0 l" a range
+and "12. März 2024" a date, and their chains carry ``decimal: ","``; on an ``en-US`` page
+"03/12/2024" is read month first and mpg in US gallons; on a ``de-CH`` page "1’250.50" is
+one number. Month names, multipliers and range words are English plus the page language's
+(:mod:`jevex.locales` lists them and what isn't read). An unknown locale is read as en-GB.
 """
 
 from __future__ import annotations
@@ -31,10 +33,20 @@ from typing import TYPE_CHECKING
 
 from jevex.generators.units import spellings
 from jevex.interfaces import Scope
-from jevex.locales import EN_GB, MONTH_NAMES, locale_conventions, localise_steps
+from jevex.locales import (
+    EN_GB,
+    LONG_SCALE_BILLION,
+    MONTH_NAMES,
+    MULTIPLIERS,
+    RANGE_WORDS,
+    locale_conventions,
+    localise_steps,
+)
 from jevex.statements import Candidate, NormaliserStep, Span, Statement
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from jevex.locales import LocaleConventions
     from jevex.schema import FieldSpec
 
@@ -73,7 +85,7 @@ def _step(name: str, **args: object) -> NormaliserStep:
 _CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
 # "£25k", "£1.5m", "€2bn", and spelled or spaced: "£1.5 million", "EUR 3 bn", "£2 m".
-_MULTIPLIER = r"(?:bn|[kKmM](?![a-zA-Z])|\s?(?i:million|billion|thousand|mn|bn|m)\b)"
+_ENGLISH = "million|billion|thousand|mn|bn|m"
 # Every amount must end cleanly: "£18,4950" or "£1.5x" yield nothing rather than a
 # truncated (and silently wrong) "£18,495" / "£1.5". A period suffix may follow
 # directly: "£299pm", "£1,200pcm", "£45pw", "£30,000pa".
@@ -103,10 +115,16 @@ class _Patterns:
 
 
 def _num(conventions: LocaleConventions) -> str:
+    group = f"[{conventions.thousands}]" if len(conventions.thousands) > 1 else ","
     if conventions.decimal == ".":
-        return r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
-    group = f"[{conventions.thousands}]"
+        return rf"\d{{1,3}}(?:{group}\d{{3}})+(?:\.\d+)?|\d+(?:\.\d+)?"
     return rf"\d{{1,3}}(?:{group}\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?"
+
+
+def _words(words: Iterable[str]) -> str:
+    """An alternation of words, longest first; a space in one matches any whitespace."""
+    ordered = sorted(set(words), key=lambda w: (-len(w), w))
+    return "|".join(re.escape(w).replace(r"\ ", r"\s+") for w in ordered)
 
 
 def _months(language: str) -> str:
@@ -114,23 +132,60 @@ def _months(language: str) -> str:
     extra = set(MONTH_NAMES.get(language, {})) - set(MONTH_NAMES["en"])
     if not extra:
         return _MONTH
-    return "|".join([_MONTH, *(re.escape(n) for n in sorted(extra, key=lambda n: (-len(n), n)))])
+    return f"{_MONTH}|{_words(extra)}"
+
+
+def _multiplier(language: str) -> str:
+    """English multipliers, plus the language's own with an optional dot ("1,5 Mio. €").
+    Where "billion" is 10^12 the English word isn't one."""
+    english = "million|thousand|mn|bn|m" if language in LONG_SCALE_BILLION else _ENGLISH
+    own = MULTIPLIERS.get(language)
+    local = rf"|\s?(?i:{_words(own)})\.?(?![^\W\d_])" if own else ""
+    return rf"(?:bn|[kKmM](?![a-zA-Z]){local}|\s?(?i:{english})\b)"
+
+
+def _round(conventions: LocaleConventions) -> str:
+    """A round amount's dash after the decimal mark: "18.495,- €", "Fr. 1’250.–"."""
+    if conventions.decimal == ",":
+        return "(?:,[-–—]{1,2})?"
+    return r"(?:\.[-–—]{1,2})?" if conventions.apostrophe_groups else ""
+
+
+def _range(num: str, units: str, language: str) -> str:
+    """Ranges with a dash or "to", or "between … and", plus the language's own words."""
+    to, between, and_ = "", "between", "and"
+    if words := RANGE_WORDS.get(language):
+        to = rf"|\s+(?i:{_words(words.to)})\s+"
+        between = f"between|{_words(words.between)}"
+        and_ = f"and|{_words(words.and_)}"
+    return (
+        rf"(?<![\w.,/-])(?P<lo>{num})(?:\s*(?:[-–—]|to)\s*{to})(?P<hi>{num})(?!\w|[.,/–-]\d)"
+        rf"(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
+        rf"|\b(?i:{between})\s+(?P<lo2>{num})\s+(?i:{and_})\s+(?P<hi2>{num})"
+    )
 
 
 @cache
 def _patterns(conventions: LocaleConventions) -> _Patterns:
+    language = conventions.language
     num = _num(conventions)
     units = _unit_alternation()
+    mult = _multiplier(language)
+    amount = f"(?:{num}){_round(conventions)}{mult}?"
+    # Without a multiplier, "€ 1 Billion" would give a truncated "€ 1".
+    end = rf"(?!\s?(?i:billion)){_END}" if language in LONG_SCALE_BILLION else _END
     money = (
-        rf"(?P<sym>[£$€¥])\s?(?:{num}){_MULTIPLIER}?{_END}"
-        rf"|(?<![\w.,])(?:{num}){_MULTIPLIER}?\s?(?P<c2>{_CODES})\b"
-        rf"|\b(?P<c3>{_CODES})\s?(?:{num}){_MULTIPLIER}?{_END}"
+        rf"(?P<sym>[£$€¥])\s?{amount}{end}"
+        rf"|(?<![\w.,]){amount}\s?(?P<c2>{_CODES})\b"
+        rf"|\b(?P<c3>{_CODES})\s?{amount}{end}"
     )
-    if conventions.currency_after:  # "18.495 €", "18.495,50 €"
-        money += rf"|(?<![\w.,])(?:{num})\s?(?P<sym2>[£$€¥])"
-    month = _months(conventions.language)
-    # German writes the day as an ordinal with a dot: "12. März 2024".
-    ordinal = "(?:st|nd|rd|th)?" if conventions.language == "en" else r"(?:st|nd|rd|th|\.)?"
+    if conventions.currency_after:  # "18.495 €", "18.495,50 €", "1,5 Mio. €"
+        money += rf"|(?<![\w.,]){amount}\s?(?P<sym2>[£$€¥])"
+    month = _months(language)
+    # German writes the day as an ordinal with a dot ("12. März 2024"), French the 1st as
+    # "1er"; Spanish puts "de" around the month ("12 de marzo de 2024").
+    ordinal = "(?:st|nd|rd|th)?" if language == "en" else r"(?:st|nd|rd|th|er|\.)?"
+    of = r"(?:\s+de)?" if language == "es" else ""
     return _Patterns(
         conventions=conventions,
         number=re.compile(rf"(?<![\w.,])(?:{num})(?![\w]|[.,]\d)"),
@@ -145,20 +200,18 @@ def _patterns(conventions: LocaleConventions) -> _Patterns:
                 {"order": conventions.date_order},
             ),
             (
-                re.compile(rf"(?<!\d)\d{{1,2}}{ordinal}\s+(?i:{month})\.?,?\s+\d{{4}}(?!\d)"),
+                re.compile(
+                    rf"(?<!\d)\d{{1,2}}{ordinal}{of}\s+(?i:{month})\.?,?{of}\s+\d{{4}}(?!\d)"
+                ),
                 {"order": "dmy"},
             ),
             (
                 re.compile(rf"\b(?i:{month})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,\s+\d{{4}}(?!\d)"),
                 {"order": "mdy"},
             ),
-            (re.compile(rf"\b(?i:{month})\.?\s+\d{{4}}(?!\d)"), {"precision": "month"}),
+            (re.compile(rf"\b(?i:{month})\.?{of}\s+\d{{4}}(?!\d)"), {"precision": "month"}),
         ),
-        range=re.compile(
-            rf"(?<![\w.,/-])(?P<lo>{num})\s*(?:[-–—]|to)\s*(?P<hi>{num})(?!\w|[.,/–-]\d)"
-            rf"(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
-            rf"|\b(?i:between)\s+(?P<lo2>{num})\s+(?i:and)\s+(?P<hi2>{num})"
-        ),
+        range=re.compile(_range(num, units, language)),
     )
 
 

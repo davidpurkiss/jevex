@@ -10,8 +10,9 @@ Unit conversion is by dimension: each unit has a factor to its dimension's base 
 mpg means UK (imperial) gallons unless a step says ``{"gallon": "us"}``.
 
 Numbers are read with a decimal point unless a step says ``{"decimal": ","}``; then "." and
-no-break spaces group thousands ("1.234,5" → 1234.5). :mod:`jevex.locales` adds these
-arguments for a locale.
+no-break spaces group thousands ("1.234,5" → 1234.5). With a decimal point, commas and
+Swiss apostrophes group them ("1’250.50"). :mod:`jevex.locales` adds these arguments for
+a locale.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 from pydantic import TypeAdapter, ValidationError
 
 from jevex.generators.units import spellings
-from jevex.locales import ALL_MONTH_NAMES, THOUSANDS_AFTER_DECIMAL_COMMA
+from jevex.locales import ALL_MONTH_NAMES, ALL_MULTIPLIERS, THOUSANDS_AFTER_DECIMAL_COMMA
 from jevex.results import Alternative, FieldMeta, Source
 
 if TYPE_CHECKING:
@@ -57,7 +58,9 @@ class FunctionNormaliser:
 
 # --- numbers ---------------------------------------------------------------------------
 
-_NUMBER = re.compile(r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|[-+]?\.\d+")
+_POINT_GROUP = "[,'’]"
+"""Thousands separators with a decimal point: a comma, or a Swiss apostrophe."""
+_NUMBER = re.compile(rf"[-+]?(?:\d{{1,3}}(?:{_POINT_GROUP}\d{{3}})+|\d+)(?:\.\d+)?|[-+]?\.\d+")
 _GROUP = f"[{THOUSANDS_AFTER_DECIMAL_COMMA}]"
 _NUMBER_DECIMAL_COMMA = re.compile(
     rf"[-+]?(?:\d{{1,3}}(?:{_GROUP}\d{{3}})+|\d+)(?:,\d+)?|[-+]?,\d+"
@@ -75,12 +78,13 @@ def _number_pattern(decimal: str) -> re.Pattern[str]:
 def _plain_number(text: str, decimal: str) -> str:
     """A matched number with its grouping removed and a decimal point: "1.234,5" → "1234.5"."""
     if decimal == ".":
-        return text.replace(",", "")
+        return re.sub(_POINT_GROUP, "", text)
     return re.sub(_GROUP, "", text).replace(",", ".")
 
 
 def parse_number(value: Any, *, decimal: str = ".") -> int | float:
-    """The first number in ``value``: "18,495" → 18495, "9.1 s" → 9.1, "150PS" → 150.
+    """The first number in ``value``: "18,495" → 18495, "9.1 s" → 9.1, "150PS" → 150,
+    "1’250.50" → 1250.5.
 
     With ``decimal=","``: "18.495" → 18495, "9,1 s" → 9.1.
     """
@@ -199,8 +203,18 @@ _MULTIPLIERS = {
     "bn": 10**9,
     "billion": 10**9,
 }
-_MONEY_MULTIPLIER = r"(?P<mult>(?i:bn|billion|million|thousand|mn)|[kKmM](?![a-zA-Z]))?"
-_MONEY = re.compile(r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?" + _MONEY_MULTIPLIER)
+_OTHER_MULTIPLIERS = "|".join(
+    re.escape(word).replace(r"\ ", r"\s+")
+    for word in sorted(ALL_MULTIPLIERS, key=lambda w: (-len(w), w))
+)
+# Other languages' words first, so "Millionen" isn't read as "million".
+_MONEY_MULTIPLIER = (
+    rf"(?P<mult>(?i:{_OTHER_MULTIPLIERS})(?![^\W\d_])"
+    r"|(?i:bn|billion|million|thousand|mn)|[kKmM](?![a-zA-Z]))?"
+)
+_MONEY = re.compile(
+    rf"(?P<num>\d{{1,3}}(?:{_POINT_GROUP}\d{{3}})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?" + _MONEY_MULTIPLIER
+)
 _MONEY_DECIMAL_COMMA = re.compile(
     rf"(?P<num>\d{{1,3}}(?:{_GROUP}\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?)\s?" + _MONEY_MULTIPLIER
 )
@@ -215,7 +229,10 @@ def parse_money(
     decimal: str = ".",
 ) -> Decimal:
     """An amount as ``Decimal``: "£18,495" → 18495, "£1.5m" / "£1.5 million" → 1500000;
-    with ``decimal=","``, "18.495,50 €" → 18495.50.
+    with ``decimal=","``, "18.495,50 €" → 18495.50 and "1,5 Mio. €" → 1500000.
+
+    Multipliers are English ones plus every language's in :data:`~jevex.locales.MULTIPLIERS`,
+    whatever the page's language.
 
     If the field's unit is a currency code, the amount must be in that currency; jevex
     doesn't convert between currencies.
@@ -233,7 +250,8 @@ def parse_money(
         except InvalidOperation as exc:
             raise NormaliseError(f"bad amount in {value!r}") from exc
         if m.group("mult"):
-            amount *= _MULTIPLIERS[m.group("mult").lower()]
+            word = " ".join(m.group("mult").lower().split())
+            amount *= _MULTIPLIERS.get(word) or ALL_MULTIPLIERS[word]
     wanted = field.unit.upper() if field and field.unit else None
     if wanted in _CURRENCY_UNITS and currency and currency.upper() != wanted:
         raise NormaliseError(f"amount is in {currency}, the field wants {wanted}")
@@ -257,7 +275,9 @@ def parse_date(
 
     ``order`` is ``ymd``/``dmy``/``mdy`` for all-numeric dates (default ``dmy``, en-GB); a
     four-digit first number is always the year. Month names may be in any language in
-    :data:`~jevex.locales.MONTH_NAMES` ("12. März 2024"). ``precision="month"`` gives the
+    :data:`~jevex.locales.MONTH_NAMES` ("12. März 2024", "12 de marzo de 2024"); with
+    several, the one nearest the year counts ("2 years ago, in March 2024": March, not
+    Spanish "ago"). ``precision="month"`` gives the
     1st of the month; ``"year"`` gives an ``int`` year for number fields, or 1 January for
     date fields.
     """
@@ -268,6 +288,8 @@ def parse_date(
     parts = _WORDS.findall(str(value))
     numbers = [int(p) for p in parts if p.isdigit()]
     month_names = [p.lower() for p in parts if not p.isdigit() and p.lower() in ALL_MONTH_NAMES]
+    if len(month_names) > 1:
+        month_names = [_month_nearest_year(parts)]
     try:
         if precision == "year":
             year = next(n for n in numbers if 1000 <= n <= 9999)
@@ -298,6 +320,14 @@ def parse_date(
     except (StopIteration, ValueError) as exc:
         raise NormaliseError(f"not a date: {value!r}") from exc
     raise NormaliseError(f"not a date: {value!r}")
+
+
+def _month_nearest_year(parts: list[str]) -> str:
+    """The month name nearest the first four-digit number (the first name if there's none):
+    other languages' short names are English words ("ago", "set", "mag")."""
+    names = [i for i, p in enumerate(parts) if not p.isdigit() and p.lower() in ALL_MONTH_NAMES]
+    year = next((i for i, p in enumerate(parts) if p.isdigit() and int(p) >= 1000), names[0])
+    return parts[min(names, key=lambda i: (abs(i - year), i))].lower()
 
 
 def _four_digit_year(yy: int) -> int:
