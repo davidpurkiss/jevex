@@ -387,7 +387,8 @@ async def test_an_examples_locale_round_trips_in_its_context(store: Store) -> No
     ("context", "locale"),
     [
         ({"locale": "de-DE"}, "de-DE"),
-        ({"locale": "en_GB"}, "en_GB"),
+        ({"locale": "en_GB"}, "en-GB"),  # canonical, however the context writes it
+        ({"locale": "de-de"}, "de-DE"),
         ({}, None),
         ({"locale": ""}, None),
         ({"locale": "English"}, None),  # not a language tag: not a scope either

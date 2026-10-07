@@ -996,6 +996,77 @@ async def test_a_generator_learned_on_a_german_page_doesnt_run_on_an_english_one
         assert [o.status for o in lrn.outcomes] == ["accepted", "missed_trigger"]
 
 
+UK_PAGE = Document.from_bytes(b'<html lang="en-GB"><p/></html>')
+UNTAGGED = Document.from_bytes(b"%PDF-1.7", content_type="application/pdf")
+DE_PAGE = Document.from_bytes(b'<html lang="de-DE"><p/></html>')
+
+
+def uk_learner(locale: str | None) -> tuple[Extractor, FakeLLM]:
+    fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9.1"})
+    fake = FakeJev().noul(VERIFY, p=0.95).choice(None, pick("9.1"))
+    extractor = Extractor(
+        [Car],
+        jev=fake.client(),
+        pipeline=pipeline(),
+        extraction_llm=fallback_llm,
+        generator_llm=FakeLLM(lambda _p, _s: DRAFT),
+        locale=locale,
+    )
+    return extractor, fallback_llm
+
+
+async def learn_once(extractor: Extractor, document: Document) -> GeneratorSpec:
+    await extractor.extract(document)
+    await extractor.wait_for_learning()
+    lrn = await extractor.learner()
+    assert lrn is not None
+    [outcome] = lrn.outcomes
+    assert outcome.status == "accepted"
+    assert outcome.spec is not None
+    return outcome.spec
+
+
+@pytest.mark.parametrize(("locale", "method"), [("en_GB", "generator"), (None, "llm")])
+async def test_with_the_extractors_locale_a_tagged_pages_generator_runs_on_untagged_ones(
+    locale: str | None, method: str
+) -> None:
+    # A mixed corpus: an en-GB page, then a PDF that says nothing.
+    extractor, fallback_llm = uk_learner(locale)
+    async with extractor:
+        learned = await learn_once(extractor, UK_PAGE)
+        assert learned.scope.locale == "en-GB"
+        pdf = (await extractor.extract(UNTAGGED)).one(Car).meta.zero_to_62_s
+        assert pdf.method == method
+        assert pdf.value == 9.1
+        assert (pdf.generator_id == learned.id) is (method == "generator")
+        german = (await extractor.extract(DE_PAGE)).one(Car).meta.zero_to_62_s
+        assert german.method == "llm"  # a page that says another locale keeps its own
+        assert len(fallback_llm.calls) == (2 if method == "generator" else 3)
+
+
+async def test_a_generator_learned_on_an_untagged_document_is_scoped_to_the_default() -> None:
+    extractor, _ = uk_learner("en-gb")
+    async with extractor:
+        learned = await learn_once(extractor, UNTAGGED)
+        assert learned.scope.locale == "en-GB"
+        store = await extractor.store()
+        assert store is not None
+        [example] = await store.examples(FIELD)
+        assert example.locale == "en-GB"
+        for document, method in [(UK_PAGE, "generator"), (DE_PAGE, "llm")]:
+            meta = (await extractor.extract(document)).one(Car).meta.zero_to_62_s
+            assert meta.method == method
+
+
+async def test_without_a_default_an_untagged_documents_generator_is_unscoped() -> None:
+    extractor, _ = uk_learner(None)
+    async with extractor:
+        learned = await learn_once(extractor, UNTAGGED)
+        assert learned.scope.locale is None
+        meta = (await extractor.extract(DE_PAGE)).one(Car).meta.zero_to_62_s
+        assert meta.method == "generator"  # runs everywhere, German pages included
+
+
 async def test_answers_below_the_learn_threshold_arent_learned() -> None:
     fallback_llm = FakeLLM(lambda _p, _s: {"stated": True, "value": 9.1, "evidence": "9.1"})
     generator_llm = FakeLLM([])

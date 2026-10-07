@@ -417,3 +417,17 @@ def test_the_context_locale_is_the_documents_and_survives_cleaning() -> None:
     ctx.document = BoilerplateCleaner().clean(ctx.document)
     assert ctx.locale == "de-DE"
     assert Context.create(Document.from_bytes(b"<p/>"), [], JevClient(YesBackend())).locale is None
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        (Document.from_bytes(b"<p/>"), "en-GB"),  # says nothing: the default, canonical
+        (Document.from_bytes(b'<html lang="de-de"><p/></html>'), "de-DE"),  # its own wins
+        (Document.from_bytes(b"%PDF-1.7", content_language="fr"), "fr"),
+    ],
+)
+def test_the_context_locale_falls_back_to_the_default(document: Document, expected: str) -> None:
+    ctx = Context.create(document, [], JevClient(YesBackend()))
+    ctx.default_locale = "en_gb"
+    assert ctx.locale == expected
