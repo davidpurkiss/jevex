@@ -104,10 +104,11 @@ extractor's `locale` is the document's, as if the document had said it:
 extractor = Extractor([VehicleSpec], locale="en-GB")
 ```
 
-The other entry points take it too: `jevex eval --locale en-GB` (plain and `--replay`),
-`jevex serve --locale en-GB`, and the Scrapy pipeline's `JEVEX_LOCALE` setting. Each
-checks the tag the way `Extractor` does (`jevex.checked_locale`), so a bad one is a usage
-error or a settings error before anything runs.
+The other entry points take it too: `jevex extract --locale en-GB`, `jevex eval --locale
+en-GB` (plain and `--replay`), `jevex serve --locale en-GB`, and the Scrapy pipeline's
+`JEVEX_LOCALE` setting. Each checks the tag the way `Extractor` does
+(`jevex.checked_locale`), so a bad one is a usage error or a settings error before anything
+runs.
 
 Generators scoped to it run on those documents, and what the learner learns from them is
 scoped to it. It comes before the candidate and statement stages' own `locale`. Without

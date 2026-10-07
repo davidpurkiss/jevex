@@ -228,7 +228,7 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> Extractio
     if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
     try:
-        extractor = Extractor(schemas, jev=jev, threshold=args.threshold)
+        extractor = Extractor(schemas, jev=jev, threshold=args.threshold, locale=args.locale)
     except (ValueError, UnsupportedFieldError) as exc:
         raise CliError(str(exc)) from exc
     # Schemas are checked before the (possibly networked) document load.
@@ -1043,6 +1043,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_probability,
         default=0.0,
         help="Confidence (0–1) below which values become null (default 0: keep everything)",
+    )
+    extract.add_argument(
+        "--locale",
+        type=_locale,
+        metavar="TAG",
+        help=f"{LOCALE_HELP}. The document's own comes first",
     )
     extract.add_argument("--indent", type=int, default=2, help="JSON indent (0 for one line)")
 
