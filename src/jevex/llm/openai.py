@@ -53,13 +53,19 @@ class OpenAILLM:
         client: AsyncOpenAI | None = None,
         instructions: str | None = None,
         prices: dict[str, ModelPrice] | None = None,
+        max_retries: int | None = None,
     ) -> None:
+        """``max_retries`` sets the SDK's retries of transient failures (``None``: its
+        default, or the given client's)."""
         import openai
 
         self.model = model
         self.instructions = instructions
         self.prices = prices or {}
-        self._client = client or openai.AsyncOpenAI()
+        client = client or openai.AsyncOpenAI()
+        self._client = (
+            client.with_options(max_retries=max_retries) if max_retries is not None else client
+        )
 
     async def structured[T: BaseModel](
         self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
@@ -103,7 +109,10 @@ class OpenAILLM:
         if response.output_parsed is None:
             raise LLMError(f"{self.model} returned no structured output")
         return LLMResponse(
-            output=validate_output(schema, response.output_parsed), usage=usage, model=self.model
+            output=validate_output(schema, response.output_parsed),
+            usage=usage,
+            model=self.model,
+            retries=int(getattr(raw, "retries_taken", 0) or 0),
         )
 
     async def aclose(self) -> None:

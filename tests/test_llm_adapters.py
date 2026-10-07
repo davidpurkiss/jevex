@@ -698,3 +698,76 @@ async def test_litellm_sends_images_in_the_openai_chat_format(
         ],
         [{"role": "user", "content": "Title?"}],
     ]
+
+
+# --- retries ---------------------------------------------------------------------------
+
+# A transient failure, then success; ``retry-after-ms`` keeps the SDKs' backoff short.
+BUSY = {"retry-after-ms": "1"}
+
+
+async def test_anthropic_counts_the_retries_its_sdk_took() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx2.Response(529, json={"type": "error"}, headers=BUSY)
+        return httpx2.Response(200, json=message('{"title": "Dune"}'))
+
+    llm = AnthropicLLM(client=anthropic_client(handler), max_retries=1)
+    response = await llm.structured("x", Book)
+    assert (response.output, response.retries, len(calls)) == (Book(title="Dune"), 1, 2)
+
+
+async def test_anthropic_max_retries_zero_gives_up_at_once() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(1)
+        return httpx2.Response(529, json={"type": "error"}, headers=BUSY)
+
+    client = anthropic_client(handler).with_options(max_retries=2)
+    with pytest.raises(LLMError, match="Anthropic API error"):
+        await AnthropicLLM(client=client, max_retries=0).structured("x", Book)
+    assert len(calls) == 1
+
+
+async def test_openai_counts_the_retries_its_sdk_took() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx2.Response(503, json={"error": {"message": "busy"}}, headers=BUSY)
+        return httpx2.Response(200, json=openai_response('{"title": "Dune"}'))
+
+    llm = OpenAILLM("gpt-test", client=openai_client(handler), max_retries=1)
+    response = await llm.structured("x", Book)
+    assert (response.retries, len(calls)) == (1, 2)
+
+
+async def test_gemini_passes_its_retries_with_each_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=gemini_response('{"title": "Dune"}'))
+
+    llm = GeminiLLM("gemini-3.5-flash", client=gemini_client(handler), max_retries=2)
+    seen: list[Any] = []
+    real = llm._client.aio.models.generate_content  # pyright: ignore[reportPrivateUsage]
+
+    async def capture(**kwargs: Any) -> Any:
+        seen.append(kwargs["config"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(llm._client.aio.models, "generate_content", capture)  # pyright: ignore[reportPrivateUsage]
+    response = await llm.structured("x", Book)
+    assert response.retries == 0  # the SDK doesn't say
+    [config] = seen
+    assert config.http_options.retry_options.attempts == 3
+    with pytest.raises(ValueError, match="max_retries must be at least 0"):
+        GeminiLLM("gemini-3.5-flash", client=gemini_client(handler), max_retries=-1)
+
+
+def test_litellm_max_retries_is_its_num_retries() -> None:
+    assert LiteLLM("openai/gpt-test", max_retries=3).completion_kwargs == {"num_retries": 3}
+    assert "num_retries" not in LiteLLM("openai/gpt-test").completion_kwargs

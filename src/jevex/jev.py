@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import re
 import time
 import weakref
@@ -28,7 +29,8 @@ from jevex._spend import ledger_add, ledger_path, ledger_total
 from jevex._tasks import gather
 
 if TYPE_CHECKING:
-    from typesafe_sdk import AsyncTypeSafeClient, NoulCriteria, RetryPolicy
+    from typesafe_sdk import AsyncTypeSafeClient, NoulCriteria
+    from typesafe_sdk import RetryPolicy as SdkRetryPolicy
 
 type JSONContent = str | Mapping[str, Any] | Sequence[Any]
 
@@ -160,6 +162,16 @@ class JevBackendError(JevError):
     """The Jev API failed: bad or missing key, network error, rejected request, 5xx."""
 
 
+class JevTransientError(JevBackendError):
+    """A Jev request failed in a way that may pass on a retry: a timeout, a connection
+    error, a 408, 429 or 5xx. :class:`JevClient` retries it by its :class:`RetryPolicy`;
+    ``retry_after`` (seconds) is the server's ``Retry-After``, if it sent one."""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class JevTokenLimitError(JevBackendError):
     """Jev rejected a request as over its token limits (``max_tokens_exceeded``).
 
@@ -239,6 +251,36 @@ def _charge(usd: float) -> None:
         ledger_add(ledger, "jev", usd, JevError)
 
 
+# --- Retries ---------------------------------------------------------------------------
+
+
+class RetryPolicy(BaseModel):
+    """How :class:`JevClient` retries a request that failed transiently
+    (:class:`JevTransientError`: timeouts, connection errors, 408, 429, 5xx).
+
+    The delay before retry ``n`` (1-based) is ``backoff_initial * 2**(n-1)``, capped at
+    ``backoff_max``, less a random fraction of up to ``backoff_jitter`` of it; a
+    ``Retry-After`` from the server is waited instead when it's longer (up to
+    ``backoff_max``). ``max_retries=0`` turns retries off. Every retry is counted in the
+    usage (``JevUsage.retries``), so results report them.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    max_retries: int = Field(default=2, ge=0)
+    backoff_initial: float = Field(default=0.5, ge=0, allow_inf_nan=False)
+    backoff_max: float = Field(default=5.0, ge=0, allow_inf_nan=False)
+    backoff_jitter: float = Field(default=0.25, ge=0, le=1)
+
+    def delay(self, retry: int, retry_after: float | None = None) -> float:
+        """Seconds to wait before retry number ``retry`` (1-based)."""
+        base = min(self.backoff_initial * 2 ** (retry - 1), self.backoff_max)
+        wait = base * (1 - random.random() * self.backoff_jitter)
+        if retry_after is not None:
+            wait = max(wait, min(retry_after, self.backoff_max))
+        return wait
+
+
 # --- Metering --------------------------------------------------------------------------
 
 
@@ -251,6 +293,8 @@ class JevUsage:
     input_tokens: int = 0
     seconds: float = 0.0
     models: set[str] = field(default_factory=set[str])
+    retries: int = 0
+    """Requests sent again after a transient failure (:class:`RetryPolicy`)."""
 
     @property
     def cost(self) -> float:
@@ -263,6 +307,7 @@ class JevUsage:
         self.input_tokens += other.input_tokens
         self.seconds += other.seconds
         self.models |= other.models
+        self.retries += other.retries
 
 
 # --- Backends --------------------------------------------------------------------------
@@ -277,9 +322,12 @@ class JevBackend(Protocol):
 class TypeSafeBackend:
     """The real Jev API via ``typesafe-sdk``.
 
-    Retries (429, 5xx, timeouts, ``Retry-After``) are handled by the SDK. Reads
-    ``TYPESAFE_API_KEY``, ``TYPESAFE_BASE_URL`` and ``TYPESAFE_DEFAULT_MODEL`` unless
-    a client is passed in.
+    A transient failure (a timeout, a connection error, a 408, 429 or 5xx) is raised as
+    :class:`JevTransientError`, for :class:`JevClient` to retry by its
+    :class:`RetryPolicy` and count. So the client this backend makes has the SDK's own
+    retries off; ``sdk_retry`` (the SDK's ``RetryPolicy``) turns them back on, uncounted.
+    A client passed in keeps its own settings. Reads ``TYPESAFE_API_KEY``,
+    ``TYPESAFE_BASE_URL`` and ``TYPESAFE_DEFAULT_MODEL`` unless a client is passed in.
     """
 
     def __init__(
@@ -287,10 +335,12 @@ class TypeSafeBackend:
         client: AsyncTypeSafeClient | None = None,
         *,
         model: str | None = None,
-        retry: RetryPolicy | None = None,
+        sdk_retry: SdkRetryPolicy | None = None,
     ) -> None:
         from typesafe_sdk import AsyncTypeSafeClient, TypeSafeError
+        from typesafe_sdk import RetryPolicy as SdkRetry
 
+        retry = sdk_retry if sdk_retry is not None else SdkRetry(max_retries=0)
         try:
             self._client = client or AsyncTypeSafeClient(model=model, retry=retry)
         except TypeSafeError as exc:  # e.g. no TYPESAFE_API_KEY
@@ -315,16 +365,21 @@ class TypeSafeBackend:
                 case Score():
                     sdk_questions[key] = SdkScore(instructions=q.instructions, criteria=q.levels)
 
-        from typesafe_sdk import TypeSafeAPIError, TypeSafeError
+        from typesafe_sdk import TypeSafeAPIConnectionError, TypeSafeAPIError, TypeSafeError
 
         try:
             # The SDK's recursive JSON alias reads as partially unknown under strict pyright.
             response = await self._client.system_one(  # pyright: ignore[reportUnknownMemberType]
                 state, sdk_questions, model=self._model
             )
-        except TypeSafeError as exc:  # after the SDK's own retries
+        except TypeSafeError as exc:
             if isinstance(exc, TypeSafeAPIError) and _error_type(exc.body) == TOKEN_LIMIT_ERROR:
                 raise JevTokenLimitError(str(exc)) from exc
+            if isinstance(exc, TypeSafeAPIConnectionError):  # timeouts too
+                raise JevTransientError(str(exc)) from exc
+            if isinstance(exc, TypeSafeAPIError) and _transient_status(exc.status):
+                after = _retry_after(exc.headers.get("retry-after"))
+                raise JevTransientError(str(exc), retry_after=after) from exc
             raise JevBackendError(str(exc)) from exc
 
         answers: dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer] = {}
@@ -344,6 +399,18 @@ class TypeSafeBackend:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _transient_status(status: int) -> bool:
+    return status in (408, 429) or 500 <= status < 600
+
+
+def _retry_after(header: str | None) -> float | None:
+    """A ``Retry-After`` header's seconds (``None`` for an HTTP date or nothing)."""
+    try:
+        return max(0.0, float(header)) if header else None
+    except ValueError:
+        return None
 
 
 TOKEN_LIMIT_ERROR = "max_tokens_exceeded"
@@ -473,7 +540,12 @@ class _Limiter:
 
 
 class JevClient:
-    """Batches questions per state, splits oversized batches and meters every request."""
+    """Batches questions per state, splits oversized batches and meters every request.
+
+    A request that fails transiently (:class:`JevTransientError`) is sent again by
+    ``retry`` (default :class:`RetryPolicy()`: two retries with backoff), and each retry
+    is counted in ``usage.retries``. What still fails after the retries raises.
+    """
 
     def __init__(
         self,
@@ -484,11 +556,13 @@ class JevClient:
         state_token_budget: int = int(MAX_STATE_TOKENS * 0.9),
         usage: JevUsage | None = None,
         max_requests: int | None = None,
+        retry: RetryPolicy | None = None,
         _limiter: _Limiter | None = None,
     ) -> None:
         self.backend = backend
         self.usage = usage if usage is not None else JevUsage()
         self.max_requests = max_requests
+        self.retry = retry if retry is not None else RetryPolicy()
         self._started = 0  # requests begun, so concurrent sends can't pass the cap together
         self._request_budget = request_token_budget
         self._state_budget = state_token_budget
@@ -500,12 +574,17 @@ class JevClient:
         return cls(TypeSafeBackend(model=model), max_concurrency=max_concurrency)
 
     def metered(
-        self, usage: JevUsage | None = None, *, max_requests: int | None = None
+        self,
+        usage: JevUsage | None = None,
+        *,
+        max_requests: int | None = None,
+        retry: RetryPolicy | None = None,
     ) -> JevClient:
         """A client sharing this backend and concurrency limit but with its own usage.
 
         The pipeline takes one per document, so each result reports its own Jev calls.
         ``max_requests`` caps that client's requests (:class:`JevRequestCapError`).
+        ``retry`` replaces this client's retry policy (``None``: keep it).
         """
         return JevClient(
             self.backend,
@@ -513,6 +592,7 @@ class JevClient:
             state_token_budget=self._state_budget,
             usage=usage if usage is not None else JevUsage(),
             max_requests=max_requests,
+            retry=retry if retry is not None else self.retry,
             _limiter=self._limiter,
         )
 
@@ -623,6 +703,23 @@ class JevClient:
                 f"Jev spend cap reached: ${spent:.4f} spent, this request would add "
                 f"~${_token_cost(estimated):.4f}, cap is ${cap:.2f} ({MAX_COST_ENV})"
             )
+        retries = 0
+        while True:
+            try:
+                response = await self._attempt(state, batch, estimated)
+            except JevTransientError as exc:
+                if retries >= self.retry.max_retries:
+                    raise
+                retries += 1
+                self.usage.retries += 1
+                await asyncio.sleep(self.retry.delay(retries, exc.retry_after))
+                continue
+            return response
+
+    async def _attempt(
+        self, state: JSONContent, batch: dict[str, Question], estimated: int
+    ) -> JevResponse:
+        """One request to the backend, metered."""
         async with self._limiter.semaphore():
             start = time.perf_counter()
             try:
@@ -636,8 +733,9 @@ class JevClient:
                 self.usage.input_tokens += estimated
                 self.usage.seconds += time.perf_counter() - start
                 raise
-            except JevTokenLimitError:
-                # Rejected before Jev read it, so nothing is billed, but it was a request.
+            except (JevTokenLimitError, JevTransientError):
+                # Rejected (or lost) before Jev answered, so nothing is billed, but it was
+                # a request.
                 self.usage.requests += 1
                 self.usage.seconds += time.perf_counter() - start
                 raise

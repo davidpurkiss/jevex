@@ -73,7 +73,10 @@ class AnthropicLLM:
         system: str | None = None,
         fallbacks: bool = True,
         prices: dict[str, ModelPrice] | None = None,
+        max_retries: int | None = None,
     ) -> None:
+        """``max_retries`` sets the SDK's retries of transient failures (``None``: its
+        default, or the given client's)."""
         import anthropic
 
         self.model = model
@@ -82,7 +85,10 @@ class AnthropicLLM:
         self.system = system
         self.fallbacks = fallbacks
         self.prices = prices if prices is not None else PRICES
-        self._client = client or anthropic.AsyncAnthropic()
+        client = client or anthropic.AsyncAnthropic()
+        self._client = (
+            client.with_options(max_retries=max_retries) if max_retries is not None else client
+        )
 
     async def structured[T: BaseModel](
         self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
@@ -105,13 +111,17 @@ class AnthropicLLM:
             kwargs["system"] = self.system
         # ``Any``: the beta and GA responses share the fields read below, and ``**kwargs``
         # defeats the SDK's overloads anyway.
+        # The raw response says how many retries the SDK took.
         create: Any = (
-            self._client.beta.messages.create if self.fallbacks else self._client.messages.create
+            self._client.beta.messages.with_raw_response.create
+            if self.fallbacks
+            else self._client.messages.with_raw_response.create
         )
         if self.fallbacks:
             kwargs.update(betas=[FALLBACK_BETA], fallbacks="default")
         try:
-            response: Any = await create(**kwargs)
+            raw: Any = await create(**kwargs)
+            response: Any = await raw.parse()
         except anthropic.APIError as exc:
             raise LLMError(f"Anthropic API error: {exc}") from exc
 
@@ -126,7 +136,12 @@ class AnthropicLLM:
         text = "".join(b.text for b in response.content if b.type == "text")
         if not text:
             raise LLMError(f"{served_by} returned no output (stop: {response.stop_reason})")
-        return LLMResponse(output=validate_output(schema, text), usage=usage, model=served_by)
+        return LLMResponse(
+            output=validate_output(schema, text),
+            usage=usage,
+            model=served_by,
+            retries=int(getattr(raw, "retries_taken", 0) or 0),
+        )
 
     def _usage(self, response: Any, served_by: str) -> LLMUsage:
         """Tokens and cost, summed over every attempt when fallbacks ran.

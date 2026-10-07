@@ -17,6 +17,7 @@ from jevex.jev import (
     JevRequestCapError,
     JevResponse,
     JevTokenLimitError,
+    JevTransientError,
     JSONContent,
     MissingAnswerError,
     Noul,
@@ -31,6 +32,7 @@ from jevex.jev import (
     estimate_tokens,
     truncate_to_tokens,
 )
+from jevex.jev import RetryPolicy as JevRetryPolicy
 
 
 class RecordingBackend:
@@ -679,3 +681,147 @@ async def test_a_request_cancelled_mid_flight_is_still_counted() -> None:
     assert client.usage.input_tokens == estimate_request_tokens(
         "some state", {"q": Noul(instructions="a?")}
     )
+
+
+# --- retries ---------------------------------------------------------------------------
+
+
+class FlakyBackend(RecordingBackend):
+    """Fails transiently ``failures`` times (``retry_after`` on each), then answers."""
+
+    def __init__(self, failures: int, *, retry_after: float | None = None) -> None:
+        super().__init__()
+        self.failures = failures
+        self.retry_after = retry_after
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        if self.failures:
+            self.failures -= 1
+            self.calls.append(list(questions))
+            raise JevTransientError("503 overloaded", retry_after=self.retry_after)
+        return await super().system_one(state, questions)
+
+
+NO_WAIT = JevRetryPolicy(backoff_initial=0)
+
+
+async def test_a_transient_failure_is_retried_and_counted() -> None:
+    backend = FlakyBackend(2)
+    client = JevClient(backend, retry=NO_WAIT)
+    answers = await client.ask("s", {"q": Noul(instructions="?")})
+    assert answers == {"q": NoulAnswer(p=0.9)}
+    assert len(backend.calls) == 3
+    assert (client.usage.retries, client.usage.requests) == (2, 3)
+
+
+async def test_retries_give_up_after_max_retries() -> None:
+    backend = FlakyBackend(5)
+    client = JevClient(backend, retry=NO_WAIT.model_copy(update={"max_retries": 1}))
+    with pytest.raises(JevTransientError, match="503 overloaded"):
+        await client.ask("s", {"q": Noul(instructions="?")})
+    assert len(backend.calls) == 2
+    assert client.usage.retries == 1
+
+
+async def test_other_backend_errors_are_not_retried() -> None:
+    from jevex.jev import JevBackendError
+
+    class Down(RecordingBackend):
+        async def system_one(
+            self, state: JSONContent, questions: Mapping[str, Question]
+        ) -> JevResponse:
+            self.calls.append(list(questions))
+            raise JevBackendError("bad key")
+
+    backend = Down()
+    client = JevClient(backend, retry=NO_WAIT)
+    with pytest.raises(JevBackendError, match="bad key"):
+        await client.ask("s", {"q": Noul(instructions="?")})
+    assert (len(backend.calls), client.usage.retries) == (1, 0)
+
+
+async def test_a_retry_waits_by_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    waits: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    policy = JevRetryPolicy(max_retries=3, backoff_initial=1.0, backoff_jitter=0)
+    await JevClient(FlakyBackend(3), retry=policy).ask("s", {"q": Noul(instructions="?")})
+    assert [w for w in waits if w] == [1.0, 2.0, 4.0]  # the backend's own sleep(0) aside
+
+
+def test_retry_delays() -> None:
+    policy = JevRetryPolicy(backoff_initial=1.0, backoff_max=3.0, backoff_jitter=0)
+    assert [policy.delay(n) for n in (1, 2, 3, 4)] == [1.0, 2.0, 3.0, 3.0]
+    assert policy.delay(1, retry_after=2.5) == 2.5  # the server's wait, when longer
+    assert policy.delay(1, retry_after=60) == 3.0  # but never past backoff_max
+    jittered = JevRetryPolicy(backoff_initial=1.0, backoff_jitter=0.5)
+    assert all(0.5 <= jittered.delay(1) <= 1.0 for _ in range(50))
+    with pytest.raises(ValidationError):
+        JevRetryPolicy(max_retries=-1)
+    assert JevClient(RecordingBackend()).retry == JevRetryPolicy()
+
+
+def test_metered_clients_keep_or_replace_the_retry_policy() -> None:
+    client = JevClient(RecordingBackend(), retry=NO_WAIT)
+    assert client.metered().retry == NO_WAIT
+    other = JevRetryPolicy(max_retries=0)
+    assert client.metered(retry=other).retry == other
+
+
+@pytest.mark.parametrize(
+    ("status", "headers", "retry_after"),
+    [(503, {}, None), (429, {"retry-after": "2"}, 2.0), (408, {"retry-after": "soon"}, None)],
+)
+async def test_transient_api_errors_become_transient_errors(
+    status: int, headers: dict[str, str], retry_after: float | None
+) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status, json={"detail": "busy"}, headers=headers)
+
+    sdk = AsyncTypeSafeClient(
+        api_key="ts-test-key",
+        transport=httpx2.MockTransport(handler),
+        retry=RetryPolicy(max_retries=0),
+    )
+    backend = TypeSafeBackend(sdk)
+    with pytest.raises(JevTransientError) as raised:
+        await backend.system_one("s", _nouls(1))
+    await backend.aclose()
+    assert raised.value.retry_after == retry_after
+
+
+async def test_connection_errors_are_transient() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("refused")
+
+    sdk = AsyncTypeSafeClient(
+        api_key="ts-test-key",
+        transport=httpx2.MockTransport(handler),
+        retry=RetryPolicy(max_retries=0),
+    )
+    backend = TypeSafeBackend(sdk)
+    client = JevClient(backend, retry=NO_WAIT)
+    with pytest.raises(JevTransientError):
+        await client.ask("s", _nouls(1))
+    await backend.aclose()
+    assert client.usage.retries == NO_WAIT.max_retries
+
+
+def test_the_backend_turns_the_sdks_own_retries_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    import typesafe_sdk
+
+    made: list[dict[str, Any]] = []
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            made.append(kwargs)
+
+    monkeypatch.setattr(typesafe_sdk, "AsyncTypeSafeClient", Client)
+    TypeSafeBackend()
+    TypeSafeBackend(sdk_retry=RetryPolicy(max_retries=4))
+    assert [m["retry"].max_retries for m in made] == [0, 4]
