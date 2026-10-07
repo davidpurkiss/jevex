@@ -107,6 +107,7 @@ from jevex.keypaths import (
     FlatBlob,
     KeyPathMapper,
     Leaf,
+    StructuredItem,
     StructuredMode,
     StructuredResult,
     StructuredStage,
@@ -183,6 +184,8 @@ from jevex.resolve import (
     MultiEntity,
     ParentChild,
     SingleEntity,
+    match_label,
+    place_document_values,
 )
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.review import ReviewItem, ReviewQueue, ReviewSink, review_items
@@ -391,6 +394,7 @@ __all__ = [
     "Store",
     "StoreError",
     "StructuredBlob",
+    "StructuredItem",
     "StructuredMode",
     "StructuredResult",
     "StructuredSource",
@@ -447,10 +451,12 @@ __all__ = [
     "locale_conventions",
     "localise_steps",
     "lock_corpus",
+    "match_label",
     "normalise",
     "open_store",
     "pack_generators",
     "pinned_llm",
+    "place_document_values",
     "prepare_input",
     "read_inputs",
     "read_results",

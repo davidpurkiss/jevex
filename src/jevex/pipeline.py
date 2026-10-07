@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from jevex.housekeeping import Housekeeper
     from jevex.interfaces import GateDecision, Learner, ParsedDocument, Selection
     from jevex.jev import ChoiceAnswer, JevClient
+    from jevex.keypaths import StructuredItem
     from jevex.learn import GeneratorSnapshot
     from jevex.llm import LLM
     from jevex.results import FieldMeta
@@ -102,6 +103,12 @@ class SchemaRun:
     """Set by the structured stage in ``merge`` mode: later routes look for every field
     again, and :meth:`offer_field` settles disagreements instead of keeping the first
     value found."""
+    structured_items: list[StructuredItem] = field(default_factory=list["StructuredItem"])
+    """Named objects in the embedded data's arrays and the values each gives (set by the
+    structured stage), so the entity stage can give an entity the values of the object
+    naming it."""
+    structured_rest: dict[str, FieldMeta] = field(default_factory=dict[str, "FieldMeta"])
+    """The embedded data's values from outside :attr:`structured_items`."""
 
     def relevant_components(self) -> set[str] | None:
         """Components that passed the gate for any group; ``None`` if nothing was gated."""
@@ -135,21 +142,29 @@ class SchemaRun:
 
     def needs(self, scope: str, name: str) -> bool:
         """Whether a route should still look for ``name`` in ``scope``: no route found it
-        yet, or routes are merged."""
+        yet, only as a value every entity shares, or routes are merged."""
         existing = self.fields.get(scope, {}).get(name)
-        return self.merge or existing is None or not existing.found
+        return self.merge or existing is None or not existing.found or existing.shared
 
     def offer_field(self, scope: str, name: str, meta: FieldMeta) -> None:
         """Record a route's ``meta`` unless another route already found the field.
 
-        In ``merge`` mode, two found values are weighed instead: the more confident one
-        wins (a value with no confidence, such as a direct read of embedded data, counts
-        as certain; a tie keeps the earlier route's), and the other, if it differs, goes
-        on the winner's ``conflicts``.
+        A value of the entity's own replaces one it shares with every entity (in ``merge``
+        mode the shared one, if it differs, goes on its ``conflicts``). In ``merge`` mode,
+        two found values are otherwise weighed: the more confident one wins (a value with
+        no confidence, such as a direct read of embedded data, counts as certain; a tie
+        keeps the earlier route's), and the other, if it differs, goes on the winner's
+        ``conflicts``.
         """
         existing = self.fields.get(scope, {}).get(name)
         if existing is None or not existing.found:
             self.set_field(scope, name, meta)
+            return
+        if existing.shared and meta.found and not meta.shared:
+            conflicts = list(meta.conflicts)
+            if self.merge and existing.value != meta.value:
+                conflicts.append(_conflict(existing))
+            self.set_field(scope, name, meta.model_copy(update={"conflicts": conflicts}))
             return
         if not self.merge or not meta.found:
             return
@@ -158,14 +173,7 @@ class SchemaRun:
             winner, loser = meta, existing
         conflicts = [*winner.conflicts, *loser.conflicts]
         if loser.value != winner.value:
-            conflicts.append(
-                Conflict(
-                    value=loser.value,
-                    method=loser.method,
-                    confidence=loser.confidence,
-                    source=loser.source,
-                )
-            )
+            conflicts.append(_conflict(loser))
         self.set_field(scope, name, winner.model_copy(update={"conflicts": conflicts}))
 
     @property
@@ -179,6 +187,12 @@ class SchemaRun:
     def finish(self) -> None:
         """Stop later stages working on this schema because it has what it needs."""
         self.finished = True
+
+
+def _conflict(meta: FieldMeta) -> Conflict:
+    return Conflict(
+        value=meta.value, method=meta.method, confidence=meta.confidence, source=meta.source
+    )
 
 
 def _certainty(meta: FieldMeta) -> float:

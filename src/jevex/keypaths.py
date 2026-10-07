@@ -23,7 +23,14 @@
 Mapped values are normalised like any candidate: numbers, money and dates take the chain
 the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
 bool values that don't read directly are asked of Jev as the field's own question. They
-are recorded on the default entity with ``method="structured"``.
+are recorded on the default entity with ``method="structured"``. Each object in an array
+that names itself (:data:`NAME_KEYS`; a JSON-LD ``offers[]`` item called "SE L") also
+gets the values its own leaves give (:class:`StructuredItem`, reusing Jev's readings,
+never asking anything new), as do the leaves outside such objects
+(:attr:`StructuredResult.rest`). Once the entity stage knows a page holds more than one
+entity, it gives each the values of the object naming it and shares the rest
+(:func:`~jevex.resolve.place_document_values`), so there's no "document" record beside
+them.
 
 The stage's :data:`StructuredMode` decides what the layout route (stages 5–13) does next:
 
@@ -65,6 +72,8 @@ from jevex.store import KeyMapping
 from jevex.structured import EmbeddedDataReader, StructuredBlob, schema_type
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
     from jevex.document import Document
     from jevex.interfaces import StructuredExtractor
     from jevex.jev import JevClient, Question, ScoreAnswer
@@ -109,6 +118,10 @@ under Jev's limit because the longest question counts against it too."""
 MEMORY_SIZE = 1024
 """Fingerprint × schema entries a store-less mapper remembers (least recently used go)."""
 
+NAME_KEYS = frozenset({"name", "model", "vehicleconfiguration", "trim", "variant", "title"})
+"""Keys (any case) whose string values name an array's object, so it can be matched to an
+entity (:class:`StructuredItem`)."""
+
 _SKIP_KEYS = frozenset({"@context", "@id"})
 _QUOTE = frozenset(".[]")
 
@@ -127,6 +140,20 @@ class Leaf:
 
 
 @dataclass(frozen=True)
+class Item:
+    """An object in an array (an entity candidate) that names something: ``offers[1]``
+    with ``name: "SE L"``."""
+
+    path: str
+    """With indices: ``offers[1]``."""
+    start: int
+    end: int
+    """Its leaves are the blob's ``leaves[start:end]``, nested objects and arrays included."""
+    names: tuple[str, ...]
+    """String values under :data:`NAME_KEYS`, outside any array nested in the item."""
+
+
+@dataclass(frozen=True)
 class FlatBlob:
     """A blob flattened into leaves, with its shape fingerprint and entity candidates."""
 
@@ -135,6 +162,8 @@ class FlatBlob:
     leaves: tuple[Leaf, ...]
     entities: tuple[str, ...]
     """Collapsed paths of arrays of objects, e.g. ``offers[]`` (entity candidates)."""
+    items: tuple[Item, ...] = ()
+    """The entity candidates' objects that name something, in document order."""
 
     @property
     def fingerprint(self) -> str:
@@ -144,13 +173,17 @@ class FlatBlob:
 
     def shapes(self) -> dict[str, list[Leaf]]:
         """Leaves grouped by collapsed path, in document order."""
-        out: dict[str, list[Leaf]] = {}
-        for leaf in self.leaves:
-            out.setdefault(leaf.shape, []).append(leaf)
-        return out
+        return _by_shape(self.leaves)
 
     def statement_id(self, leaf: Leaf) -> str:
         return f"structured.{self.index}.{leaf.index}"
+
+
+def _by_shape(leaves: Iterable[Leaf]) -> dict[str, list[Leaf]]:
+    out: dict[str, list[Leaf]] = {}
+    for leaf in leaves:
+        out.setdefault(leaf.shape, []).append(leaf)
+    return out
 
 
 def _key(parent: str, key: str) -> str:
@@ -163,33 +196,58 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
     """Leaves of ``blob.data`` with their key paths. ``@context``/``@id`` are skipped."""
     leaves: list[Leaf] = []
     entities: list[str] = []
+    found: list[Item] = []
 
-    def walk(value: Any, path: str, shape: str) -> None:
+    def walk(value: Any, path: str, shape: str, key: str, names: list[str] | None) -> None:
         if isinstance(value, dict):
-            for key, child in value.items():  # pyright: ignore[reportUnknownVariableType]
-                if key in _SKIP_KEYS:
+            for k, child in value.items():  # pyright: ignore[reportUnknownVariableType]
+                if k in _SKIP_KEYS:
                     continue
-                name = str(key)  # pyright: ignore[reportUnknownArgumentType]
-                walk(child, _key(path, name), _key(shape, name))
+                name = str(k)  # pyright: ignore[reportUnknownArgumentType]
+                walk(child, _key(path, name), _key(shape, name), name, names)
         elif isinstance(value, list):
             items: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
             if any(isinstance(item, dict) for item in items) and f"{shape}[]" not in entities:
                 entities.append(f"{shape}[]")
             for i, item in enumerate(items):
-                walk(item, f"{path}[{i}]", f"{shape}[]")
+                if not isinstance(item, dict):
+                    walk(item, f"{path}[{i}]", f"{shape}[]", key, None)
+                    continue
+                start, own = len(leaves), list[str]()
+                walk(item, f"{path}[{i}]", f"{shape}[]", key, own)
+                if own:
+                    found.append(Item(f"{path}[{i}]", start, len(leaves), tuple(own)))
         elif isinstance(value, str | int | float | bool) and not (
             isinstance(value, str) and not value.strip()
         ):
             leaves.append(Leaf(len(leaves), path or "$", shape or "$", value))
+            if names is not None and isinstance(value, str) and key.lower() in NAME_KEYS:
+                names.append(value.strip())
 
-    walk(blob.data, "", "")
-    return FlatBlob(blob, index, tuple(leaves), tuple(entities))
+    walk(blob.data, "", "", "", None)
+    found.sort(key=lambda item: item.start)
+    return FlatBlob(blob, index, tuple(leaves), tuple(entities), tuple(found))
 
 
 def _text(value: str | int | float | bool) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+@dataclass(frozen=True)
+class StructuredItem:
+    """The values one named object in an array gives (a JSON-LD ``offers[]`` item called
+    "SE L"), so the entity stage can give them to the entity it names."""
+
+    path: str
+    """With indices: ``offers[1]``."""
+    names: tuple[str, ...]
+    """What the object calls itself (see :data:`NAME_KEYS`)."""
+    statement_ids: frozenset[str]
+    """The structured statements of its leaves."""
+    fields: dict[str, dict[str, FieldMeta]]
+    """Schema name → field name → meta, read from its leaves only."""
 
 
 @dataclass(frozen=True)
@@ -201,6 +259,10 @@ class StructuredResult:
     """Schema name → field name → meta (on the default entity)."""
     events: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """``(kind, message)`` pairs for document meta."""
+    items: list[StructuredItem] = field(default_factory=list[StructuredItem])
+    """Named objects in arrays, with the values each gives, in document order."""
+    rest: dict[str, dict[str, FieldMeta]] = field(default_factory=dict[str, dict[str, FieldMeta]])
+    """Like :attr:`fields`, read only from leaves in none of :attr:`items`."""
 
 
 def _mappable(schema: SchemaSpec) -> set[str]:
@@ -284,6 +346,8 @@ class KeyPathMapper:
         )
         statements: list[Statement] = []
         fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
+        items: list[StructuredItem] = []
+        rest: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
         for flat, found in zip(flats, per_blob, strict=True):
             statements.extend(
                 Statement(
@@ -298,7 +362,30 @@ class KeyPathMapper:
             for schema_name, metas in found.items():
                 for name, meta in metas.items():
                     _keep_best(fields[schema_name], name, meta)
-        return StructuredResult(statements, fields, events)
+            # Read after every blob's values, so Jev's readings of enum and bool values are
+            # in the mapper's memory: an item or the rest never asks Jev anything new.
+            mapping = mappings[flat.fingerprint]
+            outside = found
+            if flat.items:
+                inside = {i for item in flat.items for i in range(item.start, item.end)}
+                loose = [leaf for leaf in flat.leaves if leaf.index not in inside]
+                outside = await self._blob(flat, schemas, mapping, document, jev, loose, ask=False)
+            for schema_name, metas in outside.items():
+                for name, meta in metas.items():
+                    _keep_best(rest[schema_name], name, meta)
+            for item in flat.items:
+                own = flat.leaves[item.start : item.end]
+                items.append(
+                    StructuredItem(
+                        path=item.path,
+                        names=item.names,
+                        statement_ids=frozenset(flat.statement_id(leaf) for leaf in own),
+                        fields=await self._blob(
+                            flat, schemas, mapping, document, jev, own, ask=False
+                        ),
+                    )
+                )
+        return StructuredResult(statements, fields, events, items, rest)
 
     async def _blob(
         self,
@@ -307,15 +394,20 @@ class KeyPathMapper:
         mappings: dict[str, dict[str, str | None]],
         document: Document,
         jev: JevClient,
+        leaves: Sequence[Leaf] | None = None,
+        *,
+        ask: bool = True,
     ) -> dict[str, dict[str, FieldMeta]]:
-        """One blob's values per schema, given its mappings."""
-        shapes = flat.shapes()
+        """One blob's values per schema, given its mappings: from ``leaves`` only, if
+        given. With ``ask=False``, Jev is never asked; only its remembered readings are
+        used."""
+        shapes = _by_shape(flat.leaves if leaves is None else leaves)
         found: dict[str, dict[str, FieldMeta]] = {}
         for schema in schemas:
             mapping = mappings[schema.name]
             wanted = [(shape, name) for shape, name in mapping.items() if name and shape in shapes]
             metas = await gather(
-                self._meta(schema.field(name), flat, shapes[shape], document, jev)
+                self._meta(schema.field(name), flat, shapes[shape], document, jev, ask=ask)
                 for shape, name in wanted
             )
             mine: dict[str, FieldMeta] = {}
@@ -519,6 +611,8 @@ class KeyPathMapper:
         leaves: list[Leaf],
         document: Document,
         jev: JevClient,
+        *,
+        ask: bool = True,
     ) -> FieldMeta:
         """The field's value from its leaves: the first that reads directly (every one, for
         a list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
@@ -526,7 +620,8 @@ class KeyPathMapper:
         statement: once per distinct value (remembered by the mapper), concurrently, and
         for a single-value field only when no leaf reads directly, for at most
         :data:`MAX_FALLBACK_VALUES` values (a list enum for at most
-        :data:`MAX_LIST_FALLBACK_VALUES`). When nothing works, the error is kept."""
+        :data:`MAX_LIST_FALLBACK_VALUES`). With ``ask=False`` only remembered readings are
+        used. When nothing works, the error is kept."""
         direct: dict[int, Any] = {}
         errors: dict[int, str] = {}
         for i, leaf in enumerate(leaves):
@@ -539,7 +634,9 @@ class KeyPathMapper:
             limit = MAX_FALLBACK_VALUES if not spec.many else MAX_LIST_FALLBACK_VALUES
             raws = list(dict.fromkeys(_text(leaves[i].value) for i in errors))[:limit]
             by_raw = {_text(leaves[i].value): leaves[i] for i in reversed(list(errors))}
-            results = await gather(self._ask_value_cached(spec, by_raw[r], jev) for r in raws)
+            results = await gather(
+                self._ask_value_cached(spec, by_raw[r], jev, ask=ask) for r in raws
+            )
             asked = dict(zip(raws, results, strict=True))
 
         values: list[Any] = []
@@ -579,9 +676,10 @@ class KeyPathMapper:
         )
 
     async def _ask_value_cached(
-        self, spec: FieldSpec, leaf: Leaf, jev: JevClient
+        self, spec: FieldSpec, leaf: Leaf, jev: JevClient, *, ask: bool = True
     ) -> tuple[Any, float] | None:
-        """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated".
+        """Jev's reading of an enum or bool value; ``None`` for other kinds or "not stated",
+        or with ``ask=False`` when it isn't remembered.
 
         Jev's raw answers are remembered, keyed by the exact state and questions sent, so
         a value the template repeats on every page is asked once for the mapper's lifetime
@@ -613,6 +711,8 @@ class KeyPathMapper:
         if key in self._values:
             self._values.move_to_end(key)
             answers = self._values[key]
+        elif not ask:
+            return None
         else:
             answers = await jev.ask(state, questions)
             self._values[key] = answers
@@ -703,8 +803,10 @@ class StructuredStage:
     """Runs a :class:`~jevex.interfaces.StructuredExtractor` (stage 4).
 
     Values are recorded on the default entity of each active schema, and statements on
-    ``ctx.structured``. ``mode`` (a :data:`StructuredMode`) decides whether the layout
-    route then runs for each schema, and for which fields; a schema it skips is
+    ``ctx.structured``; the named objects' values and the rest go on each run's
+    ``structured_items`` and ``structured_rest`` for the entity stage. ``mode`` (a
+    :data:`StructuredMode`) decides whether the layout route then runs for each schema,
+    and for which fields; a schema it skips is
     finished (:meth:`~jevex.pipeline.SchemaRun.finish`) with a ``layout_route_skipped`` event.
     :func:`~jevex.extractor.default_pipeline` builds a fresh stage each time, so the
     mapper's in-memory mappings belong to one pipeline.
@@ -731,6 +833,8 @@ class StructuredStage:
         for kind, message in result.events:
             ctx.event(self.name, kind, message)
         for run in runs:
+            run.structured_items = result.items
+            run.structured_rest = result.rest.get(run.name, {})
             for name, meta in result.fields.get(run.name, {}).items():
                 existing = run.fields.get(SINGLE_ENTITY_LABEL, {}).get(name)
                 if existing is None or not existing.found:

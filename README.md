@@ -29,6 +29,12 @@ from jevex.extractor import default_pipeline
 pipeline = default_pipeline().replace("structured", StructuredStage(mode="fill_gaps"))
 ```
 
+On a page with several entities (a comparison table under `MultiEntity`), embedded values
+don't make a record of their own. A value from an object that names an entity (a JSON-LD
+`offers[]` item called "Kestrova SE L" when a table column is "SE L") goes to that entity.
+The rest (the make, the model) are copied into every entity with `meta.shared` set, and a
+value the layout route finds for the entity itself replaces a shared one.
+
 ## PDFs
 
 PDF layout uses [Docling](https://github.com/docling-project/docling), an optional extra:

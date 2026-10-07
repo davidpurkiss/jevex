@@ -27,9 +27,17 @@ from jevex.entities import EntityScope
 from jevex.extractor import DEFAULT_STAGES, STAGE_ORDER, default_pipeline
 from jevex.interfaces import EntityResolver, ParsedDocument
 from jevex.jev import Choice, Noul
+from jevex.keypaths import StructuredItem, StructuredMode, StructuredStage
 from jevex.layout import LayoutStage
-from jevex.pipeline import Pipeline
-from jevex.resolve import SINGLE_ENTITY_LABEL, EntityStage, SingleEntity
+from jevex.pipeline import Pipeline, SchemaRun
+from jevex.resolve import (
+    SINGLE_ENTITY_LABEL,
+    EntityStage,
+    SingleEntity,
+    match_label,
+    place_document_values,
+)
+from jevex.results import FieldMeta, Source
 from jevex.schema import ALL_OPTION
 from jevex.split import StatementStage
 from jevex.testing import FakeJev
@@ -1206,3 +1214,214 @@ async def test_a_field_holding_one_model_gets_its_first_child() -> None:
     assert car.record.model_dump() == {"model": None, "engine": {"size_cc": 1498}}
     assert car.meta.engine.value == {"size_cc": 1498}
     assert [e.kind for e in result.meta.events] == ["extra_children"]
+
+
+# --- values found for the whole document (embedded data) ------------------------------
+
+
+def test_match_label_prefers_an_exact_name_then_the_longest_label_inside_one() -> None:
+    labels = ["SE", "SE L", "Sport"]
+    assert match_label(["SE"], labels) == "SE"
+    assert match_label(["se-l"], labels) == "SE L"  # case and punctuation are ignored
+    assert match_label(["Kestrova SE L 1.5"], labels) == "SE L"
+    assert match_label(["Kestrova", "SE"], labels) == "SE"  # any of an item's names
+    # A name inside a label isn't enough: "Kestrova" is inside every heading here.
+    assert match_label(["Kestrova"], ["Kestrova SE", "Kestrova SE L"]) is None
+    assert match_label(["SE"], ["Kestrova SE", "Kestrova SE L"]) is None
+    assert match_label(["SE and Sport"], labels) is None  # a tie names nobody
+    assert match_label(["Delivery"], labels) is None
+    assert match_label([], labels) is None
+
+
+def structured(value: object, sid: str) -> FieldMeta:
+    return FieldMeta(value=value, method="structured", source=Source(statement_id=sid))
+
+
+def item(path: str, names: tuple[str, ...], sids: set[str], **values: FieldMeta) -> StructuredItem:
+    return StructuredItem(
+        path=path, names=names, statement_ids=frozenset(sids), fields={"Car": values}
+    )
+
+
+class Car(BaseModel):
+    model: str = Field(description="Model name")
+    price: int = Field(description="Price")
+    doors: int = Field(description="Doors")
+
+
+def car_run(*labels: str) -> SchemaRun:
+    run = SchemaRun(SchemaSpec.from_model(Car))
+    run.scopes = [EntityScope(label=label) for label in labels]
+    return run
+
+
+def test_document_values_go_to_the_entity_an_item_names_and_the_rest_are_shared() -> None:
+    run = car_run("SE", "SE L", "Sport")
+    run.fields[SINGLE_ENTITY_LABEL] = {
+        "model": structured("Kestrova", "s0"),
+        "price": structured(26995, "s2"),  # the first offer's, which names SE L
+        "doors": FieldMeta(method="structured", error="no value"),
+    }
+    run.structured_items = [
+        item("offers[0]", ("Kestrova SE L",), {"s1", "s2"}, price=structured(26995, "s2")),
+        item("offers[1]", ("Delivery",), {"s3", "s4"}, price=structured(750, "s4")),
+        item("offers[2]", ("SE",), {"s5", "s6"}, price=structured(24995, "s6")),
+    ]
+    assert place_document_values(run) == (2, 4)
+    assert SINGLE_ENTITY_LABEL not in run.fields
+    se, se_l, sport = (run.fields[label] for label in ("SE", "SE L", "Sport"))
+    assert (se["price"].value, se["price"].shared) == (24995, False)
+    assert (se_l["price"].value, se_l["price"].shared) == (26995, False)
+    # Sport gets no named offer: the price from the one naming no entity, shared.
+    assert (sport["price"].value, sport["price"].shared) == (750, True)
+    assert all(f["model"].value == "Kestrova" and f["model"].shared for f in (se, se_l, sport))
+    assert all(not f["doors"].found for f in (se, se_l, sport))  # the error goes along
+
+
+def test_a_value_from_outside_every_item_is_shared_before_an_unmatched_items() -> None:
+    run = car_run("SE", "SE L")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
+    run.structured_items = [
+        item("offers[0]", ("SE",), {"s1"}, price=structured(24995, "s1")),
+        item("offers[1]", ("Delivery",), {"s2"}, price=structured(750, "s2")),
+    ]
+    run.structured_rest = {"price": structured(19995, "s9")}
+    place_document_values(run)
+    assert run.fields["SE"]["price"].value == 24995
+    assert (run.fields["SE L"]["price"].value, run.fields["SE L"]["price"].shared) == (
+        19995,
+        True,
+    )
+
+
+def test_a_value_only_matched_items_give_isnt_shared() -> None:
+    run = car_run("SE", "SE L", "Sport")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
+    run.structured_items = [
+        item("trims[0]", ("SE",), {"s1"}, price=structured(24995, "s1")),
+        # Inside a matched item, so not loose, even though it names no entity.
+        item("trims[0].extras[0]", ("Delivery",), {"s1"}, price=structured(24995, "s1")),
+        item("trims[1]", ("SE L",), {"s2"}),  # names SE L but gives no price
+    ]
+    assert place_document_values(run) == (1, 0)
+    assert "price" not in run.fields.get("SE L", {})
+    assert "Sport" not in run.fields
+
+
+def test_with_one_entity_the_documents_values_are_its_own() -> None:
+    run = car_run("listing")
+    run.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
+    assert place_document_values(run) == (1, 0)
+    assert run.fields == {"listing": {"model": structured("Kestrova", "s0")}}
+
+
+def test_nothing_moves_when_the_document_is_a_scope_or_found_nothing() -> None:
+    run = car_run(SINGLE_ENTITY_LABEL)
+    run.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
+    assert place_document_values(run) is None
+    assert list(run.fields) == [SINGLE_ENTITY_LABEL]
+    assert place_document_values(car_run("SE", "SE L")) is None
+    empty = car_run()
+    empty.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
+    assert place_document_values(empty) is None
+
+
+async def test_the_entity_stage_places_document_values_and_reports_it() -> None:
+    c = ctx(Listing, with_parsed=False)
+    c.schemas["Listing"].fields[SINGLE_ENTITY_LABEL] = {"price": structured(18495, "s0")}
+    await EntityStage(resolver=SingleEntity(label="listing")).run(c)
+    assert c.schemas["Listing"].fields["listing"]["price"].value == 18495
+    [event] = c.events
+    assert (event.kind, event.data) == ("document_values_placed", {"matched": 1, "shared": 0})
+    assert event.message == "Listing: 1 value(s) matched to an entity, 0 shared by every entity"
+
+
+class TrimSpec(BaseModel):
+    """A car's technical specification."""
+
+    model: str = Field(description="Model name")
+    price: int = Field(description="Price", unit="GBP")
+    power_ps: int = Field(description="Power", unit="PS")
+
+
+JSON_LD_TABLE_PAGE = """<html><head><script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "Car", "model": "Kestrova",
+ "offers": [{"@type": "Offer", "name": "Kestrova SE L", "price": 26995},
+            {"@type": "Offer", "name": "Delivery", "price": 750}]}
+</script></head><body>
+<h1>Kestrova</h1>
+<table>
+<thead><tr><th></th><th>SE</th><th>SE L</th></tr></thead>
+<tbody>
+<tr><th>Power</th><td>150PS</td><td>180PS</td></tr>
+<tr><th>Price</th><td>£24,995</td><td>£26,495</td></tr>
+</tbody>
+</table></body></html>"""
+
+
+def json_ld_table_jev() -> FakeJev:
+    def pick(name: str) -> Callable[[Choice], str]:
+        return lambda q: name if name in q.options else "none"
+
+    return (
+        FakeJev()
+        .noul("Does this document", p=0.95)
+        .noul("Does this section", p=0.9)
+        .noul("name a separate", p=0.9)
+        .noul("name a separate", p=0.1, state="Power")
+        .choice("key path", "none")
+        .choice('key path "model"', pick("model"))
+        .choice('key path "offers[].price"', pick("price"))
+        .choice("Which detail does this statement", "none")
+        .choice("Which detail does this statement", "power_ps", state="Power")
+        .choice("Which detail does this statement", "price", state="Price")
+        .choice("Which of these", first_option, confidence=0.9)
+    )
+
+
+async def extract_json_ld_table(
+    mode: StructuredMode, fake: FakeJev | None = None
+) -> ExtractionResult:
+    fake = fake or json_ld_table_jev()
+    pipeline = (
+        default_pipeline()
+        .replace("structured", StructuredStage(mode=mode))
+        .replace("entities", EntityStage(resolver=MultiEntity()))
+    )
+    doc = Document.from_bytes(JSON_LD_TABLE_PAGE.encode(), content_type="text/html")
+    async with Extractor([TrimSpec], jev=fake.client(), pipeline=pipeline) as ex:
+        return await ex.extract(doc)
+
+
+async def test_json_ld_on_a_comparison_table_page_fills_the_trims_not_a_document_record() -> None:
+    fake = json_ld_table_jev()
+    result = await extract_json_ld_table("fill_gaps", fake)
+    se, se_l = result.records
+    assert (se.entity, se_l.entity) == ("SE", "SE L")  # no "document" record
+    assert se.record.model_dump() == {"model": "Kestrova", "price": 24995, "power_ps": 150}
+    assert se_l.record.model_dump() == {"model": "Kestrova", "price": 26995, "power_ps": 180}
+    # The model is the page's, shared; SE L's offer names it, so its price is its own.
+    assert se.meta.model.shared
+    assert se_l.meta.model.shared
+    assert se.meta.model.method == "structured"
+    assert (se_l.meta.price.method, se_l.meta.price.shared) == ("structured", False)
+    # SE's shared price (the delivery offer's) lost to its own table cell.
+    assert (se.meta.price.method, se.meta.price.shared) == ("generator", False)
+    assert se.meta.price.conflicts == []
+    # Only SE's price was still wanted from the table.
+    prices = [c.state for c in fake.calls if "Which of these is the price" in str(c.questions)]
+    assert prices == [{"statement": "Price · SE: £24,995", "section": "Kestrova"}]
+    [placed] = [e for e in result.meta.events if e.kind == "document_values_placed"]
+    assert placed.message == ("TrimSpec: 1 value(s) matched to an entity, 3 shared by every entity")
+
+
+async def test_in_merge_mode_a_trims_own_value_beats_the_shared_one_as_a_conflict() -> None:
+    result = await extract_json_ld_table("merge")
+    se, se_l = result.records
+    assert (se.meta.price.value, se.meta.price.method) == (24995, "generator")
+    [conflict] = se.meta.price.conflicts
+    assert (conflict.value, conflict.method) == (750, "structured")
+    # SE L's own embedded price is certain, so it beats the table's.
+    assert (se_l.meta.price.value, se_l.meta.price.method) == (26995, "structured")
+    [conflict] = se_l.meta.price.conflicts
+    assert (conflict.value, conflict.method) == (26495, "generator")

@@ -269,6 +269,36 @@ def test_merge_ties_keep_the_earlier_route_and_agreement_is_no_conflict() -> Non
     assert meta.conflicts == [Conflict(value="Polo", method="jev", confidence=0.8)]
 
 
+def test_an_entitys_own_value_replaces_one_shared_by_every_entity() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car))
+    run.set_field("SE", "model", FieldMeta(value="Golf", method="structured", shared=True))
+    assert run.needs("SE", "model")  # a shared value is still worth looking past
+    run.offer_field(
+        "SE", "model", FieldMeta(value="Polo", confidence=0.4, method="jev", shared=True)
+    )
+    assert run.fields["SE"]["model"].value == "Golf"  # shared doesn't replace shared
+    run.offer_field("SE", "model", FieldMeta(method="jev", error="no value"))
+    assert run.fields["SE"]["model"].value == "Golf"
+    run.offer_field("SE", "model", FieldMeta(value="Polo", confidence=0.4, method="jev"))
+    meta = run.fields["SE"]["model"]
+    # Even a less confident own value wins, and outside merge mode records no conflict.
+    assert (meta.value, meta.shared, meta.conflicts) == ("Polo", False, [])
+    assert not run.needs("SE", "model")
+
+
+def test_in_merge_mode_the_replaced_shared_value_is_a_conflict() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.set_field("SE", "model", FieldMeta(value="Golf", method="structured", shared=True))
+    run.offer_field("SE", "model", FieldMeta(value="Polo", confidence=0.4, method="jev"))
+    meta = run.fields["SE"]["model"]
+    assert (meta.value, meta.method) == ("Polo", "jev")
+    assert meta.conflicts == [Conflict(value="Golf", method="structured")]
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.set_field("SE", "model", FieldMeta(value="Golf", method="structured", shared=True))
+    run.offer_field("SE", "model", FieldMeta(value="Golf", confidence=0.9, method="jev"))
+    assert run.fields["SE"]["model"].conflicts == []  # agreement is no conflict
+
+
 async def test_timing_recorded_even_when_stage_fails() -> None:
     @dataclass
     class Boom:
