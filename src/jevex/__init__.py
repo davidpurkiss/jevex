@@ -156,6 +156,7 @@ from jevex.learn import (
     LearnMode,
     LearnOutcome,
     LearnStage,
+    LearnStatus,
     PackDiff,
     compile_pack,
     example_statement,
@@ -167,6 +168,15 @@ from jevex.locales import (
     html_language,
     locale_conventions,
     localise_steps,
+)
+from jevex.logs import LogContext, log_context
+from jevex.monitoring import (
+    DRIFT_WINDOW,
+    DriftWindow,
+    FieldDrift,
+    Headroom,
+    budget_headroom,
+    store_error,
 )
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
@@ -252,11 +262,13 @@ from jevex.tables import (
     row_roles,
     table_statements,
 )
+from jevex.tracing import resolve_tracer
 
 __version__ = "0.0.1"
 
 __all__ = [
     "BUILTIN_NORMALISERS",
+    "DRIFT_WINDOW",
     "ENTRY_POINT_GROUP",
     "QUARANTINE_AFTER",
     "BBox",
@@ -301,6 +313,7 @@ __all__ = [
     "DocumentStat",
     "DocumentText",
     "DomLocation",
+    "DriftWindow",
     "DuplicateGenerator",
     "DuplicateStatementError",
     "EmbeddedData",
@@ -316,6 +329,7 @@ __all__ = [
     "FallbackStage",
     "FetchError",
     "Field",
+    "FieldDrift",
     "FieldMeta",
     "FieldSpec",
     "FlatBlob",
@@ -330,6 +344,7 @@ __all__ = [
     "GeneratorSpec",
     "GeneratorStats",
     "GeneratorUse",
+    "Headroom",
     "Housekeeper",
     "HtmlLayoutParser",
     "HtmlTextReader",
@@ -356,12 +371,14 @@ __all__ = [
     "LearnMode",
     "LearnOutcome",
     "LearnStage",
+    "LearnStatus",
     "LearnedGenerators",
     "LearningSpend",
     "LearningStoppedError",
     "LocaleConventions",
     "Location",
     "LockCheck",
+    "LogContext",
     "MatchSpec",
     "MultiEntity",
     "NamedItem",
@@ -447,6 +464,7 @@ __all__ = [
     "book_values",
     "books_corpus",
     "bootstrap_interval",
+    "budget_headroom",
     "canonical_locale",
     "charge_usage",
     "check_baseline",
@@ -484,6 +502,7 @@ __all__ = [
     "locale_conventions",
     "localise_steps",
     "lock_corpus",
+    "log_context",
     "match_label",
     "normalise",
     "open_store",
@@ -498,6 +517,7 @@ __all__ = [
     "render_page",
     "render_text",
     "replay",
+    "resolve_tracer",
     "review_items",
     "row_roles",
     "run_baseline",
@@ -508,6 +528,7 @@ __all__ = [
     "section_text",
     "stats_server",
     "status_of",
+    "store_error",
     "stored_generators",
     "summarise_results",
     "table_statements",
