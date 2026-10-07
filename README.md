@@ -71,8 +71,22 @@ pipeline = default_pipeline().replace(
 )
 ```
 
-A vision model plugs in as another `ImageProcessor` passed to `ImageStage(processors=[...])`;
-the statements it returns are tagged `vision`, and so are the values taken from them.
+A vision model can read images too, alongside OCR. It's off by default; pass any LLM
+adapter that reads images (Claude, OpenAI, Gemini) as `vision_llm`:
+
+```python
+from jevex import Extractor
+from jevex.llm.anthropic import AnthropicLLM
+
+extractor = Extractor([VehicleSpec], vision_llm=AnthropicLLM("claude-sonnet-5-5"))
+```
+
+It asks the model for the facts each image shows (one call per image, counted against your
+`budgets` like any LLM call) and adds them as `vision` statements. Values Jev picks from them
+get `method="vision"`, and Jev then checks each one against its statement, as it does the LLM
+fallback's answers: a value that passes is marked `verified`, and one that fails is moved to
+the field's `alternatives`. Your own vision model plugs in as another `ImageProcessor` in
+`ImageStage(processors=[...])`.
 
 ## Locales
 

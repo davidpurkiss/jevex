@@ -250,7 +250,7 @@ class _ExampleEntry(BaseModel):
     value: Any
     evidence: tuple[int, int] | None = None
     context: dict[str, Any] = Field(default_factory=dict[str, Any])
-    source: Literal["llm", "human"] = "llm"
+    source: Literal["llm", "vision", "human"] = "llm"
     probability: float | None = None
     document_source: str | None = None
 

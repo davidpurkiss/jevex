@@ -7,6 +7,7 @@ CI installs both. RapidOCR's models ship in its wheel, so the real OCR test is o
 
 import base64
 import io
+import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -16,9 +17,11 @@ from pydantic import BaseModel
 
 from jevex import (
     BBox,
+    Budgets,
     Component,
     Context,
     DefaultImageLoader,
+    DocBudget,
     Document,
     DomLocation,
     Extractor,
@@ -37,13 +40,24 @@ from jevex import (
     UnreadableImageError,
     text_components,
 )
+from jevex.budgets import DocumentBudget
 from jevex.extractor import STAGE_ORDER, default_pipeline
 from jevex.fetch import FetchError
-from jevex.images import MAX_IMAGES, decode_data_uri, pages_without_text, raster, render_pdf
-from jevex.interfaces import ImageProcessor, ParsedDocument
+from jevex.images import (
+    MAX_IMAGES,
+    VisionOutput,
+    VisionProcessor,
+    decode_data_uri,
+    llm_image,
+    pages_without_text,
+    raster,
+    render_pdf,
+)
+from jevex.interfaces import BudgetedImageProcessor, ImageProcessor, ParsedDocument
 from jevex.jev import Choice
 from jevex.layout import LayoutStage
-from jevex.testing import FakeJev
+from jevex.llm import LLMError, LLMImage, LLMRefusalError
+from jevex.testing import FakeJev, FakeLLM
 
 PDF_FIXTURE = Path(__file__).parent / "fixtures" / "pdf" / "spec.pdf"
 
@@ -630,6 +644,26 @@ async def test_a_price_on_an_image_document_is_extracted() -> None:
     assert questions
 
 
+async def test_a_price_a_vision_model_reads_is_extracted_and_verified() -> None:
+    fake = (
+        FakeJev(default_p=1.0)
+        .choice("Which detail", "price", state="24,995")
+        .choice("Which of these", lambda q: next(o for o in q.options if o != "none"))
+    )
+    model = FakeLLM(lambda _p, _s: {"statements": ["The price is £24,995."]}, price=(1.0, 1.0))
+    pipeline = default_pipeline().replace("images", ImageStage(processors=[]))
+    async with Extractor([Car], jev=fake.client(), pipeline=pipeline, vision_llm=model) as ex:
+        result = await ex.extract(Document.from_bytes(PNG, url="https://cars.test/card.png"))
+    item = result.one(Car)
+    assert item.strict() == Car(price=Decimal("24995"))
+    assert (item.meta.price.method, item.meta.price.verified) == ("vision", True)
+    assert [c.images for c in model.calls] == [(LLMImage(PNG, "image/png"),)]
+    assert result.meta.llm.calls == 1
+    assert result.meta.llm.cost > 0
+    verify = "The statement states that the price (GBP) is 24995."
+    assert verify in [q.instructions for q in fake.questions]
+
+
 # --- RapidOCR (ocr extra) ----------------------------------------------------------------
 
 
@@ -674,3 +708,136 @@ def test_rapidocr_drops_lines_below_min_confidence() -> None:
     out = io.BytesIO()
     picture.save(out, format="PNG")
     assert RapidOcrEngine(min_confidence=1.0).read(out.getvalue()) == []
+
+
+# --- the vision processor --------------------------------------------------------------------
+
+
+def vision_llm(*said: str) -> FakeLLM:
+    return FakeLLM(lambda _p, _s: {"statements": list(said)})
+
+
+async def test_the_vision_processor_asks_for_the_facts_an_image_shows() -> None:
+    model = vision_llm("0-62 mph:  7.9 s", "Boot: 380 litres", "0-62 mph: 7.9 s", "  ")
+    image = image_component(trail=["Golf", "Performance"]).model_copy(
+        update={"text": "Golf  spec card"}
+    )
+    reading = await VisionProcessor(model).process(image, image_data())
+    assert [t.text for t in reading.statements] == ["0-62 mph: 7.9 s", "Boot: 380 litres"]
+    assert reading.text == []
+    [call] = model.calls
+    assert call.schema is VisionOutput
+    assert call.images == (LLMImage(PNG, "image/png"),)
+    assert call.prompt == (
+        "Read this image from a document and list the facts it shows.\n\n"
+        "Section: Golf › Performance\n"
+        "Alt text: Golf spec card\n"
+        "Write each fact as one short statement that names what it describes, in the\n"
+        "language of the image's text, copying numbers, units and names exactly as they "
+        "appear\n"
+        '(for example "0-62 mph: 7.9 s"). Include the text you can read and what its '
+        "tables,\n"
+        "charts and diagrams show. Leave out decoration, and never guess at what you can't "
+        "read.\n"
+        "If the image shows no facts, return no statements."
+    )
+
+
+async def test_the_vision_prompt_can_be_overridden() -> None:
+    model = vision_llm()
+    processor = VisionProcessor(model, prompt="Facts?{section}{alt}")
+    assert await processor.process(image_component(), image_data()) == ImageReading()
+    assert model.calls[0].prompt == "Facts?"
+    assert isinstance(processor, BudgetedImageProcessor)
+    assert isinstance(processor, ImageProcessor)
+
+
+async def test_a_refused_budget_leaves_the_image_without_statements() -> None:
+    model = vision_llm("Boot: 380 litres")
+    budget = DocumentBudget(Budgets(per_document=DocBudget(max_llm_calls=1)))
+    processor = VisionProcessor(model)
+    first = await processor.process_within(image_component(), image_data(), budget)
+    second = await processor.process_within(image_component(), image_data(), budget)
+    assert [len(r.statements) for r in (first, second)] == [1, 0]
+    assert len(model.calls) == 1
+    assert budget.llm_calls == 1
+    assert [e.limit for e in budget.events] == ["max_llm_calls"]
+
+
+async def test_a_failed_vision_call_is_an_unreadable_image() -> None:
+    def fail(_p: str, _s: type[BaseModel]) -> object:
+        raise LLMRefusalError("declined")
+
+    with pytest.raises(UnreadableImageError, match="the vision model failed: declined"):
+        await VisionProcessor(FakeLLM(fail)).process(image_component(), image_data())
+
+
+def test_images_a_model_cant_take_are_converted_to_png() -> None:
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (3, 2), "red").save(out, format="BMP")
+    data = image_data(content=out.getvalue(), content_type="image/bmp")
+    converted = llm_image(data)
+    assert converted.content_type == "image/png"
+    assert Image.open(io.BytesIO(converted.content)).size == (3, 2)
+    assert llm_image(image_data()) == LLMImage(PNG, "image/png")
+    broken = image_data(content=b"BM not really", content_type="image/bmp")
+    with pytest.raises(UnreadableImageError, match="can't convert the image/bmp image"):
+        llm_image(broken)
+
+
+def test_converting_needs_pillow(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    with pytest.raises(UnreadableImageError, match="needs Pillow"):
+        llm_image(image_data(content_type="image/gif"))
+
+
+async def test_vision_llm_on_the_context_adds_a_vision_processor_metered_by_the_budget() -> None:
+    ctx = await html_context(f"<h1>Golf</h1><img src='{PNG_URI}' alt='Spec card'>")
+    model = vision_llm("Boot: 380 litres")
+    ctx.vision_llm = model
+    ctx.budget = DocumentBudget(Budgets(per_document=DocBudget(max_llm_calls=5)))
+    images, ocr = stage(line("Golf GTI", 0, 0, 50, 10))
+    await images.run(ctx)
+    assert ctx.parsed is not None
+    [image] = [c for c in ctx.parsed.root.walk() if c.type == "image"]
+    assert [c.text for c in image.children] == ["Golf GTI", "Boot: 380 litres"]
+    assert [s.kind for s in ctx.parsed.statements.values()] == ["vision"]
+    assert "Alt text: Spec card\n" in model.calls[0].prompt
+    assert ctx.budget.llm_calls == 1
+    assert len(ocr.seen) == 1
+
+
+async def test_vision_llm_alone_reads_images_without_ocr() -> None:
+    ctx = await html_context(f"<img src='{PNG_URI}'>")
+    ctx.vision_llm = vision_llm("A red hatchback")
+    await ImageStage(processors=[]).run(ctx)
+    assert ctx.parsed is not None
+    assert [s.text for s in ctx.parsed.statements.values()] == ["A red hatchback"]
+    assert ctx.events == []
+
+
+async def test_a_stage_with_its_own_vision_processor_doesnt_get_a_second() -> None:
+    ctx = await html_context(f"<img src='{PNG_URI}'>")
+    mine, theirs = vision_llm("Mine"), vision_llm("Theirs")
+    ctx.vision_llm = theirs
+    await ImageStage(processors=[VisionProcessor(mine)]).run(ctx)
+    assert (len(mine.calls), len(theirs.calls)) == (1, 0)
+
+
+async def test_one_processor_failing_keeps_what_the_others_read() -> None:
+    def fail(_p: str, _s: type[BaseModel]) -> object:
+        raise LLMError("HTTP 529 overloaded")
+
+    ctx = await html_context(f"<img src='{PNG_URI}'>")
+    ctx.vision_llm = FakeLLM(fail)
+    images, _ = stage(line("Golf GTI", 0, 0, 50, 10))
+    await images.run(ctx)
+    assert ctx.parsed is not None
+    [image] = [c for c in ctx.parsed.root.walk() if c.type == "image"]
+    assert [c.text for c in image.children] == ["Golf GTI"]
+    [event] = ctx.events
+    assert event.kind == "images_unread"
+    assert event.data["images"] == {image.id: "the vision model failed: HTTP 529 overloaded"}

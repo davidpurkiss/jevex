@@ -215,6 +215,22 @@ class ImageProcessor(Protocol):
 
 
 @runtime_checkable
+class BudgetedImageProcessor(ImageProcessor, Protocol):
+    """An :class:`ImageProcessor` that spends the document's LLM budget (a vision model,
+    such as :class:`~jevex.images.VisionProcessor`).
+
+    The image stage calls :meth:`process_within` with ``ctx.budget`` instead of
+    :meth:`process`, so the processor's LLM calls go through ``budget.call_llm`` and count
+    against the same per-document and run budgets as the fallback's. When a budget says
+    no, return what was read without the model (often nothing).
+    """
+
+    async def process_within(
+        self, image: Component, data: ImageData, budget: DocumentBudget
+    ) -> ImageReading: ...
+
+
+@runtime_checkable
 class ComponentGate(Protocol):
     """The ids of components relevant to each field group, per schema.
 

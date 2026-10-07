@@ -34,6 +34,7 @@ from jevex.generators import GeneratorRegistry, default_registry
 from jevex.interfaces import Selection
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, JSONContent, NoulAnswer
 from jevex.layout import section_text
+from jevex.pipeline import vision_values
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 
@@ -432,3 +433,9 @@ def _record_direct(
             shared=not own,
         ),
     )
+    if spec.many:
+        given = [(o.statement, v, None) for o in ordered for v in o.values]
+    else:
+        given = [(best.statement, value, None)]
+    if checks := vision_values(given):
+        run.vision_values[(scope, spec.name)] = checks

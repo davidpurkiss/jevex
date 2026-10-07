@@ -21,7 +21,7 @@ from jevex.locales import document_locale
 from jevex.results import Conflict
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
 
     from jevex.budgets import DocumentBudget
     from jevex.document import Document
@@ -34,8 +34,33 @@ if TYPE_CHECKING:
     from jevex.llm import LLM
     from jevex.results import FieldMeta
     from jevex.schema import FieldSpec, SchemaSpec
-    from jevex.statements import Candidate, Statement
+    from jevex.statements import Candidate, Span, Statement
     from jevex.store import Store, VerifiedExample
+
+
+@dataclass(frozen=True)
+class VisionValue:
+    """A value (a list field's item) that only a vision model's statement gave, waiting
+    for the fallback stage to verify it. ``span`` is the candidate's, when it had one."""
+
+    statement_id: str
+    value: Any
+    span: Span | None = None
+
+
+def vision_values(given: Iterable[tuple[Statement, Any, Span | None]]) -> list[VisionValue]:
+    """Of the values a route offers, as ``(statement, value, span)`` for each statement
+    that gave one, those only vision statements gave, once each, in order: a value that
+    a document's own text states too needs no check."""
+    given = list(given)
+    stated = [value for statement, value, _ in given if statement.kind != "vision"]
+    out: list[VisionValue] = []
+    for statement, value, span in given:
+        if statement.kind != "vision" or value in stated:
+            continue
+        if not any(v.statement_id == statement.id and v.value == value for v in out):
+            out.append(VisionValue(statement.id, value, span))
+    return out
 
 
 @runtime_checkable
@@ -86,6 +111,12 @@ class SchemaRun:
     """Keyed by (scope label, field name): ids of the generators whose candidates are in
     the value the normalise stage offered (every accepted pick for a list field). Whether
     that value stood is up to :attr:`fields`."""
+    vision_values: dict[tuple[str, str], list[VisionValue]] = field(
+        default_factory=dict[tuple[str, str], list[VisionValue]]
+    )
+    """Keyed by (scope label, field name): the values (a list field's items) in what the
+    select or normalise stage offered that only vision statements gave. The fallback
+    stage verifies them, if the offered value stood (:mod:`jevex.fallback`)."""
     values: dict[str, dict[str, Any]] = field(default_factory=dict[str, dict[str, Any]])
     """Bare values by scope label, then field name, for stages with no metadata to give.
     Used only when ``fields`` has no entry for that field."""
@@ -233,8 +264,13 @@ class Context:
     extraction_llm: LLM | None = None
     """The extractor's ``extraction_llm``: the fallback stage asks it where Jev's selection
     failed. ``None`` turns the fallback off."""
+    vision_llm: LLM | None = None
+    """The extractor's ``vision_llm``: the image stage adds a
+    :class:`~jevex.images.VisionProcessor` over it. ``None``: only the stage's own
+    processors read images."""
     verified: list[VerifiedExample] = field(default_factory=list["VerifiedExample"])
-    """LLM answers that passed Jev verification on this document, queued for learning."""
+    """LLM and vision answers that passed Jev verification on this document, queued for
+    learning."""
     learner: Learner | None = None
     """The extractor's learner (a ``GeneratorLearner`` with a ``generator_llm``, or an
     ``ExampleLogger`` in ``compile`` mode): the learn stage hands it :attr:`verified`.

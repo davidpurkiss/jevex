@@ -22,22 +22,23 @@ import types
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Union, cast, get_args, get_origin
 
 from pydantic import TypeAdapter, ValidationError
 
 from jevex.generators.units import spellings
 from jevex.locales import ALL_MONTH_NAMES, ALL_MULTIPLIERS, THOUSANDS_AFTER_DECIMAL_COMMA
+from jevex.pipeline import vision_values
 from jevex.results import Alternative, FieldMeta, Source
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from jevex.interfaces import Selection
-    from jevex.pipeline import Context, SchemaRun
+    from jevex.pipeline import Context, SchemaRun, VisionValue
     from jevex.results import Method
     from jevex.schema import FieldSpec
-    from jevex.statements import Candidate, NormaliserStep
+    from jevex.statements import Candidate, NormaliserStep, Span, Statement
 
 
 class NormaliseError(ValueError):
@@ -527,11 +528,13 @@ class NormaliseStage:
             for (scope, field_name), picks in grouped.items():
                 if not run.needs(scope, field_name):
                     continue
-                meta, generator_ids = self._field_meta(
+                meta, generator_ids, checks = self._field_meta(
                     ctx, run, field_name, picks, shared=run.shared_statements(scope)
                 )
                 run.offer_field(scope, field_name, meta)
                 run.value_generators[(scope, field_name)] = generator_ids
+                if checks:
+                    run.vision_values[(scope, field_name)] = checks
 
     def _field_meta(
         self,
@@ -541,9 +544,9 @@ class NormaliseStage:
         picks: list[tuple[str, Selection]],
         *,
         shared: set[str],
-    ) -> tuple[FieldMeta, set[str]]:
-        """The field's meta, and the ids of the generators whose candidates are in its
-        value."""
+    ) -> tuple[FieldMeta, set[str], list[VisionValue]]:
+        """The field's meta, the ids of the generators whose candidates are in its value,
+        and the values in it only vision statements gave."""
         field = run.spec.field(field_name)
         # The entity's own statements outrank those it shares with every entity.
         ranked = sorted(picks, key=lambda p: (p[0] in shared, -p[1].confidence))
@@ -580,6 +583,7 @@ class NormaliseStage:
                     error="; ".join(errors),
                 ),
                 set(),
+                [],
             )
 
         best_id, best, _, best_value = accepted[0]
@@ -594,6 +598,12 @@ class NormaliseStage:
                         items.append(item)
             best_value = items
         used = accepted if field.many else accepted[:1]
+        given: list[tuple[Statement, Any, Span | None]] = []
+        for statement_id, _, candidate, v in used:
+            statement = ctx.parsed.statements.get(statement_id) if ctx.parsed else None
+            if statement is not None:
+                items = cast("list[Any]", v) if field.many and isinstance(v, list) else [v]
+                given.extend((statement, item, candidate.span) for item in items)
         return (
             FieldMeta(
                 value=best_value,
@@ -609,6 +619,7 @@ class NormaliseStage:
                 shared=from_shared,
             ),
             {c.generator_id for _, _, c, _ in used},
+            vision_values(given),
         )
 
 

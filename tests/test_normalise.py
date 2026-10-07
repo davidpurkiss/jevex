@@ -34,6 +34,7 @@ from jevex.normalise import (
     run_chain,
     strip,
 )
+from jevex.pipeline import VisionValue
 from jevex.results import FieldMeta
 from jevex.testing import FakeJev
 
@@ -795,3 +796,34 @@ async def test_values_from_a_vision_statement_are_tagged_vision() -> None:
     await NormaliseStage().run(ctx)
     meta = run.fields["doc"]["zero_to_62_s"]
     assert (meta.value, meta.method) == (9.1, "vision")
+    span = Span(start=21, end=26)
+    assert run.vision_values == {("doc", "zero_to_62_s"): [VisionValue("s1", 9.1, span)]}
+
+
+async def test_list_items_only_vision_statements_give_are_left_to_verify() -> None:
+    said = statement("s1", "Seen: red, grey").model_copy(update={"kind": "vision"})
+    text = statement("s2", "Painted red")
+    ctx = context(said, text)
+    run = ctx.schemas["Car"]
+    red, grey = pick(said, "red", 0.9), pick(said, "grey", 0.9)
+    run.selections[("doc", "colours", "s1")] = red.model_copy(
+        update={"accepted": [red.candidate, grey.candidate]}
+    )
+    run.selections[("doc", "colours", "s2")] = pick(text, "red", 0.8)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["colours"].value == ["red", "grey"]
+    assert run.vision_values == {
+        ("doc", "colours"): [VisionValue("s1", "grey", Span(start=11, end=15))]
+    }
+
+
+async def test_values_from_text_statements_need_no_vision_check() -> None:
+    a = statement("s1", "0-62 mph in 9.1 s")
+    said = statement("s2", "The dial reads 9.4 s").model_copy(update={"kind": "vision"})
+    ctx = context(a, said)
+    run = ctx.schemas["Car"]
+    run.selections[("doc", "zero_to_62_s", "s1")] = pick(a, "9.1 s", 0.9, "parse_number")
+    run.selections[("doc", "zero_to_62_s", "s2")] = pick(said, "9.4 s", 0.6, "parse_number")
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["zero_to_62_s"].method == "generator"
+    assert run.vision_values == {}

@@ -28,6 +28,7 @@ from jevex.interfaces import LLMExtractor, ParsedDocument, Selection
 from jevex.jev import ChoiceAnswer, Noul
 from jevex.layout import Component
 from jevex.llm import LLMError
+from jevex.pipeline import VisionValue
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.statements import Candidate
 from jevex.testing import FakeJev, FakeLLM
@@ -550,3 +551,177 @@ async def test_extraction_llm_turns_the_fallback_on_and_is_metered() -> None:
     assert item.meta.zero_to_62_s.method == "llm"
     assert result.meta.llm.calls == 1
     assert result.meta.llm.cost > 0
+
+
+# --- vision values -------------------------------------------------------------------------
+
+
+def seen(sid: str, text: str = "The 0-62 mph time is 9.1 s.") -> Statement:
+    return st(sid, text).model_copy(update={"kind": "vision"})
+
+
+def from_vision(
+    ctx: Context, name: str, value: Any, items: list[VisionValue], *, confidence: float = 0.95
+) -> None:
+    """Leave what the normalise (or select) stage would have for a vision value."""
+    run = ctx.schemas["Car"]
+    statement = ctx.parsed.statements[items[0].statement_id] if ctx.parsed else None
+    assert statement is not None
+    for scope in run.scopes:
+        run.set_field(
+            scope.label,
+            name,
+            FieldMeta(
+                value=value,
+                confidence=confidence,
+                method="vision",
+                source=Source(statement_id=statement.id, statement=statement.text),
+                alternatives=[Alternative(value=8.0, raw="8", p=0.02)],
+            ),
+        )
+        run.vision_values[(scope.label, name)] = items
+
+
+VISION_SPAN = Span(start=21, end=24)
+
+
+async def test_a_verified_vision_value_stays_marked_verified_without_an_llm() -> None:
+    fake = FakeJev(strict=True).noul(VERIFY, p=0.9, state="9.1 s")
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1, VISION_SPAN)])
+    await FallbackStage().run(ctx)
+    [call] = fake.calls
+    assert call.questions == {"Car.zero_to_62_s/vision0": Noul(instructions=VERIFY)}
+    m = meta(ctx)
+    assert (m.value, m.method, m.verified, m.confidence) == (9.1, "vision", True, 0.9)
+    [example] = ctx.verified
+    assert (example.field, example.value, example.source) == ("Car.zero_to_62_s", 9.1, "vision")
+    assert (example.statement, example.evidence, example.probability) == (
+        "The 0-62 mph time is 9.1 s.",
+        (21, 24),
+        0.9,
+    )
+    assert example.context["kind"] == "vision"
+    assert ctx.events == []
+
+
+async def test_verification_never_raises_a_vision_values_confidence() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.99)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)], confidence=0.7)
+    await FallbackStage().run(ctx)
+    assert (meta(ctx).confidence, meta(ctx).verified) == (0.7, True)
+
+
+async def test_a_rejected_vision_value_becomes_an_alternative_and_an_event() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.3)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1, VISION_SPAN)])
+    await FallbackStage().run(ctx)
+    m = meta(ctx)
+    assert (m.found, m.method, m.verified) == (False, None, None)
+    assert m.alternatives == [
+        Alternative(value=9.1, raw="9.1", p=0.3),
+        Alternative(value=8.0, raw="8", p=0.02),
+    ]
+    assert ctx.verified == []
+    [event] = ctx.events
+    assert (event.stage, event.kind) == ("fallback", "vision_rejected")
+    assert event.data == {
+        "schema": "Car",
+        "field": "zero_to_62_s",
+        "statement_id": "v1",
+        "value": 9.1,
+        "p": 0.3,
+    }
+
+
+async def test_a_rejected_vision_value_leaves_the_field_to_the_llm_fallback() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.3, state="9.1 s.").noul(VERIFY, p=0.9, state="seconds")
+    ctx = context(fake, [seen("v1"), st("s1")], {"v1": "zero_to_62_s", "s1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)])
+    ctx.extraction_llm = llm(value=9.1, evidence="9.1 seconds")
+    await FallbackStage().run(ctx)
+    m = meta(ctx)
+    assert (m.value, m.method, m.verified) == (9.1, "llm", True)
+    assert m.source is not None
+    assert m.source.statement_id == "s1"
+
+
+async def test_list_fields_verify_only_the_items_vision_alone_gave() -> None:
+    fake = FakeJev().noul('"GTI"', p=0.9).noul('"R"', p=0.2)
+    statements = [seen("v1", "Trims: SE, GTI and R."), st("s1", "Choose the SE.")]
+    ctx = context(fake, statements, {"v1": "trims", "s1": "trims"})
+    from_vision(
+        ctx,
+        "trims",
+        ["SE", "GTI", "R"],
+        [VisionValue("v1", "GTI", Span(start=11, end=14)), VisionValue("v1", "R")],
+    )
+    await FallbackStage().run(ctx)
+    [call] = fake.calls
+    assert call.questions == {
+        "Car.trims/vision0": Noul(
+            instructions='Does the statement give "GTI" as one of the trim names?'
+        ),
+        "Car.trims/vision1": Noul(
+            instructions='Does the statement give "R" as one of the trim names?'
+        ),
+    }
+    m = meta(ctx, "trims")
+    assert (m.value, m.verified, m.confidence) == (["SE", "GTI"], True, 0.9)
+    assert Alternative(value="R", raw=None, p=0.2) in m.alternatives
+    assert [(e.value, e.evidence) for e in ctx.verified] == [("GTI", (11, 14))]
+
+
+async def test_a_list_left_with_no_items_is_emptied() -> None:
+    fake = FakeJev().noul('"GTI"', p=0.1)
+    ctx = context(fake, [seen("v1", "Trims: GTI.")], {"v1": "trims"})
+    from_vision(ctx, "trims", ["GTI"], [VisionValue("v1", "GTI")])
+    await FallbackStage().run(ctx)
+    assert not meta(ctx, "trims").found
+
+
+async def test_a_bool_vision_value_is_verified_as_a_claim() -> None:
+    claim = "The statement says it has an automatic gearbox."
+    fake = FakeJev(strict=True).noul(claim, p=0.95)
+    ctx = context(fake, [seen("v1", "Automatic gearbox.")], {"v1": "automatic"})
+    from_vision(ctx, "automatic", True, [VisionValue("v1", True)])
+    await FallbackStage().run(ctx)
+    assert [q.instructions for q in fake.questions] == [claim]
+    assert meta(ctx, "automatic").verified is True
+
+
+async def test_a_vision_value_is_asked_about_once_for_every_scope_sharing_it() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.9)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"}, scopes=("a", "b"))
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)])
+    await FallbackStage().run(ctx)
+    [call] = fake.calls
+    assert len(call.questions) == 1
+    assert meta(ctx, scope="a").verified is True
+    assert meta(ctx, scope="b").verified is True
+    assert len(ctx.verified) == 1
+
+
+async def test_vision_values_that_no_longer_stand_are_left_alone() -> None:
+    fake = FakeJev(strict=True)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    run = ctx.schemas["Car"]
+    # Embedded data won a merge: its value stands, not the vision one.
+    run.set_field("doc", "zero_to_62_s", FieldMeta(value=9.1, method="structured"))
+    run.vision_values[("doc", "zero_to_62_s")] = [VisionValue("v1", 9.1)]
+    # A list the vision item was taken out of.
+    run.set_field("doc", "trims", FieldMeta(value=["SE"], method="generator"))
+    run.vision_values[("doc", "trims")] = [VisionValue("v1", "GTI")]
+    await FallbackStage().run(ctx)
+    assert fake.calls == []
+    assert meta(ctx).verified is None
+
+
+async def test_a_custom_verify_threshold_applies_to_vision_values() -> None:
+    fake = FakeJev().noul(VERIFY, p=0.6)
+    ctx = context(fake, [seen("v1")], {"v1": "zero_to_62_s"})
+    from_vision(ctx, "zero_to_62_s", 9.1, [VisionValue("v1", 9.1)])
+    await FallbackStage(verify_threshold=0.5).run(ctx)
+    assert meta(ctx).verified is True

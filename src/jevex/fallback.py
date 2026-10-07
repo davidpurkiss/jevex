@@ -30,6 +30,22 @@ statement in one request:
 Every dropped or rejected answer is reported as a ``fallback`` event. LLM calls go
 through ``ctx.budget.call_llm``, so when a budget is hit the remaining fields keep their
 Jev answers and the hit is in ``meta.budget_events``.
+
+**Vision values** (spec: *Image stage*) are verified the same way, with or without an
+LLM, before anything is asked of one. A value Jev picked from a vision model's statement
+(``method="vision"``; for a list field, each item only vision statements gave,
+:attr:`~jevex.pipeline.SchemaRun.vision_values`) gets the same Noul against that
+statement, one request per statement:
+
+- ``p >= verify_threshold``: the value stays, with ``verified=True`` and its confidence
+  lowered to ``p`` if that's less, and is added to ``Context.verified`` for learning
+  (``source="vision"``).
+- Otherwise it is dropped and listed in the field's ``alternatives`` with its
+  verification probability (a ``vision_rejected`` event). A field left empty is then
+  one the LLM fallback may ask about.
+
+Jev reads only the statement, not the image, so this checks that the value is what the
+model's statement says, not that the statement is true of the image.
 """
 
 from __future__ import annotations
@@ -56,7 +72,7 @@ if TYPE_CHECKING:
     from jevex.interfaces import LLMExtractor
     from jevex.jev import Question
     from jevex.llm import LLM
-    from jevex.pipeline import Context, SchemaRun
+    from jevex.pipeline import Context, SchemaRun, VisionValue
     from jevex.schema import FieldSpec
     from jevex.statements import Statement
 
@@ -66,7 +82,12 @@ Provisional: the spec's open questions set the defaults from eval runs."""
 FALLBACK_THRESHOLD = 0.5
 """Selection confidence below which the LLM is asked. Provisional, like the others."""
 VERIFY_THRESHOLD = 0.8
-"""Verification probability at or above which an LLM answer is accepted. Provisional."""
+"""Verification probability at or above which an LLM answer (or a vision value) is
+accepted. Provisional."""
+
+SELECTED = frozenset({"jev", "generator", "vision"})
+"""Methods of the values the select and normalise stages record: a vision value is only
+checked while one of theirs stands (not, say, embedded data that won a merge)."""
 
 Trigger = Literal["no_candidates", "none_chosen", "low_confidence"]
 
@@ -220,6 +241,7 @@ class FallbackStage:
                 raise ValueError(f"{label} must be between 0 and 1, got {value}")
 
     async def run(self, ctx: Context) -> None:
+        await self._verify_vision(ctx)
         extractor = self.extractor
         if extractor is None and ctx.extraction_llm is not None:
             extractor = LLMFieldExtractor(ctx.extraction_llm)
@@ -236,6 +258,117 @@ class FallbackStage:
         checked = [a for a in asks if a.values]
         await self._verify(ctx, checked)
         self._record(ctx, checked)
+
+    async def _verify_vision(self, ctx: Context) -> None:
+        """Verify the vision values that stand (see the module docstring)."""
+        checks = _vision_checks(ctx)
+        if not checks or ctx.parsed is None:
+            return
+        statements = ctx.parsed.statements
+        questions: dict[str, dict[str, Question]] = {}
+        keys: dict[tuple[str, str, str, str], str] = {}
+        for check in checks:
+            for item in check.items:
+                ident = check.ident(item)
+                if ident in keys:
+                    continue
+                asked = questions.setdefault(item.statement_id, {})
+                key = f"{check.run.name}.{check.spec.name}/vision{len(asked)}"
+                spec = check.spec
+                asked[key] = (
+                    spec.member_question(item.value)
+                    if spec.many
+                    else spec.verify_question(item.value)
+                )
+                keys[ident] = key
+        ids = list(questions)
+        replies = await gather(
+            ctx.jev.ask(statement_state(statements[sid]), questions[sid]) for sid in ids
+        )
+        p: dict[tuple[str, str, str, str], float] = {}
+        for sid, reply in zip(ids, replies, strict=True):
+            for ident, key in keys.items():
+                if ident[0] == sid:
+                    answer = reply[key]
+                    assert isinstance(answer, NoulAnswer)
+                    p[ident] = answer.p
+        queued: set[str] = set()
+        for check in checks:
+            item_p = [p[check.ident(item)] for item in check.items]
+            for example in self._settle_vision(ctx, check, item_p):
+                if example.id not in queued:
+                    queued.add(example.id)
+                    ctx.verified.append(example)
+
+    def _settle_vision(
+        self, ctx: Context, check: _VisionCheck, item_p: list[float]
+    ) -> list[VerifiedExample]:
+        """Keep or drop one field's vision values (``item_p``: each one's verification
+        probability); the examples of the ones kept."""
+        meta, spec = check.meta, check.spec
+        statements = ctx.parsed.statements if ctx.parsed else {}
+        kept: list[tuple[VisionValue, float]] = []
+        dropped: list[tuple[VisionValue, float]] = []
+        for item, p in zip(check.items, item_p, strict=True):
+            (kept if p >= self.verify_threshold else dropped).append((item, p))
+        rejected: list[Alternative] = []
+        for item, p in dropped:
+            statement = statements[item.statement_id]
+            raw = item.span.of(statement.text) if item.span else None
+            rejected.append(Alternative(value=item.value, raw=raw, p=p))
+            ctx.event(
+                self.name,
+                "vision_rejected",
+                f"{check.run.name}.{spec.name} on {item.statement_id}: Jev didn't verify "
+                f"{item.value!r} (p={p:.2f})",
+                schema=check.run.name,
+                field=spec.name,
+                statement_id=item.statement_id,
+                value=item.value,
+                p=p,
+            )
+        current: list[Any] = cast("list[Any]", meta.value) if spec.many else [meta.value]
+        gone = [item.value for item, _ in dropped]
+        value: Any = [v for v in current if v not in gone]
+        if not spec.many:
+            value = value[0] if value else None
+        if value is None or value == []:
+            check.run.set_field(
+                check.scope,
+                spec.name,
+                FieldMeta(
+                    alternatives=sorted([*meta.alternatives, *rejected], key=lambda a: -a.p),
+                    conflicts=meta.conflicts,
+                ),
+            )
+            return []
+        update: dict[str, Any] = {"value": value}
+        if rejected:
+            update["alternatives"] = _ranked([*meta.alternatives, *rejected], value)
+        if kept:
+            least = min(p for _, p in kept)
+            confidence = meta.confidence
+            update["confidence"] = least if confidence is None else min(confidence, least)
+            update["verified"] = True
+        check.run.set_field(check.scope, spec.name, meta.model_copy(update=update))
+        field_key = f"{check.run.name}.{spec.name}"
+        examples: list[VerifiedExample] = []
+        for item, p in kept:
+            statement = statements[item.statement_id]
+            examples.append(
+                VerifiedExample(
+                    id=example_id(field_key, statement.text, item.value),
+                    field=field_key,
+                    statement=statement.text,
+                    value=item.value,
+                    evidence=(item.span.start, item.span.end) if item.span else None,
+                    context=example_context(statement, ctx.locale),
+                    source="vision",
+                    probability=p,
+                    document_source=ctx.document.source,
+                )
+            )
+        return examples
 
     def needs(self, run: SchemaRun, scope: str, name: str) -> bool:
         """Whether a field still wants the LLM: not found yet, or found by a route with a
@@ -353,6 +486,40 @@ class FallbackStage:
                 grouped.setdefault((ask.run.name, scope, ask.spec.name), []).append(ask)
         for (schema, scope, name), found in grouped.items():
             _settle(ctx, ctx.schemas[schema], scope, name, found)
+
+
+@dataclass
+class _VisionCheck:
+    """One field of one scope whose value has vision values to verify."""
+
+    run: SchemaRun
+    scope: str
+    spec: FieldSpec
+    meta: FieldMeta
+    items: list[VisionValue]
+
+    def ident(self, item: VisionValue) -> tuple[str, str, str, str]:
+        """The question an item needs, the same for every scope that shares it."""
+        return (item.statement_id, self.run.name, self.spec.name, repr(item.value))
+
+
+def _vision_checks(ctx: Context) -> list[_VisionCheck]:
+    """The fields whose standing value holds vision values not yet verified."""
+    statements = ctx.parsed.statements if ctx.parsed else {}
+    checks: list[_VisionCheck] = []
+    for run in ctx.active:
+        for (scope, name), items in run.vision_values.items():
+            meta = run.fields.get(scope, {}).get(name)
+            if meta is None or not meta.found or meta.verified is not None:
+                continue
+            if meta.method not in SELECTED:
+                continue
+            spec = run.spec.field(name)
+            current: list[Any] = cast("list[Any]", meta.value) if spec.many else [meta.value]
+            pending = [i for i in items if i.value in current and i.statement_id in statements]
+            if pending:
+                checks.append(_VisionCheck(run, scope, spec, meta, pending))
+    return checks
 
 
 def _settle(ctx: Context, run: SchemaRun, scope: str, name: str, found: list[_Ask]) -> None:
