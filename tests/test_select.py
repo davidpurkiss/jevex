@@ -13,6 +13,7 @@ from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
 from jevex.learn import GeneratorSnapshot
 from jevex.normalise import NormaliseStage
+from jevex.pipeline import VisionValue
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
     CandidateStage,
@@ -625,3 +626,14 @@ async def test_answers_from_a_vision_statement_are_tagged_vision() -> None:
     await run_both(ctx)
     meta = ctx.schemas["Car"].fields["doc"]["fuel_type"]
     assert (meta.value, meta.method) == ("diesel", "vision")
+    assert ctx.schemas["Car"].vision_values == {("doc", "fuel_type"): [VisionValue("s1", "diesel")]}
+
+
+async def test_list_options_a_text_statement_also_gives_need_no_vision_check() -> None:
+    fake = FakeJev(default_p=0.05).noul('"red"', p=0.9).noul('"grey"', p=0.9, state="Grey")
+    said = st("s1", "Grey and red paint").model_copy(update={"kind": "vision"})
+    ctx = context(fake, [said, st("s2", "In red")], {"s1": "colours", "s2": "colours"})
+    await run_both(ctx)
+    run = ctx.schemas["Car"]
+    assert run.fields["doc"]["colours"].value == ["grey", "red"]
+    assert run.vision_values == {("doc", "colours"): [VisionValue("s1", "grey")]}

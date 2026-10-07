@@ -100,6 +100,7 @@ from jevex.images import (
     OcrProcessor,
     RapidOcrEngine,
     UnreadableImageError,
+    VisionProcessor,
     text_components,
 )
 from jevex.interfaces import LLMAnswer
@@ -411,6 +412,7 @@ __all__ = [
     "UnsupportedDocumentError",
     "ValueStat",
     "VerifiedExample",
+    "VisionProcessor",
     "__version__",
     "baseline_instructions",
     "blank_rows",

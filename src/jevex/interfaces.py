@@ -15,7 +15,7 @@ Stage order and default implementations (spec: *Pipeline architecture*):
  3    DocumentGate           Noul per schema                #12
  4    StructuredExtractor    JSON-LD, microdata, app state  #29, #30
  5    LayoutParser           HTML segmenter; Docling (PDF)  #13, #24
- 6    ImageProcessor         OCR                            #26
+ 6    ImageProcessor         OCR; opt-in VisionProcessor    #26, #147
  7    ComponentGate          Noul per component × group     #14
  8    StatementSplitter      by component type              #15
  9    EntityResolver         Single-, Multi-, ParentChild   #21, #27, #28
@@ -212,6 +212,22 @@ class ImageProcessor(Protocol):
     """
 
     async def process(self, image: Component, data: ImageData) -> ImageReading: ...
+
+
+@runtime_checkable
+class BudgetedImageProcessor(ImageProcessor, Protocol):
+    """An :class:`ImageProcessor` that spends the document's LLM budget (a vision model,
+    such as :class:`~jevex.images.VisionProcessor`).
+
+    The image stage calls :meth:`process_within` with ``ctx.budget`` instead of
+    :meth:`process`, so the processor's LLM calls go through ``budget.call_llm`` and count
+    against the same per-document and run budgets as the fallback's. When a budget says
+    no, return what was read without the model (often nothing).
+    """
+
+    async def process_within(
+        self, image: Component, data: ImageData, budget: DocumentBudget
+    ) -> ImageReading: ...
 
 
 @runtime_checkable

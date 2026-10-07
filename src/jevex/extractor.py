@@ -453,6 +453,7 @@ class Extractor:
         store: Store | str | Path | None = None,
         run_id: str | None = None,
         extraction_llm: LLM | None = None,
+        vision_llm: LLM | None = None,
         generator_llm: LLM | None = None,
         learn_threshold: float = LEARN_THRESHOLD,
         learn_mode: LearnMode = "inline",
@@ -480,6 +481,11 @@ class Extractor:
         ``extraction_llm`` turns on the LLM fallback (:mod:`jevex.fallback`): where Jev's
         selection fails, the LLM is asked for the value and its evidence, and Jev verifies
         the answer before it is used. Off (``None``) by default.
+
+        ``vision_llm`` (an adapter that reads images) turns on the vision processor
+        (:class:`~jevex.images.VisionProcessor`): the image stage asks it for the facts
+        each image shows, alongside OCR, and values Jev picks from those statements are
+        verified like the fallback's. Its calls count against ``budgets``. Off by default.
 
         ``generator_llm`` turns on learning (:mod:`jevex.learn`): fallback answers Jev
         verified with probability ``>= learn_threshold`` are turned into generators in
@@ -555,6 +561,7 @@ class Extractor:
         self._owns_store = False
         self._store_lock: asyncio.Lock | None = None
         self.extraction_llm = extraction_llm
+        self.vision_llm = vision_llm
         self.generator_llm = generator_llm
         self.learn_threshold = learn_threshold
         self._learned: LearnedGenerators | None = None
@@ -786,6 +793,7 @@ class Extractor:
         ctx.budget = budget
         ctx.store = await self.store()
         ctx.extraction_llm = self.extraction_llm
+        ctx.vision_llm = self.vision_llm
         learner = await self.learner()
         if learner is None and self.learn_mode == "compile":
             store = await self.store()

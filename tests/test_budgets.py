@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +20,7 @@ from jevex import (
 )
 from jevex.budgets import period_start
 from jevex.jev import JevBackendError, Noul
-from jevex.llm import LLMResponse, LLMUsage, reset_process_llm_cost
+from jevex.llm import LLMImage, LLMResponse, LLMUsage, reset_process_llm_cost
 from jevex.pipeline import Context, SchemaRun, for_each_schema
 from jevex.store import SpendEntry, SQLiteStore, StoreError
 from jevex.testing import FakeJev, FakeLLM
@@ -62,7 +62,9 @@ class ScriptedLLM:
         self.delay = delay
         self.calls = 0
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         self.calls += 1
         await asyncio.sleep(self.delay)
         output = schema.model_validate({"title": "Dune"})
@@ -543,3 +545,46 @@ async def test_no_budgets_and_no_store_opens_nothing() -> None:
     assert await ex.store() is None
     result = await ex.extract(doc())
     assert result.meta.budget_events == []
+
+
+# --- images --------------------------------------------------------------------------------
+
+PICTURE = LLMImage(b"\x89PNG", "image/png")
+
+
+class TextOnlyLLM:
+    """An LLM written before images: no ``images`` argument."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def structured(self, prompt: str, schema: type[Title]) -> LLMResponse[Title]:
+        self.calls += 1
+        return LLMResponse(Title(title="Dune"), LLMUsage(10, 5, 0.001), "old")
+
+
+async def test_images_go_to_the_llm_and_the_call_is_metered_like_any_other(
+    store: SQLiteStore,
+) -> None:
+    fake = llm(price=(1_000_000, 1_000_000))
+    budgets = Budgets(per_document=DocBudget(max_llm_calls=1), run=RunBudget(max_spend=100.0))
+    budget = DocumentBudget(budgets, ledger(store, max_spend=100.0))
+    assert await budget.call_llm(fake, "Title?", Title, images=[PICTURE]) is not None
+    assert await budget.call_llm(fake, "Title?", Title, images=[PICTURE]) is None
+    [call] = fake.calls
+    assert call.images == (PICTURE,)
+    assert budget.llm_spend > 0
+    assert await store.spend(kind="llm") == pytest.approx(budget.llm_spend)
+    assert [e.limit for e in budget.events] == ["max_llm_calls"]
+
+    response = await ledger(store, max_spend=100.0).call_llm(fake, "x", Title, images=[PICTURE])
+    assert response is not None
+    assert fake.calls[-1].images == (PICTURE,)
+
+
+async def test_a_text_only_llm_still_serves_calls_without_images() -> None:
+    old = TextOnlyLLM()
+    response = await DocumentBudget().call_llm(old, "Title?", Title)  # pyright: ignore[reportArgumentType]
+    assert response is not None
+    assert await RunLedger().call_llm(old, "Title?", Title) is not None  # pyright: ignore[reportArgumentType]
+    assert old.calls == 2

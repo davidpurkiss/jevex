@@ -17,7 +17,12 @@ like any other.
   documents, and makes no requests of its own unless asked to.
 - **Reading.** Every :class:`~jevex.interfaces.ImageProcessor` reads every loaded image.
   The default, :class:`OcrProcessor`, runs OCR (:class:`RapidOcrEngine`, ``ocr`` extra).
-  A vision-model plugin is a processor that returns statements.
+  A vision model is a processor that returns statements. jevex ships one, opt-in:
+  :class:`VisionProcessor`, which asks any :class:`~jevex.llm.LLM` adapter that reads
+  images (Claude, OpenAI, Gemini) for the facts an image shows. ``Extractor(vision_llm=)``
+  adds it alongside OCR. A :class:`~jevex.interfaces.BudgetedImageProcessor`, as it is,
+  gets the document's budget, so its calls count against the same budgets and ledger as
+  any other LLM call (:mod:`jevex.budgets`).
 - **Text becomes components.** Text read from an image is parsed into child components
   of the image (:func:`text_components`): lines in reading order, wrapped lines joined into
   paragraphs, and a short line clearly taller than the rest as a heading that opens a
@@ -25,7 +30,8 @@ like any other.
   them like any paragraph; their sentences are ``ocr`` statements.
 - **Vision statements** are taken as they are: each becomes a ``vision`` statement on a
   paragraph child of its own (so the component gate sees its text), and isn't split
-  again. Values selected from one are recorded with ``method="vision"``.
+  again. Values selected from one are recorded with ``method="vision"``, and the fallback
+  stage has Jev verify them like an LLM's answers (:mod:`jevex.fallback`).
 
 Everything found in an image has an :class:`~jevex.layout.ImageLocation`: the image's URL
 or PDF page, plus the bbox of its line (on a PDF page, in page points; otherwise in the
@@ -33,7 +39,9 @@ image's pixels). A ``data:`` image has no URL worth repeating, so its ``src`` is
 the component id still points at the image.
 
 An image that can't be read (a broken ``data:`` URI, a failed fetch, bytes that aren't a
-raster image) is recorded in an ``images_unread`` event and skipped. With no processor
+raster image) is recorded in an ``images_unread`` event and skipped. So is a processor
+that fails on an image (a vision model's API error), but what the other processors read
+in it is kept. With no processor
 (the ``ocr`` extra isn't installed and none was given) the stage only records
 ``images_skipped``.
 """
@@ -55,10 +63,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from jevex import _pdfium
 from jevex._tasks import gather
+from jevex.budgets import DocumentBudget
 from jevex.document import sniff_content_type
 from jevex.fetch import FetchError
-from jevex.interfaces import ParsedDocument
-from jevex.layout import BBox, Component, ImageLocation, PageLocation
+from jevex.interfaces import BudgetedImageProcessor, ParsedDocument
+from jevex.layout import BBox, Component, ImageLocation, PageLocation, section_text
+from jevex.llm import IMAGE_TYPES, LLMError, LLMImage
 from jevex.split import cut_statement, is_key_value
 from jevex.statements import Statement
 
@@ -70,6 +80,7 @@ if TYPE_CHECKING:
     from jevex.document import Document
     from jevex.interfaces import Fetcher, ImageProcessor
     from jevex.layout import ComponentType
+    from jevex.llm import LLM
     from jevex.pipeline import Context
 
 RASTER_TYPES = frozenset(
@@ -357,6 +368,87 @@ class OcrProcessor:
         return ImageReading(text=await asyncio.to_thread(self.engine.read, data.content))
 
 
+VISION_PROMPT = """\
+Read this image from a document and list the facts it shows.
+
+{section}{alt}Write each fact as one short statement that names what it describes, in the
+language of the image's text, copying numbers, units and names exactly as they appear
+(for example "0-62 mph: 7.9 s"). Include the text you can read and what its tables,
+charts and diagrams show. Leave out decoration, and never guess at what you can't read.
+If the image shows no facts, return no statements."""
+"""The default prompt for :class:`VisionProcessor`. Placeholders: ``section``
+(``"Section: ...\\n"`` or empty) and ``alt`` (``"Alt text: ...\\n"`` or empty)."""
+
+
+class VisionOutput(BaseModel):
+    """What :class:`VisionProcessor` asks the model for."""
+
+    statements: list[str] = Field(description="The facts the image shows, one statement each")
+
+
+@dataclass(frozen=True)
+class VisionProcessor:
+    """An opt-in :class:`~jevex.interfaces.BudgetedImageProcessor`: a vision model, any
+    :class:`~jevex.llm.LLM` adapter that reads images, lists the facts each image shows.
+
+    One call per image, with the image, its heading trail and alt text, through the
+    document's ``budget.call_llm``: when a budget says no, the image gets no statements
+    (OCR, if it runs too, still reads it). The model's statements become ``vision``
+    statements; Jev picks values from them like any other and the fallback stage verifies
+    those values. An image that isn't PNG, JPEG or WebP is converted to PNG first, which
+    needs Pillow (the ``ocr`` extra has it). A failed call (an API error, a refusal) is
+    raised as :class:`UnreadableImageError`, so the stage records it and moves on.
+    """
+
+    llm: LLM
+    prompt: str = VISION_PROMPT
+
+    async def process(self, image: Component, data: ImageData) -> ImageReading:
+        """Read ``image`` with only the process-wide LLM cap: the image stage calls
+        :meth:`process_within` instead."""
+        return await self.process_within(image, data, DocumentBudget())
+
+    async def process_within(
+        self, image: Component, data: ImageData, budget: DocumentBudget
+    ) -> ImageReading:
+        picture = await asyncio.to_thread(llm_image, data)
+        section = section_text(image.heading_trail)
+        alt = " ".join(image.text.split())
+        prompt = self.prompt.format(
+            section=f"Section: {section}\n" if section else "",
+            alt=f"Alt text: {alt}\n" if alt else "",
+        )
+        try:
+            response = await budget.call_llm(self.llm, prompt, VisionOutput, images=[picture])
+        except LLMError as exc:
+            raise UnreadableImageError(f"the vision model failed: {exc}") from exc
+        if response is None:
+            return ImageReading()
+        said = dict.fromkeys(" ".join(s.split()) for s in response.output.statements)
+        return ImageReading(statements=[ImageText(text=text) for text in said if text])
+
+
+def llm_image(data: ImageData) -> LLMImage:
+    """``data`` as an image every LLM adapter takes: as it is when it's PNG, JPEG or WebP,
+    else converted to PNG (the first frame of a GIF) with Pillow."""
+    if data.content_type in IMAGE_TYPES:
+        return LLMImage(data.content, data.content_type)
+    try:
+        from PIL import Image, UnidentifiedImageError
+    except ImportError:
+        raise UnreadableImageError(
+            f"sending {data.content_type} to a vision model needs Pillow to convert it "
+            "(install jevex[ocr])"
+        ) from None
+    try:
+        with Image.open(io.BytesIO(data.content)) as picture:
+            out = io.BytesIO()
+            picture.convert("RGBA").save(out, format="PNG")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise UnreadableImageError(f"can't convert the {data.content_type} image: {exc}") from exc
+    return LLMImage(out.getvalue(), "image/png")
+
+
 # --- Text to components ------------------------------------------------------------------
 
 HEADING_SCALE = 1.4
@@ -580,7 +672,7 @@ class _Read:
     image: Component
     data: ImageData | None = None
     readings: list[ImageReading] = field(default_factory=list[ImageReading])
-    error: str | None = None
+    errors: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -589,9 +681,10 @@ class ImageStage:
 
     ``processors`` default to OCR when the ``ocr`` extra is installed, and to none
     otherwise. Add a vision model by passing it alongside:
-    ``ImageStage(processors=[OcrProcessor(), MyVisionModel()])``. At most ``max_images``
-    images are read per document, in reading order; an ``images_capped`` event counts the
-    rest.
+    ``ImageStage(processors=[OcrProcessor(), VisionProcessor(llm)])``, or with
+    ``Extractor(vision_llm=llm)``, which adds a :class:`VisionProcessor` over
+    ``ctx.vision_llm`` (unless the stage already has one). At most ``max_images`` images
+    are read per document, in reading order; an ``images_capped`` event counts the rest.
     """
 
     processors: list[ImageProcessor] = field(default_factory=_default_processors)
@@ -607,7 +700,8 @@ class ImageStage:
         document = ctx.document
         if ctx.parsed is None and not document.is_image:
             return
-        if not self.processors:
+        processors = self._processors(ctx)
+        if not processors:
             root = ctx.parsed.root if ctx.parsed else _image_document_root(document)
             count = sum(c.type == "image" for c in root.walk())
             if count:
@@ -638,9 +732,10 @@ class ImageStage:
                 unread=len(images) - self.max_images,
             )
             images = images[: self.max_images]
-        reads = await gather(self._read(image, document) for image in images)
+        budget = ctx.budget or DocumentBudget()
+        reads = await gather(self._read(image, document, processors, budget) for image in images)
 
-        unread = {r.image.id: r.error for r in reads if r.error is not None}
+        unread = {r.image.id: "; ".join(r.errors) for r in reads if r.errors}
         if unread:
             ctx.event(
                 self.name,
@@ -648,7 +743,7 @@ class ImageStage:
                 f"{len(unread)} image(s) couldn't be read",
                 images=unread,
             )
-        not_loaded = [r.image.id for r in reads if r.data is None and r.error is None]
+        not_loaded = [r.image.id for r in reads if r.data is None and not r.errors]
         if not_loaded:
             ctx.event(
                 self.name,
@@ -660,6 +755,14 @@ class ImageStage:
         for read in reads:
             if read.data is not None:
                 self._attach(parsed, read.image, read.data, read.readings)
+
+    def _processors(self, ctx: Context) -> list[ImageProcessor]:
+        processors = list(self.processors)
+        if ctx.vision_llm is not None and not any(
+            isinstance(p, VisionProcessor) for p in processors
+        ):
+            processors.append(VisionProcessor(ctx.vision_llm))
+        return processors
 
     def _images(self, root: Component, scanned: list[int]) -> list[Component]:
         """The images to read, in reading order. Each ``scanned`` PDF page (no text layer)
@@ -685,15 +788,34 @@ class ImageStage:
             )
         ]
 
-    async def _read(self, image: Component, document: Document) -> _Read:
+    async def _read(
+        self,
+        image: Component,
+        document: Document,
+        processors: list[ImageProcessor],
+        budget: DocumentBudget,
+    ) -> _Read:
         read = _Read(image)
         try:
             read.data = await self.loader.load(image, document)
-            if read.data is not None:
-                data = read.data
-                read.readings = await gather(p.process(image, data) for p in self.processors)
         except UnreadableImageError as exc:
-            read.error = str(exc)
+            read.errors.append(str(exc))
+        if read.data is None:
+            return read
+        data = read.data
+
+        async def run(processor: ImageProcessor) -> ImageReading | None:
+            try:
+                if isinstance(processor, BudgetedImageProcessor):
+                    return await processor.process_within(image, data, budget)
+                return await processor.process(image, data)
+            except UnreadableImageError as exc:
+                # One processor failing (a vision model's API error) leaves the others'.
+                read.errors.append(str(exc))
+                return None
+
+        readings = await gather(run(p) for p in processors)
+        read.readings = [r for r in readings if r is not None]
         return read
 
     def _attach(

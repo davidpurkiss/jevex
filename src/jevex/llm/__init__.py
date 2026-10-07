@@ -3,9 +3,14 @@
 Every adapter implements one small protocol::
 
     class LLM(Protocol):
-        async def structured(self, prompt: str, schema: type[T]) -> LLMResponse[T]: ...
+        async def structured(
+            self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+        ) -> LLMResponse[T]: ...
 
-``LLMResponse`` carries the validated output plus token usage and its cost. Adapters live
+``LLMResponse`` carries the validated output plus token usage and its cost. ``images``
+(:class:`LLMImage`: PNG, JPEG or WebP bytes) go with the prompt to a vision model, for the
+opt-in vision processor (:class:`~jevex.images.VisionProcessor`); callers pass them only
+when there are some, so an LLM used only for text may leave the argument out. Adapters live
 in extras: ``jevex.llm.anthropic`` (``jevex[anthropic]``), ``jevex.llm.openai``
 (``jevex[openai]``), ``jevex.llm.gemini`` (``jevex[gemini]``) and ``jevex.llm.litellm``
 (``jevex[litellm]``, which covers any provider LiteLLM supports, including local Ollama).
@@ -20,15 +25,19 @@ It's a backstop; per-document and per-run budgets are #34.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
 from jevex._spend import ledger_add, ledger_path, ledger_total
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 ANTHROPIC_MODEL = "claude-opus-5-5"
 """Default model: strongest, for generator synthesis (``generator_llm``)."""
@@ -128,9 +137,41 @@ class LLMResponse[T: BaseModel]:
     model: str
 
 
+IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
+"""Image types every adapter can send (Claude, OpenAI and Gemini all read them)."""
+
+
+@dataclass(frozen=True)
+class LLMImage:
+    """An image sent with a prompt: encoded bytes and their media type, one of
+    :data:`IMAGE_TYPES`."""
+
+    content: bytes
+    content_type: str
+
+    def __post_init__(self) -> None:
+        if self.content_type not in IMAGE_TYPES:
+            raise ValueError(
+                f"an LLM image must be one of {sorted(IMAGE_TYPES)}, got {self.content_type!r}"
+            )
+
+    @property
+    def base64(self) -> str:
+        return base64.b64encode(self.content).decode("ascii")
+
+    @property
+    def data_uri(self) -> str:
+        return f"data:{self.content_type};base64,{self.base64}"
+
+
 @runtime_checkable
 class LLM(Protocol):
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]: ...
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
+        """``schema``'s output for ``prompt``, with ``images`` (if any) shown to the model
+        before it. Raise :class:`LLMError` when the call fails."""
+        ...
 
 
 class LLMError(Exception):
@@ -202,10 +243,12 @@ def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:
 __all__ = [
     "ANTHROPIC_FAST_MODEL",
     "ANTHROPIC_MODEL",
+    "IMAGE_TYPES",
     "LLM",
     "PRICES",
     "LLMBudgetExceededError",
     "LLMError",
+    "LLMImage",
     "LLMRefusalError",
     "LLMResponse",
     "LLMUsage",

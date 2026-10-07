@@ -84,7 +84,8 @@ class VerifiedExample(BaseModel):
 
     ``evidence`` is the ``(start, end)`` character span of the value in ``statement``.
     ``context`` holds whatever the learner needs to replay it (:func:`example_context`:
-    heading trail, statement kind, the document's locale). ``source`` is who verified it;
+    heading trail, statement kind, the document's locale). ``source`` is where the value
+    came from: the LLM fallback, a vision model (both verified by Jev) or a human reviewer;
     ``document_source`` is where the statement came from (:attr:`jevex.Document.source`),
     so the learner runs the generators scoped to that source on it. ``None`` when unknown:
     then no source-scoped generator runs on it.
@@ -98,7 +99,7 @@ class VerifiedExample(BaseModel):
     value: Any
     evidence: tuple[int, int] | None = None
     context: dict[str, Any] = Field(default_factory=dict[str, Any])
-    source: Literal["llm", "human"] = "llm"
+    source: Literal["llm", "vision", "human"] = "llm"
     probability: float | None = None
     created_at: datetime = Field(default_factory=utcnow)
     document_source: str | None = None
