@@ -25,9 +25,10 @@ on: affected fields keep the best Jev answer or stay ``None``. Every hit is repo
 
 **For stage authors** the one entry point is :meth:`DocumentBudget.call_llm` (on
 ``ctx.budget``): it checks the budgets, makes the call and records its cost, and returns
-``None`` when a budget says no. Code that runs outside a document (the learner, #38) uses
-:meth:`RunLedger.call_llm`, which applies only the run budget. Every other method is used
-by the extractor and changes the ledger.
+``None`` when a budget says no. A call with ``images`` (a vision model reading a
+picture, :class:`~jevex.images.VisionProcessor`) is metered like any other. Code that
+runs outside a document (the learner, #38) uses :meth:`RunLedger.call_llm`, which applies
+only the run budget. Every other method is used by the extractor and changes the ledger.
 
 **Limits and their bounds:**
 
@@ -61,7 +62,9 @@ from jevex.llm import LLMBudgetExceededError
 from jevex.store import SpendEntry
 
 if TYPE_CHECKING:
-    from jevex.llm import LLM, LLMResponse
+    from collections.abc import Sequence
+
+    from jevex.llm import LLM, LLMImage, LLMResponse
     from jevex.store import SpendKind, Store
 
 Period = Literal["hour", "day", "week", "month", "run"]
@@ -131,6 +134,16 @@ def period_start(period: Period, now: datetime, run_started: datetime) -> dateti
     if period == "week":
         return day - timedelta(days=day.weekday())
     return day.replace(day=1)
+
+
+async def _structured[T: BaseModel](
+    llm: LLM, prompt: str, schema: type[T], images: Sequence[LLMImage]
+) -> LLMResponse[T]:
+    # Images go only to calls that have some, so an LLM written for text alone (without
+    # the ``images`` argument) still serves them.
+    if images:
+        return await llm.structured(prompt, schema, images=images)
+    return await llm.structured(prompt, schema)
 
 
 @dataclass(frozen=True)
@@ -214,14 +227,14 @@ class RunLedger:
             )
 
     async def call_llm[T: BaseModel](
-        self, llm: LLM, prompt: str, schema: type[T]
+        self, llm: LLM, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
     ) -> LLMResponse[T] | None:
         """An LLM call under the run budget only, for work outside a document (the learner).
         ``None`` when the run budget (or the process backstop) says no."""
         if await self.refuse_llm() is not None:
             return None
         try:
-            response = await llm.structured(prompt, schema)
+            response = await _structured(llm, prompt, schema, images)
         except LLMBudgetExceededError:
             return None
         await self.record("llm", response.usage.cost)
@@ -341,9 +354,10 @@ class DocumentBudget:
         await self.ledger.record("llm", cost)
 
     async def call_llm[T: BaseModel](
-        self, llm: LLM, prompt: str, schema: type[T]
+        self, llm: LLM, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
     ) -> LLMResponse[T] | None:
-        """Make an LLM call if the budgets allow it; ``None`` when they don't.
+        """Make an LLM call (with ``images``, if any) if the budgets allow it; ``None``
+        when they don't.
 
         A failed call still counts (the provider may bill it), though its cost is
         unknown. Hitting the process backstop (``JEVEX_LLM_MAX_COST_USD``) stops LLM use
@@ -354,7 +368,7 @@ class DocumentBudget:
         # A call that fails stays counted (the provider may bill it); its cost is unknown
         # for a different reason than a missing price, so it isn't reported as unpriced.
         try:
-            response = await llm.structured(prompt, schema)
+            response = await _structured(llm, prompt, schema, images)
         except LLMBudgetExceededError as exc:
             self.llm_calls -= 1  # refused before any request was made
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))

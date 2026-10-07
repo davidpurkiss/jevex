@@ -26,13 +26,31 @@ from jevex.llm import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anthropic import AsyncAnthropic
     from pydantic import BaseModel
+
+    from jevex.llm import LLMImage
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+
+def _content(prompt: str, images: Sequence[LLMImage]) -> str | list[dict[str, Any]]:
+    """The user message: the prompt alone, or the images (as base64 blocks) then it."""
+    if not images:
+        return prompt
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": i.content_type, "data": i.base64},
+        }
+        for i in images
+    ]
+    return [*blocks, {"type": "text", "text": prompt}]
 
 
 class AnthropicLLM:
@@ -66,7 +84,9 @@ class AnthropicLLM:
         self.prices = prices if prices is not None else PRICES
         self._client = client or anthropic.AsyncAnthropic()
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         import anthropic
 
         check_budget()
@@ -78,7 +98,7 @@ class AnthropicLLM:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": _content(prompt, images)}],
             "output_config": output_config,
         }
         if self.system:

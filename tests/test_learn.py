@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -95,7 +95,7 @@ def example(
     eid: str = "ex-1",
     field: str = FIELD,
     p: float | None = 0.95,
-    source: Literal["llm", "human"] = "llm",
+    source: Literal["llm", "vision", "human"] = "llm",
     evidence: tuple[int, int] | None = None,
     context: dict[str, Any] | None = None,
     document_source: str | None = None,
@@ -178,7 +178,9 @@ async def test_aclose_drops_queued_examples_but_keeps_them_stored() -> None:
     started = asyncio.Event()
 
     class SlowLLM(FakeLLM):
-        async def structured(self, prompt: str, schema: type[Any]) -> Any:
+        async def structured(
+            self, prompt: str, schema: type[Any], *, images: Sequence[Any] = ()
+        ) -> Any:
             started.set()
             await asyncio.sleep(10)
             raise AssertionError("cancelled before it answers")

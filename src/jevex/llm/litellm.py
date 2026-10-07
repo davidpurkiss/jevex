@@ -22,7 +22,22 @@ from jevex.llm import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import BaseModel
+
+    from jevex.llm import LLMImage
+
+
+def _content(prompt: str, images: Sequence[LLMImage]) -> str | list[dict[str, Any]]:
+    """The user message: the prompt alone, or the images (as ``data:`` URIs) then it, in
+    the OpenAI chat format LiteLLM translates for every provider."""
+    if not images:
+        return prompt
+    parts: list[dict[str, Any]] = [
+        {"type": "image_url", "image_url": {"url": i.data_uri}} for i in images
+    ]
+    return [*parts, {"type": "text", "text": prompt}]
 
 
 class LiteLLM:
@@ -45,14 +60,16 @@ class LiteLLM:
         self.completion_kwargs = completion_kwargs
         """Extra ``litellm.acompletion`` arguments, e.g. ``api_base`` for Ollama."""
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         import litellm  # already imported by __init__; this is a cheap lookup
 
         check_budget()
         try:
             response: Any = await litellm.acompletion(  # pyright: ignore[reportUnknownMemberType]
                 model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": _content(prompt, images)}],
                 response_format=schema,
                 **self.completion_kwargs,
             )

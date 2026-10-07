@@ -23,8 +23,24 @@ from jevex.llm import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from openai import AsyncOpenAI
     from pydantic import BaseModel
+
+    from jevex.llm import LLMImage
+
+
+def _input(prompt: str, images: Sequence[LLMImage]) -> Any:
+    """The request's input: the prompt alone, or one user message with the images (as
+    ``data:`` URIs) then the prompt."""
+    if not images:
+        return prompt
+    content: list[dict[str, Any]] = [
+        {"type": "input_image", "image_url": i.data_uri, "detail": "auto"} for i in images
+    ]
+    content.append({"type": "input_text", "text": prompt})
+    return [{"role": "user", "content": content}]
 
 
 class OpenAILLM:
@@ -45,7 +61,9 @@ class OpenAILLM:
         self.prices = prices or {}
         self._client = client or openai.AsyncOpenAI()
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         import openai
         from pydantic import ValidationError
 
@@ -53,7 +71,7 @@ class OpenAILLM:
         try:
             raw: Any = await self._client.responses.with_raw_response.parse(
                 model=self.model,
-                input=prompt,
+                input=_input(prompt, images),
                 text_format=schema,
                 instructions=self.instructions,
             )

@@ -29,9 +29,13 @@ from jevex.llm import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from google.genai import Client
     from google.genai.types import GenerateContentResponse
     from pydantic import BaseModel
+
+    from jevex.llm import LLMImage
 
 ThinkingLevel = Literal["minimal", "low", "medium", "high"]
 
@@ -69,7 +73,9 @@ class GeminiLLM:
         self.prices = prices if prices is not None else PRICES
         self._client = client or genai.Client()
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         from google.genai import types
 
         check_budget()
@@ -88,9 +94,15 @@ class GeminiLLM:
                 else None
             ),
         )
+        contents: types.ContentListUnion = prompt
+        if images:
+            contents = [
+                *(types.Part.from_bytes(data=i.content, mime_type=i.content_type) for i in images),
+                prompt,
+            ]
         try:
             response = await self._client.aio.models.generate_content(
-                model=self.model, contents=prompt, config=config
+                model=self.model, contents=contents, config=config
             )
         # Not just ``errors.APIError``: transport failures surface as httpx, httpx2 or aiohttp
         # exceptions (whichever client the SDK picked), and a non-JSON body as a ValueError.

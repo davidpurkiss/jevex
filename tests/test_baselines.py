@@ -1,5 +1,6 @@
 import json
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -43,6 +44,7 @@ from jevex.layout import Component, DomLocation, LayoutStage
 from jevex.llm import (
     LLMBudgetExceededError,
     LLMError,
+    LLMImage,
     LLMResponse,
     LLMUsage,
     process_llm_cost,
@@ -300,7 +302,9 @@ async def test_llm_baseline_sends_the_instructions_then_the_document() -> None:
 class UnpricedLLM:
     calls: int = 0
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         self.calls += 1
         return LLMResponse(schema.model_validate({}), LLMUsage(10, 5, None), "mystery-model")
 

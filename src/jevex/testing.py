@@ -19,7 +19,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast
@@ -40,7 +40,7 @@ from jevex.jev import (
     ScoreAnswer,
     TypeSafeBackend,
 )
-from jevex.llm import LLMResponse, LLMUsage, check_budget, record, validate_output
+from jevex.llm import LLMImage, LLMResponse, LLMUsage, check_budget, record, validate_output
 
 if TYPE_CHECKING:
     from jevex.llm import LLM
@@ -331,6 +331,7 @@ def stale_recording(reason: str) -> NoReturn:
 class FakeLLMCall:
     prompt: str
     schema: type[BaseModel]
+    images: tuple[LLMImage, ...] = ()
 
 
 class FakeLLM:
@@ -339,6 +340,7 @@ class FakeLLM:
     ``answer(prompt, schema)`` returns the output (a model instance or a dict/JSON it can
     validate), or raise to simulate a failure. Token usage is estimated from the text so
     budgets and cost accounting can be tested; ``price`` sets USD per million tokens.
+    Images sent with a call are kept on its :class:`FakeLLMCall`.
     """
 
     def __init__(
@@ -358,9 +360,11 @@ class FakeLLM:
         self.price = price
         self.calls: list[FakeLLMCall] = []
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         check_budget()
-        self.calls.append(FakeLLMCall(prompt, schema))
+        self.calls.append(FakeLLMCall(prompt, schema, tuple(images)))
         if self._queue is not None:
             if not self._queue:
                 raise UnscriptedQuestionError("FakeLLM has no more scripted answers")
@@ -383,7 +387,9 @@ class FakeLLM:
 class LLMCassette:
     """Record/replay for any :class:`~jevex.llm.LLM`, like :class:`Cassette` for Jev.
 
-    Keyed by the prompt and the schema's JSON schema. In replay mode an unrecorded call
+    Keyed by the prompt and the schema's JSON schema, plus a digest of each image sent
+    with it (so a text-only call's key is the same as before images could be sent). In
+    replay mode an unrecorded call
     raises :class:`CassetteMissError`; ``JEVEX_RECORD=1`` (see :func:`llm_cassette`) records.
     :meth:`aclose` closes ``inner`` when it has an ``aclose``.
     """
@@ -397,12 +403,19 @@ class LLMCassette:
         )
 
     @staticmethod
-    def key(prompt: str, schema: type[BaseModel]) -> str:
-        blob = json.dumps({"prompt": prompt, "schema": schema.model_json_schema()}, sort_keys=True)
+    def key(prompt: str, schema: type[BaseModel], images: Sequence[LLMImage] = ()) -> str:
+        keyed: dict[str, object] = {"prompt": prompt, "schema": schema.model_json_schema()}
+        if images:
+            keyed["images"] = [
+                [i.content_type, hashlib.sha256(i.content).hexdigest()] for i in images
+            ]
+        blob = json.dumps(keyed, sort_keys=True)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
-        key = self.key(prompt, schema)
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
+        key = self.key(prompt, schema, images)
         if not self.record:
             if key not in self._entries:
                 raise CassetteMissError(
@@ -417,7 +430,11 @@ class LLMCassette:
             )
         if self._inner is None:
             raise CassetteMissError("recording needs an inner LLM")
-        response = await self._inner.structured(prompt, schema)
+        response = await (
+            self._inner.structured(prompt, schema, images=images)
+            if images
+            else self._inner.structured(prompt, schema)
+        )
         self._entries[key] = {
             "prompt": prompt,
             "output": response.output.model_dump(mode="json"),

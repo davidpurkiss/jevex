@@ -3,6 +3,7 @@
 Skipped when the extras aren't installed (``uv sync --all-extras``); CI installs them.
 """
 
+import base64
 import json
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -22,6 +23,7 @@ from pydantic import BaseModel  # noqa: E402
 from jevex.llm import (  # noqa: E402
     LLMBudgetExceededError,
     LLMError,
+    LLMImage,
     LLMRefusalError,
     ModelPrice,
     process_llm_cost,
@@ -586,3 +588,113 @@ async def test_litellm_explicit_prices() -> None:
 async def test_litellm_invalid_output_is_an_llm_error() -> None:
     with pytest.raises(LLMError):
         await LiteLLM("openai/gpt-test", mock_response="not json").structured("x", Book)
+
+
+# --- images ------------------------------------------------------------------------------
+
+IMAGE = LLMImage(b"\x89PNG fake", "image/png")
+IMAGE_B64 = base64.b64encode(IMAGE.content).decode()
+
+
+def test_llm_images_are_png_jpeg_or_webp() -> None:
+    assert IMAGE.data_uri == f"data:image/png;base64,{IMAGE_B64}"
+    with pytest.raises(ValueError, match="image/bmp"):
+        LLMImage(b"BM", "image/bmp")
+
+
+async def test_anthropic_sends_images_before_the_prompt() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=message('{"title": "Dune"}'))
+
+    llm = AnthropicLLM(client=anthropic_client(handler))
+    await llm.structured("Title?", Book, images=[IMAGE])
+    assert seen["body"]["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": IMAGE_B64},
+                },
+                {"type": "text", "text": "Title?"},
+            ],
+        }
+    ]
+    await llm.structured("Title?", Book)
+    assert seen["body"]["messages"] == [{"role": "user", "content": "Title?"}]
+
+
+async def test_openai_sends_images_as_data_uris() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=openai_response('{"title": "Dune"}'))
+
+    llm = OpenAILLM("gpt-test", client=openai_client(handler))
+    await llm.structured("Title?", Book, images=[IMAGE])
+    assert seen["body"]["input"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_image", "image_url": IMAGE.data_uri, "detail": "auto"},
+                {"type": "input_text", "text": "Title?"},
+            ],
+        }
+    ]
+    await llm.structured("Title?", Book)
+    assert seen["body"]["input"] == "Title?"
+
+
+async def test_gemini_sends_images_as_inline_parts() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=gemini_response('{"title": "Dune"}'))
+
+    llm = GeminiLLM("gemini-3.5-flash", client=gemini_client(handler))
+    await llm.structured("Title?", Book, images=[IMAGE])
+    # The SDK puts the image parts and the prompt in one user turn.
+    assert seen["body"]["contents"] == [
+        {
+            "role": "user",
+            "parts": [
+                {"inlineData": {"data": IMAGE_B64, "mime_type": "image/png"}},
+                {"text": "Title?"},
+            ],
+        }
+    ]
+
+
+async def test_litellm_sends_images_in_the_openai_chat_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import litellm
+
+    seen: list[Any] = []
+    real: Any = litellm.acompletion  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    async def capture(**kwargs: Any) -> Any:
+        seen.append(kwargs["messages"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(litellm, "acompletion", capture)
+    llm = LiteLLM("openai/gpt-test", mock_response='{"title": "Dune"}')
+    await llm.structured("Title?", Book, images=[IMAGE])
+    await llm.structured("Title?", Book)
+    assert seen == [
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": IMAGE.data_uri}},
+                    {"type": "text", "text": "Title?"},
+                ],
+            }
+        ],
+        [{"role": "user", "content": "Title?"}],
+    ]

@@ -1,7 +1,8 @@
+import hashlib
 import json
 import re
 import socket
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ from jevex.jev import (
     Score,
     ScoreAnswer,
 )
-from jevex.llm import LLMResponse
+from jevex.llm import LLMImage, LLMResponse
 from jevex.testing import (
     Cassette,
     CassetteMissError,
@@ -227,7 +228,9 @@ class ClosableLLM:
         self.llm = FakeLLM([{"title": "Dune"}])
         self.closed = 0
 
-    async def structured[T: BaseModel](self, prompt: str, schema: type[T]) -> LLMResponse[T]:
+    async def structured[T: BaseModel](
+        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
+    ) -> LLMResponse[T]:
         return await self.llm.structured(prompt, schema)
 
     async def aclose(self) -> None:
@@ -305,3 +308,33 @@ def test_network_is_blocked() -> None:
 @pytest.mark.live
 def test_live_marker_is_skipped_by_default() -> None:
     pytest.fail("live tests must not run without --live")
+
+
+async def test_fake_llm_keeps_the_images_sent() -> None:
+    picture = LLMImage(b"\x89PNG", "image/png")
+    fake = FakeLLM([{"title": "Dune"}, {"title": "Emma"}])
+    await fake.structured("Title?", Title, images=[picture])
+    await fake.structured("Title?", Title)
+    assert [c.images for c in fake.calls] == [(picture,), ()]
+
+
+async def test_llm_cassette_keys_images_and_keeps_text_only_keys(tmp_path: Path) -> None:
+    picture = LLMImage(b"\x89PNG", "image/png")
+    other = LLMImage(b"\x89PNG other", "image/png")
+    blob = json.dumps(
+        {"prompt": "Title?", "schema": Title.model_json_schema()}, sort_keys=True
+    ).encode()
+    assert LLMCassette.key("Title?", Title) == hashlib.sha256(blob).hexdigest()[:16]
+    keys = {LLMCassette.key("Title?", Title, images) for images in ([], [picture], [other])}
+    assert len(keys) == 3
+
+    inner = FakeLLM(lambda prompt, _s: {"title": "Dune"})
+    recorder = LLMCassette(tmp_path / "llm.json", inner, record=True)
+    await recorder.structured("Title?", Title, images=[picture])
+    await recorder.structured("Title?", Title)
+    await recorder.aclose()
+    assert [c.images for c in inner.calls] == [(picture,), ()]
+    replay = LLMCassette(tmp_path / "llm.json")
+    assert (await replay.structured("Title?", Title, images=[picture])).output.title == "Dune"
+    with pytest.raises(CassetteMissError):
+        await replay.structured("Title?", Title, images=[other])
