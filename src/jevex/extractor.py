@@ -588,6 +588,7 @@ class Extractor:
         self._pack_sources = list(packs)
         self._community_packs = community_packs
         self._packs: list[Pack] | None = None
+        self._packs_lock: asyncio.Lock | None = None
         self.record_stats = record_stats
 
     @property
@@ -623,8 +624,14 @@ class Extractor:
     async def packs(self) -> list[Pack]:
         """The project packs, then the community packs, loaded on first use (off the event
         loop). Raises :class:`~jevex.packs.PackError` for one that doesn't load."""
-        if self._packs is None:
-            self._packs = await asyncio.to_thread(self._load_packs)
+        if self._packs is not None:
+            return self._packs
+        # Documents starting together would each load them, and see different objects.
+        if self._packs_lock is None:
+            self._packs_lock = asyncio.Lock()
+        async with self._packs_lock:
+            if self._packs is None:
+                self._packs = await asyncio.to_thread(self._load_packs)
         return self._packs
 
     def _load_packs(self) -> list[Pack]:
@@ -900,6 +907,7 @@ class Extractor:
         """Stop the learner (examples still queued stay in the store, unlearned; call
         :meth:`wait_for_learning` first to finish them), then close Jev and the store."""
         learner, self._learner, self._learned, self._learn_lock = self._learner, None, None, None
+        self._packs_lock = None
         self._housekeeper = None
         try:
             if learner is not None:

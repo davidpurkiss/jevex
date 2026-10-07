@@ -1133,3 +1133,30 @@ async def test_the_pack_index_follows_a_new_set_of_packs() -> None:
         packs=[car_pack("b", {**EVERY_PATH, "model": None})],
     )
     assert "model" not in second.fields["Car"]
+
+
+async def test_documents_starting_together_load_the_packs_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor
+
+    car_pack("cars", EVERY_PATH).write(tmp_path / "cars")
+    loads: list[object] = []
+    real = jevex.extractor.load_pack
+
+    def counting(source: Pack | str | Path) -> Pack:
+        loads.append(source)
+        return real(source)
+
+    monkeypatch.setattr(jevex.extractor, "load_pack", counting)
+    ex = Extractor(
+        [Car],
+        jev=FakeJev(strict=True).client(),
+        pipeline=Pipeline([StructuredStage()]),
+        packs=[tmp_path / "cars"],
+        community_packs=False,
+    )
+    results = await asyncio.gather(*(ex.extract(page(CAR)) for _ in range(4)))
+    assert loads == [tmp_path / "cars"]
+    assert all(r.values["Car"]["document"]["model"] == "Golf" for r in results)
+    await ex.aclose()
