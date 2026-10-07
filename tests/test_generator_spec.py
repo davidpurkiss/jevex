@@ -328,3 +328,31 @@ def test_specs_are_exported_at_the_top_level() -> None:
 
     assert jevex.GeneratorSpec is GeneratorSpec
     assert jevex.generator_spec_json_schema is generator_spec_json_schema
+
+
+@pytest.mark.parametrize(
+    ("written", "kept"), [("de_de", "de-DE"), ("EN-gb", "en-GB"), ("fr", "fr")]
+)
+def test_a_scope_locale_is_kept_canonical(written: str, kept: str) -> None:
+    spec = GeneratorSpec.parse(
+        {
+            "id": "g",
+            "field": "VehicleSpec.zero_to_62_s",
+            "match": {"regex": r"(\d+) s", "group": 1},
+            "scope": {"locale": written},
+        }
+    )
+    assert spec.scope.locale == kept
+    assert spec.to_data()["scope"] == {"locale": kept}
+
+
+def test_a_scope_locale_must_still_be_a_language_tag() -> None:
+    with pytest.raises(InvalidGeneratorError):
+        GeneratorSpec.parse(
+            {
+                "id": "g",
+                "field": "VehicleSpec.zero_to_62_s",
+                "match": {"regex": r"(\d+) s", "group": 1},
+                "scope": {"locale": "German"},
+            }
+        )

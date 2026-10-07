@@ -413,9 +413,9 @@ class GeneratorLearner:
     ``"Parent.nested_field.field"`` for a nested model's field).
     ``base``, ``locale``, ``selector``, ``normalisers`` and ``fallback_threshold`` should
     be what the candidate, select, normalise and fallback stages use, so a generator is
-    tested as documents will run it: ``locale`` is the candidate stage's, used for
-    examples whose document had none of its own. ``ledger`` applies the run budget to
-    the learner's LLM and Jev calls and records their spend.
+    tested as documents will run it: ``locale`` is the extractor's ``locale``, else the
+    candidate stage's, used for examples whose document had none of its own. ``ledger``
+    applies the run budget to the learner's LLM and Jev calls and records their spend.
     """
 
     schemas: Sequence[SchemaSpec]

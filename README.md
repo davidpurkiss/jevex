@@ -97,7 +97,18 @@ Generators read numbers, amounts and dates the way the page's locale writes them
 document's locale comes from, in order: the caller (`Document.from_bytes(..., locale="de-DE")`),
 the page's `<html lang>` (or a `<meta http-equiv="Content-Language">`), and the HTTP
 `Content-Language` header (`Document(content_language=...)`; `SimpleFetcher` and the Scrapy
-integration fill it in). When none of them says, the candidate stage's own locale is used:
+integration fill it in). When none of them says, as for most PDFs and images, the
+extractor's `locale` is the document's, as if the document had said it:
+
+```python
+extractor = Extractor([VehicleSpec], locale="en-GB")
+```
+
+Generators scoped to it run on those documents, and what the learner learns from them is
+scoped to it. It comes before the candidate and statement stages' own `locale`. Without
+one, such documents have no locale of their own: generators are scoped and numbers and dates
+read by the candidate stage's `locale` if it has one (else only unscoped generators run),
+and what the learner learns from them stays unscoped:
 
 ```python
 from jevex import CandidateStage
@@ -106,7 +117,9 @@ from jevex.extractor import default_pipeline
 pipeline = default_pipeline().replace("candidates", CandidateStage(locale="de-DE"))
 ```
 
-`jevex.document_locale(document)` shows which locale a document gets. The statement
+Tags are kept canonical (`jevex.canonical_locale`): `de_DE`, `de-de` and `DE-de` are all
+`de-DE`, so they're one generator scope. `jevex.document_locale(document)` shows which
+locale a document says it has (without the extractor's default). The statement
 stage splits sentences by the same locale's language (German pages keep "z. B." and
 "3. Mai" mid-sentence), falling back to `StatementStage(locale=...)`, then the candidate
 stage's locale, then English; a language the sentence splitter doesn't know is split as
@@ -425,6 +438,10 @@ jevex testsite build --seed 42                  # deterministic: same seed, same
 jevex testsite build --waves "table;kv,grid"    # only these families, in two waves
 jevex testsite serve                            # http://127.0.0.1:8000/
 ```
+
+The site is `en-GB`. HTML pages say so in `<html lang>`; PDFs and images can't, so their
+`truth.json` entries carry `"locale": "en-GB"`, which `jevex eval` gives the document
+(any corpus can do the same), and `jevex testsite serve` sends `Content-Language: en-GB`.
 
 `truth.json` lists the pages wave by wave, so a replay meets each wave's template
 families together and the LLM-call rate spikes, then falls as generators are learned. The

@@ -17,7 +17,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from jevex._tasks import gather
-from jevex.locales import document_locale
+from jevex.locales import canonical_locale, document_locale
 from jevex.results import Conflict
 
 if TYPE_CHECKING:
@@ -309,6 +309,9 @@ class Context:
     housekeeper: Housekeeper | None = None
     """The extractor's :class:`~jevex.housekeeping.Housekeeper` (when it has a store): the
     learn stage gives it the document's generator counts. ``None``: none are kept."""
+    default_locale: str | None = None
+    """The extractor's ``locale``: the locale of a document that doesn't say its own.
+    ``None``: such a document has none (stages fall back to their own ``locale``)."""
 
     @classmethod
     def create(cls, document: Document, schemas: Sequence[SchemaSpec], jev: JevClient) -> Context:
@@ -320,9 +323,13 @@ class Context:
 
     @cached_property
     def locale(self) -> str | None:
-        """The document's own locale (:func:`~jevex.locales.document_locale`), ``None``
-        when it doesn't say. Read once: cleaning keeps what it's read from."""
-        return document_locale(self.document)
+        """The document's own locale (:func:`~jevex.locales.document_locale`), else
+        :attr:`default_locale`, canonical (:func:`~jevex.locales.canonical_locale`).
+        ``None`` when neither says. Read once: cleaning keeps what it's read from."""
+        own = document_locale(self.document)
+        if own:
+            return own
+        return canonical_locale(self.default_locale) if self.default_locale else None
 
     @property
     def active(self) -> list[SchemaRun]:

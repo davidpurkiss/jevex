@@ -13,7 +13,10 @@ generator uses it with its own scope's locale, so a generator scoped ``de-DE`` r
 
 :func:`document_locale` finds a document's own locale (the caller's, the page's
 ``<html lang>``, its ``Content-Language``), so one pipeline reads each page by its own
-conventions and runs only the locale-scoped generators meant for it.
+conventions and runs only the locale-scoped generators meant for it. A document that
+doesn't say takes the extractor's ``locale``, if it has one (``Extractor(locale=)``).
+Tags are kept canonical (:func:`canonical_locale`: ``de_de`` is ``de-DE``), so generator
+scopes learned from differently written tags are the same scope.
 
 Beyond the decimal mark, a page's language adds its own words: month names
 (:data:`MONTH_NAMES`: German, French, Spanish, Italian, Dutch), amount multipliers
@@ -361,6 +364,31 @@ def _subtags(locale: str) -> tuple[str, str | None]:
     return parts[0].lower(), region
 
 
+def canonical_locale(tag: str) -> str:
+    """``tag`` in BCP 47's conventional form, so one locale is always written one way:
+    ``de_DE``, ``de-de`` and ``DE-de`` are all ``de-DE``, ``zh-hant-tw`` is ``zh-Hant-TW``.
+
+    Subtags are joined by ``-``; the language is lower case, a script title case and a
+    region upper case, and everything from the first singleton (``-u-``, ``-x-``) on is
+    lower case. Doesn't check that ``tag`` is one (see
+    :data:`~jevex.document.LOCALE_TAG`).
+    """
+    parts = tag.replace("_", "-").split("-")
+    out = [parts[0].lower()]
+    extension = False
+    for part in parts[1:]:
+        extension = extension or len(part) == 1
+        if extension:
+            out.append(part.lower())
+        elif len(part) == 4 and part.isalpha():
+            out.append(part.title())
+        elif len(part) == 2 and part.isalpha():
+            out.append(part.upper())
+        else:
+            out.append(part.lower())
+    return "-".join(out)
+
+
 def locale_conventions(locale: str | None) -> LocaleConventions:
     """The conventions for a BCP 47 tag; en-GB's when it's ``None``, empty or unknown.
 
@@ -426,14 +454,16 @@ def document_locale(document: Document) -> str | None:
     HTTP :attr:`~jevex.Document.content_language`, as browsers read a page's language. A
     header or pragma naming several languages counts by its first. Values that aren't a
     language tag (``lang=""``, ``lang="English"``) are skipped, so the next source counts.
+    The tag comes back canonical (:func:`canonical_locale`): ``lang="en-gb"`` is ``en-GB``.
     """
     if document.locale:
-        return document.locale
+        return canonical_locale(document.locale)
     if document.is_html:
         found = html_language(document.content)
         if found:
-            return found
-    return _first_tag(document.content_language)
+            return canonical_locale(found)
+    found = _first_tag(document.content_language)
+    return canonical_locale(found) if found else None
 
 
 def html_language(content: bytes) -> str | None:

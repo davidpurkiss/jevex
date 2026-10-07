@@ -13,6 +13,7 @@ from jevex.document import sniff_content_type
 from jevex.testsite import (
     DEFAULT_WAVES,
     FAMILIES,
+    SITE_LOCALE,
     Dataset,
     Page,
     build,
@@ -60,6 +61,15 @@ def test_every_family_is_present() -> None:
     for page in pages:
         assert sniff_content_type(page.content) == page.content_type
         assert page.truth()["content_type"] == page.content_type
+
+
+def test_pages_that_cant_say_their_locale_carry_it_in_the_truth() -> None:
+    for page in render(generate(42)):
+        if page.content_type == "text/html":
+            assert f'<html lang="{SITE_LOCALE}">' in page.html
+            assert "locale" not in page.truth()
+        else:
+            assert page.truth()["locale"] == SITE_LOCALE == "en-GB"
 
 
 def test_html_is_only_for_html_pages() -> None:
@@ -374,6 +384,7 @@ def test_server_serves_the_build(site: str, tmp_path: Path) -> None:
     pdf = next(p["path"] for p in truth["pages"] if p["family"] == "pdf")
     with urllib.request.urlopen(f"{site}/{pdf}") as response:
         assert response.headers["Content-Type"] == "application/pdf"
+        assert response.headers["Content-Language"] == "en-GB"
         assert response.read() == (tmp_path / pdf).read_bytes()
 
 

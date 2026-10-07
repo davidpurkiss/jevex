@@ -156,3 +156,43 @@ async def test_plain_dict_has_each_records_values_without_meta() -> None:
     assert (
         result.to_dict()["records"][0]["record"] == result.to_plain_dict()["records"][0]["record"]
     )
+
+
+# --- locale --------------------------------------------------------------------------
+
+
+@dataclass
+class SeesLocale:
+    """Records the locale each document runs under."""
+
+    seen: list[str | None]
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        self.seen.append(ctx.locale)
+
+
+async def test_the_extractors_locale_is_the_default_for_documents_that_dont_say() -> None:
+    stage = SeesLocale([])
+    async with Extractor(
+        [Car], jev=FakeJev().client(), pipeline=Pipeline([stage]), locale="en_gb"
+    ) as extractor:
+        assert extractor.locale == "en-GB"
+        await extractor.extract(Document.from_bytes(b"%PDF-1.7"))
+        await extractor.extract(Document.from_bytes(b'<html lang="de-de"><p>Golf</p></html>'))
+        await extractor.extract(Document.from_bytes(b"%PDF-1.7", locale="fr_FR"))
+    assert stage.seen == ["en-GB", "de-DE", "fr-FR"]
+
+
+async def test_without_a_locale_documents_that_dont_say_have_none() -> None:
+    stage = SeesLocale([])
+    async with Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([stage])) as extractor:
+        assert extractor.locale is None
+        await extractor.extract(Document.from_bytes(b"%PDF-1.7"))
+    assert stage.seen == [None]
+
+
+@pytest.mark.parametrize("locale", ["English", "", "en GB", "en-GB\n"])
+def test_the_extractors_locale_must_be_a_language_tag(locale: str) -> None:
+    with pytest.raises(ValueError, match="locale must be a BCP 47 language tag"):
+        Extractor([Car], jev=FakeJev().client(), locale=locale)

@@ -410,6 +410,19 @@ async def test_a_different_normaliser_chain_scope_or_field_isnt_a_duplicate(
     assert await store.disabled_generator_ids() == set()
 
 
+async def test_scopes_written_differently_for_one_locale_are_the_same_scope() -> None:
+    store = await dedupe_store(spec("gen-a", locale="de-DE"))
+    # Stored as written before tags were canonical.
+    other = record(spec("gen-b", r"(\d+\.\d+)\s*seconds", locale="de-DE"))
+    await store.put_generator(
+        other.model_copy(update={"spec": {**other.spec, "scope": {"locale": "de_de"}}})
+    )
+    learned = LearnedGenerators(store)
+    await learned.load()
+    [found] = await Housekeeper(store, learned).dedupe()
+    assert (found.id, found.kept) == ("gen-b", "gen-a")
+
+
 async def test_generators_that_find_nothing_on_any_example_arent_duplicates() -> None:
     store = await dedupe_store(spec("gen-a", r"(\d+) km"), spec("gen-b", r"(\d+)\s*km"))
     assert await Housekeeper(store).dedupe() == []

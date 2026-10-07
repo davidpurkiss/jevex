@@ -60,6 +60,7 @@ from jevex.generators.regex import (
 )
 from jevex.generators.units import spellings
 from jevex.interfaces import Scope
+from jevex.locales import canonical_locale
 from jevex.statements import NormaliserStep
 
 if TYPE_CHECKING:
@@ -265,6 +266,13 @@ class SpecScope(BaseModel):
             "document's site id. Case-insensitive; subdomains don't match."
         ),
     )
+
+    @field_validator("locale")
+    @classmethod
+    def _canonical_locale(cls, value: str | None) -> str | None:
+        """Kept canonical (:func:`~jevex.locales.canonical_locale`): a spec written
+        ``de_de`` loads as ``de-DE``, the same scope as one learned on a ``de-DE`` page."""
+        return canonical_locale(value) if value is not None else None
 
 
 class MatchSpec(BaseModel):

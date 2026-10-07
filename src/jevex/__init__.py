@@ -146,6 +146,7 @@ from jevex.learn import (
 )
 from jevex.locales import (
     LocaleConventions,
+    canonical_locale,
     document_locale,
     html_language,
     locale_conventions,
@@ -419,6 +420,7 @@ __all__ = [
     "book_values",
     "books_corpus",
     "bootstrap_interval",
+    "canonical_locale",
     "charge_usage",
     "check_baseline",
     "check_lock",

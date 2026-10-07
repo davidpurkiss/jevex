@@ -16,6 +16,10 @@ Template families (the ``family`` in the ground truth):
 Rasterised pages (``scanned``, ``infographic``) write prices as ``GBP 17,000``, not
 ``£17,000``, because the font they're drawn in has no pound sign.
 
+The site is en-GB (:data:`SITE_LOCALE`). HTML pages say so in ``<html lang>``; PDFs and
+images can't, so their ground truth carries a ``locale`` that eval gives the document, and
+the server sends it as ``Content-Language``.
+
 Each page gets its own ``random.Random(f"{seed}:{path}")``, so pages don't change when
 others are added. HTML pages carry realistic boilerplate (nav, cookie banner, footer) for
 the cleaner. Values are worded from :mod:`jevex.testsite.phrasing`, whose docstring says
@@ -43,6 +47,9 @@ if TYPE_CHECKING:
 HTML = "text/html"
 PDF = "application/pdf"
 PNG = "image/png"
+SITE_LOCALE = "en-GB"
+"""The site's locale: HTML pages declare it, and PDFs and images carry it as
+:attr:`Page.locale`."""
 FAMILIES = ("table", "kv", "prose", "grid", "listing", "pdf", "scanned", "infographic")
 """Every template family, in the order the module docstring describes them."""
 
@@ -63,6 +70,9 @@ class Page:
     content_type: str = HTML
     records: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     json_ld: bool = False
+    locale: str | None = None
+    """The page's locale where its content can't say it (PDFs and images): eval hands it
+    to the document as :attr:`~jevex.Document.locale`. HTML pages declare theirs."""
 
     @property
     def html(self) -> str:
@@ -80,7 +90,7 @@ class Page:
             "content_type": self.content_type,
             "json_ld": self.json_ld,
             "records": self.records,
-        }
+        } | ({"locale": self.locale} if self.locale else {})
 
 
 # --- page chrome -----------------------------------------------------------------------
@@ -88,7 +98,7 @@ class Page:
 
 def _layout(title: str, body: str, *, head: str = "") -> bytes:
     html = f"""<!doctype html>
-<html lang="en-GB">
+<html lang="{SITE_LOCALE}">
 <head>
 <meta charset="utf-8">
 <title>{escape(title)}</title>
@@ -387,6 +397,7 @@ def pdf_page(seed: int, model: Model) -> Page:
         schema="VehicleSpec",
         content=to_pdf(spec_sheet(rng, model)),
         content_type=PDF,
+        locale=SITE_LOCALE,
         records=[_truth(v, v.trim) for v in model.variants],
     )
 
@@ -410,6 +421,7 @@ def scanned_page(seed: int, model: Model) -> Page:
         schema="VehicleSpec",
         content=to_scanned_pdf(scanned_drawing(seed, model), f"{seed}:{path}:scan"),
         content_type=PDF,
+        locale=SITE_LOCALE,
         records=[_truth(v, v.trim) for v in model.variants],
     )
 
@@ -429,6 +441,7 @@ def infographic_page(seed: int, model: Model) -> Page:
         schema="VehicleSpec",
         content=to_png(drawing),
         content_type=PNG,
+        locale=SITE_LOCALE,
         records=[_truth(v, "document")],
     )
 
