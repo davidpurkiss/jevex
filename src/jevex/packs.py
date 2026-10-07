@@ -19,8 +19,12 @@ its project packs, then the community packs installed (:func:`layered_generators
 first layer with an id wins, and a layer can disable a lower layer's generator by id
 without editing it (the store's disable list, a pack's ``manifest.disables``).
 
-Key mappings and examples in a pack reach the extractor when the pack is imported into a
-store (:func:`import_pack`, ``jevex pack import``); only generators are layered.
+Key mappings are layered the same way, without an import: the structured stage's
+:class:`~jevex.keypaths.KeyPathMapper` looks each (fingerprint, schema, path) up in the
+store, then in each pack, and the first layer with a mapping wins. The store's own
+answers ("none" and ``unsure`` ones too) always win, and nothing a pack gives is written
+to the store. Examples reach the extractor only when the pack is imported into a store
+(:func:`import_pack`, ``jevex pack import``).
 :func:`export_pack` writes a store's state as a pack, and :func:`diff_packs` compares two
 packs (or a pack and a store) for review.
 """

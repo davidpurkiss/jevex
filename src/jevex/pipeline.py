@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from jevex.keypaths import StructuredItem
     from jevex.learn import GeneratorSnapshot
     from jevex.llm import LLM
+    from jevex.packs import Pack
     from jevex.results import FieldMeta, Method, Source
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Span, Statement
@@ -279,6 +280,9 @@ class Context:
     store: Store | None = None
     """The extractor's store (learned state: key mappings, generators...), ``None`` without
     one. Stages that learn read and write it here."""
+    packs: Sequence[Pack] = ()
+    """The extractor's packs, project packs then community packs (:mod:`jevex.packs`): the
+    layers under :attr:`store` that the structured stage looks key mappings up in."""
     pipeline: Pipeline | None = None
     """The pipeline running this context (set by :meth:`Pipeline.run`), for a stage whose
     work depends on how a later stage is configured. ``None`` when stages are run by hand."""

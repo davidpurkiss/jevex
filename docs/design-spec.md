@@ -337,6 +337,10 @@ The store resolves generators through ordered layers, and the first match on an 
 
 Any layer can disable a generator from a lower layer without editing that layer.
 
+Structured-data key mappings are looked up through the same layers: the first match on
+(fingerprint, schema, path) wins. The local layer's own answers, "none" included, always
+win, and nothing from a pack is written to the local layer.
+
 ## Results API
 
 Each extracted record is a plain Pydantic instance, with full metadata alongside it. By default nothing is filtered: `record` holds the best answer for every field, and a threshold is opt-in.
