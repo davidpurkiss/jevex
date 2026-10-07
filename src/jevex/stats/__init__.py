@@ -14,15 +14,18 @@ from __future__ import annotations
 
 from jevex.stats.charts import CHART_VIEWS, chart_svg, cost_svg, learning_svg, mix_svg
 from jevex.stats.data import (
+    DRIFT_DOCUMENTS,
     VIEWS,
     Event,
     FieldStat,
+    FieldWindow,
     GeneratorStat,
     Point,
     SpendPoint,
     Stats,
     curve,
     field_stats,
+    field_window,
     from_replay,
     from_replay_csv,
     from_store,
@@ -34,9 +37,11 @@ from jevex.stats.server import replay_loader, stats_server, store_loader
 
 __all__ = [
     "CHART_VIEWS",
+    "DRIFT_DOCUMENTS",
     "VIEWS",
     "Event",
     "FieldStat",
+    "FieldWindow",
     "GeneratorStat",
     "Point",
     "SpendPoint",
@@ -45,6 +50,7 @@ __all__ = [
     "cost_svg",
     "curve",
     "field_stats",
+    "field_window",
     "from_replay",
     "from_replay_csv",
     "from_store",

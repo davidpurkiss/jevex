@@ -40,6 +40,9 @@ CURVE_POINTS = 60
 LOWEST_VALUES = 3
 """Lowest-confidence values the fields view lists per field."""
 
+DRIFT_DOCUMENTS = 100
+"""The recent documents each field's drift is read over (:attr:`FieldStat.recent`)."""
+
 
 @dataclass(frozen=True)
 class Point:
@@ -114,8 +117,36 @@ class GeneratorStat:
 
 
 @dataclass(frozen=True)
+class FieldWindow:
+    """One field over some documents: those with its schema that didn't fail, how many
+    gave it a value, and its values' resolution and confidence (drift, compared over
+    the recent ones: :attr:`FieldStat.recent`)."""
+
+    documents: int
+    found: int
+    """Documents with at least one value for it."""
+    values: int
+    llm: int
+    """Values the LLM fallback gave."""
+    mean_confidence: float | None
+
+    @property
+    def none_rate(self) -> float:
+        """The share of the documents that gave it no value."""
+        return 1 - self.found / self.documents if self.documents else 0.0
+
+    @property
+    def fallback_rate(self) -> float:
+        return self.llm / self.values if self.values else 0.0
+
+
+@dataclass(frozen=True)
 class FieldStat:
-    """One ``"Schema.field"``: how its found values were resolved and how sure Jev was."""
+    """One ``"Schema.field"``: how its found values were resolved and how sure Jev was.
+
+    ``none_rate`` is the share of the documents with its schema (that didn't fail) that
+    gave it no value; ``recent`` is the same numbers over the last :data:`DRIFT_DOCUMENTS`
+    documents, to compare with the whole for drift (``None`` when unknown)."""
 
     field: str
     n: int
@@ -123,6 +154,8 @@ class FieldStat:
     methods: Mapping[str, int]
     lowest: tuple[tuple[str, float], ...]
     """Its lowest-confidence recent values, ``(value, confidence)``, lowest first."""
+    none_rate: float | None = None
+    recent: FieldWindow | None = None
 
     @property
     def fallback_rate(self) -> float:
@@ -395,13 +428,24 @@ def _generator_json(g: GeneratorStat) -> dict[str, Any]:
 
 
 def _field_json(f: FieldStat) -> dict[str, Any]:
+    recent = f.recent
     return {
         "field": f.field,
         "n": f.n,
         "mean_confidence": f.mean_confidence,
         "fallback_rate": f.fallback_rate,
+        "none_rate": f.none_rate,
         "methods": dict(f.methods),
         "lowest": [{"value": v, "confidence": c} for v, c in f.lowest],
+        "recent": None
+        if recent is None
+        else {
+            "documents": recent.documents,
+            "values": recent.values,
+            "mean_confidence": recent.mean_confidence,
+            "fallback_rate": recent.fallback_rate,
+            "none_rate": recent.none_rate,
+        },
     }
 
 
@@ -549,10 +593,13 @@ def _point_spend(points: Sequence[Point]) -> list[SpendPoint]:
     return out
 
 
-def field_stats(docs: Sequence[DocumentStat], lowest: int = LOWEST_VALUES) -> list[FieldStat]:
-    """Per ``"Schema.field"``, sorted by field: the documents' found values counted by
-    method, their mean confidence (over values that have one) and the ``lowest``
-    lowest-confidence ones, the most recent first among equals."""
+def field_stats(
+    docs: Sequence[DocumentStat], lowest: int = LOWEST_VALUES, recent: int = DRIFT_DOCUMENTS
+) -> list[FieldStat]:
+    """Per ``"Schema.field"``, sorted by field: the documents' (oldest first) found values
+    counted by method, their mean confidence (over values that have one) and the
+    ``lowest`` lowest-confidence ones, the most recent first among equals; the field's
+    "none" rate, and the same over the last ``recent`` documents (:class:`FieldWindow`)."""
     by_field: dict[str, list[tuple[int, str | None, float | None, str]]] = {}
     for i, d in enumerate(docs):
         for v in d.values:
@@ -572,9 +619,27 @@ def field_stats(docs: Sequence[DocumentStat], lowest: int = LOWEST_VALUES) -> li
                 mean_confidence=sum(confident) / len(confident) if confident else None,
                 methods=_count(m for _, m, _, _ in values if m),
                 lowest=tuple((text, c) for _, c, text in low),
+                none_rate=field_window(name, docs).none_rate,
+                recent=field_window(name, docs[-recent:]) if recent > 0 else None,
             )
         )
     return out
+
+
+def field_window(name: str, docs: Sequence[DocumentStat]) -> FieldWindow:
+    """``name`` (``"Schema.field"``, a nested model's ``"Parent.nested.field"``) over
+    ``docs``: those whose schemas include its top-level schema and that didn't fail."""
+    schema = name.split(".")[0]
+    seen = [d for d in docs if schema in d.schemas and d.status != "failed"]
+    values = [v for d in seen for v in d.values if v.field == name]
+    confident = [v.confidence for v in values if v.confidence is not None]
+    return FieldWindow(
+        documents=len(seen),
+        found=sum(any(v.field == name for v in d.values) for d in seen),
+        values=len(values),
+        llm=sum(v.method == "llm" for v in values),
+        mean_confidence=sum(confident) / len(confident) if confident else None,
+    )
 
 
 # --- from a replay -------------------------------------------------------------------
