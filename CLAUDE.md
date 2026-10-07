@@ -168,7 +168,7 @@ same prompt ("Follow .claude/loop.md...").
   `httpx2.MockTransport` with `AsyncTypeSafeClient(transport=...)`.
 - Jev limits (Jev 1.13, measured in `docs/jev-limits.md`): 32k tokens for state plus the
   longest question, 64k per request (over either: `400 max_tokens_exceeded`), no cap on the
-  number of questions, Choice up to 255 options, Score 2–10 levels. `estimate_tokens`
+  number of questions (bounded only by the 64k request), Choice up to 255 options, Score 2–10 levels. `estimate_tokens`
   under-counts table and JSON text about 3x (#241). `JevClient` estimates tokens and
   splits or raises (`StateTooLargeError`), so stages must chunk oversized components.
 - Noul answers have only a probability (`NoulAnswer.p`) and no confidence.

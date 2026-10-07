@@ -326,5 +326,53 @@
       }
     ]
   },
-  "edges_cost_usd": 0.00657
+  "edges_cost_usd": 0.00657,
+  "pipeline": {
+    "default_gate_question": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
+    "page_gate_question": "Does this document give technical specifications for one or more vehicle variants?",
+    "pages": {
+      "pdf": {
+        "path": "brochures/delmaro-kestrova-spec-sheet.pdf",
+        "entities": 4,
+        "gate_p": 0.99,
+        "requests": 76,
+        "questions": 98,
+        "input_tokens": 35347,
+        "cost_usd": 0.00148,
+        "seconds": 8.96
+      },
+      "table": {
+        "path": "specs/delmaro-kestrova-table.html",
+        "entities": 4,
+        "gate_p": 0.99,
+        "requests": 74,
+        "questions": 96,
+        "input_tokens": 34360,
+        "cost_usd": 0.00144,
+        "seconds": 1.85
+      },
+      "kv": {
+        "path": "specs/delmaro-kestrova-details.html",
+        "entities": 4,
+        "gate_p": 0.99,
+        "requests": 79,
+        "questions": 123,
+        "input_tokens": 35568,
+        "cost_usd": 0.00149,
+        "seconds": 2.13
+      },
+      "prose": {
+        "path": "specs/delmaro-kestrova-se.html",
+        "entities": 1,
+        "gate_p": 0.98,
+        "requests": 20,
+        "questions": 31,
+        "input_tokens": 9165,
+        "cost_usd": 0.00038,
+        "seconds": 1.16
+      }
+    },
+    "default_gate_p_on_table_page": 0.18
+  },
+  "pipeline_cost_usd": 0.00483
 }
