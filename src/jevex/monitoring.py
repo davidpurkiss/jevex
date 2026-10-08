@@ -9,8 +9,8 @@ drift from the store (:mod:`jevex.stats`). ``docs/monitoring.md`` suggests alert
   LLM fallback gave the value, and Jev's mean confidence. A site that changes its layout
   shows as a rising "none" or fallback rate long before anyone reads the records.
 - **Budget headroom** (:func:`budget_headroom`): what's left of the run budget's LLM and
-  Jev caps this period (``RunBudget``), and of the process caps
-  (``JEVEX_*_MAX_COST_USD``).
+  Jev caps this period (``RunBudget``, :func:`run_headroom`), and of the process caps
+  (``JEVEX_*_MAX_COST_USD``, :func:`process_headroom`).
 - **Health** (:func:`store_error`, :attr:`GeneratorLearner.alive
   <jevex.learn.GeneratorLearner.alive>`): whether the store answers and the learner's
   worker is still running.
@@ -194,9 +194,22 @@ class Headroom:
 
 
 async def budget_headroom(ledger: RunLedger | None) -> list[Headroom]:
-    """Every spend cap that is set, with what's spent of it: the run budget's (through
-    ``ledger``, read from its spend ledger) and the process caps. Raises
-    :class:`~jevex.store.LedgerError` if the ledger can't be read."""
+    """Every spend cap that is set, with what's spent of it: the run budget's
+    (:func:`run_headroom`) and then the process caps (:func:`process_headroom`). Raises
+    what they raise; a caller that must report the others when one fails calls them
+    separately, as ``jevex serve`` does."""
+    out = await run_headroom(ledger)
+    for kind in ("jev", "llm"):
+        capped = process_headroom(kind)
+        if capped is not None:
+            out.append(capped)
+    return out
+
+
+async def run_headroom(ledger: RunLedger | None) -> list[Headroom]:
+    """The run budget's LLM and Jev caps that are set, with this period's spend read
+    through ``ledger`` from its spend ledger. Raises :class:`~jevex.store.LedgerError` if
+    the ledger can't be read."""
     out: list[Headroom] = []
     run = ledger.budget if ledger is not None and ledger.active else None
     if ledger is not None and run is not None:
@@ -208,15 +221,20 @@ async def budget_headroom(ledger: RunLedger | None) -> list[Headroom]:
             if limit is not None:
                 spent = await ledger.spent(kind)
                 out.append(Headroom("run", kind, run.period, limit, spent))
-    process: tuple[tuple[Literal["llm", "jev"], tuple[float, float] | None], ...] = (
-        ("jev", process_cap()),
-        ("llm", process_llm_cap()),
-    )
-    for kind, capped in process:
-        if capped is not None:
-            limit, spent = capped
-            out.append(Headroom("process", kind, "process", limit, spent))
     return out
+
+
+def process_headroom(kind: Literal["llm", "jev"]) -> Headroom | None:
+    """The process cap on ``kind`` (``JEVEX_JEV_MAX_COST_USD`` or
+    ``JEVEX_LLM_MAX_COST_USD``) with its spend, or ``None`` when it isn't set. Raises
+    :class:`~jevex.jev.JevError` / :class:`~jevex.llm.LLMError` when the cap isn't a
+    number or the ``JEVEX_SPEND_LEDGER`` file can't be read: a misconfiguration, not a
+    store failure."""
+    capped = process_cap() if kind == "jev" else process_llm_cap()
+    if capped is None:
+        return None
+    limit, spent = capped
+    return Headroom("process", kind, "process", limit, spent)
 
 
 async def store_error(store: Store, *, wait_s: float = STORE_TIMEOUT_S) -> str | None:
