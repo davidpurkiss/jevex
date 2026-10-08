@@ -177,6 +177,8 @@ from jevex.monitoring import (
     FieldDrift,
     Headroom,
     budget_headroom,
+    process_headroom,
+    run_headroom,
     store_error,
 )
 from jevex.normalise import (
@@ -518,6 +520,7 @@ __all__ = [
     "pinned_llm",
     "place_document_values",
     "prepare_input",
+    "process_headroom",
     "read_inputs",
     "read_results",
     "record_model",
@@ -530,6 +533,7 @@ __all__ = [
     "row_roles",
     "run_baseline",
     "run_chain",
+    "run_headroom",
     "schema_specs",
     "schemas_text",
     "score_results",

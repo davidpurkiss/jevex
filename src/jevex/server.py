@@ -9,8 +9,8 @@ A FastAPI app for callers that aren't Python, such as the car finder's Go crawle
   when the store doesn't answer or a learner's worker has died.
 - ``GET /metrics`` is Prometheus text: documents, records, the resolution mix, Jev and
   LLM calls, retries, rate limits and spend, budget hits and headroom, errors by stage
-  and part, extraction and per-stage time, learner outcomes and liveness, store errors
-  and per-field drift (:mod:`jevex.monitoring`) since the process started.
+  and part, extraction and per-stage time, learner outcomes and liveness, store and
+  spend-ledger errors and per-field drift (:mod:`jevex.monitoring`) since the process started.
 - Opt-in (``stats=True``, ``jevex serve --stats``), because it shows URLs and spend: the
   stats UI over the service's store, with the routes ``jevex stats`` serves (``/stats/``,
   ``/stats/api/<view>``, ``/stats/api/chart/<view>.svg``).
@@ -51,22 +51,23 @@ from jevex import __version__
 from jevex.budgets import RunLedger
 from jevex.document import LOCALE_TAG, Document
 from jevex.extractor import Extractor, document_stat
-from jevex.jev import JevBudgetExceededError, JevClient
+from jevex.jev import JevBudgetExceededError, JevClient, JevError
 from jevex.learn import LearnStatus
-from jevex.llm import LLMBudgetExceededError
+from jevex.llm import LLMBudgetExceededError, LLMError
 from jevex.locales import checked_locale
 from jevex.logs import get_logger
 from jevex.monitoring import (
     DRIFT_WINDOW,
     STORE_TIMEOUT_S,
     DriftWindow,
-    budget_headroom,
+    process_headroom,
+    run_headroom,
     store_error,
 )
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
 from jevex.stats.server import redact
-from jevex.store import MemoryLedger, SpendLedger, StoreError, open_store
+from jevex.store import LedgerError, MemoryLedger, SpendLedger, StoreError, open_store
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
@@ -150,8 +151,12 @@ class Metrics:
     of the documents with a result; one whose extraction raised (a process spend cap)
     counts only as an ``error``. ``errors`` counts the documents with each error, by
     stage, kind and part (``""`` for none). ``store_errors`` counts store failures:
-    those in results and those the service met itself (health checks, headroom and stats
-    reads). ``drift`` keeps the last documents' fields (:class:`~jevex.monitoring.DriftWindow`).
+    those in results (kind ``store``) and those the service met itself (health checks and
+    stats reads). ``ledger_errors`` counts spend-ledger failures the same way: those in
+    results (kind ``ledger``) and the service's headroom reads. The ledger is the store
+    unless the service was given another, so a store outage usually shows in both; a
+    ledger failure also means LLM calls that can't be cleared aren't made. ``drift``
+    keeps the last documents' fields (:class:`~jevex.monitoring.DriftWindow`).
     """
 
     documents: Counter[Outcome] = field(default_factory=Counter[Outcome])
@@ -171,6 +176,7 @@ class Metrics:
     llm_rate_limited: int = 0
     errors: Counter[tuple[str, str, str]] = field(default_factory=Counter[tuple[str, str, str]])
     store_errors: int = 0
+    ledger_errors: int = 0
     seconds: float = 0.0
     timed: int = 0
     stage_seconds: dict[str, float] = field(default_factory=dict[str, float])
@@ -184,6 +190,7 @@ class Metrics:
         self.documents[_outcome(result)] += 1
         self.errors.update({(e.stage, e.kind, e.part or "") for e in result.errors})
         self.store_errors += sum(e.kind == "store" for e in result.errors)
+        self.ledger_errors += sum(e.kind == "ledger" for e in result.errors)
         self.jev_retries += meta.jev.retries
         self.llm_retries += meta.llm.retries
         self.jev_rate_limited += meta.jev.rate_limited
@@ -296,6 +303,11 @@ class Metrics:
                 "jevex_store_errors_total",
                 "Store failures, in documents and in the service's own reads.",
                 self.store_errors,
+            ),
+            (
+                "jevex_ledger_errors_total",
+                "Spend-ledger failures, in documents and in the service's headroom reads.",
+                self.ledger_errors,
             ),
         ):
             metric(name, "counter", help_, [({}, value)])
@@ -595,19 +607,30 @@ class Service:
         return [e.running_learner for e in self._extractors.values() if e.running_learner]
 
     async def headroom(self) -> list[Headroom]:
-        """What's left of each spend cap (:func:`~jevex.monitoring.budget_headroom`):
-        none when the spend ledger (by default the store) can't be read within
-        ``STORE_TIMEOUT_S``, which is counted in ``store_errors`` (so ``/metrics`` still
-        answers while it is down)."""
+        """What's left of each spend cap (:func:`~jevex.monitoring.budget_headroom`), so
+        that ``/metrics`` still answers when one can't be read. The run budget's are left
+        out when the spend ledger (by default the store) fails or doesn't answer within
+        ``STORE_TIMEOUT_S``, which is counted in ``ledger_errors``. A process cap is left
+        out when it's misconfigured (``JEVEX_*_MAX_COST_USD`` not a number, an unreadable
+        ``JEVEX_SPEND_LEDGER`` file): that is logged, not counted as a ledger failure."""
         run = self.budgets.run if self.budgets else None
         ledger = RunLedger(run, self.ledger, run_id=self.run_id) if run else None
+        out: list[Headroom] = []
         try:
             async with asyncio.timeout(STORE_TIMEOUT_S):
-                return await budget_headroom(ledger)
-        except Exception as exc:
-            self.metrics.store_errors += 1
-            log.warning("can't read the spend ledger for /metrics: %s", exc, exc_info=exc)
-            return []
+                out += await run_headroom(ledger)
+        except (LedgerError, TimeoutError) as exc:
+            self.metrics.ledger_errors += 1
+            log.warning("can't read the spend ledger for /metrics: %r", exc, exc_info=exc)
+        for kind in ("jev", "llm"):
+            try:
+                capped = process_headroom(kind)
+            except (JevError, LLMError) as exc:
+                log.warning("can't read the process %s spend cap for /metrics: %s", kind, exc)
+                continue
+            if capped is not None:
+                out.append(capped)
+        return out
 
     async def render_metrics(self) -> str:
         """``/metrics``: :attr:`metrics` with the learners and the spend caps."""

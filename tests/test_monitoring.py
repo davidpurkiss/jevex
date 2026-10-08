@@ -10,13 +10,16 @@ from pydantic import BaseModel
 from jevex import Document, Extractor, Field, Pipeline, RunBudget
 from jevex.budgets import RunLedger
 from jevex.extractor import ExtractionResult
-from jevex.jev import JevBackendError, reset_process_cost
-from jevex.llm import reset_process_llm_cost
+from jevex.jev import JevBackendError, JevError, reset_process_cost
+from jevex.llm import LLMError, reset_process_llm_cost
 from jevex.monitoring import (
     DriftWindow,
     FieldDrift,
+    Headroom,
     budget_headroom,
     observations,
+    process_headroom,
+    run_headroom,
     store_error,
 )
 from jevex.pipeline import Context
@@ -184,6 +187,35 @@ async def test_headroom_of_the_run_budget_and_the_process_caps(
     assert [h.spent_usd for h in found] == pytest.approx([2.0, 0.25, 0.1, 3.0])
     assert [h.remaining_usd for h in found] == pytest.approx([3.0, 0.75, 0.4, 0.0])
     await store.aclose()
+
+
+async def test_run_and_process_headroom_separately(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = SQLiteStore(":memory:")
+    ledger = RunLedger(RunBudget(max_jev_spend=1.0, period="run"), store, run_id="r1")
+    await store.record_spend(SpendEntry(amount_usd=0.25, kind="jev", run_id="r1"))
+    reset_process_llm_cost()
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
+    monkeypatch.delenv("JEVEX_JEV_MAX_COST_USD", raising=False)
+    assert await run_headroom(ledger) == [Headroom("run", "jev", "run", 1.0, 0.25)]
+    assert process_headroom("llm") == Headroom("process", "llm", "process", 2.0, 0.0)
+    assert process_headroom("jev") is None
+    await store.aclose()
+
+
+async def test_a_misconfigured_process_cap_raises_its_own_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "lots")
+    with pytest.raises(JevError, match="must be a number of US dollars, got 'lots'"):
+        process_headroom("jev")
+    with pytest.raises(JevError):  # budget_headroom raises what its parts raise
+        await budget_headroom(None)
+    ledger_file = tmp_path / "ledger"
+    ledger_file.write_text("llm ???\n")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger_file))
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
+    with pytest.raises(LLMError, match="has a bad line 1"):
+        process_headroom("llm")
 
 
 async def test_no_caps_no_headroom(monkeypatch: pytest.MonkeyPatch) -> None:

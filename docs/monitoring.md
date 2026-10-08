@@ -89,14 +89,22 @@ span for the page, say), so a page's fetch and extraction can be one trace.
 | `jevex_llm_rate_limited_total` | counter | LLM calls that still failed on a 429 after the SDK's retries |
 | `jevex_budget_events_total{scope,limit}` | counter | budget limits hit |
 | `jevex_budget_remaining_usd{scope,kind,period}`, `jevex_budget_limit_usd{...}` | gauge | each spend cap and what's left: `scope="run"` is the run budget this period (`--max-spend`, `--max-jev-spend`), `scope="process"` the `JEVEX_*_MAX_COST_USD` caps |
-| `jevex_store_errors_total` | counter | store failures, in documents and in the service's own reads |
+| `jevex_store_errors_total` | counter | store failures: in documents (`jevex_errors_total` kind `store`), health checks and stats reads |
+| `jevex_ledger_errors_total` | counter | spend-ledger failures: in documents (kind `ledger`: an LLM call the ledger couldn't clear isn't made) and the service's headroom reads |
 | `jevex_learner_outcomes_total{status}` | counter | examples the learner finished, by outcome (`accepted`, `covered`, `llm_error`...) |
 | `jevex_learner_alive` | gauge | 1 while every learner's worker can take examples, 0 once one has died |
 | `jevex_learner_worker_deaths_total` | counter | times a learner's worker died |
 | `jevex_drift_documents`, `jevex_field_records{field}`, `jevex_field_none_rate{field}`, `jevex_field_fallback_rate{field}`, `jevex_field_confidence_mean{field}` | gauge | drift over the last documents (below) |
 
 Learner series appear once a learner exists (a `generator_llm`, after the first
-document); headroom series only when a cap is set.
+document); headroom series only when a cap is set. The run budget's headroom is left
+out while its ledger can't be read (counted in `jevex_ledger_errors_total`). A process
+cap's is left out when it's misconfigured (`JEVEX_*_MAX_COST_USD` isn't a number, or the
+`JEVEX_SPEND_LEDGER` file can't be read); that is logged as a warning on `jevex.server`,
+not counted as a ledger failure.
+
+The spend ledger is the store unless `jevex serve` was given another
+(`Service(ledger=...)`), so a store outage usually shows in both error counters.
 
 The Scrapy pipeline puts the counts that apply in Scrapy's stats under `jevex/`:
 documents, records, `partial`, `failed`, `stopped`, `errors/<kind>`,
@@ -177,6 +185,8 @@ groups:
         for: 15m
       - alert: JevexStoreErrors
         expr: rate(jevex_store_errors_total[15m]) > 0
+      - alert: JevexLedgerErrors       # LLM calls the run budget can't clear aren't made
+        expr: rate(jevex_ledger_errors_total[15m]) > 0
 ```
 
 Metrics can't see accuracy: a value can be confidently wrong. Schedule an accuracy check

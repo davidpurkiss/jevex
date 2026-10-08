@@ -300,6 +300,7 @@ async def test_a_failing_ledger_is_reported_on_the_result(
         ("ledger", "DownLedger", LedgerError.__name__)
     ]
     assert service.metrics.documents["partial"] == 1
+    assert (service.metrics.ledger_errors, service.metrics.store_errors) == (1, 0)
     await service.aclose()
 
 
@@ -689,6 +690,7 @@ def test_metrics_attribute_errors_and_time_stages_and_count_rate_limits(
         "# TYPE jevex_stage_seconds summary",
         'jevex_stage_seconds_count{stage="select"} 1',
         "jevex_store_errors_total 0",
+        "jevex_ledger_errors_total 0",
     ):
         assert line + "\n" in text
     assert 'jevex_stage_seconds_sum{stage="select"} ' in text
@@ -733,7 +735,8 @@ async def test_a_hung_store_leaves_metrics_without_headroom(
     await service.start()
     text = await service.render_metrics()
     assert "jevex_budget_remaining_usd" not in text
-    assert "jevex_store_errors_total 1\n" in text
+    assert "jevex_ledger_errors_total 1\n" in text
+    assert "jevex_store_errors_total 0\n" in text
     await service.aclose()
     await store.aclose()
 
@@ -782,6 +785,67 @@ async def test_metrics_report_budget_headroom(
     await store.aclose()
 
 
+@pytest.mark.parametrize(
+    ("jev_cap", "bad_ledger_file", "logged"),
+    [
+        ("fifty cents", False, "JEVEX_JEV_MAX_COST_USD must be a number of US dollars"),
+        ("0.5", True, "JEVEX_SPEND_LEDGER file "),
+    ],
+    ids=["malformed-cap", "unreadable-ledger-file"],
+)
+async def test_a_misconfigured_process_cap_keeps_the_other_headroom(
+    stage: FindValues,
+    fake_jev: FakeJev,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    jev_cap: str,
+    bad_ledger_file: bool,
+    logged: str,
+) -> None:
+    from jevex.llm import reset_process_llm_cost
+
+    reset_process_llm_cost()  # other tests' calls
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", jev_cap)
+    if bad_ledger_file:  # the LLM cap reads the same file, so it's left out too
+        ledger_file = tmp_path / "ledger"
+        ledger_file.write_text("jev not-a-number\n")
+        monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger_file))
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
+    store = SQLiteStore(":memory:")
+    budgets = Budgets(run=RunBudget(max_spend=5.0, period="week"))
+    service = Service([Book], jev=fake_jev.client(), store=store, budgets=budgets)
+    await service.start()
+    with caplog.at_level("WARNING", logger="jevex.server"):
+        text = await service.render_metrics()
+    assert 'jevex_budget_remaining_usd{scope="run",kind="llm",period="week"} 5.0\n' in text
+    assert 'scope="process",kind="jev"' not in text
+    assert ('scope="process",kind="llm"' in text) is not bad_ledger_file
+    assert "jevex_ledger_errors_total 0\n" in text
+    assert "jevex_store_errors_total 0\n" in text
+    prefix = "can't read the process jev spend cap for /metrics: "
+    assert any(r.getMessage().startswith(prefix + logged) for r in caplog.records)
+    await service.aclose()
+    await store.aclose()
+
+
+async def test_headroom_raises_what_is_not_a_ledger_failure(
+    stage: FindValues, fake_jev: FakeJev, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.server as server
+
+    async def broken(_: object) -> list[object]:
+        raise KeyError("a bug, not an outage")
+
+    monkeypatch.setattr(server, "run_headroom", broken)
+    service = Service([Book], jev=fake_jev.client(), budgets=ONE_DOCUMENT)
+    await service.start()
+    with pytest.raises(KeyError):
+        await service.headroom()
+    assert service.metrics.ledger_errors == 0
+    await service.aclose()
+
+
 @pytest.mark.parametrize("given", [True, False])
 async def test_headroom_reads_the_ledger_the_extractors_share(
     stage: FindValues, fake_jev: FakeJev, given: bool
@@ -827,8 +891,9 @@ def test_health_is_503_when_the_store_does_not_answer(stage: FindValues, fake_je
         assert response.status_code == 503
         assert response.json()["status"] == "unhealthy"
         assert response.json()["checks"] == {"store": "StoreError: database is locked"}
-        text = client.get("/metrics").text  # the headroom read fails too
-    assert "jevex_store_errors_total 2\n" in text
+        text = client.get("/metrics").text  # the headroom read fails too: the ledger's
+    assert "jevex_store_errors_total 1\n" in text
+    assert "jevex_ledger_errors_total 1\n" in text
     assert "jevex_budget_remaining_usd" not in text
 
 
