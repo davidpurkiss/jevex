@@ -9,6 +9,7 @@ from urllib.parse import unquote
 from jevex.stats import (
     Event,
     FieldStat,
+    FieldWindow,
     GeneratorStat,
     Point,
     SpendPoint,
@@ -124,6 +125,39 @@ def test_fields_needing_attention_come_first() -> None:
     assert page.index("<td>Car.trim</td>") < page.index("<td>Car.model</td>")
     assert "GTI (0.41)" in page
     assert 'aria-label="generator 60%, llm 40%"' in page
+
+
+def test_fields_show_none_rates_and_mark_recent_drift() -> None:
+    drifting = FieldStat(
+        "Car.trim",
+        10,
+        0.9,
+        {"jev": 9, "llm": 1},
+        (),
+        none_rate=0.1,
+        recent=FieldWindow(documents=5, found=3, values=3, llm=1, mean_confidence=0.85),
+    )
+    steady = FieldStat(
+        "Car.model",
+        20,
+        0.95,
+        {"jev": 20},
+        (),
+        none_rate=0.0,
+        recent=FieldWindow(documents=5, found=5, values=5, llm=0, mean_confidence=0.95),
+    )
+    unknown = FieldStat("Car.price", 2, None, {"structured": 2}, ())
+    page = render_page(store_stats(fields=[drifting, steady, unknown])).split("<h2>Fields</h2>")[1]
+    assert "recent: llm · confidence · none" in page
+    # Fallback 10% → 33% and none 10% → 40% are marked; confidence 0.90 → 0.85 isn't.
+    assert '<td><b class="drift">33.3%</b> · 0.85 · <b class="drift">40.0%</b></td>' in page
+    assert "<td>0.0% · 0.95 · 0.0%</td>" in page
+    row = page.split("<td>Car.price</td>")[1].split("</tr>")[0]
+    assert '<td class="num" data-value="0.0000">–</td>' in row  # no none rate known
+    assert "<td>–</td>" in row  # nor a recent window
+    [trim] = to_json(store_stats(fields=[drifting]), "fields")
+    assert trim["none_rate"] == 0.1
+    assert trim["recent"]["none_rate"] == 0.4
 
 
 def test_events_are_newest_first_and_escaped() -> None:

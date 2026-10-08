@@ -19,7 +19,7 @@ from urllib.parse import quote
 import yaml
 
 from jevex.stats.charts import CHART_CSS, PALETTE_CSS, calls, chart_svg, pct, theme_css, usd
-from jevex.stats.data import METHODS, method_shares, summary, to_json
+from jevex.stats.data import DRIFT_DOCUMENTS, METHODS, method_shares, summary, to_json
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 LIVE_REFRESH_SECONDS = 30
 EVENT_LIMIT = 50
+DRIFT_MARGIN = 0.1
+"""How much worse a field's recent fallback rate, confidence or "none" rate must be than
+over all documents for the fields view to mark it."""
 
 MARK_SVG = (
     '<svg class="mark" viewBox="0 0 160 160" width="32" height="32" aria-hidden="true">'
@@ -114,6 +117,7 @@ pre { margin: 4px 0; font-size: 12px; white-space: pre-wrap; }
 .mixbar .m-llm { background: var(--series-4); }
 .mixbar .m-vision { background: var(--series-5); }
 .empty { color: var(--text-muted); }
+b.drift { color: var(--series-4); }
 ul.events { list-style: none; padding: 0; margin: 0; }
 ul.events li { padding: 3px 0; border-bottom: 1px solid var(--grid); }
 .kind { display: inline-block; min-width: 64px; color: var(--text-secondary); }
@@ -331,18 +335,48 @@ def _fields(fields: Sequence[FieldStat]) -> str:
     head = (
         '<tr><th data-sort="text">field</th><th class="num" data-sort="num">values</th>'
         '<th class="num" data-sort="num">mean confidence</th>'
-        '<th class="num" data-sort="num">llm</th><th>method mix</th>'
+        '<th class="num" data-sort="num">llm</th>'
+        '<th class="num" data-sort="num">none</th><th>method mix</th>'
+        f'<th title="the last {DRIFT_DOCUMENTS} documents">recent: llm · confidence · none</th>'
         "<th>lowest confidence</th></tr>"
     )
     rows = [
         f'<tr class="row"><td>{_esc(f.field)}</td><td class="num">{f.n}</td>'
         f'<td class="num">{_num(f.mean_confidence)}</td>'
         f'<td class="num" data-value="{f.fallback_rate:.4f}">{pct(f.fallback_rate)}</td>'
+        f'<td class="num" data-value="{f.none_rate or 0:.4f}">'
+        f"{'–' if f.none_rate is None else pct(f.none_rate)}</td>"
         f"<td>{_mixbar(f.methods)}</td>"
+        f"<td>{_recent(f)}</td>"
         f"<td>{'; '.join(f'{_esc(v)} ({c:.2f})' for v, c in f.lowest) or '–'}</td></tr>"
         for f in ordered
     ]
     return f"<table data-sortable><thead>{head}</thead><tbody>{''.join(rows)}</tbody></table>"
+
+
+def _recent(f: FieldStat) -> str:
+    """The field over the recent documents, a figure marked when it's worse than over all
+    of them by more than :data:`DRIFT_MARGIN` (drift)."""
+    r = f.recent
+    if r is None or not r.documents:
+        return "–"
+
+    def mark(text: str, worse: bool) -> str:
+        return f'<b class="drift">{text}</b>' if worse else text
+
+    confidence = _num(r.mean_confidence)
+    worse_confidence = (
+        r.mean_confidence is not None
+        and f.mean_confidence is not None
+        and f.mean_confidence - r.mean_confidence > DRIFT_MARGIN
+    )
+    return " · ".join(
+        (
+            mark(pct(r.fallback_rate), r.fallback_rate - f.fallback_rate > DRIFT_MARGIN),
+            mark(confidence, worse_confidence),
+            mark(pct(r.none_rate), r.none_rate - (f.none_rate or 0.0) > DRIFT_MARGIN),
+        )
+    )
 
 
 def _events(stats: Stats) -> str:

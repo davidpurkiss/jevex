@@ -130,7 +130,9 @@ async def test_a_stopped_document_records_why(store: SQLiteStore) -> None:
     ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Stops()]), store=store)
     await ex.extract(doc())
     [stat] = await store.documents()
-    assert stat.events == [DocumentEvent(kind="stopped", message="select: nothing to read")]
+    assert stat.events == [
+        DocumentEvent(kind="stopped", message="select: nothing to read", stage="select")
+    ]
     assert stat.records == 0
 
 
@@ -144,7 +146,9 @@ async def test_a_failed_document_is_recorded_with_its_error(store: SQLiteStore) 
     )
     assert (stat.status, stat.errors) == ("failed", [error])
     assert stat.events == [
-        DocumentEvent(kind="error", message="select jev: JevBackendError: backend down")
+        DocumentEvent(
+            kind="error", message="select jev: JevBackendError: backend down", stage="select"
+        )
     ]
     assert stat.jev_requests == 1
     assert stat.values == []
@@ -156,7 +160,9 @@ async def test_a_spend_cap_still_raises_and_is_recorded(store: SQLiteStore) -> N
         await ex.extract(doc())
     [stat] = await store.documents()
     assert stat.status == "failed"
-    assert stat.events == [DocumentEvent(kind="error", message="JevBudgetExceededError: capped")]
+    assert stat.events == [
+        DocumentEvent(kind="error", message="JevBudgetExceededError: capped", stage="select")
+    ]
     assert stat.jev_requests == 1
 
 
@@ -508,3 +514,25 @@ async def test_the_learner_retries_jev_as_documents_do() -> None:
     assert learner is not None
     assert learner.jev.retry == policy
     await ex.aclose()
+
+
+def test_a_skipped_parts_stat_event_names_its_stage_and_part() -> None:
+    @dataclass
+    class Skips:
+        name: str = "candidates"
+
+        async def run(self, ctx: Context) -> None:
+            ctx.part_failed(self.name, "generator", "gen-1", IndexError("group 2"))
+
+    ex = Extractor([Car], jev=FakeJev().client(), pipeline=Pipeline([Skips()]))
+    result = ex.extract_sync(doc())
+    ex.close()
+    stat = document_stat(result, doc_id="d", run_id=None, seconds=0.1)
+    assert stat.events == [
+        DocumentEvent(
+            kind="error",
+            message="candidates generator gen-1: IndexError: group 2",
+            stage="candidates",
+            part="gen-1",
+        )
+    ]

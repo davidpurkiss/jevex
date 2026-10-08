@@ -21,7 +21,7 @@ from jevex.stats import (
     summary,
     to_json,
 )
-from jevex.stats.data import merge, method_shares
+from jevex.stats.data import field_window, merge, method_shares
 from jevex.store import (
     DocumentEvent,
     DocumentStat,
@@ -283,6 +283,32 @@ llm_cost_per_document,errors,generators,values_jev,values_llm,values_generator
 2,4,2,1 2,,0.5,0.001,0.005,1,3,2,1,1
 3,6,2,2,0.5,0.0,0.001,0.0,0,3,2,0,2
 """
+
+
+def test_field_stats_read_none_rates_and_recent_drift() -> None:
+    def trim(value: str, method: str = "jev", confidence: float = 0.9) -> ValueStat:
+        return ValueStat(field="Car.trim", method=method, confidence=confidence, value=value)
+
+    docs = [
+        doc(0, schemas=["Car"], values=[trim("GTI"), trim("R")]),  # a list: one document
+        doc(1, schemas=["Car"], values=[trim("GTD")]),
+        doc(2, schemas=["Car"], values=[trim("TSI", "llm", 0.5)]),
+        doc(3, schemas=["Car"]),  # no trim
+        doc(4, schemas=["Car"], status="failed"),  # not counted
+        doc(5, schemas=["Bike"]),  # another schema's
+    ]
+    [stat] = field_stats(docs, recent=4)
+    assert stat.none_rate == pytest.approx(1 / 4)
+    recent = stat.recent
+    assert recent is not None
+    # The last four documents: two with Car that didn't fail, one with a trim.
+    assert (recent.documents, recent.found, recent.values, recent.llm) == (2, 1, 1, 1)
+    assert (recent.none_rate, recent.fallback_rate, recent.mean_confidence) == (0.5, 1.0, 0.5)
+    whole = field_window("Car.trim", docs)
+    assert (whole.documents, whole.found, whole.values, whole.llm) == (4, 3, 4, 1)
+    assert field_stats(docs, recent=0)[0].recent is None
+    empty = field_window("Car.trim", [])
+    assert (empty.none_rate, empty.fallback_rate, empty.mean_confidence) == (0.0, 0.0, None)
 
 
 def test_a_replay_csv_gives_one_point_per_batch() -> None:

@@ -43,6 +43,7 @@ store learned inline (``hybrid`` mode), become a :class:`PackDiff` written out f
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import time
@@ -68,6 +69,7 @@ from jevex.jev import JevBudgetExceededError, JevError
 from jevex.layout import DomLocation, section_text
 from jevex.llm import LLMError
 from jevex.locales import locale_conventions, localise_steps
+from jevex.logs import get_logger, log_context
 from jevex.normalise import BUILTIN_NORMALISERS, NormaliseError, NormaliserRegistry, normalise
 from jevex.packs import (
     PACK_GENERATORS,
@@ -92,6 +94,8 @@ if TYPE_CHECKING:
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate
     from jevex.store import Store, VerifiedExample
+
+log = get_logger(__name__)
 
 LEARN_THRESHOLD = 0.9
 """Verification probability at or above which an LLM answer is learned from. Provisional:
@@ -442,6 +446,8 @@ class GeneratorLearner:
     outcomes: list[LearnOutcome] = field(default_factory=list[LearnOutcome])
     spend: LearningSpend = field(default_factory=LearningSpend, init=False)
     """What :meth:`learn` has spent so far, whatever each example's outcome."""
+    deaths: int = field(default=0, init=False)
+    """How many times the worker has died on an unexpected error (see :attr:`alive`)."""
     _queue: asyncio.Queue[VerifiedExample] | None = field(default=None, init=False, repr=False)
     _worker: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
@@ -458,6 +464,25 @@ class GeneratorLearner:
     @property
     def snapshot(self) -> GeneratorSnapshot:
         return self.generators.current
+
+    @property
+    def alive(self) -> bool:
+        """Whether the background worker can take examples: ``False`` once it has died
+        on an unexpected error, until that error is raised (by the next :meth:`submit`,
+        :meth:`drain` or :meth:`aclose`, which starts a new worker next time). A learner
+        that hasn't started a worker yet is alive. ``jevex serve``'s ``/health`` reads it.
+        """
+        if self._error is not None:
+            return False
+        worker = self._worker
+        return worker is None or not worker.done() or worker.cancelled()
+
+    def outcome_counts(self) -> dict[LearnStatus, int]:
+        """How many examples ended in each status so far (:attr:`outcomes`)."""
+        counts = dict.fromkeys(get_args(LearnStatus), 0)
+        for outcome in self.outcomes:
+            counts[outcome.status] += 1
+        return counts
 
     def wants(self, example: VerifiedExample) -> bool:
         """Whether ``example`` is learned from: a human's, or verified with
@@ -522,6 +547,22 @@ class GeneratorLearner:
             message = "; ".join(m for m in (outcome.message, *unrecorded) if m)
             outcome = outcome.model_copy(update={"message": message})
         self.outcomes.append(outcome)
+        if outcome.status == "accepted" and outcome.spec is not None:
+            log.info(
+                "learned generator %s for %s (snapshot %s)",
+                outcome.spec.id,
+                outcome.field,
+                outcome.snapshot,
+                extra={"part": outcome.spec.id},
+            )
+        else:
+            log.info(
+                "example %s for %s not learned: %s: %s",
+                outcome.example_id,
+                outcome.field,
+                outcome.status,
+                outcome.message,
+            )
         return outcome
 
     # -- the steps ----------------------------------------------------------------------
@@ -777,21 +818,25 @@ class GeneratorLearner:
             # A new event loop (asyncio.run per batch) can't use the old loop's queue.
             self._queue = asyncio.Queue()
             self._loop = loop
-            self._worker = loop.create_task(self._work(self._queue))
+            # Its own context: the document that happened to start it isn't what it logs.
+            self._worker = loop.create_task(self._work(self._queue), context=contextvars.Context())
         return self._queue
 
     async def _work(self, queue: asyncio.Queue[VerifiedExample]) -> None:
-        while True:
-            item = await queue.get()
-            try:
-                await self.learn(item)
-            except Exception as exc:
-                # Not an expected failure (those are outcomes): stop, and let the next
-                # submit, drain or aclose raise it.
-                self._error = exc
-                return
-            finally:
-                queue.task_done()
+        with log_context(run_id=self.ledger.run_id):
+            while True:
+                item = await queue.get()
+                try:
+                    await self.learn(item)
+                except Exception as exc:
+                    # Not an expected failure (those are outcomes): stop, and let the next
+                    # submit, drain or aclose raise it.
+                    log.error("the learner worker died on example %s", item.id, exc_info=exc)
+                    self._error = exc
+                    self.deaths += 1
+                    return
+                finally:
+                    queue.task_done()
 
     def _raise_error(self) -> None:
         if self._error is not None:

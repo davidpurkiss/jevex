@@ -209,11 +209,12 @@ def reset_process_llm_cost() -> None:
     _process_cost = 0.0
 
 
-def check_budget() -> None:
-    """Raise before a call if the process cap is already spent."""
+def process_llm_cap() -> tuple[float, float] | None:
+    """``JEVEX_LLM_MAX_COST_USD`` and the spend it's compared against (this process's, or
+    the ``JEVEX_SPEND_LEDGER`` total), or ``None`` when no cap is set."""
     raw = os.environ.get(MAX_COST_ENV)
     if not raw:
-        return
+        return None
     try:
         cap = float(raw)
     except ValueError:
@@ -222,6 +223,15 @@ def check_budget() -> None:
     spent = _process_cost
     if ledger is not None:  # the ledger can only tighten the cap
         spent = max(spent, ledger_total(ledger, "llm", LLMError))
+    return cap, spent
+
+
+def check_budget() -> None:
+    """Raise before a call if the process cap is already spent."""
+    capped = process_llm_cap()
+    if capped is None:
+        return
+    cap, spent = capped
     if spent >= cap:
         raise LLMBudgetExceededError(
             f"LLM spend cap reached: ${spent:.4f} of ${cap:.2f} ({MAX_COST_ENV})"
@@ -234,6 +244,21 @@ def record(usage: LLMUsage) -> None:
     ledger = ledger_path()
     if ledger is not None and usage.cost:
         ledger_add(ledger, "llm", usage.cost, LLMError)
+
+
+def rate_limited(exc: BaseException) -> bool:
+    """Whether ``exc``, or an exception it was raised from (adapters wrap their SDK's
+    errors in :class:`LLMError`), is the SDK's 429 (too many requests): Anthropic's,
+    OpenAI's and LiteLLM's errors carry ``status_code``, Gemini's ``code``. The SDKs' own
+    retries of 429s aren't reported, so this sees only calls that still failed."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if any(getattr(current, name, None) == 429 for name in ("status_code", "code", "status")):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def validate_output[T: BaseModel](schema: type[T], data: Any) -> T:
@@ -263,6 +288,8 @@ __all__ = [
     "ModelPrice",
     "cost",
     "gemini_flash_3x_price",
+    "process_llm_cap",
     "process_llm_cost",
+    "rate_limited",
     "reset_process_llm_cost",
 ]

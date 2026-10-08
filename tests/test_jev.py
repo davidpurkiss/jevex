@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import random
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -18,6 +19,7 @@ from jevex.jev import (
     JevResponse,
     JevTokenLimitError,
     JevTransientError,
+    JevUsage,
     JSONContent,
     MissingAnswerError,
     Noul,
@@ -689,10 +691,13 @@ async def test_a_request_cancelled_mid_flight_is_still_counted() -> None:
 class FlakyBackend(RecordingBackend):
     """Fails transiently ``failures`` times (``retry_after`` on each), then answers."""
 
-    def __init__(self, failures: int, *, retry_after: float | None = None) -> None:
+    def __init__(
+        self, failures: int, *, retry_after: float | None = None, status: int = 503
+    ) -> None:
         super().__init__()
         self.failures = failures
         self.retry_after = retry_after
+        self.status = status
 
     async def system_one(
         self, state: JSONContent, questions: Mapping[str, Question]
@@ -700,7 +705,9 @@ class FlakyBackend(RecordingBackend):
         if self.failures:
             self.failures -= 1
             self.calls.append(list(questions))
-            raise JevTransientError("503 overloaded", retry_after=self.retry_after)
+            raise JevTransientError(
+                f"{self.status} overloaded", retry_after=self.retry_after, status=self.status
+            )
         return await super().system_one(state, questions)
 
 
@@ -714,6 +721,23 @@ async def test_a_transient_failure_is_retried_and_counted() -> None:
     assert answers == {"q": NoulAnswer(p=0.9)}
     assert len(backend.calls) == 3
     assert (client.usage.retries, client.usage.requests) == (2, 3)
+    assert client.usage.rate_limited == 0
+
+
+async def test_rate_limited_requests_are_counted_and_retries_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="jevex")
+    client = JevClient(FlakyBackend(2, status=429), retry=NO_WAIT)
+    await client.ask("s", {"q": Noul(instructions="?")})
+    assert (client.usage.rate_limited, client.usage.retries) == (2, 2)
+    assert [r.getMessage() for r in caplog.records] == [
+        "Jev request failed (429 overloaded), retry 1 of 2 in 0.0s",
+        "Jev request failed (429 overloaded), retry 2 of 2 in 0.0s",
+    ]
+    total = JevUsage()
+    total.add(client.usage)
+    assert total.rate_limited == 2
 
 
 async def test_retries_give_up_after_max_retries() -> None:
@@ -793,6 +817,8 @@ async def test_transient_api_errors_become_transient_errors(
         await backend.system_one("s", _nouls(1))
     await backend.aclose()
     assert raised.value.retry_after == retry_after
+    assert raised.value.status == status
+    assert raised.value.rate_limited == (status == 429)
 
 
 async def test_connection_errors_are_transient() -> None:

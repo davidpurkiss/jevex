@@ -170,3 +170,42 @@ async def test_llm_cassette_records_then_replays(tmp_path: Path) -> None:
     assert len(inner.calls) == 1
     with pytest.raises(CassetteMissError, match="JEVEX_RECORD=1"):
         await LLMCassette(path).structured("Another prompt", Book)
+
+
+class _Status(Exception):
+    def __init__(self, **attrs: object) -> None:
+        super().__init__("x")
+        for name, value in attrs.items():
+            setattr(self, name, value)
+
+
+@pytest.mark.parametrize(
+    ("attrs", "expected"),
+    [
+        ({"status_code": 429}, True),  # Anthropic, OpenAI, LiteLLM
+        ({"code": 429}, True),  # Gemini
+        ({"status_code": 500}, False),
+        ({"code": "rate_limit"}, False),
+        ({}, False),
+    ],
+)
+def test_rate_limited(attrs: dict[str, object], expected: bool) -> None:
+    from jevex.llm import rate_limited
+
+    assert rate_limited(_Status(**attrs)) is expected
+
+
+def test_rate_limited_sees_through_an_adapters_wrapping() -> None:
+    from jevex.llm import LLMError, rate_limited
+
+    def wrapped(sdk: Exception) -> LLMError:
+        try:
+            raise sdk
+        except Exception as exc:  # what the adapters do
+            try:
+                raise LLMError(f"Anthropic request failed: {exc}") from exc
+            except LLMError as error:
+                return error
+
+    assert rate_limited(wrapped(_Status(status_code=429)))
+    assert not rate_limited(wrapped(_Status(status_code=500)))

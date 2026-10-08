@@ -296,6 +296,16 @@ failed 3 times is disabled (kept for review, like a pruned one) with a
 1 for a failed one; `jevex eval` scores failed documents as all missing and lists each
 partial one's errors.
 
+### Monitoring
+
+jevex logs to `logging.getLogger("jevex.<module>")`, silently until you configure
+logging, and every record carries the run, document, URL, stage and part it's about
+(`%(url)s`, `%(stage)s`, `%(part)s`...). With the `otel` extra each document is an
+OpenTelemetry trace with a span per stage (`Extractor(tracer=...)`, or the global tracer
+once you set a provider). `jevex serve` adds Prometheus metrics, health checks and
+per-field drift. [`docs/monitoring.md`](docs/monitoring.md) lists every signal, suggests
+alerts, and covers failures jevex can't see itself (native aborts, restarts).
+
 ## Learned state
 
 jevex keeps what it learns (key mappings, generators, verified examples, stats) and the
@@ -417,9 +427,13 @@ A [partial result](#when-something-fails) is a 200 whose `status` and `errors` s
 skipped. Unknown schemas and unreadable documents answer 422, a Jev failure 502, any other
 failed extraction 500, and a process spend cap (`JEVEX_*_MAX_COST_USD`) 503.
 
-`GET /health` names the schemas; `GET /metrics` is Prometheus text (documents by outcome:
-`ok`, `partial`, `stopped` or `error`; errors by stage and kind; records, values by
-resolution method, Jev and LLM calls, retries and spend, budget hits, extraction time).
+`GET /health` names the schemas and answers 503 when the store doesn't answer or the
+learner's worker has died. `GET /metrics` is Prometheus text: documents by outcome (`ok`,
+`partial`, `stopped` or `error`), errors by stage, kind and part, records, values by
+resolution method, Jev and LLM calls, retries, rate limits and spend, budget hits and
+headroom, extraction and per-stage time, learner outcomes and liveness, store errors, and
+each field's "none" rate, fallback rate and confidence over recent documents (see
+[`docs/monitoring.md`](docs/monitoring.md)).
 `--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's off by
 default because it shows URLs and spend. The service has no auth of its own: run it behind
 yours.
@@ -470,8 +484,9 @@ values, as `jevex extract` prints them), so `scrapy crawl books -O books.jsonl` 
 them out. Items without a document pass through. `JEVEX_THRESHOLD`, `JEVEX_LOCALE` (the
 locale of documents that don't say their own) and `JEVEX_META` (per-field and document
 meta) work as their `Extractor` and `jevex extract` namesakes,
-and counts go to Scrapy's stats under `jevex/` (with `partial`, `failed` and
-`errors/<kind>`). A [failed](#when-something-fails) document fails its item with an
+and counts go to Scrapy's stats under `jevex/` (with `partial`, `failed`,
+`errors/<kind>`, `errors/<stage>/<kind>/<part>`, `stage_seconds/<stage>` and the learner's
+outcomes). A [failed](#when-something-fails) document fails its item with an
 `ExtractionError`, which Scrapy logs and drops. For anything else (LLMs, budgets, a
 custom pipeline), subclass `JevexPipeline` and override `make_extractor`; `fill_item`
 decides what the item gets. When the spider closes, the pipeline lets queued learning

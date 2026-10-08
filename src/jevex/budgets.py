@@ -64,7 +64,8 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jevex.llm import LLMBudgetExceededError
+from jevex.llm import LLMBudgetExceededError, rate_limited
+from jevex.logs import get_logger
 from jevex.store import LedgerError, SpendEntry
 
 if TYPE_CHECKING:
@@ -72,6 +73,8 @@ if TYPE_CHECKING:
 
     from jevex.llm import LLM, LLMImage, LLMResponse
     from jevex.store import SpendKind, SpendLedger
+
+log = get_logger(__name__)
 
 Period = Literal["hour", "day", "week", "month", "run"]
 Scope = Literal["document", "run", "process"]
@@ -292,6 +295,8 @@ class DocumentBudget:
     llm_retries: int = 0
     """Retries the LLM adapters' SDKs took on this document's calls
     (:attr:`~jevex.llm.LLMResponse.retries`)."""
+    llm_rate_limited: int = 0
+    """Calls that failed with a 429 after the SDK's retries (:func:`~jevex.llm.rate_limited`)."""
     rpm_skips: int = 0
     llm_stopped: bool = False
     events: list[BudgetEvent] = field(default_factory=list[BudgetEvent])
@@ -308,9 +313,11 @@ class DocumentBudget:
 
     def record_hit(self, scope: Scope, limit: str, message: str) -> None:
         """Report a budget hit in ``meta.budget_events`` (once per scope and limit; a
-        later hit of the same limit replaces the message)."""
-        self.events = [e for e in self.events if not (e.scope == scope and e.limit == limit)]
-        self.events.append(BudgetEvent(scope=scope, limit=limit, message=message))
+        later hit of the same limit replaces the message). The first is logged."""
+        kept = [e for e in self.events if not (e.scope == scope and e.limit == limit)]
+        if len(kept) == len(self.events):
+            log.warning("%s budget %s hit: %s", scope, limit, message)
+        self.events = [*kept, BudgetEvent(scope=scope, limit=limit, message=message)]
 
     def _stop_llm(self, scope: Scope, limit: str, message: str) -> None:
         self.llm_stopped = True
@@ -427,6 +434,10 @@ class DocumentBudget:
             self.llm_calls -= 1  # refused before any request was made
             self._stop_llm("process", "JEVEX_LLM_MAX_COST_USD", str(exc))
             return None
+        except Exception as exc:
+            if rate_limited(exc):
+                self.llm_rate_limited += 1
+            raise
         self.llm_retries += response.retries
         await self._settle(response.usage.cost)
         return response

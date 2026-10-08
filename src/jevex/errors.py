@@ -24,6 +24,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jevex.logs import get_logger
+
+log = get_logger(__name__)
+
 type Status = Literal["ok", "partial", "failed"]
 """``ok``: nothing failed. ``partial``: a part failed and was skipped. ``failed``: a core
 failure ended the document."""
@@ -78,7 +82,7 @@ class PartError(BaseModel):
 
     def describe(self) -> str:
         """One line for logs and CLI output."""
-        where = f"{self.stage} {self.kind}" + (f" {self.part}" if self.part else "")
+        where = _where(self.stage, self.kind, self.part)
         times = f" (x{self.count})" if self.count > 1 else ""
         return f"{where}: {self.type}: {self.message}{times}"
 
@@ -122,12 +126,33 @@ class PartErrors:
         fatal: bool = False,
     ) -> None:
         """Record one failure. A repeat of the same stage, kind, part and type adds to its
-        count; the first fatal one's exception becomes :attr:`cause`."""
+        count; the first fatal one's exception becomes :attr:`cause`.
+
+        Each is logged (:mod:`jevex.logs`), with its traceback: a fatal one at ``ERROR``,
+        the first of a kind at ``WARNING`` and repeats at ``DEBUG``."""
         key = (stage, kind, part, type(exc).__name__)
         found = self._errors.get(key)
+        extra = {"stage": stage, "part": part}
         if found is not None:
             self._errors[key] = found.model_copy(update={"count": found.count + 1})
+            log.debug("%s failed again: %s", _where(stage, kind, part), exc, extra=extra)
             return
+        if fatal:
+            log.error(
+                "%s failed; the document failed: %s",
+                _where(stage, kind, part),
+                exc,
+                exc_info=exc,
+                extra=extra,
+            )
+        else:
+            log.warning(
+                "%s failed and was skipped: %s",
+                _where(stage, kind, part),
+                exc,
+                exc_info=exc,
+                extra=extra,
+            )
         self._errors[key] = PartError(
             stage=stage,
             kind=kind,
@@ -158,6 +183,10 @@ def status_of(errors: list[PartError]) -> Status:
     if any(e.fatal for e in errors):
         return "failed"
     return "partial" if errors else "ok"
+
+
+def _where(stage: str, kind: str, part: str | None) -> str:
+    return f"{stage} {kind}" + (f" {part}" if part else "")
 
 
 def _message(exc: BaseException) -> str:

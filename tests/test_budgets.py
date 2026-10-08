@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -344,6 +345,34 @@ async def test_a_failed_call_still_counts() -> None:
     assert await budget.call_llm(llm(), "x", Title) is None
 
 
+class TooManyRequests(Exception):
+    status_code = 429
+
+
+async def test_a_call_failing_on_a_rate_limit_is_counted() -> None:
+    def limited(_p: str, _s: type[BaseModel]) -> object:
+        raise TooManyRequests("slow down")
+
+    def down(_p: str, _s: type[BaseModel]) -> object:
+        raise RuntimeError("provider down")
+
+    budget = doc_budget()
+    for answer in (limited, down, limited):
+        with pytest.raises(Exception, match=r"slow down|provider down"):
+            await budget.call_llm(FakeLLM(answer), "x", Title)
+    assert (budget.llm_calls, budget.llm_rate_limited) == (3, 2)
+
+
+async def test_the_first_hit_of_each_limit_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="jevex")
+    budget = doc_budget(max_llm_calls=1)
+    for _ in range(3):
+        await budget.call_llm(llm(), "x", Title)
+    assert [r.getMessage() for r in caplog.records] == [
+        "document budget max_llm_calls hit: 1 LLM calls (the limit)"
+    ]
+
+
 async def test_the_process_backstop_stops_llm_use_instead_of_failing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -566,7 +595,13 @@ async def test_llm_use_and_budget_events_reach_document_meta() -> None:
     assert meta["budget_events"] == [
         {"scope": "document", "limit": "max_llm_calls", "message": "1 LLM calls (the limit)"}
     ]
-    assert meta["llm"] == {"calls": 1, "cost": 0.0, "unpriced_calls": 0, "retries": 0}
+    assert meta["llm"] == {
+        "calls": 1,
+        "cost": 0.0,
+        "unpriced_calls": 0,
+        "retries": 0,
+        "rate_limited": 0,
+    }
     assert not result.meta.stopped  # Jev and generators carry on
 
 
