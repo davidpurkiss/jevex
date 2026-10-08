@@ -40,6 +40,7 @@ PartKind = Literal[
     "structured_extractor",
     "llm_extractor",
     "review_sink",
+    "ledger",
     "jev",
     "store",
     "document",
@@ -47,11 +48,14 @@ PartKind = Literal[
 ]
 """What failed. Parts that are skipped: ``generator``, ``normaliser``, ``image_loader``,
 ``image_processor``, ``structured_extractor``, ``llm_extractor`` (the fallback's) and
-``review_sink``. Core failures, which fail the document: ``jev`` (Jev after retries),
-``store`` (while the document runs), ``document`` (it can't be read:
-:class:`DocumentError`) and ``stage`` (any other error a stage raised). A ``store`` error
-writing the spend ledger or stats after the document ran isn't fatal: its result stands,
-``partial``."""
+``review_sink``. ``ledger``: the spend ledger (:class:`~jevex.store.SpendLedger`) failed,
+so an LLM call it couldn't clear wasn't made, a Jev spend cap wasn't checked or spend
+wasn't recorded; the document carries on. ``store``: a store lookup failed (it counts as
+nothing found) or a write was skipped (key mappings, learned generators, examples,
+generator stats, the document's stats); the document carries on. Core failures, which
+fail the document: ``jev`` (Jev after retries), ``store`` from a stage that doesn't
+handle it, ``document`` (it can't be read: :class:`DocumentError`) and ``stage`` (any
+other error a stage raised)."""
 
 MAX_MESSAGE_CHARS = 500
 """Longer messages are cut: one is kept per error, and results are serialised."""

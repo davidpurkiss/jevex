@@ -507,6 +507,23 @@ async def test_default_extractor_takes_schemas_from_a_comma_separated_setting() 
     await pipeline.close_spider()
 
 
+async def test_default_extractor_takes_a_locale() -> None:
+    pipeline = await opened(JevexPipeline, JEVEX_SCHEMAS=[Book], JEVEX_LOCALE=" de_ch ")
+    assert pipeline.extractor.locale == "de-CH"
+    await pipeline.close_spider()
+    pipeline = await opened(JevexPipeline, JEVEX_SCHEMAS=[Book], JEVEX_LOCALE="")
+    assert pipeline.extractor.locale is None
+    await pipeline.close_spider()
+
+
+@pytest.mark.parametrize("locale", ["Swiss German", 42])
+async def test_default_extractor_rejects_a_bad_locale(locale: object) -> None:
+    pipeline = JevexPipeline.from_crawler(crawler(JEVEX_SCHEMAS=[Book], JEVEX_LOCALE=locale))
+
+    with pytest.raises(ValueError, match="JEVEX_LOCALE: locale must be a BCP 47 language tag"):
+        await pipeline.open_spider()
+
+
 async def test_default_extractor_needs_schemas() -> None:
     pipeline = JevexPipeline.from_crawler(crawler())
 

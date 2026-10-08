@@ -79,6 +79,7 @@ from jevex.packs import (
 )
 from jevex.select import JevCandidateSelector, statement_state, unique_spans
 from jevex.statements import Statement, StatementKind
+from jevex.store import LedgerError, StoreError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -343,6 +344,8 @@ LearnStatus = Literal[
     "covered",
     "unlearnable",
     "budget",
+    "ledger_error",
+    "store_error",
     "llm_error",
     "jev_error",
     "invalid_spec",
@@ -351,7 +354,10 @@ LearnStatus = Literal[
 ]
 """``accepted``: published. ``covered``: the generators in use already find the value.
 ``unlearnable``: no registered candidate field, or an example whose value doesn't fit it.
-``budget``: the run budget (or a process cap) refused the LLM or Jev. ``llm_error``,
+``budget``: the run budget (or a process cap) refused the LLM or Jev. ``ledger_error``:
+the spend ledger failed, so the run budget couldn't be checked and the LLM or Jev wasn't
+asked. ``store_error``: the store couldn't be read for the regression test, or the
+accepted generator couldn't be stored, so it wasn't published. ``llm_error``,
 ``jev_error``: a call failed. ``invalid_spec``: the draft didn't validate.
 ``missed_trigger``: it didn't give the value on the triggering statement.
 ``regressed``: it lowered accuracy on the field's stored examples."""
@@ -516,10 +522,13 @@ class GeneratorLearner:
         self._raise_error()
 
     async def learn(self, example: VerifiedExample) -> LearnOutcome:
-        """Learn from one example now (the worker calls this for each queued one)."""
+        """Learn from one example now (the worker calls this for each queued one).
+
+        Spend the ledger fails to record is noted in the outcome's message."""
         jev = self.jev.metered()
+        unrecorded: list[str] = []
         try:
-            outcome = await self._learn(example, jev)
+            outcome = await self._learn(example, jev, unrecorded)
         except _Rejected as exc:
             outcome = LearnOutcome(
                 example_id=example.id,
@@ -530,7 +539,13 @@ class GeneratorLearner:
             )
         finally:
             self.spend = replace(self.spend, jev_cost=self.spend.jev_cost + jev.usage.cost)
-            await self.ledger.record("jev", jev.usage.cost)
+            try:
+                await self.ledger.record("jev", jev.usage.cost)
+            except LedgerError as exc:
+                unrecorded.append(f"its Jev spend wasn't recorded: {exc}")
+        if unrecorded:
+            message = "; ".join(m for m in (outcome.message, *unrecorded) if m)
+            outcome = outcome.model_copy(update={"message": message})
         self.outcomes.append(outcome)
         if outcome.status == "accepted" and outcome.spec is not None:
             log.info(
@@ -552,7 +567,9 @@ class GeneratorLearner:
 
     # -- the steps ----------------------------------------------------------------------
 
-    async def _learn(self, example: VerifiedExample, jev: JevClient) -> LearnOutcome:
+    async def _learn(
+        self, example: VerifiedExample, jev: JevClient, unrecorded: list[str]
+    ) -> LearnOutcome:
         schema, spec = self._field(example)
         statement = example_statement(example)
         expected = self._expected(example, spec)
@@ -560,7 +577,7 @@ class GeneratorLearner:
         current = self.snapshot.on(self.base)
         if self._finds(self._generate(current, statement, spec, schema, where), spec, expected):
             raise _Rejected("covered", "the generators in use already find the value")
-        draft = await self._synthesise(example, statement, spec)
+        draft = await self._synthesise(example, statement, spec, unrecorded)
         try:
             generator_spec = draft_spec(draft, example.field, example.id, example.locale)
         except InvalidGeneratorError as exc:
@@ -568,7 +585,11 @@ class GeneratorLearner:
         generator = generator_spec.to_generator()
         if not self._finds(generator.generate(statement), spec, expected):
             raise _Rejected("missed_trigger", "it finds no span with the value", generator_spec)
-        if await self.ledger.refuse_document() is not None:
+        try:
+            refusal = await self.ledger.refuse_document()
+        except LedgerError as exc:
+            raise _Rejected("ledger_error", str(exc), generator_spec) from None
+        if refusal is not None:
             raise _Rejected("budget", "the run's Jev spend cap is reached", generator_spec)
         candidate = current.with_generator(generator)
         try:
@@ -579,7 +600,12 @@ class GeneratorLearner:
             raise _Rejected("budget", str(exc), generator_spec) from None
         except JevError as exc:
             raise _Rejected("jev_error", f"{type(exc).__name__}: {exc}", generator_spec) from None
-        snapshot = await self.generators.publish(generator_spec)
+        except StoreError as exc:  # reading the stored examples
+            raise _Rejected("store_error", str(exc), generator_spec) from None
+        try:
+            snapshot = await self.generators.publish(generator_spec)
+        except StoreError as exc:
+            raise _Rejected("store_error", str(exc), generator_spec) from None
         return LearnOutcome(
             example_id=example.id,
             field=example.field,
@@ -603,7 +629,7 @@ class GeneratorLearner:
         return schema, found
 
     async def _synthesise(
-        self, example: VerifiedExample, statement: Statement, spec: FieldSpec
+        self, example: VerifiedExample, statement: Statement, spec: FieldSpec, unrecorded: list[str]
     ) -> GeneratorDraft:
         section = section_text(statement.heading_trail)
         value = json.dumps(example.value, default=str, ensure_ascii=False)
@@ -619,8 +645,16 @@ class GeneratorLearner:
             max_length=MAX_PATTERN_LENGTH,
             normalisers=NORMALISERS,
         )
+
+        def not_recorded(exc: LedgerError) -> None:
+            unrecorded.append(f"its LLM spend wasn't recorded: {exc}")
+
         try:
-            response = await self.ledger.call_llm(self.llm, prompt, GeneratorDraft)
+            response = await self.ledger.call_llm(
+                self.llm, prompt, GeneratorDraft, on_ledger_error=not_recorded
+            )
+        except LedgerError as exc:
+            raise _Rejected("ledger_error", str(exc)) from None
         except LLMError as exc:
             self.spend = replace(self.spend, llm_calls=self.spend.llm_calls + 1)
             raise _Rejected("llm_error", f"{type(exc).__name__}: {exc}") from None
@@ -967,6 +1001,10 @@ class LearnStage:
     with a ``generator_llm``, or an :class:`ExampleLogger` in ``compile`` mode), and
     ``housekeeper=None`` uses ``ctx.housekeeper`` (the extractor's, when it has a store).
     Without either, that part is skipped.
+
+    A store that fails is reported (``store`` errors ``examples``, ``generator_stats``)
+    and the document carries on: an example it can't store isn't learned from, and a
+    document whose counts can't be read or written prunes and quarantines nothing.
     """
 
     learner: Learner | None = None
@@ -977,7 +1015,13 @@ class LearnStage:
         learner = self.learner if self.learner is not None else ctx.learner
         if learner is not None:
             for example in ctx.verified:
-                await learner.submit(example)
+                try:
+                    await learner.submit(example)
+                except StoreError as exc:
+                    ctx.errors.add(self.name, "store", "examples", exc)
         housekeeper = self.housekeeper if self.housekeeper is not None else ctx.housekeeper
         if housekeeper is not None:
-            await housekeeper.record(ctx)
+            try:
+                await housekeeper.record(ctx)
+            except StoreError as exc:
+                ctx.errors.add(self.name, "store", "generator_stats", exc)

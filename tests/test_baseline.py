@@ -75,6 +75,7 @@ def test_a_baseline_holds_the_run_s_headline_numbers() -> None:
     b = Baseline.from_report(report((6, 4), llm=3), corpus="abc", mode="replay")
     assert b.corpus == "abc"
     assert b.mode == "replay"
+    assert b.locale is None
     assert b.documents == 2
     assert b.accuracy == pytest.approx(11 / 15)
     assert b.llm_calls_per_document == 1.5
@@ -93,6 +94,7 @@ def test_baselines_round_trip_as_sorted_json(tmp_path: Path) -> None:
     data = json.loads(text)
     assert list(data) == sorted(data)
     assert data["version"] == 1
+    assert data["locale"] is None
     assert data["tolerances"] == {
         "accuracy_drop": 0.02,
         "field_accuracy_drop": None,
@@ -116,6 +118,39 @@ def test_a_missing_or_malformed_baseline_is_a_baseline_error(tmp_path: Path) -> 
     bad.write_text(json.dumps({**data, "acuracy": 0.5}))  # a typo isn't silently dropped
     with pytest.raises(BaselineError):
         Baseline.load(bad)
+
+
+def test_a_baseline_records_its_run_s_locale(tmp_path: Path) -> None:
+    path = tmp_path / "baseline.json"
+    b = Baseline.from_report(report((10, 0)), corpus="abc", locale="de_de")
+    assert b.locale == "de-DE"  # canonical, like every other locale jevex keeps
+    b.write(path)
+    assert json.loads(path.read_text())["locale"] == "de-DE"
+    assert Baseline.load(path) == b
+
+
+def test_a_baseline_written_before_locales_were_recorded_reads_as_no_locale(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "old.json"
+    BASE.write(path)
+    data = json.loads(path.read_text())
+    del data["locale"]
+    path.write_text(json.dumps(data))
+    old = Baseline.load(path)
+    assert old.locale is None
+    assert check_baseline(report((10, 0)), old, corpus="abc").passed
+    with pytest.raises(BaselineError, match="recorded without --locale, this run with"):
+        ensure_comparable(old, corpus="abc", mode="eval", locale="de-DE")
+
+
+def test_a_baseline_with_a_malformed_locale_is_a_baseline_error(tmp_path: Path) -> None:
+    path = tmp_path / "bad.json"
+    BASE.write(path)
+    data = json.loads(path.read_text())
+    path.write_text(json.dumps({**data, "locale": "not a locale"}))
+    with pytest.raises(BaselineError, match=r"(?s)isn't a jevex baseline.*BCP 47"):
+        Baseline.load(path)
 
 
 @pytest.mark.parametrize(
@@ -214,6 +249,25 @@ def test_a_baseline_from_another_corpus_or_mode_is_refused() -> None:
         check_baseline(report((10, 0)), BASE, corpus="xyz")
     with pytest.raises(BaselineError, match="from a plain eval, not a --replay run"):
         ensure_comparable(BASE, corpus="abc", mode="replay")
+
+
+def test_a_baseline_only_gates_runs_with_its_locale() -> None:
+    german = Baseline.from_report(report((10, 0)), corpus="abc", locale="de-DE")
+    assert check_baseline(report((10, 0)), german, corpus="abc", locale="de-DE").passed
+    ensure_comparable(german, corpus="abc", mode="eval", locale="de_DE")  # the same locale
+    with pytest.raises(
+        BaselineError,
+        match=re.escape(
+            "the baseline was recorded with --locale de-DE, this run with --locale fr-FR: "
+            "pages without a locale of their own are read differently, so the numbers "
+            "don't compare"
+        ),
+    ):
+        check_baseline(report((10, 0)), german, corpus="abc", locale="fr-FR")
+    with pytest.raises(BaselineError, match="with --locale de-DE, this run without --locale"):
+        check_baseline(report((10, 0)), german, corpus="abc")
+    with pytest.raises(BaselineError, match="without --locale, this run with --locale de-DE"):
+        ensure_comparable(BASE, corpus="abc", mode="eval", locale="de-DE")
 
 
 def test_format_gate() -> None:
@@ -479,6 +533,25 @@ def test_a_bad_baseline_fails_before_the_run(
     assert code == 1
     assert "no such directory" in err
     assert stage.ran == []  # nothing was extracted, so nothing was spent
+
+
+def test_the_gate_refuses_a_run_with_another_locale_before_it_starts(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "baseline.json"
+    code, _, _ = eval_cli(corpus, monkeypatch, "--locale", "de-DE", "--write-baseline", str(path))
+    assert code == 0
+    assert Baseline.load(path).locale == "de-DE"
+
+    code, _, err = eval_cli(corpus, monkeypatch, "--locale", "de_de", "--gate", str(path))
+    assert (code, err) == (0, f"jevex: gate passed against {path} (3 checks)\n")
+
+    for argv in (["--locale", "fr-FR"], []):
+        stage = ReadTitle()
+        code, out, err = eval_cli(corpus, monkeypatch, *argv, "--gate", str(path), stage=stage)
+        assert (code, out) == (1, "")
+        assert err.startswith("jevex: error: the baseline was recorded with --locale de-DE")
+        assert stage.ran == []  # refused before anything was extracted
 
 
 def test_no_baseline_is_written_from_a_run_with_failures(

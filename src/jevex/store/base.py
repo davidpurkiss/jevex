@@ -264,8 +264,15 @@ class Store(Protocol):
 
     All methods are async (a store does I/O). Writes are atomic: a concurrent reader
     sees a write entirely or not at all. Cancelling a task that awaits a write doesn't
-    undo it: the write may still commit (for :meth:`try_spend` that means a charge that
-    is counted, never one that overshoots the cap).
+    undo it: the write may still commit.
+
+    Failing to reach the backend raises :class:`StoreError`. While a document runs that's
+    reported on its result, not raised: a failed lookup counts as nothing found (a key
+    path is asked about again, the generators already loaded stay in use) and a failed
+    write is skipped.
+
+    The spend ledger isn't part of it (:class:`~jevex.store.SpendLedger`), though the
+    built-in stores are ledgers too.
     """
 
     # Generators
@@ -356,47 +363,6 @@ class Store(Protocol):
 
     async def generator_stats(self, generator_id: str) -> GeneratorStats:
         """Counts so far; all zero for a generator never recorded."""
-        ...
-
-    # Spend ledger
-    async def record_spend(self, entry: SpendEntry) -> None: ...
-
-    async def spend(
-        self,
-        *,
-        since: datetime | None = None,
-        kind: SpendKind | None = None,
-        run_id: str | None = None,
-    ) -> float:
-        """Total USD in the ledger matching every filter given."""
-        ...
-
-    async def try_spend(
-        self,
-        entry: SpendEntry,
-        *,
-        cap_usd: float | None = None,
-        max_count: int | None = None,
-        since: datetime | None = None,
-        kind: SpendKind | None = None,
-    ) -> bool:
-        """Record ``entry`` only if it keeps the ledger within the given limits.
-
-        Both limits count the entries at or after ``since`` whose kind is ``kind`` (every
-        kind when ``None``), plus ``entry`` itself: ``cap_usd`` caps their total and
-        ``max_count`` their number. So #34 can give Jev and the LLM their own caps
-        (``kind=``), a spend cap per period (``since=``) and a rate limit
-        (``max_count`` over the last minute). The check and the write are one
-        transaction, so workers sharing a limit can't overshoot it together. Returns
-        whether the entry was recorded. With ``kind`` set, ``entry`` must be of that
-        kind (``ValueError`` otherwise).
-        """
-        ...
-
-    async def spend_entries(
-        self, *, since: datetime | None = None, kind: SpendKind | None = None
-    ) -> list[SpendEntry]:
-        """The ledger's entries at or after ``since`` (of ``kind``), oldest first."""
         ...
 
     # Document stats

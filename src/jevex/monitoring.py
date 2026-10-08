@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 from jevex.jev import process_cap
@@ -196,8 +195,8 @@ class Headroom:
 
 async def budget_headroom(ledger: RunLedger | None) -> list[Headroom]:
     """Every spend cap that is set, with what's spent of it: the run budget's (through
-    ``ledger``, read from the store) and the process caps. Raises the store's error if
-    it can't be read."""
+    ``ledger``, read from its spend ledger) and the process caps. Raises
+    :class:`~jevex.store.LedgerError` if the ledger can't be read."""
     out: list[Headroom] = []
     run = ledger.budget if ledger is not None and ledger.active else None
     if ledger is not None and run is not None:
@@ -221,11 +220,12 @@ async def budget_headroom(ledger: RunLedger | None) -> list[Headroom]:
 
 
 async def store_error(store: Store, *, wait_s: float = STORE_TIMEOUT_S) -> str | None:
-    """Why ``store`` doesn't answer a small read within ``wait_s`` seconds, or ``None``
-    when it does (a health check: it never raises for the store's own failures)."""
+    """Why ``store`` doesn't answer a small read (its disabled generator ids) within
+    ``wait_s`` seconds, or ``None`` when it does (a health check: it never raises for the
+    store's own failures)."""
     try:
         async with asyncio.timeout(wait_s):
-            await store.spend(since=datetime.now(UTC))
+            await store.disabled_generator_ids()
     except TimeoutError:
         return f"the store didn't answer within {wait_s:g}s"
     except Exception as exc:

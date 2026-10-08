@@ -79,6 +79,7 @@ from jevex.generators import InvalidGeneratorError
 from jevex.jev import JevError
 from jevex.learn import LEARN_THRESHOLD, PackDiff
 from jevex.llm import ANTHROPIC_MODEL
+from jevex.locales import checked_locale
 from jevex.packs import (
     PACK_GENERATORS,
     PackError,
@@ -124,6 +125,12 @@ EXIT_ERROR = 1
 EXIT_USAGE = 2
 
 SERVE_PORT = 8080
+
+LOCALE_HELP = (
+    "The locale (a BCP 47 tag such as de-DE) of documents that don't say their own (no "
+    "<html lang> or Content-Language; most PDFs and images): their numbers and dates are "
+    "read by its conventions (default: none)"
+)
 
 
 class CliError(Exception):
@@ -221,7 +228,7 @@ async def _extract(args: argparse.Namespace, jev: JevClient | None) -> Extractio
     if jev is None and not os.environ.get("TYPESAFE_API_KEY", "").strip():
         raise CliError("TYPESAFE_API_KEY is not set (jevex needs a Jev API key to extract)")
     try:
-        extractor = Extractor(schemas, jev=jev, threshold=args.threshold)
+        extractor = Extractor(schemas, jev=jev, threshold=args.threshold, locale=args.locale)
     except (ValueError, UnsupportedFieldError) as exc:
         raise CliError(str(exc)) from exc
     # Schemas are checked before the (possibly networked) document load.
@@ -249,7 +256,7 @@ async def _eval(args: argparse.Namespace, jev: JevClient | None, llm: LLM | None
     model = (llm or load_llm(args.llm)) if args.llm else None
     try:
         try:
-            extractor = Extractor(schemas, jev=jev, extraction_llm=model)
+            extractor = Extractor(schemas, jev=jev, extraction_llm=model, locale=args.locale)
         except (ValueError, UnsupportedFieldError) as exc:
             raise CliError(str(exc)) from exc
         async with extractor:
@@ -378,6 +385,7 @@ async def _replay(args: argparse.Namespace, jev: JevClient | None, llm: LLM | No
                 extraction_llm=model,
                 generator_llm=model,
                 community_packs=False,
+                locale=args.locale,
             )
         except (ValueError, UnsupportedFieldError) as exc:
             raise CliError(str(exc)) from exc
@@ -426,6 +434,8 @@ class _GatePlan:
 
     corpus: str
     mode: EvalMode
+    locale: str | None
+    """The run's ``--locale``, which a baseline records and is gated on."""
     tolerances: GateTolerances
     baseline: Baseline | None
     """The baseline to gate against (``--gate``); ``None`` when writing one."""
@@ -448,8 +458,8 @@ def _plan_gate(args: argparse.Namespace) -> _GatePlan | None:
         if args.gate is not None:
             baseline = Baseline.load(args.gate)
             tolerances = baseline.tolerances.model_copy(update=overrides)
-            ensure_comparable(baseline, corpus=corpus, mode=mode)
-            return _GatePlan(corpus, mode, tolerances, baseline)
+            ensure_comparable(baseline, corpus=corpus, mode=mode, locale=args.locale)
+            return _GatePlan(corpus, mode, args.locale, tolerances, baseline)
         target = Path(args.write_baseline)
         if not target.parent.is_dir():
             raise CliError(f"no such directory for {target}")
@@ -457,7 +467,7 @@ def _plan_gate(args: argparse.Namespace) -> _GatePlan | None:
         previous = Baseline.load(target).tolerances if target.exists() else GateTolerances()
     except BaselineError as exc:
         raise CliError(str(exc)) from exc
-    return _GatePlan(corpus, mode, previous.model_copy(update=overrides), None)
+    return _GatePlan(corpus, mode, args.locale, previous.model_copy(update=overrides), None)
 
 
 def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, err: TextIO) -> int:
@@ -466,7 +476,11 @@ def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, 
         if report.failed:
             raise CliError("not writing a baseline: documents failed (see above)")
         baseline = Baseline.from_report(
-            report, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+            report,
+            corpus=plan.corpus,
+            mode=plan.mode,
+            locale=plan.locale,
+            tolerances=plan.tolerances,
         )
         try:
             baseline.write(args.write_baseline)
@@ -475,7 +489,12 @@ def _finish_gate(args: argparse.Namespace, plan: _GatePlan, report: EvalReport, 
         print(f"jevex: wrote baseline {args.write_baseline}", file=err)
         return EXIT_OK
     result = check_baseline(
-        report, plan.baseline, corpus=plan.corpus, mode=plan.mode, tolerances=plan.tolerances
+        report,
+        plan.baseline,
+        corpus=plan.corpus,
+        mode=plan.mode,
+        locale=plan.locale,
+        tolerances=plan.tolerances,
     )
     print(format_gate(result, args.gate), file=err, end="")
     return EXIT_OK if result.passed else EXIT_ERROR
@@ -887,6 +906,7 @@ def _serve(
             close_llms=llm is None,  # an adapter built here is the service's to close
             stats=args.stats,
             stats_budget_usd=args.stats_budget,
+            locale=args.locale,
         )
     except (ValueError, UnsupportedFieldError) as exc:
         raise CliError(str(exc)) from exc
@@ -976,6 +996,13 @@ def _rate(text: str) -> float:
     return value
 
 
+def _locale(text: str) -> str:
+    try:
+        return checked_locale(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _field_drop(text: str) -> float | None:
     return None if text.strip().lower() == "none" else _probability(text)
 
@@ -1016,6 +1043,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_probability,
         default=0.0,
         help="Confidence (0–1) below which values become null (default 0: keep everything)",
+    )
+    extract.add_argument(
+        "--locale",
+        type=_locale,
+        metavar="TAG",
+        help=f"{LOCALE_HELP}. The document's own comes first",
     )
     extract.add_argument("--indent", type=int, default=2, help="JSON indent (0 for one line)")
 
@@ -1069,6 +1102,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use this LLM for the fallback (and, with --replay, for learning): "
         f"{', '.join(LLM_PROVIDERS)} (anthropic defaults to {ANTHROPIC_MODEL}). "
         "Without it the run uses Jev alone",
+    )
+    evaluate.add_argument(
+        "--locale",
+        type=_locale,
+        metavar="TAG",
+        help=f"{LOCALE_HELP}. A page's locale in truth.json comes first",
     )
     baseline = evaluate.add_mutually_exclusive_group()
     baseline.add_argument(
@@ -1267,6 +1306,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_probability,
         default=0.0,
         help="Confidence (0–1) below which values become null (default 0: keep everything)",
+    )
+    serve.add_argument(
+        "--locale",
+        type=_locale,
+        metavar="TAG",
+        help=f"{LOCALE_HELP}. A request's own locale comes first",
     )
     serve.add_argument("--max-spend", type=_usd, help="LLM spend allowed per --period, in USD")
     serve.add_argument("--max-jev-spend", type=_usd, help="Jev spend allowed per --period, in USD")
@@ -1485,6 +1530,7 @@ def main(
             for flag, value in (
                 ("--replay", args.replay or None),
                 ("--llm", args.llm),
+                ("--locale", args.locale),
                 ("--concurrency", args.concurrency),
                 ("--gate", args.gate),
                 ("--write-baseline", args.write_baseline),

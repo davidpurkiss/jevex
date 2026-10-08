@@ -104,6 +104,12 @@ extractor's `locale` is the document's, as if the document had said it:
 extractor = Extractor([VehicleSpec], locale="en-GB")
 ```
 
+The other entry points take it too: `jevex extract --locale en-GB`, `jevex eval --locale
+en-GB` (plain and `--replay`), `jevex serve --locale en-GB`, and the Scrapy pipeline's
+`JEVEX_LOCALE` setting. Each checks the tag the way `Extractor` does
+(`jevex.checked_locale`), so a bad one is a usage error or a settings error before anything
+runs.
+
 Generators scoped to it run on those documents, and what the learner learns from them is
 scoped to it. It comes before the candidate and statement stages' own `locale`. Without
 one, such documents have no locale of their own: generators are scoped and numbers and dates
@@ -313,6 +319,46 @@ extractor = Extractor(schemas=[VehicleSpec], store="postgresql://jevex@db.intern
 Its tables go in a `jevex` schema. To choose another, pass a store instead:
 `store=PostgresStore(url, db_schema="jevex_staging")` (from `jevex.store.postgres`).
 
+If the store fails while a document runs, the document carries on and the failure is in
+`result.errors` (kind `store`): a lookup that fails counts as nothing found (a key path is
+asked about again, which costs an extra Jev call), and a write that fails is skipped.
+
+### Spend ledger
+
+A run budget (`RunBudget`) is kept in a spend ledger that every worker on the same run
+shares. By default that's the store (SQLite and Postgres are ledgers too; with no store, the
+extractor opens an in-memory SQLite one). A custom store that isn't a ledger gets a
+`MemoryLedger` for the extractor. To keep spend somewhere else, such as a Redis
+counter, a billing system or a per-process cap, implement `SpendLedger` and pass it in:
+
+```python
+from jevex import Budgets, Extractor, RunBudget, SpendEntry
+
+
+class BillingLedger:  # four async methods; see jevex.store.ledger
+    async def record_spend(self, entry: SpendEntry) -> None: ...
+    async def spend(self, *, since=None, kind=None, run_id=None) -> float: ...
+    async def try_spend(
+        self, entry, *, cap_usd=None, max_count=None, since=None, kind=None
+    ) -> bool: ...
+    async def spend_entries(self, *, since=None, kind=None) -> list[SpendEntry]: ...
+
+
+extractor = Extractor(
+    schemas=[VehicleSpec],
+    budgets=Budgets(run=RunBudget(max_spend=5.00, llm_rpm=60)),
+    store="sqlite:///jevex.db",  # learned state stays here
+    ledger=BillingLedger(),  # spend goes here
+)
+```
+
+`try_spend` must check its limits and record the entry atomically, so workers sharing a
+cap can't overshoot it together. Sums should be exact to a nano-dollar, because Jev
+charges a few nano-dollars per token. When the ledger raises, jevex can't confirm the
+spend, so the LLM call that needed it isn't made. The failure is reported in
+`result.errors` (kind `ledger`), and Jev and generators carry on. Retrying, buffering or
+failing open during an outage is up to the ledger, for example a wrapper around it.
+
 ### Packs
 
 A pack is learned state as reviewable YAML: a directory with a `manifest.yaml` (name,
@@ -393,8 +439,12 @@ default because it shows URLs and spend. The service has no auth of its own: run
 yours.
 
 `--max-spend` and `--max-jev-spend` cap LLM and Jev spend per `--period` (default `day`)
-across every request. In Python, `jevex.server.create_app(Service([...], store=...))`
-gives the FastAPI app to mount or run yourself.
+across every request. `--locale TAG` is the [locale](#locales) of documents that don't say
+their own; a request's `"locale"` in `document` overrides it for that document. In Python, `jevex.server.create_app(Service([...], store=...))`
+gives the FastAPI app to mount or run yourself. The run budget is kept in the store
+(the built-in ones are [spend ledgers](#spend-ledger)); `Service(ledger=...)` keeps it in another
+`SpendLedger` instead, shared by every schema set the service serves, as is the in-memory
+ledger it makes for a store that isn't one.
 
 The `Dockerfile` builds an image that runs `jevex serve` on port 8080. Your schemas'
 package must be importable inside it (build an image `FROM` it that installs the
@@ -431,8 +481,9 @@ class BookSpider(scrapy.Spider):
 
 The pipeline swaps the item's `document` for `records` (each record's schema, entity and
 values, as `jevex extract` prints them), so `scrapy crawl books -O books.jsonl` writes
-them out. Items without a document pass through. `JEVEX_THRESHOLD` and `JEVEX_META`
-(per-field and document meta) work as their `Extractor` and `jevex extract` namesakes,
+them out. Items without a document pass through. `JEVEX_THRESHOLD`, `JEVEX_LOCALE` (the
+locale of documents that don't say their own) and `JEVEX_META` (per-field and document
+meta) work as their `Extractor` and `jevex extract` namesakes,
 and counts go to Scrapy's stats under `jevex/` (with `partial`, `failed`,
 `errors/<kind>`, `errors/<stage>/<kind>/<part>`, `stage_seconds/<stage>` and the learner's
 outcomes). A [failed](#when-something-fails) document fails its item with an
@@ -496,6 +547,8 @@ jevex testsite serve                            # http://127.0.0.1:8000/
 The site is `en-GB`. HTML pages say so in `<html lang>`; PDFs and images can't, so their
 `truth.json` entries carry `"locale": "en-GB"`, which `jevex eval` gives the document
 (any corpus can do the same), and `jevex testsite serve` sends `Content-Language: en-GB`.
+`jevex eval --locale TAG` gives every page without a `locale` of its own (in `truth.json`
+or the page itself) that one instead.
 
 `truth.json` lists the pages wave by wave, so a replay meets each wave's template
 families together and the LLM-call rate spikes, then falls as generators are learned. The
@@ -515,12 +568,13 @@ cost charts include them.
 `--gate BASELINE` turns any run into a regression check: it exits 1 if overall accuracy,
 or any field's accuracy, fell, or LLM calls per document rose, by more than the
 baseline's tolerances. `--write-baseline PATH` records a run as the baseline (a JSON file
-with the numbers, a digest of the corpus, and the tolerances). The default tolerances
-are 0.02 for accuracy, 0.05 per field and 0.1 LLM calls per document;
+with the numbers, a digest of the corpus, the run's `--locale`, and the tolerances). The
+default tolerances are 0.02 for accuracy, 0.05 per field and 0.1 LLM calls per document;
 `--max-accuracy-drop`, `--max-field-drop` (`none` turns it off) and `--max-llm-rise`
-change them. A baseline only gates runs of the same corpus and mode (plain or
-`--replay`). jevex's own CI gates a small test-site corpus replayed from recorded Jev and
-LLM answers (`tests/test_baseline.py`).
+change them. A baseline only gates runs of the same corpus, mode (plain or `--replay`)
+and `--locale` (a baseline file without a locale means no `--locale`). jevex's own CI
+gates a small test-site corpus replayed from recorded Jev and LLM answers
+(`tests/test_baseline.py`).
 
 ```sh
 jevex eval testsite/build --schema jevex.testsite:VehicleSpec --schema jevex.testsite:Listing

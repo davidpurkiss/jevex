@@ -268,6 +268,10 @@ class StructuredResult:
     """Named objects in arrays, with the values each gives, in document order."""
     rest: dict[str, dict[str, FieldMeta]] = field(default_factory=dict[str, dict[str, FieldMeta]])
     """Like :attr:`fields`, read only from leaves in none of :attr:`items`."""
+    store_errors: list[tuple[str, StoreError]] = field(default_factory=list[tuple[str, StoreError]])
+    """``(part, error)`` for each store call that failed (``key_mappings``,
+    ``unsure_counts``): a lookup counts as nothing stored, so its paths are asked about,
+    and a write is skipped. The stage reports them on the result."""
 
 
 def _mappable(schema: SchemaSpec) -> set[str]:
@@ -338,6 +342,7 @@ class KeyPathMapper:
         packs = self.packs if self.packs is not None else tuple(packs)
         data = self.reader.read(document)
         events: list[tuple[str, str]] = []
+        failures: list[tuple[str, StoreError]] = []
         blobs = data.blobs
         if len(blobs) > self.max_blobs:
             events.append(
@@ -353,7 +358,8 @@ class KeyPathMapper:
         for flat in flats:
             first.setdefault(flat.fingerprint, flat)
         resolved = await gather(
-            self._mappings(flat, schemas, jev, events, store, packs) for flat in first.values()
+            self._mappings(flat, schemas, jev, events, failures, store, packs)
+            for flat in first.values()
         )
         mappings = dict(zip(first, resolved, strict=True))
         per_blob = await gather(
@@ -400,7 +406,7 @@ class KeyPathMapper:
                         ),
                     )
                 )
-        return StructuredResult(statements, fields, events, items, rest)
+        return StructuredResult(statements, fields, events, items, rest, failures)
 
     async def _blob(
         self,
@@ -437,10 +443,14 @@ class KeyPathMapper:
         schemas: list[SchemaSpec],
         jev: JevClient,
         events: list[tuple[str, str]],
+        failures: list[tuple[str, StoreError]],
         store: Store | None,
         packs: Sequence[Pack],
     ) -> dict[str, dict[str, str | None]]:
-        """Per schema: collapsed path → field name (or None) for every path known."""
+        """Per schema: collapsed path → field name (or None) for every path known. A store
+        that fails is added to ``failures``: a failed lookup counts as no mappings stored (the
+        paths are asked about), a failed count gives up on no path, and a failed write
+        is skipped."""
         fingerprint = flat.fingerprint
         shapes = flat.shapes()
         known: dict[str, dict[str, str | None]] = {}
@@ -450,10 +460,12 @@ class KeyPathMapper:
             # Per path, the first layer's mapping wins: the store's, then each pack's. A
             # mapping to a field the schema no longer has counts as none there: a lower
             # layer's is used, or else the path is re-asked.
-            layers = [
-                await self._known(fingerprint, schema.name, store),
-                *self._pack_mappings(packs, fingerprint, schema.name),
-            ]
+            try:
+                stored = await self._known(fingerprint, schema.name, store)
+            except StoreError as exc:
+                failures.append(("key_mappings", exc))
+                stored = {}
+            layers = [stored, *self._pack_mappings(packs, fingerprint, schema.name)]
             mine: dict[str, str | None] = {}
             for layer in layers:
                 for path, name in layer.items():
@@ -486,8 +498,12 @@ class KeyPathMapper:
                     unsure.append(shape)
                     continue
                 learned[shape] = None if answer.choice == NONE_OPTION else answer.choice
-            counts = await self._count_unsure(fingerprint, schema_name, unsure, store)
-            given_up = [path for path in unsure if counts[path] >= self.unsure_limit]
+            try:
+                counts = await self._count_unsure(fingerprint, schema_name, unsure, store)
+            except StoreError as exc:
+                failures.append(("unsure_counts", exc))
+                counts = {}  # unknown: no path is given up on
+            given_up = [path for path in unsure if counts.get(path, 0) >= self.unsure_limit]
             if given_up:
                 events.append(
                     (
@@ -497,7 +513,10 @@ class KeyPathMapper:
                     )
                 )
             learned |= dict.fromkeys(given_up)
-            await self._remember(fingerprint, schema_name, learned, set(given_up), store)
+            try:
+                await self._remember(fingerprint, schema_name, learned, set(given_up), store)
+            except StoreError as exc:
+                failures.append(("key_mappings", exc))
             known[schema_name] |= learned
         return known
 
@@ -863,6 +882,8 @@ class StructuredStage:
     An extractor that raises (other than a Jev or store error, which fail the document)
     is skipped and recorded with :meth:`Context.part_failed
     <jevex.pipeline.Context.part_failed>`: the document carries on without embedded data.
+    The store calls it reports failing (:attr:`StructuredResult.store_errors`) are
+    recorded as ``store`` errors; the document carries on.
     """
 
     extractor: StructuredExtractor = field(default_factory=KeyPathMapper)
@@ -888,6 +909,8 @@ class StructuredStage:
         except Exception as exc:
             ctx.part_failed(self.name, "structured_extractor", type(self.extractor).__name__, exc)
             return
+        for part, exc in result.store_errors:
+            ctx.errors.add(self.name, "store", part, exc)
         ctx.structured.extend(result.statements)
         for kind, message in result.events:
             ctx.event(self.name, kind, message)

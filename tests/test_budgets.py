@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ from jevex.budgets import period_start
 from jevex.jev import JevBackendError, Noul
 from jevex.llm import LLMImage, LLMResponse, LLMUsage, reset_process_llm_cost
 from jevex.pipeline import Context, SchemaRun, for_each_schema
-from jevex.store import SpendEntry, SQLiteStore, StoreError
+from jevex.store import LedgerError, MemoryLedger, SpendEntry, SQLiteStore, Store
 from jevex.testing import FakeJev, FakeLLM
 
 
@@ -159,14 +160,103 @@ async def test_a_call_cancelled_during_the_ledger_check_frees_its_slot_and_wakes
 async def test_a_ledger_error_gives_the_slot_back() -> None:
     budget = DocumentBudget(
         Budgets(per_document=DocBudget(max_llm_calls=1)),
-        SlowLedger(delay=0.0, error=StoreError("disk full")),
+        SlowLedger(delay=0.0, error=LedgerError("disk full")),
     )
     fake = ScriptedLLM()
-    with pytest.raises(StoreError):
+    with pytest.raises(LedgerError):
         await budget.call_llm(fake, "x", Title)
     assert budget.llm_calls == 0
+    assert fake.calls == 0
     assert await budget.call_llm(fake, "x", Title) is not None
     assert budget.events == []
+
+
+class BrokenLedger(MemoryLedger):
+    """A spend ledger that can't be read (``spend``, ``try_spend``), or written."""
+
+    def __init__(self, *, read: bool = True, write: bool = True) -> None:
+        super().__init__()
+        self.read_fails = read
+        self.write_fails = write
+
+    async def spend(self, **kw: Any) -> float:
+        if self.read_fails:
+            raise ConnectionError("redis down")
+        return await super().spend(**kw)
+
+    async def try_spend(self, entry: SpendEntry, **kw: Any) -> bool:
+        if self.read_fails:
+            raise ConnectionError("redis down")
+        return await super().try_spend(entry, **kw)
+
+    async def record_spend(self, entry: SpendEntry) -> None:
+        if self.write_fails:
+            raise ConnectionError("read-only replica")
+        await super().record_spend(entry)
+
+
+async def test_the_run_ledger_turns_what_the_ledger_raises_into_a_ledger_error() -> None:
+    run = RunLedger(RunBudget(max_spend=1.0, max_jev_spend=1.0), BrokenLedger())
+    for check in (run.refuse_llm, run.refuse_document, lambda: run.record("jev", 0.1)):
+        with pytest.raises(LedgerError, match="ConnectionError: ") as info:
+            await check()
+        assert isinstance(info.value.__cause__, ConnectionError)
+
+
+async def test_an_llm_call_the_ledger_cant_clear_isnt_made_and_is_reported() -> None:
+    errors: list[LedgerError] = []
+    run = RunLedger(RunBudget(llm_rpm=10), BrokenLedger())
+    budget = DocumentBudget(Budgets(run=run.budget), run, on_ledger_error=errors.append)
+    fake = ScriptedLLM()
+    assert await budget.call_llm(fake, "x", Title) is None
+    assert await budget.call_llm(fake, "x", Title) is None  # each call asks again
+    assert fake.calls == 0
+    assert budget.llm_calls == 0
+    assert not budget.llm_stopped
+    assert budget.events == []  # not a budget hit: a failure
+    assert [str(e) for e in errors] == ["ConnectionError: redis down"] * 2
+
+
+async def test_an_llm_call_whose_cost_cant_be_recorded_keeps_its_answer() -> None:
+    errors: list[LedgerError] = []
+    run = RunLedger(RunBudget(max_spend=10.0), BrokenLedger(read=False))
+    budget = DocumentBudget(Budgets(run=run.budget), run, on_ledger_error=errors.append)
+    fake = ScriptedLLM(cost=0.5)
+    response = await budget.call_llm(fake, "x", Title)
+    assert response is not None
+    assert budget.llm_spend == 0.5
+    assert [str(e) for e in errors] == ["ConnectionError: read-only replica"]
+    # Without a handler the failure is raised, after the call.
+    unhandled = DocumentBudget(Budgets(run=run.budget), run)
+    with pytest.raises(LedgerError):
+        await unhandled.call_llm(fake, "x", Title)
+    assert fake.calls == 2
+
+
+async def test_a_document_runs_when_the_ledger_cant_check_or_record_its_jev_spend() -> None:
+    errors: list[LedgerError] = []
+    run = RunLedger(RunBudget(max_jev_spend=0.0), BrokenLedger())
+    budget = DocumentBudget(Budgets(run=run.budget), run, on_ledger_error=errors.append)
+    assert await budget.start_document()  # a cap of 0 would refuse it
+    await budget.finish_document(0.25)
+    assert len(errors) == 2
+    assert budget.events == []
+    with pytest.raises(LedgerError):
+        await DocumentBudget(Budgets(run=run.budget), run).start_document()
+
+
+async def test_the_learners_llm_call_through_a_failing_ledger() -> None:
+    fake = ScriptedLLM(cost=0.5)
+    with pytest.raises(LedgerError):
+        await RunLedger(RunBudget(llm_rpm=10), BrokenLedger()).call_llm(fake, "x", Title)
+    assert fake.calls == 0  # it couldn't be cleared, so it wasn't made
+    run = RunLedger(RunBudget(max_spend=10.0), BrokenLedger(read=False))
+    errors: list[LedgerError] = []
+    assert await run.call_llm(fake, "x", Title, on_ledger_error=errors.append) is not None
+    assert len(errors) == 1
+    with pytest.raises(LedgerError):
+        await run.call_llm(fake, "x", Title)
+    assert fake.calls == 2
 
 
 async def test_a_call_cap_hit_under_a_live_ledger_is_still_reported(store: SQLiteStore) -> None:
@@ -535,7 +625,7 @@ async def test_run_jev_spend_cap_skips_documents_once_reached(tmp_path: Path) ->
     first = await ex.extract(doc())
     assert not first.meta.stopped
     store = await ex.store()
-    assert store is not None
+    assert isinstance(store, SQLiteStore)
     assert await store.spend(kind="jev") == pytest.approx(first.meta.jev.cost)
     second = await ex.extract(doc())
     assert second.meta.stopped
@@ -550,8 +640,41 @@ async def test_a_run_budget_without_a_store_uses_an_in_memory_ledger() -> None:
     store = await ex.store()
     assert isinstance(store, SQLiteStore)
     assert store.path == ":memory:"
-    assert (await ex.ledger()).store is store
+    assert (await ex.ledger()).ledger is store
     await ex.aclose()
+
+
+async def test_a_ledger_passed_in_keeps_the_run_budget_instead_of_the_store(
+    store: SQLiteStore,
+) -> None:
+    mine = MemoryLedger()
+    ex = Extractor(
+        [Car],
+        jev=FakeJev().client(),
+        pipeline=Pipeline([AsksOnce()]),
+        budgets=Budgets(run=RunBudget(max_jev_spend=1.0)),
+        store=store,
+        ledger=mine,
+    )
+    result = await ex.extract(doc())
+    assert (await ex.ledger()).ledger is mine
+    assert result.meta.jev.cost > 0
+    assert await mine.spend(kind="jev") == pytest.approx(result.meta.jev.cost)
+    assert await store.spend() == 0.0
+    await ex.aclose()
+
+
+async def test_a_store_that_isnt_a_ledger_gets_an_in_memory_one() -> None:
+    not_a_ledger = cast("Store", object())
+    ex = Extractor(
+        [Car], jev=FakeJev().client(), budgets=Budgets(run=RunBudget(llm_rpm=5)), store=not_a_ledger
+    )
+    ledger = (await ex.ledger()).ledger
+    assert isinstance(ledger, MemoryLedger)
+    assert (await ex.ledger()).ledger is ledger  # one per extractor
+    # Without a run budget nothing is kept.
+    plain = Extractor([Car], jev=FakeJev().client(), store=not_a_ledger)
+    assert (await plain.ledger()).ledger is None
 
 
 async def test_a_store_passed_in_is_not_closed(store: SQLiteStore) -> None:

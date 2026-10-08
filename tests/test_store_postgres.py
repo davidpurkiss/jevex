@@ -81,7 +81,7 @@ async def test_an_extractor_opens_and_closes_a_postgres_url(
     store = await extractor.store()
     assert isinstance(store, PostgresStore)
     ledger = await extractor.ledger()
-    assert ledger.store is store
+    assert ledger.ledger is store
     await store.record_spend(charge(0.5))
     await extractor.aclose()
     with pytest.raises(StoreError, match="closed"):

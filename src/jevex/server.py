@@ -18,8 +18,8 @@ A FastAPI app for callers that aren't Python, such as the car finder's Go crawle
 Schemas are registered by module path (``module:Class``, as ``jevex extract`` takes them).
 Each set of schemas a request asks for gets its own :class:`~jevex.extractor.Extractor`,
 made on first use, so a document is only asked about the schemas it's for; they all share
-one Jev client, one store (and so the run budget's ledger and the learned generators) and
-the LLMs.
+one Jev client, one store (and so the learned generators), one spend ledger (and so the
+run budget) and the LLMs.
 
 This module imports FastAPI, so nothing in core imports it: ``jevex serve`` loads it when
 it runs.
@@ -54,6 +54,7 @@ from jevex.extractor import Extractor, document_stat
 from jevex.jev import JevBudgetExceededError, JevClient
 from jevex.learn import LearnStatus
 from jevex.llm import LLMBudgetExceededError
+from jevex.locales import checked_locale
 from jevex.logs import get_logger
 from jevex.monitoring import (
     DRIFT_WINDOW,
@@ -65,7 +66,7 @@ from jevex.monitoring import (
 from jevex.schema import SchemaSpec
 from jevex.stats import CHART_VIEWS, VIEWS, chart_svg, from_store, render_page, to_json
 from jevex.stats.server import redact
-from jevex.store import StoreError, open_store
+from jevex.store import MemoryLedger, SpendLedger, StoreError, open_store
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
@@ -429,11 +430,20 @@ class Service:
     document stats are recorded (nothing could read them). ``jev`` defaults to a client
     from the ``TYPESAFE_*`` environment variables. The extractors don't close the LLMs
     they're given; ``close_llms`` has :meth:`aclose` close them (for adapters built just
-    for the service). The other options are :class:`~jevex.extractor.Extractor`'s.
+    for the service). The other options are :class:`~jevex.extractor.Extractor`'s;
+    ``locale`` (the extractors' default locale, which a request's ``locale`` overrides for
+    its document) raises ``ValueError`` here if it isn't a language tag.
+
+    ``ledger`` (a :class:`~jevex.store.SpendLedger`) keeps the run budget's spend for
+    every extractor, so the budget holds across all the schema sets served. Without it
+    that's the store when it is a ledger (the built-in ones are), else one
+    :class:`~jevex.store.MemoryLedger` the extractors share. The service doesn't close a
+    ledger it's given.
 
     ``stats`` mounts the stats UI over the store (it needs a ``store``);
-    ``stats_budget_usd`` draws its budget line. ``drift_window`` is how many recent
-    documents ``/metrics``' per-field drift covers (:class:`~jevex.monitoring.DriftWindow`).
+    ``stats_budget_usd`` draws its budget line. Its spend comes from ``ledger`` when one
+    is given, else from the store. ``drift_window`` is how many recent documents
+    ``/metrics``' per-field drift covers (:class:`~jevex.monitoring.DriftWindow`).
     """
 
     def __init__(
@@ -442,6 +452,7 @@ class Service:
         *,
         jev: JevClient | None = None,
         store: Store | str | Path | None = None,
+        ledger: SpendLedger | None = None,
         budgets: Budgets | None = None,
         threshold: float = 0.0,
         extraction_llm: LLM | None = None,
@@ -450,6 +461,7 @@ class Service:
         stats: bool = False,
         stats_budget_usd: float | None = None,
         drift_window: int = DRIFT_WINDOW,
+        locale: str | None = None,
     ) -> None:
         if not schemas:
             raise ValueError("register at least one schema")
@@ -464,6 +476,8 @@ class Service:
         self.stats = stats
         self.stats_budget_usd = stats_budget_usd
         self.threshold = threshold
+        # Checked here, not when the first request builds an extractor.
+        self.locale = checked_locale(locale) if locale is not None else None
         self.budgets = budgets
         self.extraction_llm = extraction_llm
         self.generator_llm = generator_llm
@@ -475,6 +489,8 @@ class Service:
         self._store_source = store if isinstance(store, str | Path) else None
         self._store = None if isinstance(store, str | Path) else store
         self._owns_store = False
+        self._spend_ledger = ledger
+        self._memory_ledger = MemoryLedger()
         # Stats go to the caller's store only, not to an in-memory one nothing else reads.
         self._record_stats = store is not None
         self._extractors: dict[tuple[str, ...], Extractor] = {}
@@ -487,6 +503,16 @@ class Service:
     def store(self) -> Store | None:
         """The store the extractors share, once :meth:`start` has opened it."""
         return self._store
+
+    @property
+    def ledger(self) -> SpendLedger | None:
+        """The spend ledger the extractors share (see the class docstring), once
+        :meth:`start` has opened the store."""
+        if self._spend_ledger is not None:
+            return self._spend_ledger
+        if self._store is None:
+            return None
+        return self._store if isinstance(self._store, SpendLedger) else self._memory_ledger
 
     @property
     def store_label(self) -> str:
@@ -521,12 +547,14 @@ class Service:
                 [self.models[n] for n in key],
                 jev=self._jev,
                 store=self._store,
+                ledger=self.ledger,
                 run_id=self.run_id,
                 budgets=self.budgets,
                 threshold=self.threshold,
                 extraction_llm=self.extraction_llm,
                 generator_llm=self.generator_llm,
                 record_stats=self._record_stats,
+                locale=self.locale,
             )
         return self._extractors[key]
 
@@ -549,8 +577,13 @@ class Service:
         if self._store is None:
             raise RuntimeError("the service isn't started")
         try:
+            # Not the in-memory fallback: it has only this process's spend, the store's
+            # documents every process's.
             return await from_store(
-                self._store, source=self.store_label, budget_usd=self.stats_budget_usd
+                self._store,
+                source=self.store_label,
+                budget_usd=self.stats_budget_usd,
+                ledger=self._spend_ledger,
             )
         except StoreError:
             self.metrics.store_errors += 1
@@ -563,10 +596,11 @@ class Service:
 
     async def headroom(self) -> list[Headroom]:
         """What's left of each spend cap (:func:`~jevex.monitoring.budget_headroom`):
-        none when the store can't be read within ``STORE_TIMEOUT_S``, which is counted in
-        ``store_errors`` (so ``/metrics`` still answers while the store is down)."""
+        none when the spend ledger (by default the store) can't be read within
+        ``STORE_TIMEOUT_S``, which is counted in ``store_errors`` (so ``/metrics`` still
+        answers while it is down)."""
         run = self.budgets.run if self.budgets else None
-        ledger = RunLedger(run, self._store, run_id=self.run_id) if run else None
+        ledger = RunLedger(run, self.ledger, run_id=self.run_id) if run else None
         try:
             async with asyncio.timeout(STORE_TIMEOUT_S):
                 return await budget_headroom(ledger)

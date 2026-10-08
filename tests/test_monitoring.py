@@ -22,7 +22,7 @@ from jevex.monitoring import (
 from jevex.pipeline import Context
 from jevex.results import FieldMeta, build_extracted
 from jevex.schema import SchemaSpec
-from jevex.store import SpendEntry, SQLiteStore, StoreError, open_store
+from jevex.store import LedgerError, SpendEntry, SQLiteStore, StoreError, open_store
 from jevex.testing import FakeJev
 
 
@@ -161,7 +161,7 @@ async def test_a_document_that_found_nothing_is_all_none() -> None:
 async def test_headroom_of_the_run_budget_and_the_process_caps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     ledger = RunLedger(
         RunBudget(max_spend=5.0, period="day", max_jev_spend=1.0), store, run_id="r1"
     )
@@ -191,7 +191,7 @@ async def test_no_caps_no_headroom(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JEVEX_LLM_MAX_COST_USD", raising=False)
     assert await budget_headroom(None) == []
     assert await budget_headroom(RunLedger()) == []  # no run budget
-    store = open_store(":memory:")
+    store = SQLiteStore(":memory:")
     ledger = RunLedger(RunBudget(llm_rpm=10), store)  # a budget without spend caps
     assert await budget_headroom(ledger) == []
     await store.aclose()
@@ -205,6 +205,10 @@ class Failing(SQLiteStore):
     async def spend(self, **_: Any) -> float:
         return await self.fail()
 
+    async def disabled_generator_ids(self) -> set[str]:
+        await self.fail()
+        return set()
+
 
 async def test_store_error_says_why_the_store_does_not_answer() -> None:
     store = open_store(":memory:")
@@ -216,7 +220,7 @@ async def test_store_error_says_why_the_store_does_not_answer() -> None:
 
     failing = Failing(broken)
     assert await store_error(failing) == "StoreError: database is locked"
-    with pytest.raises(StoreError):  # the headroom read raises it for the caller
+    with pytest.raises(LedgerError):  # the headroom read raises it for the caller
         await budget_headroom(RunLedger(RunBudget(max_spend=1), failing))
     await failing.aclose()
 

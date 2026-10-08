@@ -20,6 +20,9 @@ Settings:
   sharing a store share learned generators and the run budget's ledger.
 - ``JEVEX_THRESHOLD``: the confidence below which a value is left out of the record
   (default 0: keep everything).
+- ``JEVEX_LOCALE``: the locale (a BCP 47 tag such as ``de-DE``) of documents that don't
+  say their own (no ``<html lang>`` or ``Content-Language``; most PDFs and images), as
+  ``Extractor(locale=)`` takes it (default: none).
 - ``JEVEX_META``: add each field's meta to the records, and the document's meta to the
   item under ``document_meta`` (default ``False``).
 - ``JEVEX_DOCUMENT_FIELD`` / ``JEVEX_RECORDS_FIELD`` / ``JEVEX_META_FIELD``: the item
@@ -51,6 +54,7 @@ from scrapy.utils.asyncio import is_asyncio_available
 
 from jevex.document import OCTET_STREAM, Document, sniff_content_type
 from jevex.extractor import Extractor
+from jevex.locales import checked_locale
 
 if TYPE_CHECKING:
     from scrapy.crawler import Crawler
@@ -140,8 +144,9 @@ class JevexPipeline:
         return self._extractor
 
     def make_extractor(self) -> Extractor:
-        """The extractor for this crawl, from ``JEVEX_SCHEMAS``, ``JEVEX_STORE`` and
-        ``JEVEX_THRESHOLD``. Override it to configure anything else.
+        """The extractor for this crawl, from ``JEVEX_SCHEMAS``, ``JEVEX_STORE``,
+        ``JEVEX_THRESHOLD`` and ``JEVEX_LOCALE``. Override it to configure anything else.
+        Raises ``ValueError`` for a setting it can't use.
 
         It runs on Scrapy's event loop when the spider opens, so the extractor's Jev client
         and store belong to the loop the items are processed on.
@@ -152,10 +157,16 @@ class JevexPipeline:
                 "set JEVEX_SCHEMAS to the schemas to extract (model classes or module:Class "
                 "paths), or override JevexPipeline.make_extractor"
             )
+        tag: object = self.settings.get("JEVEX_LOCALE") or None
+        try:
+            locale = checked_locale(str(tag).strip()) if tag is not None else None
+        except ValueError as exc:
+            raise ValueError(f"JEVEX_LOCALE: {exc}") from exc
         return Extractor(
             [_schema(s) for s in specs],
             store=self.settings.get("JEVEX_STORE") or None,
             threshold=self.settings.getfloat("JEVEX_THRESHOLD", 0.0),
+            locale=locale,
         )
 
     async def open_spider(self) -> None:

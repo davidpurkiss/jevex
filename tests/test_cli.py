@@ -87,6 +87,58 @@ def test_extract_threshold(page: Path) -> None:
     assert json.loads(out)["records"][0]["record"] == {"title": None}
 
 
+@dataclass
+class TitleIsLocale:
+    """Records the document's locale (or ``"none"``) as the title, so a test can see it."""
+
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        meta = FieldMeta(value=ctx.locale or "none", confidence=0.9, method="jev")
+        for run in ctx.active:
+            run.set_field("document", "title", meta)
+
+
+@pytest.mark.parametrize(
+    ("html", "locale"),
+    [
+        ("<html><body><p>Title: Dune</p></body></html>", "de-AT"),
+        ('<html lang="fr-FR"><body><p>Titre : Dune</p></body></html>', "fr-FR"),
+    ],
+)
+def test_extract_locale_is_for_documents_without_their_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, html: str, locale: str
+) -> None:
+    import jevex.extractor as extractor
+
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", (TitleIsLocale(),))
+    path = tmp_path / "book.html"
+    path.write_text(html)
+    code, out, err = run_cli("extract", str(path), "--schema", SCHEMA, "--locale", "de_at")
+    assert (code, err) == (0, "")
+    assert json.loads(out)["records"][0]["record"] == {"title": locale}
+
+
+def test_extract_without_a_locale_leaves_it_unknown(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jevex.extractor as extractor
+
+    monkeypatch.setattr(extractor, "DEFAULT_STAGES", (TitleIsLocale(),))
+    code, out, _ = run_cli("extract", str(page), "--schema", SCHEMA)
+    assert code == 0
+    assert json.loads(out)["records"][0]["record"] == {"title": "none"}
+
+
+def test_extract_rejects_a_bad_locale(page: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("extract", str(page), "--schema", SCHEMA, "--locale", "en GB")
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "argument --locale: locale must be a BCP 47 language tag" in captured.err
+    assert captured.out == ""
+
+
 def test_missing_file_is_a_clean_error() -> None:
     code, out, err = run_cli("extract", "nope.html", "--schema", SCHEMA)
     assert code == 1
@@ -190,6 +242,30 @@ def test_serve_errors_before_serving(argv: list[str], message: str, served: Serv
     code, out, err = run_cli("serve", *argv)
     assert (code, out) == (1, "")
     assert message in err
+    assert served == []
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_serve_passes_its_locale_to_the_extractors(served: Served) -> None:
+    from fastapi.testclient import TestClient
+
+    from jevex.server import Service
+
+    code, _, err = run_cli("serve", "--schema", SCHEMA, "--locale", "de_at")
+    assert (code, err) == (0, "")
+    [(app, _)] = served
+    service: object = app.state.service
+    assert isinstance(service, Service)
+    assert service.locale == "de-AT"
+    with TestClient(app):
+        assert service.extractor(["Book"]).locale == "de-AT"
+
+
+def test_serve_rejects_a_bad_locale(served: Served, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run_cli("serve", "--schema", SCHEMA, "--locale", "en GB")
+    assert exc.value.code == 2
+    assert "argument --locale: locale must be a BCP 47 language tag" in capsys.readouterr().err
     assert served == []
 
 

@@ -13,10 +13,12 @@ compares a new run with it and fails (exit 1) when :func:`check_baseline` finds 
 Improvements never fail the gate. Every tolerance is absolute: accuracies are fractions
 (0.02 is two percentage points), the LLM-call rate is calls per document.
 
-A baseline only means something for the corpus and mode it was recorded on, so it
-records both: :func:`corpus_digest` (a hash of ``truth.json`` and every document it
-lists) and whether it came from a plain run or a ``--replay``. :func:`check_baseline` refuses a
-run of anything else with :class:`BaselineError` rather than comparing unlike numbers.
+A baseline only means something for the corpus, mode and locale it was recorded with, so
+it records all three: :func:`corpus_digest` (a hash of ``truth.json`` and every document
+it lists), whether it came from a plain run or a ``--replay``, and the run's ``--locale``
+(which changes how pages without a locale of their own are read). :func:`check_baseline`
+refuses a run of anything else with :class:`BaselineError` rather than comparing unlike
+numbers.
 """
 
 from __future__ import annotations
@@ -26,9 +28,10 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from jevex.eval import TRUTH_FILE, load_corpus
+from jevex.locales import canonical_locale, checked_locale
 
 if TYPE_CHECKING:
     from jevex.eval import EvalReport
@@ -71,6 +74,9 @@ class Baseline(BaseModel):
     mode: EvalMode = "eval"
     """``"replay"`` for a ``jevex eval --replay`` run, whose LLM-call rate includes learning
     from an empty store; ``"eval"`` otherwise."""
+    locale: str | None = None
+    """The run's default locale (``jevex eval --locale``), canonical; ``None`` when it had
+    none, as in files written before baselines recorded it."""
     documents: int = Field(ge=0)
     accuracy: float | None
     """Overall accuracy (``None`` when nothing was scored)."""
@@ -79,6 +85,11 @@ class Baseline(BaseModel):
     """Accuracy per ``Schema.field``."""
     tolerances: GateTolerances = GateTolerances()
 
+    @field_validator("locale")
+    @classmethod
+    def _check_locale(cls, value: str | None) -> str | None:
+        return None if value is None else checked_locale(value)
+
     @classmethod
     def from_report(
         cls,
@@ -86,14 +97,16 @@ class Baseline(BaseModel):
         *,
         corpus: str,
         mode: EvalMode = "eval",
+        locale: str | None = None,
         tolerances: GateTolerances | None = None,
     ) -> Baseline:
-        """The baseline a run of ``report`` sets, keeping ``tolerances`` (default ones if
-        not given)."""
+        """The baseline a run of ``report`` sets, with the run's default ``locale``, keeping
+        ``tolerances`` (default ones if not given)."""
         summary = report.summary()
         return cls(
             corpus=corpus,
             mode=mode,
+            locale=locale,
             documents=summary["documents"],
             accuracy=summary["accuracy"],
             llm_calls_per_document=summary["llm_calls_per_document"],
@@ -188,9 +201,16 @@ class GateResult(BaseModel):
         return not self.regressions
 
 
-def ensure_comparable(baseline: Baseline, *, corpus: str, mode: EvalMode) -> None:
-    """Raise :class:`BaselineError` unless a run of ``mode`` on ``corpus`` can be gated
-    against ``baseline``. Cheap, so callers can check before spending on the run."""
+def _locale_run(locale: str | None) -> str:
+    return "without --locale" if locale is None else f"with --locale {locale}"
+
+
+def ensure_comparable(
+    baseline: Baseline, *, corpus: str, mode: EvalMode, locale: str | None = None
+) -> None:
+    """Raise :class:`BaselineError` unless a run of ``mode`` on ``corpus`` with the default
+    ``locale`` can be gated against ``baseline``. Cheap, so callers can check before
+    spending on the run."""
     if corpus != baseline.corpus:
         raise BaselineError(
             "the baseline was recorded on a different corpus (its documents or truth.json "
@@ -201,6 +221,14 @@ def ensure_comparable(baseline: Baseline, *, corpus: str, mode: EvalMode) -> Non
             f"the baseline is from {_MODES[baseline.mode]}, not {_MODES[mode]}: their "
             "LLM-call rates don't compare"
         )
+    if locale is not None:
+        locale = canonical_locale(locale)  # de_DE and de-DE are one locale
+    if locale != baseline.locale:
+        raise BaselineError(
+            f"the baseline was recorded {_locale_run(baseline.locale)}, this run "
+            f"{_locale_run(locale)}: pages without a locale of their own are read "
+            "differently, so the numbers don't compare"
+        )
 
 
 def check_baseline(
@@ -209,15 +237,16 @@ def check_baseline(
     *,
     corpus: str,
     mode: EvalMode = "eval",
+    locale: str | None = None,
     tolerances: GateTolerances | None = None,
 ) -> GateResult:
     """Compare a run with its baseline, using ``tolerances`` or else the baseline's own.
 
-    ``corpus`` (:func:`corpus_digest`) and ``mode`` must match the baseline's
-    (:func:`ensure_comparable`). A field in the baseline that the run scored nothing for
-    counts as a regression; a field new since the baseline isn't checked.
+    ``corpus`` (:func:`corpus_digest`), ``mode`` and the run's default ``locale`` must match
+    the baseline's (:func:`ensure_comparable`). A field in the baseline that the run scored
+    nothing for counts as a regression; a field new since the baseline isn't checked.
     """
-    ensure_comparable(baseline, corpus=corpus, mode=mode)
+    ensure_comparable(baseline, corpus=corpus, mode=mode, locale=locale)
     tol = tolerances or baseline.tolerances
     summary = report.summary()
     checks: list[Check] = []
