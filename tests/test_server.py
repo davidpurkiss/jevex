@@ -782,6 +782,29 @@ async def test_metrics_report_budget_headroom(
     await store.aclose()
 
 
+@pytest.mark.parametrize("given", [True, False])
+async def test_headroom_reads_the_ledger_the_extractors_share(
+    stage: FindValues, fake_jev: FakeJev, given: bool
+) -> None:
+    store = NotALedger()
+    budgets = Budgets(run=RunBudget(max_spend=5.0, period="week"))
+    service = Service(
+        [Book],
+        jev=fake_jev.client(),
+        store=cast("Store", store),
+        ledger=MemoryLedger() if given else None,
+        budgets=budgets,
+    )
+    await service.start()
+    ledger = service.ledger
+    assert isinstance(ledger, MemoryLedger)
+    await ledger.record_spend(SpendEntry(amount_usd=1.25, kind="llm", run_id=service.run_id))
+    text = await service.render_metrics()
+    assert 'jevex_budget_remaining_usd{scope="run",kind="llm",period="week"} 3.75\n' in text
+    await service.aclose()
+    await store.inner.aclose()
+
+
 class BrokenStore(SQLiteStore):
     """A store that stopped answering reads."""
 
