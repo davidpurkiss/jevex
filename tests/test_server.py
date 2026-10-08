@@ -716,11 +716,15 @@ async def test_errors_count_documents_not_exception_types() -> None:
     assert metrics.errors == {("candidates", "generator", "gen-1"): 1}
 
 
-async def test_a_hung_store_leaves_metrics_without_headroom(
+async def test_a_hung_store_leaves_metrics_without_run_headroom(
     stage: FindValues, fake_jev: FakeJev, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import jevex.server as server
     from jevex import Budgets, RunBudget
+    from jevex.llm import reset_process_llm_cost
+
+    reset_process_llm_cost()  # other tests' calls
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
 
     class Hangs(SQLiteStore):
         async def spend(self, **_: Any) -> float:
@@ -734,7 +738,9 @@ async def test_a_hung_store_leaves_metrics_without_headroom(
     )
     await service.start()
     text = await service.render_metrics()
-    assert "jevex_budget_remaining_usd" not in text
+    assert 'scope="run"' not in text
+    # The process caps don't need the ledger, so they're still reported.
+    assert 'jevex_budget_remaining_usd{scope="process",kind="llm",period="process"} 2.0\n' in text
     assert "jevex_ledger_errors_total 1\n" in text
     assert "jevex_store_errors_total 0\n" in text
     await service.aclose()

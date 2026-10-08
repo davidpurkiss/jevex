@@ -301,7 +301,7 @@ class Metrics:
             ),
             (
                 "jevex_store_errors_total",
-                "Store failures, in documents and in the service's own reads.",
+                "Store failures, in documents and in the service's health checks and stats reads.",
                 self.store_errors,
             ),
             (

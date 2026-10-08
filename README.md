@@ -431,8 +431,8 @@ failed extraction 500, and a process spend cap (`JEVEX_*_MAX_COST_USD`) 503.
 learner's worker has died. `GET /metrics` is Prometheus text: documents by outcome (`ok`,
 `partial`, `stopped` or `error`), errors by stage, kind and part, records, values by
 resolution method, Jev and LLM calls, retries, rate limits and spend, budget hits and
-headroom, extraction and per-stage time, learner outcomes and liveness, store errors, and
-each field's "none" rate, fallback rate and confidence over recent documents (see
+headroom, extraction and per-stage time, learner outcomes and liveness, store and
+spend-ledger errors, and each field's "none" rate, fallback rate and confidence over recent documents (see
 [`docs/monitoring.md`](docs/monitoring.md)).
 `--stats` (with `--store`) also serves the [stats UI](#stats) at `/stats/`. It's off by
 default because it shows URLs and spend. The service has no auth of its own: run it behind
