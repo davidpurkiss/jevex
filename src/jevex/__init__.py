@@ -262,6 +262,7 @@ from jevex.structured import (
 )
 from jevex.tables import (
     RowRole,
+    axis_text,
     blank_rows,
     header_prefix,
     infer_headers,
@@ -468,6 +469,7 @@ __all__ = [
     "VerifiedExample",
     "VisionProcessor",
     "__version__",
+    "axis_text",
     "baseline_instructions",
     "blank_rows",
     "book_values",

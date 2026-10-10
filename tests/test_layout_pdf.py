@@ -209,10 +209,15 @@ def test_spec_sheet_table_cells_render_with_their_headers() -> None:
         TableCell(row=1, col=1, text="8.5"),
     ]
     assert [s.text for s in table_statements(table)] == [
+        "1.5 TSI SE",
+        "2.0 TDI SE L",
+        "0-62 mph (s)",
         "0-62 mph (s) · 1.5 TSI SE: 8.5",
         "0-62 mph (s) · 2.0 TDI SE L: 10.4",
+        "Top speed (mph)",
         "Top speed (mph) · 1.5 TSI SE: 139",
         "Top speed (mph) · 2.0 TDI SE L: 128",
+        "CO2 (g/km)",
         "CO2 (g/km) · 1.5 TSI SE: 131",
         "CO2 (g/km) · 2.0 TDI SE L: 118",
     ]
@@ -466,7 +471,13 @@ def test_empty_table_cells_keep_their_place_but_not_under_a_span() -> None:
         TableCell(row=2, col=1, text="150 PS", col_span=2),
     ]
     assert table.text == "SE | GT\nTowing\nPower | 150 PS"
-    assert [s.text for s in table_statements(table)] == ["Power · SE / GT: 150 PS"]
+    # "Towing" heads a row of empty cells, so it isn't a header statement.
+    assert [s.text for s in table_statements(table)] == [
+        "SE",
+        "GT",
+        "Power",
+        "Power · SE / GT: 150 PS",
+    ]
 
 
 def test_a_table_without_text_leaves_only_its_caption() -> None:
