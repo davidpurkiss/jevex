@@ -173,6 +173,8 @@ def test_parse_date_rejects(raw: str) -> None:
         ("5 - -7", [5, -7]),
         ("5 \u2013 -7", [5, -7]),
         ("5 and -7", [5, -7]),
+        ("\u20135 to 7", [5, 7]),
+        ("5 \u2013 \u20137", [5, 7]),
     ],
 )
 def test_parse_range(raw: str, value: list[int]) -> None:
