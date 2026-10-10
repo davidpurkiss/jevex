@@ -758,9 +758,13 @@ async def place_document_values(run: SchemaRun, jev: JevClient) -> tuple[int, in
       offers);
     - to every other entity, marked ``shared`` (so a value of the entity's own replaces
       it, :meth:`~jevex.pipeline.SchemaRun.offer_field`): the document's value, unless it
-      came from an object placed on an entity; then the value from outside every object
-      (:attr:`~jevex.pipeline.SchemaRun.structured_rest`), else from the first object
-      that applies to every entity (and isn't inside a placed one).
+      came from an object placed on an entity, or Jev found none of the document's values
+      to be it while some entity has one of its own (the values disagreed because they're
+      the entities'). Then it's the value from outside every object
+      (:attr:`~jevex.pipeline.SchemaRun.structured_rest`, settled by Jev on its own when
+      those values disagree), else from the first object that applies to every entity
+      (and isn't inside a placed one), else, after Jev's "none", the document's unfound
+      value.
 
     Past 254 entities there are too many options for a Choice, so nothing is asked and
     every object applies to every entity.
@@ -803,12 +807,14 @@ async def place_document_values(run: SchemaRun, jev: JevClient) -> tuple[int, in
             if found is not None and found.found:
                 own.setdefault(label, found)
         shared: FieldMeta | None = meta
-        if meta.found and meta.source is not None and meta.source.statement_id in taken:
+        placed_value = meta.found and meta.source is not None and meta.source.statement_id in taken
+        if placed_value or (not meta.found and own):
             others = [
                 run.structured_rest.get(name),
                 *(i.fields[run.name].get(name) for i in loose),
             ]
-            shared = next((m for m in others if m is not None and m.found), None)
+            fallback = None if placed_value else meta
+            shared = next((m for m in others if m is not None and m.found), fallback)
         for label in labels:
             if label in own:
                 run.set_field(label, name, own[label])

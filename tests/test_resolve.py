@@ -36,7 +36,7 @@ from jevex.resolve import (
     SingleEntity,
     place_document_values,
 )
-from jevex.results import FieldMeta, Source
+from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import ALL_OPTION
 from jevex.split import StatementStage
 from jevex.testing import FakeJev
@@ -1416,6 +1416,80 @@ async def test_a_value_from_outside_every_item_is_shared_before_an_unplaced_item
         19995,
         True,
     )
+
+
+# Jev's "none" over the page's distinct prices.
+NO_PRICE = FieldMeta(
+    method="structured",
+    confidence=0.6,
+    alternatives=[
+        Alternative(value=24995, raw="24995", p=0.2),
+        Alternative(value=750, raw="750", p=0.2),
+    ],
+)
+
+
+def offers_run() -> SchemaRun:
+    """SE's offer, and a delivery offer for every car, on a page whose price Jev found
+    none of."""
+    run = car_run("SE", "SE L")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": NO_PRICE}
+    run.structured_items = [
+        item("offers[0]", "offers[0].name: SE", {"s1"}, price=structured(24995, "s1")),
+        item("offers[1]", "offers[1].name: Delivery", {"s2"}, price=structured(750, "s2")),
+    ]
+    return run
+
+
+async def test_after_a_page_none_entities_values_leave_the_rest_to_share() -> None:
+    run = offers_run()
+    run.structured_rest = {"price": structured(19995, "s9")}
+    assert await place_document_values(run, places(SE="SE").client()) == (1, 1)
+    assert run.fields["SE"]["price"] == structured(24995, "s1")
+    assert run.fields["SE L"]["price"] == structured(19995, "s9").model_copy(
+        update={"shared": True}
+    )
+
+
+async def test_after_a_page_none_an_object_for_every_entity_is_shared() -> None:
+    run = offers_run()
+    await place_document_values(run, places(SE="SE").client())
+    assert (run.fields["SE L"]["price"].value, run.fields["SE L"]["price"].shared) == (750, True)
+
+
+async def test_a_page_none_stands_when_no_entity_has_a_value_of_its_own() -> None:
+    # Jev placed nothing, so the values it found none of to be the price are every car's.
+    run = offers_run()
+    run.structured_rest = {"price": structured(19995, "s9")}
+    assert await place_document_values(run, places().client()) == (0, 0)
+    for label in ("SE", "SE L"):
+        assert run.fields[label]["price"] == NO_PRICE.model_copy(update={"shared": True})
+
+
+async def test_a_none_for_the_rest_leaves_no_shared_value() -> None:
+    rest_none = FieldMeta(
+        method="structured",
+        confidence=0.7,
+        alternatives=[Alternative(value=19995, raw="19995", p=0.3)],
+    )
+    # After a page "none": the page's own unfound value is what's shared.
+    run = car_run("SE", "SE L")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": NO_PRICE}
+    run.structured_items = [
+        item("offers[0]", "offers[0].name: SE", {"s1"}, price=structured(24995, "s1"))
+    ]
+    run.structured_rest = {"price": rest_none}
+    assert await place_document_values(run, places(SE="SE").client()) == (1, 0)
+    assert run.fields["SE L"]["price"] == NO_PRICE.model_copy(update={"shared": True})
+    # After a page value an entity's object gave: nothing is shared.
+    run = car_run("SE", "SE L")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
+    run.structured_items = [
+        item("offers[0]", "offers[0].name: SE", {"s1"}, price=structured(24995, "s1"))
+    ]
+    run.structured_rest = {"price": rest_none}
+    assert await place_document_values(run, places(SE="SE").client()) == (1, 0)
+    assert "SE L" not in run.fields
 
 
 async def test_a_value_only_placed_items_give_isnt_shared_and_valueless_ones_arent_asked() -> None:
