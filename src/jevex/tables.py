@@ -148,34 +148,39 @@ def table_statements(table: Component) -> list[Statement]:
     # Header statements, only with headers on both axes (see the module docstring).
     row_header_cols = {c.col for cells in row_header_cells.values() for c in cells}
     both_axes = bool(header_rows) and bool(row_header_cols)
-    seen: set[str] = set()
     # A header over no data (a blank row's "Towing", an empty column) names nothing.
     data = [c for c in cells if not c.header]
     data_rows = {row for c in data for row in range(c.row, c.row + c.row_span)}
     data_cols = {col for c in data for col in range(c.col, c.col + c.col_span)}
 
-    def row_labels_of(c: TableCell) -> list[str]:
-        """One label per row ``c`` covers: that row's headers, joined ("Kestrova SE")."""
-        per_row = [
+    def headers_per_row(c: TableCell) -> list[list[str]]:
+        """The headers of each row ``c`` covers, in column order."""
+        return [
             [_label(h.text) for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)]
             for covered in range(c.row, c.row + c.row_span)
         ]
-        return list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
 
-    row_axis = list(
-        dict.fromkeys(
-            _label(c.text)
-            for r in body
-            if roles[r] == "body"
-            for c in rows[r]
-            if c.header
-            and _label(c.text)
-            and any(r2 in data_rows for r2 in range(c.row, c.row + c.row_span))
-        )
-    )
+    def covers_data(c: TableCell) -> bool:
+        return any(row in data_rows for row in range(c.row, c.row + c.row_span))
+
+    # A row header's fellow labels are the others in its column ("SE", "GT" under the
+    # trims; "Kestrova", "Delmaro" under the models).
+    row_axes: dict[int, list[str]] = {}
+    for r in body:
+        if roles[r] == "body":
+            for c in rows[r]:
+                if c.header and (label := _label(c.text)) and covers_data(c):
+                    axis = row_axes.setdefault(c.col, [])
+                    if label not in axis:
+                        axis.append(label)
+    seen_cols: set[str] = set()
+    # A row header repeated under another outer header ("SE" under "Kestrova" and under
+    # "Delmaro") names another entity, so it's a statement again.
+    seen_rows: set[tuple[str, tuple[str, ...]]] = set()
+
     out: list[Statement] = []
     if both_axes:
-        out += _column_header_statements(table, header_rows[-1], col_headers, data_cols, seen)
+        out += _column_header_statements(table, header_rows[-1], col_headers, data_cols, seen_cols)
     for r in body:
         row = sorted(rows[r], key=lambda c: c.col)
         if roles[r] != "body":
@@ -184,35 +189,29 @@ def table_statements(table: Component) -> list[Statement]:
             else:
                 col_headers = headers_of([r])  # a header row repeated mid-table
                 if both_axes:
-                    out += _column_header_statements(table, r, col_headers, data_cols, seen)
+                    out += _column_header_statements(table, r, col_headers, data_cols, seen_cols)
             continue
         for c in row:
+            # One label per covered row: its headers, joined ("Kestrova SE").
+            per_row = headers_per_row(c)
+            row_labels = list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
             if c.header:
                 label = _label(c.text)
-                covers_data = any(r2 in data_rows for r2 in range(c.row, c.row + c.row_span))
-                if both_axes and label and covers_data and label not in seen:
-                    seen.add(label)
+                key = (label, tuple(row_labels))
+                if both_axes and label and covers_data(c) and key not in seen_rows:
+                    seen_rows.add(key)
                     ref = TableCellRef(
                         row=r,
                         col=c.col,
                         row_headers=[label],
-                        row_labels=row_labels_of(c),
+                        row_labels=row_labels,
                         corner=" ".join(col_headers.get(c.col, [])) or None,
-                        axis_labels=row_axis,
+                        axis_labels=row_axes[c.col],
                     )
                     out.append(_statement(table, f"h{r}c{c.col}", label, ref, "table_header"))
                 continue
-            # A data cell spanning rows takes every covered row's headers, and one label
-            # per covered row: its headers, joined ("Kestrova SE").
-            per_row = [
-                [
-                    _label(h.text)
-                    for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)
-                ]
-                for covered in range(c.row, c.row + c.row_span)
-            ]
+            # A data cell spanning rows takes every covered row's headers.
             row_headers = list(dict.fromkeys(h for headers in per_row for h in headers))
-            row_labels = list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
             # One label per column covered: its stacked headers, joined.
             labels = [
                 " ".join(col_headers[col])

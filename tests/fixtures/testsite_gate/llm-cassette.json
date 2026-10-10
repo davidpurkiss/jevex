@@ -8,23 +8,37 @@
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Used cars: page 1\nStatement: Brantis Parhelia\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004644,
+      "cost": 0.004464,
       "input_tokens": 506,
-      "output_tokens": 131
+      "output_tokens": 122
     }
   },
   "7aa9b847336d1e60": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "Tamsin",
+      "evidence": "Corvane Tamsin",
       "stated": true,
       "value": "Tamsin"
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Used cars: page 1\nStatement: Corvane Tamsin\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.005904,
+      "cost": 0.004984,
       "input_tokens": 506,
-      "output_tokens": 194
+      "output_tokens": 148
+    }
+  },
+  "9a5c4a49722bdd01": {
+    "model": "claude-opus-5-5",
+    "output": {
+      "evidence": "Power output \u00b7 Sport: 114 bhp",
+      "stated": true,
+      "value": 85.0
+    },
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 Sport: 114 bhp\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "usage": {
+      "cost": 0.004908,
+      "input_tokens": 542,
+      "output_tokens": 137
     }
   },
   "afff0f390433a918": {
@@ -32,27 +46,27 @@
     "output": {
       "evidence": "143PS",
       "stated": true,
-      "value": 105.2
+      "value": 105.18
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 GT: 143PS\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004516,
+      "cost": 0.004696,
       "input_tokens": 539,
-      "output_tokens": 118
+      "output_tokens": 127
     }
   },
   "cedb35a59f4705c4": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "173 bhp",
+      "evidence": "Power output \u00b7 Edition: 173 bhp",
       "stated": true,
       "value": 129.0
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 Edition: 173 bhp\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004688,
+      "cost": 0.004388,
       "input_tokens": 542,
-      "output_tokens": 126
+      "output_tokens": 111
     }
   },
   "eec3aca60e4fa71c": {

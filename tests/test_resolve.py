@@ -499,6 +499,26 @@ async def test_multi_entity_without_confirm_asks_no_boundary_questions() -> None
     assert all("entity" in c.questions for c in fake.calls)
 
 
+async def test_headers_of_a_table_whose_axes_are_rejected_are_asked_about() -> None:
+    # The trims are sections; the price table's years are rejected on both axes, so its
+    # headers aren't known to head every trim, and Jev is asked like for any statement.
+    parsed = await parse(
+        "<table><tr><th></th><th>2022</th><th>2023</th></tr>"
+        "<tr><th>Price</th><td>£20,000</td><td>£21,000</td></tr></table>"
+        "<h2>SE</h2><p>150PS.</p><h2>SE L</h2><p>180PS.</p>"
+    )
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.1)
+        .noul('"SE', p=0.9)  # the section headings (the last matching rule wins)
+        .choice(WHICH, ALL_OPTION)
+    )
+    se, _ = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    asked = [c.state["statement"] for c in fake.calls if "entity" in c.questions]
+    assert {"2022", "2023", "Price"} <= set(asked)
+    assert texts(parsed, se.shared_statement_ids)[:3] == ["2022", "2023", "Price"]
+
+
 async def test_multi_entity_with_one_entity_is_a_single_entity() -> None:
     # One column label, and a table without row headers: nothing to split.
     parsed = await parse(

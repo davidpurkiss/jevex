@@ -87,7 +87,7 @@ class Statement(BaseModel):
     heading_trail: list[str] = Field(default_factory=list[str])
     location: Location
     table: TableCellRef | None = None
-    """Set on ``table_cell`` statements."""
+    """Set on ``table_cell`` and ``table_header`` statements."""
 
 
 class NormaliserStep(BaseModel):

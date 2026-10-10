@@ -768,3 +768,37 @@ def test_row_roles_of_tables_with_only_headers_or_none_are_all_body() -> None:
     plain = table(cell(0, 0, "Spec"), cell(0, 1, "SE"), cell(0, 2, "GT"), cell(1, 0, "Power"))
     assert row_roles(plain) == {0: "body", 1: "body"}
     assert row_roles(table(cell(0, 0, " ", header=True))) == {}
+
+
+def test_a_row_label_repeated_under_another_outer_header_is_stated_again() -> None:
+    t = html_table(
+        "<tr><th>Model</th><th>Trim</th><th>Power</th></tr>"
+        "<tr><th rowspan=2>Kestrova</th><th>SE</th><td>150 PS</td></tr>"
+        "<tr><th>GT</th><td>200 PS</td></tr>"
+        "<tr><th rowspan=2>Delmaro</th><th>SE</th><td>160 PS</td></tr>"
+        "<tr><th>GT</th><td>210 PS</td></tr>"
+    )
+    rows = [
+        (s.text, s.table.row_labels, s.table.corner, s.table.axis_labels)
+        for s in table_statements(t)
+        if s.kind == "table_header" and s.table and s.table.row_headers
+    ]
+    # Each trim names a different entity under each model, and each column of row
+    # headers is its own axis: models with models, trims with trims.
+    models, trims = ["Kestrova", "Delmaro"], ["SE", "GT"]
+    assert rows == [
+        ("Kestrova", ["Kestrova SE", "Kestrova GT"], "Model", models),
+        ("SE", ["Kestrova SE"], "Trim", trims),
+        ("GT", ["Kestrova GT"], "Trim", trims),
+        ("Delmaro", ["Delmaro SE", "Delmaro GT"], "Model", models),
+        ("SE", ["Delmaro SE"], "Trim", trims),
+        ("GT", ["Delmaro GT"], "Trim", trims),
+    ]
+    # A label repeated for the same entities ("Power" under two bands) is stated once.
+    banded = html_table(
+        "<tr><th></th><th>SE</th></tr>"
+        "<tr><th>Petrol</th></tr><tr><th>Power</th><td>150 PS</td></tr>"
+        "<tr><th>Diesel</th></tr><tr><th>Power</th><td>120 PS</td></tr>"
+    )
+    headers = [s.text for s in table_statements(banded) if s.kind == "table_header"]
+    assert headers == ["SE", "Power"]

@@ -132,11 +132,11 @@ class MultiEntity:
     With two or more entities, every statement no boundary claimed is asked one Choice
     (:meth:`~jevex.schema.SchemaSpec.entity_question`): which entity it applies to, or
     "all of them". A table's header statements (``table_header``) join their column's or
-    row's entity; one no boundary claimed (a row label when the columns are the entities)
-    applies to all of them without asking. Those go on every scope's
-    ``shared_statement_ids``: a value found only in them is copied into each record with
-    ``meta.shared`` set. Past 254 entities there are too many options for a Choice, so
-    those statements are left out (the entity stage reports them as
+    row's entity; one no boundary claimed in a table whose other axis is the entities (a
+    row label when the columns are) applies to all of them without asking. Those go on
+    every scope's ``shared_statement_ids``: a value found only in them is copied into
+    each record with ``meta.shared`` set. Past 254 entities there are too many options
+    for a Choice, so those statements are left out (the entity stage reports them as
     ``unassigned_statements``). With fewer than two entities, the document is one entity
     labelled ``label``, as with :class:`SingleEntity`, and nothing more is asked.
     """
@@ -170,8 +170,21 @@ class MultiEntity:
         labels = list(dict.fromkeys(label for s in statements for label in owners.get(s.id, [])))
         if len(labels) < 2:
             return await SingleEntity(label=self.label).resolve(parsed, schema, jev)
+        # Tables one of whose axes are entities: a header there no entity claimed heads the
+        # other axis.
+        entity_tables = {
+            parsed.statements[sid].component_id
+            for group, _, ids in accepted
+            if group.rule == 0
+            for sid in ids
+        }
         shared = await self._assign(
-            [s for s in statements if s.id not in owners], labels, owners, schema, jev
+            [s for s in statements if s.id not in owners],
+            labels,
+            owners,
+            schema,
+            jev,
+            entity_tables,
         )
         return _scopes(statements, labels, owners, shared)
 
@@ -206,13 +219,18 @@ class MultiEntity:
         owners: dict[str, list[str]],
         schema: SchemaSpec,
         jev: JevClient,
+        entity_tables: set[str],
     ) -> set[str]:
         """Ask which entity each unclaimed statement applies to. Fills ``owners``; returns
         the ids of statements that apply to all of them.
 
-        An unclaimed table header isn't asked about: it heads the axis that isn't the
-        entities (a row label, "Power", over every trim's column), so it applies to all."""
-        shared = {s.id for s in ambiguous if s.kind == "table_header"}
+        An unclaimed header of a table whose other axis is the entities (``entity_tables``)
+        isn't asked about: it heads that whole axis (a row label, "Power", over every
+        trim's column), so it applies to all of them. Other tables' headers are asked like
+        any statement."""
+        shared = {
+            s.id for s in ambiguous if s.kind == "table_header" and s.component_id in entity_tables
+        }
         ambiguous = [s for s in ambiguous if s.id not in shared]
         if len(labels) >= MAX_CHOICE_OPTIONS:
             return shared
