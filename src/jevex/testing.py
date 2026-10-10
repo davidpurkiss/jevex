@@ -15,11 +15,13 @@ For realistic answers, record real responses once and replay them in CI::
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import re
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast
@@ -44,6 +46,8 @@ from jevex.jev import (
 from jevex.llm import LLMImage, LLMResponse, LLMUsage, check_budget, record, validate_output
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from jevex.llm import LLM
 
 type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer
@@ -237,6 +241,24 @@ def request_key(state: JSONContent, questions: Mapping[str, Question]) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
+class _Recording:
+    """The requests a recording run has recorded, so each one is asked live only once."""
+
+    def __init__(self) -> None:
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._done: set[str] = set()
+
+    @asynccontextmanager
+    async def once(self, key: str) -> AsyncGenerator[bool]:
+        """Yields whether ``key`` still needs recording, holding its lock so a duplicate
+        in flight waits for the first. It counts as recorded once the block finishes;
+        a failed call (a transient error the client retries) leaves it to the next one.
+        """
+        async with self._locks.setdefault(key, asyncio.Lock()):
+            yield key not in self._done
+            self._done.add(key)
+
+
 class Cassette:
     """Replays recorded Jev responses from a JSON file; records them when ``record`` is on.
 
@@ -246,6 +268,11 @@ class Cassette:
     mode, an unrecorded request raises :class:`CassetteMissError`, so tests never reach
     the network by accident. :meth:`aclose` closes ``inner`` (an
     ``Extractor`` calls it when it closes), so a recording run doesn't leak connections.
+
+    A request asked again while recording (two identical cards on a page, say) gets the
+    answer recorded for it in this run, as a replay would: Jev can answer the same request
+    differently, and a run scored on one answer but recorded with another replays to other
+    numbers than the baseline it wrote.
     """
 
     def __init__(self, path: str | Path, *, record: bool = False, inner: JevBackend | None = None):
@@ -255,21 +282,29 @@ class Cassette:
         self._entries: dict[str, dict[str, object]] = (
             json.loads(self.path.read_text()) if self.path.exists() else {}
         )
+        self._recording = _Recording()
 
     async def system_one(
         self, state: JSONContent, questions: Mapping[str, Question]
     ) -> JevResponse:
         key = request_key(state, questions)
-        if not self.record:
-            if key not in self._entries:
-                raise CassetteMissError(
-                    f"no recording for request {key} in {self.path}; "
-                    f"run with {RECORD_ENV}=1 to record it"
-                )
-            entry = self._entries[key]
-            if "rejected" in entry:
-                raise JevTokenLimitError(str(entry["rejected"]))
-            return _RESPONSE.validate_python(entry["response"])
+        if self.record:
+            async with self._recording.once(key) as first:
+                if first:
+                    await self._record(key, state, questions)
+        if key not in self._entries:
+            raise CassetteMissError(
+                f"no recording for request {key} in {self.path}; "
+                f"run with {RECORD_ENV}=1 to record it"
+            )
+        entry = self._entries[key]
+        if "rejected" in entry:
+            raise JevTokenLimitError(str(entry["rejected"]))
+        return _RESPONSE.validate_python(entry["response"])
+
+    async def _record(
+        self, key: str, state: JSONContent, questions: Mapping[str, Question]
+    ) -> None:
         if self._inner is None:
             self._inner = TypeSafeBackend()
         request = {
@@ -281,14 +316,12 @@ class Cassette:
         except JevTokenLimitError as exc:
             # Part of a normal run (the client asks again in parts), so replay it too.
             self._entries[key] = {"request": request, "rejected": str(exc)}
-            self.save()
-            raise
-        self._entries[key] = {
-            "request": request,
-            "response": _RESPONSE.dump_python(response, mode="json"),
-        }
+        else:
+            self._entries[key] = {
+                "request": request,
+                "response": _RESPONSE.dump_python(response, mode="json"),
+            }
         self.save()
-        return response
 
     async def aclose(self) -> None:
         """Close the inner backend, the one passed in or the API backend recording made."""
@@ -404,6 +437,7 @@ class LLMCassette:
     with it (so a text-only call's key is the same as before images could be sent). In
     replay mode an unrecorded call
     raises :class:`CassetteMissError`; ``JEVEX_RECORD=1`` (see :func:`llm_cassette`) records.
+    A call made again while recording gets the answer recorded for it in this run.
     :meth:`aclose` closes ``inner`` when it has an ``aclose``.
     """
 
@@ -414,6 +448,7 @@ class LLMCassette:
         self._entries: dict[str, dict[str, object]] = (
             json.loads(self.path.read_text()) if self.path.exists() else {}
         )
+        self._recording = _Recording()
 
     @staticmethod
     def key(prompt: str, schema: type[BaseModel], images: Sequence[LLMImage] = ()) -> str:
@@ -429,18 +464,25 @@ class LLMCassette:
         self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
     ) -> LLMResponse[T]:
         key = self.key(prompt, schema, images)
-        if not self.record:
-            if key not in self._entries:
-                raise CassetteMissError(
-                    f"no LLM recording {key} in {self.path}; run with {RECORD_ENV}=1 to record it"
-                )
-            entry = self._entries[key]
-            usage = cast("dict[str, Any]", entry["usage"])
-            return LLMResponse(
-                output=schema.model_validate(entry["output"]),
-                usage=LLMUsage(usage["input_tokens"], usage["output_tokens"], usage["cost"]),
-                model=str(entry["model"]),
+        if self.record:
+            async with self._recording.once(key) as first:
+                if first:
+                    await self._record(key, prompt, schema, images)
+        if key not in self._entries:
+            raise CassetteMissError(
+                f"no LLM recording {key} in {self.path}; run with {RECORD_ENV}=1 to record it"
             )
+        entry = self._entries[key]
+        usage = cast("dict[str, Any]", entry["usage"])
+        return LLMResponse(
+            output=schema.model_validate(entry["output"]),
+            usage=LLMUsage(usage["input_tokens"], usage["output_tokens"], usage["cost"]),
+            model=str(entry["model"]),
+        )
+
+    async def _record(
+        self, key: str, prompt: str, schema: type[BaseModel], images: Sequence[LLMImage]
+    ) -> None:
         if self._inner is None:
             raise CassetteMissError("recording needs an inner LLM")
         response = await (
@@ -460,7 +502,6 @@ class LLMCassette:
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._entries, indent=2, sort_keys=True) + "\n")
-        return response
 
     async def aclose(self) -> None:
         """Close the inner LLM. An ``Extractor`` doesn't close LLMs it's given, so call it."""
