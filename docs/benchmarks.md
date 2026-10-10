@@ -46,8 +46,7 @@ the test site's raster pages.
 | --- | --- | --- | --- | --- |
 | **`testsite`**: the synthetic test site, seed 42, default waves | Exact truth. It covers every feature, and its waves show the learning curve | Generated with the site | 203 pages: 155 HTML, 32 PDFs, 16 PNGs | In full |
 | **`books`**: [books.toscrape.com](https://books.toscrape.com) (`Book` schema) | A real site built for scraping practice | Read from each page's markup, then spot-checked by hand | 200 product pages, sampled with seed 42 | In full |
-| **`spec-sheets-local`**: real spec PDFs we may not redistribute | Realistic PDFs with trim columns | Hand-labelled | 20–40 PDFs | Aggregate numbers only |
-| **`spec-sheets-press`**: press-kit spec PDFs whose terms allow committing them | Real PDFs anyone can rerun | Hand-labelled | As many as the terms allow | In full |
+| **`spec-sheets`**: real UK price guides, spec PDFs and spec pages from 11 makes (`VehicleSpec` schema) | Real documents with trim columns, fetched from the manufacturers by anyone rerunning | Hand-labelled, one record per priced variant (`spec-sheets/LABELLING.md`), every value checked against the document's text by script | 25 documents (13 PDFs, 12 HTML pages), 318 records | In full |
 
 Every corpus is a directory in `jevex eval`'s format: a `truth.json` that lists each
 document and its expected records.
@@ -81,12 +80,26 @@ jevex corpus check DIR benchmarks/corpora/NAME.lock     # exit 1, listing what d
   markup by script, and a 20-label spot-check was posted on #211 for the owner to confirm. If
   the site starts serving different bytes, the lock check fails and a new fetch needs a
   new lock.
-- **`spec-sheets-local`** lives outside the repo, in the directory `$JEVEX_BENCH_SPEC_SHEETS`
-  names. Only its lock is committed. That lock holds file names and hashes, never content.
-  Its `publish: aggregate` means results show only the corpus's summary numbers, with no
-  per-document rows, values or file names.
-- **`spec-sheets-press`** is committed under `benchmarks/corpora/spec-sheets-press/`. Each
-  source's terms are confirmed and recorded next to its files before they're added.
+- **`spec-sheets`** is fetched, like `books`, and never committed: the documents are the
+  manufacturers'. The repo holds what's needed to fetch and check them, in
+  `benchmarks/corpora/spec-sheets/`: `manifest.json` gives each document's file name, URL,
+  SHA-256, kind and the date it was captured, and `truth.json` holds the labels. Results
+  can be published for as long as the links live. Fetch the documents with the
+  `fetch.py` uv script, into the directory `$JEVEX_BENCH_SPEC_SHEETS` names (the config's
+  `env`), then check them against the lock:
+
+  ```sh
+  uv run --script benchmarks/corpora/fetch.py benchmarks/corpora/spec-sheets/manifest.json \
+      --out "$JEVEX_BENCH_SPEC_SHEETS"
+  jevex corpus check "$JEVEX_BENCH_SPEC_SHEETS" benchmarks/corpora/spec-sheets.lock
+  ```
+
+  `fetch.py` downloads through `SimpleFetcher` (robots.txt honoured, a second between
+  requests to one host), checks every document's SHA-256 and copies `truth.json` alongside.
+  It reports each document. A dead link, a robots.txt refusal or a different hash fails the
+  run, and nothing already in the directory is overwritten. A document already there with
+  the right hash isn't fetched again, so a run can be resumed. If a manufacturer replaces
+  a document, the corpus needs a new capture: a new manifest entry, labels and lock.
 
 ## Systems compared
 
