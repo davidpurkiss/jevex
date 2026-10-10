@@ -353,7 +353,6 @@ def test_noun_phrases_keep_numbers_with_thousands_separators_whole() -> None:
     assert raws(NounPhrase(), "Price £18,495, or 25k GBP on finance") == [
         "Price",
         "Price £18,495",
-        "18,495",
         "25k",
         "25k GBP",
         "GBP",
@@ -362,7 +361,7 @@ def test_noun_phrases_keep_numbers_with_thousands_separators_whole() -> None:
 
 
 def test_noun_phrases_skip_pure_numbers_and_chunk_long_runs() -> None:
-    assert raws(NounPhrase(), "42, 7.5") == []
+    assert raws(NounPhrase(), "42, 7.5, 18,495") == []
     assert raws(NounPhrase(), "Kestrova 2.0 SE") == [
         "Kestrova",
         "Kestrova 2.0",

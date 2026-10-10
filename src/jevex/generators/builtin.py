@@ -604,7 +604,7 @@ class NounPhrase:
             else:
                 phrases = [run[i : i + MAX_PHRASE_WORDS] for i in range(0, n, MAX_PHRASE_WORDS)]
             for words in phrases:
-                if not all(w.group().replace(".", "").isdigit() for w in words):
+                if not all(w.group().replace(",", "").replace(".", "").isdigit() for w in words):
                     out.append(
                         _candidate(
                             statement, words[0].start(), words[-1].end(), self.id, _step("strip")
