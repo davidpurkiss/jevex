@@ -230,10 +230,14 @@ async def test_recording_a_new_run_asks_jev_again(tmp_path: Path) -> None:
     path = tmp_path / "c.json"
     questions = {"q": Noul(instructions="Is it fast?")}
     await Cassette(path, record=True, inner=Drifting()).system_one("state", questions)
+    later = Drifting()
+    later.calls = 1  # its first answer is p=0.2, unlike the first run's 0.1
 
-    rerecorded = await Cassette(path, record=True, inner=Drifting()).system_one("state", questions)
+    rerecorded = await Cassette(path, record=True, inner=later).system_one("state", questions)
 
-    assert rerecorded.answers["q"] == NoulAnswer(p=0.1)
+    assert later.calls == 2
+    assert rerecorded.answers["q"] == NoulAnswer(p=0.2)
+    assert await Cassette(path).system_one("state", questions) == rerecorded
     assert len(json.loads(path.read_text())) == 1
 
 
