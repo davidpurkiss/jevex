@@ -199,6 +199,63 @@ def test_ranges() -> None:
     ]
 
 
+class Climate(BaseModel):
+    operating: list[float] = Field(default_factory=list, description="Operating temperature")
+
+
+CLIMATE = SchemaSpec.from_model(Climate)
+
+
+@pytest.mark.parametrize(
+    ("text", "raw", "value"),
+    [
+        ("Operating range -5 to -2 °C", "-5 to -2", [-5, -2]),
+        ("Operating range between -5 and 5 °C", "between -5 and 5", [-5, 5]),
+        ("Operating range between \u22125 and \u22122 °C", "between \u22125 and \u22122", [-5, -2]),
+        ("Operating range \u22125–\u22122 °C", "\u22125–\u22122", [-5, -2]),
+        ("Operating range -5--2 °C", "-5--2", [-5, -2]),
+        ("Operating range 5 to -2 °C", "5 to -2", [5, -2]),
+        ("Operating range (-5–7 °C)", "-5–7", [-5, 7]),
+    ],
+)
+def test_ranges_keep_their_signs(text: str, raw: str, value: list[int]) -> None:
+    [cand] = Range().generate(st(text))
+    assert cand.raw == raw
+    assert normalise(cand.raw, cand.normalise, CLIMATE.field("operating")) == value
+    # The unsigned numbers are still proposed, for Jev to choose between.
+    assert raws(NumberWithUnit(), text) == [str(abs(v)) for v in value]
+
+
+def test_signed_ranges_in_the_page_languages_words() -> None:
+    field = CLIMATE.field("operating")
+    [cand] = Range().generate_in(st("zwischen -1,5 und 2,5 °C"), field, "de-DE")
+    assert cand.raw == "zwischen -1,5 und 2,5"
+    assert normalise(cand.raw, cand.normalise, field) == [-1.5, 2.5]
+
+
+def test_a_signed_range_is_a_key_values_chain() -> None:
+    field = CLIMATE.field("operating")
+    [cand] = KeyValue().generate_for(st("Operating range: -5 to -2 °C"), field)
+    assert cand.raw == "-5 to -2 °C"
+    assert normalise(cand.raw, cand.normalise, field) == [-5, -2]
+
+
+@pytest.mark.parametrize(
+    ("text", "raw", "value"),
+    [("Seats 5-7", "5-7", [5, 7]), ("0-62 mph in 9.1 s", "0-62 mph", [0, 62])],
+)
+def test_a_dash_between_numbers_is_not_a_sign(text: str, raw: str, value: list[float]) -> None:
+    [cand] = Range().generate(st(text))
+    assert cand.raw == raw
+    assert normalise(cand.raw, cand.normalise, CLIMATE.field("operating")) == value
+
+
+def test_a_dash_after_a_word_or_number_is_not_a_sign() -> None:
+    assert raws(Range(), "Size A-5 to 7") == []
+    assert raws(Range(), "Size A\u22125 to 7") == []
+    assert raws(Range(), "Grid 3-1-5 to 7") == []
+
+
 def test_dates_and_references_are_not_ranges() -> None:
     assert raws(Range(), "MOT 2024-09-01") == []
     assert raws(Range(), "ref 12-34/56") == []

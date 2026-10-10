@@ -12,7 +12,7 @@ Normaliser steps these generators emit:
   "£1.5 million" → amount in that currency, with any multiplier (k, m, bn, thousand,
   million, billion) applied
 - ``{parse_date: {order?, precision?}}``: dates, month-years and years
-- ``parse_range``: "5–7" → [5, 7]
+- ``parse_range``: "5–7" → [5, 7], "-5 to -2" → [-5, -2]
 - ``strip``: trim whitespace and trailing punctuation
 
 The number, money, range, date and key-value generators match the way the document's
@@ -70,6 +70,8 @@ _ENGLISH = "million|billion|thousand|mn|bn|m"
 # truncated (and silently wrong) "£18,495" / "£1.5". A period suffix may follow
 # directly: "£299pm", "£1,200pcm", "£45pw", "£30,000pa".
 _END = r"(?:(?![\w]|[.,]\d)|(?=p(?:cm|m|a|w)\b))"
+# A hyphen-minus or a minus sign (U+2212), which ``parse_range`` reads as one.
+_SIGN = "[-\u2212]"
 _MONTH = (
     r"January|February|March|April|May|June|July|August|September|October|November|December"
     r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec"
@@ -136,16 +138,20 @@ def _range(num: str, units: str, language: str) -> str:
 
     A dash between numbers can also be a name or a score ("0-62 mph", "3-1"), and
     Spanish and Italian "a" join much else: the range is only proposed, and Jev's Choice
-    tells the readings apart."""
+    tells the readings apart. Either end may carry a minus sign ("-5 to -2", "between -5
+    and 5"), but not the first right after a word or number ("A-5", "2024-03"): that dash
+    joins them. The number generator still proposes the unsigned numbers, so Jev also
+    picks between the signed and unsigned readings."""
     to, between, and_ = "", "between", "and"
     if words := RANGE_WORDS.get(language):
         to = rf"|\s+(?i:{_words(words.to)})\s+"
         between = f"between|{_words(words.between)}"
         and_ = f"and|{_words(words.and_)}"
+    signed = f"{_SIGN}?(?:{num})"
     return (
-        rf"(?<![\w.,/-])(?P<lo>{num})(?:\s*(?:[-–—]|to)\s*{to})(?P<hi>{num})(?!\w|[.,/–-]\d)"
-        rf"(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
-        rf"|\b(?i:{between})\s+(?P<lo2>{num})\s+(?i:{and_})\s+(?P<hi2>{num})"
+        rf"(?<![\w.,/\u2212-])(?P<lo>{signed})(?:\s*(?:[-–—]|to)\s*{to})(?P<hi>{signed})"
+        rf"(?!\w|[.,/–-]\d)(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
+        rf"|\b(?i:{between})\s+(?P<lo2>{signed})\s+(?i:{and_})\s+(?P<hi2>{signed})"
     )
 
 
