@@ -1,12 +1,18 @@
 """Sweep the extraction thresholds over the synthetic test site (#49).
 
-Live and billed: run only with keys, under spend caps. One live pass asks Jev and the
-fallback LLM everything the grid's most permissive setting would ask, and caches every
-answer per question (Jev) and per prompt (LLM). Every other setting asks a subset of
-those, so the whole grid then replays offline from the cache, end to end through the
-default pipeline with ``MultiEntity``, and is scored with :func:`jevex.score_result`::
+Live and billed: run only with keys, under spend caps. Live passes ask Jev and the
+fallback LLM everything the grid's most permissive setting for each ``ALSO_CATEGORY_P``
+would ask (:data:`PERMISSIVE`), and cache every answer per question (Jev) and per prompt
+(LLM). For a given ``ALSO_CATEGORY_P``, a lower category threshold and a higher fallback
+threshold only ask more, so every grid setting should ask a subset of what's cached. Across
+``ALSO_CATEGORY_P`` that doesn't hold (a field another route already found confidently
+isn't asked about), hence one live pass per value. The grid then replays offline from the
+cache, end to end through the default pipeline with ``MultiEntity``, scored with
+:func:`jevex.score_result`. Every row reports its cache misses: a Jev miss fails a stage,
+and an LLM miss is caught by the fallback and scored as no answer, so a row is only valid
+with none::
 
-    # live: fill the cache (Jev and the fallback LLM; about $1 for 15 pages)
+    # live: fill the cache (Jev and the fallback LLM; about $0.6 for 20 pages)
     (set -a; . .env; set +a; ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_FOR_TESTS" \\
         JEVEX_JEV_MAX_COST_USD=0.50 JEVEX_LLM_MAX_COST_USD=2 \\
         uv run python benchmarks/thresholds/sweep.py --live --cache /tmp/sweep-7 --seed 7)
@@ -68,10 +74,14 @@ CATEGORY = (0.3, 0.4, 0.5, 0.6, 0.7)
 FALLBACK = (0.3, 0.5, 0.7, 0.9)
 VERIFY = (0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
 ALSO = (0.1, 0.2, 0.3, 0.4, 0.5)
-PERMISSIVE = (min(CATEGORY), max(FALLBACK), 0.0, min(ALSO))
-"""(category, fallback, verify, also): asks a superset of every other setting's questions.
-A verify threshold of 0 keeps every verified LLM value, so the calibration sees them all."""
-DEFAULTS = (0.5, 0.5, 0.8, 0.3)
+PERMISSIVE = [(min(CATEGORY), max(FALLBACK), 0.0, also) for also in ALSO]
+"""(category, fallback, verify, also): for each ``ALSO_CATEGORY_P``, the setting that asks
+a superset of the others' questions. A verify threshold of 0 keeps every verified LLM
+value, so the calibration sees them all."""
+OLD_DEFAULTS = (0.5, 0.5, 0.8, 0.3)
+"""The defaults before #49."""
+CHOSEN = (0.5, 0.3, 0.7, 0.1)
+"""The defaults #49 chose (``docs/thresholds.md``)."""
 
 _ANSWER: TypeAdapter[Answer] = TypeAdapter(Answer)
 _QUESTION: TypeAdapter[Question] = TypeAdapter(Question)
@@ -94,6 +104,8 @@ class QuestionCache:
         self.path = path
         self.inner = inner
         self.entries: dict[str, Any] = json.loads(path.read_text()) if path.exists() else {}
+        self.misses = 0
+        """Questions an offline run asked that weren't cached."""
 
     async def system_one(
         self, state: JSONContent, questions: Mapping[str, Question]
@@ -105,6 +117,7 @@ class QuestionCache:
         tokens = 0
         if missing:
             if self.inner is None:
+                self.misses += len(missing)
                 raise CacheMissError(f"{len(missing)} question(s) not in {self.path}")
             response = await self.inner.system_one(state, missing)
             tokens = response.input_tokens or 0
@@ -113,23 +126,24 @@ class QuestionCache:
         answers = {n: _ANSWER.validate_python(self.entries[keys[n]]) for n in questions}
         return JevResponse(answers=answers, input_tokens=tokens)
 
-    async def aclose(self) -> None:
-        close = getattr(self.inner, "aclose", None)
-        if close is not None:
-            await close()
-
     def save(self) -> None:
         self.path.write_text(json.dumps(self.entries, sort_keys=True) + "\n")
 
 
 class PromptCache:
     """An LLM answered from a per-prompt cache; misses go to ``inner`` (or raise). A cached
-    answer reports its original usage, so offline runs still price each setting."""
+    answer reports its original usage, so offline runs still price each setting.
+
+    Neither cache has an ``aclose``: an :class:`~jevex.Extractor` closes its backend and
+    LLM when it closes, and each setting's extractor would close the live clients the
+    next setting still needs. :func:`main` closes them once."""
 
     def __init__(self, path: Path, inner: LLM | None) -> None:
         self.path = path
         self.inner = inner
         self.entries: dict[str, Any] = json.loads(path.read_text()) if path.exists() else {}
+        self.misses = 0
+        """Prompts an offline run sent that weren't cached."""
 
     async def structured[T: BaseModel](
         self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
@@ -137,6 +151,7 @@ class PromptCache:
         key = _key([prompt, schema.model_json_schema(), [i.content.hex() for i in images]])
         if key not in self.entries:
             if self.inner is None:
+                self.misses += 1
                 raise CacheMissError(f"an LLM prompt not in {self.path}")
             response = await self.inner.structured(prompt, schema, images=images)
             u = response.usage
@@ -152,11 +167,6 @@ class PromptCache:
             usage=LLMUsage(i, o, c),
             model=entry["model"],
         )
-
-    async def aclose(self) -> None:
-        close = getattr(self.inner, "aclose", None)
-        if close is not None:
-            await close()
 
     def save(self) -> None:
         self.path.write_text(json.dumps(self.entries, sort_keys=True) + "\n")
@@ -215,7 +225,7 @@ async def run_setting(
     setting: tuple[float, float, float, float],
 ) -> dict[str, Any]:
     category, fallback, verify, also = setting
-    jevex.select.ALSO_CATEGORY_P = also
+    jev.misses = llm.misses = 0
     pipeline = (
         default_pipeline()
         .replace("entities", EntityStage(MultiEntity()))
@@ -232,24 +242,30 @@ async def run_setting(
     calibration: dict[tuple[str, str, str, str], tuple[float, bool]] = {}
     # A fresh in-memory store, one document at a time in order: the structured stage's
     # learned key mappings then reach later documents the same way in every setting.
-    async with Extractor(
-        [VehicleSpec, Listing],
-        jev=JevClient(jev),
-        pipeline=pipeline,
-        extraction_llm=llm,
-        store=":memory:",
-        community_packs=False,
-    ) as extractor:
-        tolerances = resolve_tolerances(extractor)
-        for item in items:
-            document = Document.from_path(item.path, url=item.path.as_posix())
-            start = time.perf_counter()
-            result = await extractor.extract(document)
-            report.documents.append(
-                score_result(item, result, time.perf_counter() - start, tolerances)
-            )
-            calibration |= llm_values(item, result, tolerances)
-    jevex.select.ALSO_CATEGORY_P = DEFAULTS[3]
+    library_also = jevex.select.ALSO_CATEGORY_P
+    jevex.select.ALSO_CATEGORY_P = also  # only select.field_statements reads it, per call
+    try:
+        async with Extractor(
+            [VehicleSpec, Listing],
+            jev=JevClient(jev),
+            pipeline=pipeline,
+            extraction_llm=llm,
+            store=":memory:",
+            community_packs=False,
+        ) as extractor:
+            tolerances = resolve_tolerances(extractor)
+            for item in items:
+                document = Document.from_path(
+                    item.path, url=item.path.as_posix(), locale=item.locale
+                )
+                start = time.perf_counter()
+                result = await extractor.extract(document)
+                report.documents.append(
+                    score_result(item, result, time.perf_counter() - start, tolerances)
+                )
+                calibration |= llm_values(item, result, tolerances)
+    finally:
+        jevex.select.ALSO_CATEGORY_P = library_also
     summary = report.summary()
     return {
         "category_threshold": category,
@@ -262,17 +278,24 @@ async def run_setting(
             {"page": page, "statement_id": sid, "field": f, "value": v, "p": p, "right": ok}
             for (page, sid, f, v), (p, ok) in calibration.items()
         ],
+        "cache_misses": {"jev": jev.misses, "llm": llm.misses},
         "failed": {d.path: d.error for d in report.documents if d.status == "failed"},
+        "partial": {d.path: d.warnings for d in report.documents if d.status == "partial"},
         "methods": dict(sum((d.methods for d in report.documents), Counter[str]())),
     }
 
 
 def grid() -> list[tuple[float, float, float, float]]:
-    """The fallback's three thresholds against each other at the default
-    ``ALSO_CATEGORY_P``, then ``ALSO_CATEGORY_P`` alone at the other defaults."""
-    out = [(c, f, v, DEFAULTS[3]) for c, f, v in itertools.product(CATEGORY, FALLBACK, VERIFY)]
-    out += [(*DEFAULTS[:3], a) for a in ALSO if a != DEFAULTS[3]]
-    return out
+    """The fallback's three thresholds against each other at the old and the chosen
+    ``ALSO_CATEGORY_P``, then ``ALSO_CATEGORY_P`` alone at the old and the chosen other
+    thresholds."""
+    out = [
+        (c, f, v, a)
+        for a in (OLD_DEFAULTS[3], CHOSEN[3])
+        for c, f, v in itertools.product(CATEGORY, FALLBACK, VERIFY)
+    ]
+    out += [(*base[:3], a) for base in (OLD_DEFAULTS, CHOSEN) for a in ALSO]
+    return list(dict.fromkeys(out))
 
 
 def _setting(text: str) -> tuple[float, float, float, float]:
@@ -308,7 +331,7 @@ async def main(argv: list[str]) -> int:
         inner_jev, inner_llm = TypeSafeBackend(), AnthropicLLM()
     jev = QuestionCache(Path("jev.json"), inner_jev)
     llm = PromptCache(Path("llm.json"), inner_llm)
-    settings = args.only or ([PERMISSIVE] if args.live else grid())
+    settings = args.only or (PERMISSIVE if args.live else grid())
     rows: list[dict[str, Any]] = []
     try:
         for setting in settings:
@@ -317,8 +340,10 @@ async def main(argv: list[str]) -> int:
     finally:
         jev.save()
         llm.save()
-        await jev.aclose()
-        await llm.aclose()
+        for inner in (inner_jev, inner_llm):
+            close = getattr(inner, "aclose", None)
+            if close is not None:
+                await close()
     out = {
         "seed": args.seed,
         "pages": [i.path.as_posix() for i in items],

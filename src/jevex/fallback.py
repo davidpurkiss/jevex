@@ -87,13 +87,14 @@ CATEGORY_THRESHOLD = 0.5
 Swept from 0.3 to 0.7 on the test site, it changed nothing (#49,
 ``docs/thresholds.md``), so it stays at the midpoint."""
 FALLBACK_THRESHOLD = 0.3
-"""Selection confidence below which the LLM is asked. On the test site, 0.3 kept the
-accuracy of 0.5 and 0.7 with 60% fewer LLM calls; 0.9 gained under a point for 11 times
-the calls (#49, ``docs/thresholds.md``)."""
+"""Selection confidence below which the LLM is asked. On the test site, 0.3 made about
+two-thirds fewer LLM calls than 0.5, for the same accuracy; 0.9 gained under a point for 11
+times the calls (#49, ``docs/thresholds.md``)."""
 VERIFY_THRESHOLD = 0.7
 """Verification probability at or above which an LLM answer (or a vision value) is
-accepted. On the test site, every verified answer outside a make/model ambiguity was
-right from p 0.5 up; 0.7 keeps a margin (#49, ``docs/thresholds.md``)."""
+accepted. On the test site, every verified answer was right from p 0.5 up, except a few
+``model`` values holding the make or trim too, which no threshold separated; 0.7 keeps a
+margin (#49, ``docs/thresholds.md``)."""
 
 SELECTED = frozenset({"jev", "generator", "vision"})
 """Methods of the values the select and normalise stages record: a vision value is only
