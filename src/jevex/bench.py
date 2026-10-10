@@ -62,8 +62,8 @@ from jevex.benchmarks import (
 )
 from jevex.eval import evaluate, load_corpus, match_records, schema_tolerances, score_value
 from jevex.extractor import Extractor, default_pipeline
-from jevex.jev import JevError, process_cap
-from jevex.llm import LLMError, process_llm_cap
+from jevex.jev import JevBudgetExceededError, JevError, process_cap
+from jevex.llm import LLMBudgetExceededError, LLMError, process_llm_cap
 from jevex.logs import get_logger
 from jevex.replay import replay
 from jevex.resolve import EntityStage, MultiEntity
@@ -332,7 +332,11 @@ def prepare_corpus(spec: CorpusSpec, config_dir: Path, work: Path) -> PreparedCo
     Raises :class:`BenchRunError` for an unset ``env``, a schema or pipeline that doesn't
     load, and :class:`~jevex.benchmarks.CorpusLockError` for a corpus that doesn't match.
     """
-    from jevex.cli import CliError, load_pipeline, load_schema  # the CLI imports this module
+    from jevex.cli import (
+        CliError,
+        load_pipeline,
+        load_schema,
+    )  # cli imports jevex, which imports us
 
     try:
         schemas = tuple(load_schema(s) for s in spec.schemas)
@@ -557,10 +561,12 @@ class _Run:
                 ran = await self.step(system, corpus)
                 if not ran:
                     status, message = "skipped", f"the config pins no model for {system}"
+            except (JevBudgetExceededError, LLMBudgetExceededError) as exc:
+                status, message = "stopped", str(exc)
             except Exception as exc:  # recorded on the step; the next system runs
                 status, message = "failed", f"{type(exc).__name__}: {exc}"
             reached = _cap_reached()
-            if reached is not None:
+            if reached is not None and status != "stopped":
                 status, message = "stopped", reached
             seconds = time.perf_counter() - start
             done = (

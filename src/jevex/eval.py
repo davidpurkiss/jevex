@@ -556,28 +556,19 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def score_document(
-    item: CorpusItem,
-    result: ExtractionResult,
-    tolerances: Mapping[str, Mapping[str, Tolerance]],
-) -> dict[str, FieldScore]:
-    """Per ``Schema.field`` scores for one document.
-
-    ``tolerances`` maps each schema the extractor has to its per-field tolerances. The
-    document's own schema is scored against its expected records; any record found for
-    another schema is wrong by definition, so its values count as spurious there.
-    """
-    return score_records(item, _found_records(result), tolerances)
-
-
 def score_records(
     item: CorpusItem,
     found: Mapping[str, list[dict[str, Any]]],
     tolerances: Mapping[str, Mapping[str, Tolerance]],
 ) -> dict[str, FieldScore]:
-    """:func:`score_document` for records found some other way (a baseline's): ``found``
-    maps each schema name to its records, each ``{"entity": ..., "values": {...}}`` holding
-    only the values found."""
+    """Per ``Schema.field`` scores for one document's records: ``found`` maps each schema
+    name to its records, each ``{"entity": ..., "values": {...}}`` holding only the values
+    found (jevex's, or a baseline's).
+
+    ``tolerances`` maps each schema the extractor has to its per-field tolerances. The
+    document's own schema is scored against its expected records; any record found for
+    another schema is wrong by definition, so its values count as spurious there.
+    """
     own = tolerances[item.schema]
     scores = {f"{item.schema}.{name}": FieldScore() for name in own}
     for exp, rec in match_records(item.records, found.get(item.schema, []), own):
@@ -634,7 +625,7 @@ async def run_document(
     tolerances: Mapping[str, Mapping[str, Tolerance]],
 ) -> DocumentRun:
     """Extract one corpus document and score it (``tolerances`` as for
-    :func:`score_document`).
+    :func:`score_records`).
 
     Raises the :data:`RUN_ERRORS`; any other failed document is recorded on the run,
     which then scores as all missing.
@@ -657,7 +648,7 @@ def score_result(
     tolerances: Mapping[str, Mapping[str, Tolerance]],
 ) -> DocumentRun:
     """Score an extraction of ``item`` that took ``seconds`` (``tolerances`` as for
-    :func:`score_document`): a failed one scores as all missing. For callers that need the
+    :func:`score_records`): a failed one scores as all missing. For callers that need the
     result too, such as a threshold sweep reading the fallback's values."""
     meta = result.meta
     failed = result.status == "failed"

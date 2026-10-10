@@ -32,6 +32,7 @@ from jevex.benchmarks import (
 )
 from jevex.clean import html_text_of
 from jevex.examples.books import Book
+from jevex.extractor import Extractor
 from jevex.resolve import EntityStage, MultiEntity, SingleEntity
 from jevex.testing import FakeJev, FakeLLM
 from jevex.testsite import build
@@ -144,11 +145,29 @@ async def run(config: Path, out: Path, **kwargs: Any) -> Any:
 # --- a run -----------------------------------------------------------------------------
 
 
-async def test_a_run_saves_and_scores_every_system(tmp_path: Path) -> None:
+async def test_a_run_saves_and_scores_every_system(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[dict[str, Any]] = []
+
+    class Recorded(Extractor):
+        def __init__(self, schemas: Any, **kwargs: Any) -> None:
+            built.append(kwargs)
+            super().__init__(schemas, **kwargs)
+
+    monkeypatch.setattr("jevex.bench.Extractor", Recorded)
     config = write_config(tmp_path / "bench")
     out = tmp_path / "results"
     systems = ["jevex-cold", "jevex-warm", "jevex-no-llm", "llm-fast", "llm-strong", "llm-gemini"]
     manifest = await run(config, out, systems=systems)
+    # The warm pass reads the store the cold pass learned into, and learns no more.
+    cold, warm, no_llm = built
+    assert warm["store"] is cold["store"]
+    assert cold["generator_llm"] is not None
+    assert "generator_llm" not in warm
+    assert warm["extraction_llm"] is cold["extraction_llm"]
+    assert "store" not in no_llm
+    assert "extraction_llm" not in no_llm
     assert [(s.system, s.status, s.message) for s in manifest.steps] == [
         ("jevex-cold", "done", None),
         ("jevex-warm", "done", None),
@@ -177,6 +196,9 @@ async def test_a_run_saves_and_scores_every_system(tmp_path: Path) -> None:
     cold = read_score(score_path(out, "jevex-cold", "books"))
     assert cold.cost_per_document.mean > 0  # Jev's estimated tokens, even when faked
     assert replay_path(out, "books").read_text().startswith("batch,documents,")
+    warm_score = read_score(score_path(out, "jevex-warm", "books"))
+    assert warm_score.documents == 2
+    assert len(read_results(out / "jevex-warm" / "books.jsonl")) == 2
     assert not score_path(out, "llm-gemini", "books").exists()
     # Every results file is rescored as jevex eval --results would.
     rows = read_results(out / "jevex-cold" / "books.jsonl")
@@ -202,7 +224,7 @@ async def test_a_run_stops_when_a_spend_cap_is_reached(
     step = manifest.steps[-1]
     assert (step.system, step.status) == ("llm-fast", "stopped")
     assert step.message is not None
-    assert step.message.startswith("the LLM spend cap was reached")
+    assert step.message.startswith("LLM spend cap reached")
     assert len(manifest.steps) == 1  # llm-strong never ran
     assert not manifest.complete
     assert manifest.llm_spend > 0
@@ -210,6 +232,41 @@ async def test_a_run_stops_when_a_spend_cap_is_reached(
         sum(float(line.split()[1]) for line in ledger.read_text().splitlines())
     )
     assert read_manifest(out) == manifest
+
+
+async def test_a_run_stops_when_the_jev_cap_refuses_a_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "spend.ledger"))
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.0000001")
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "1")
+    config = write_config(tmp_path / "bench")
+    manifest = await run(
+        config, tmp_path / "results", systems=["jevex-no-llm", "llm-fast"], dry_run=False
+    )
+    (step,) = manifest.steps  # llm-fast never ran
+    assert (step.system, step.status) == ("jevex-no-llm", "stopped")
+    assert step.message is not None
+    assert step.message.startswith("Jev spend cap reached")
+
+
+async def test_a_cap_spent_without_an_error_still_stops_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """jevex's fallback stops calling the LLM at its cap rather than failing, so the run
+    checks the caps after every step too."""
+    ledger = tmp_path / "spend.ledger"
+    ledger.write_text("llm 0.5\n")
+    monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
+    monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "1")
+    monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "0.5")
+    config = write_config(tmp_path / "bench")
+    manifest = await run(
+        config, tmp_path / "results", systems=["jevex-no-llm", "llm-fast"], dry_run=False
+    )
+    (step,) = manifest.steps
+    assert (step.system, step.status) == ("jevex-no-llm", "stopped")
+    assert step.message == "the LLM spend cap was reached ($0.5000 of $0.50)"
 
 
 async def test_a_corpus_that_fails_its_lock_fails_its_steps_and_the_run_goes_on(
