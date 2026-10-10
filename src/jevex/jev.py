@@ -218,12 +218,7 @@ class JevBudgetExceededError(JevError):
 # (jevex._spend), which is how the agent loop caps a whole run and a week.
 
 MAX_COST_ENV = "JEVEX_JEV_MAX_COST_USD"
-_process_cost = 0.0
-
-
-def process_cost() -> float:
-    """Estimated USD spent on Jev by this process so far."""
-    return _process_cost
+_process_cost: float = 0.0
 
 
 def process_cap() -> tuple[float, float] | None:
@@ -231,12 +226,6 @@ def process_cap() -> tuple[float, float] | None:
     the ``JEVEX_SPEND_LEDGER`` total), or ``None`` when no cap is set."""
     cap = _max_cost()
     return None if cap is None else (cap, _spent())
-
-
-def reset_process_cost() -> None:
-    """Reset the process-wide spend counter (for tests)."""
-    global _process_cost
-    _process_cost = 0.0
 
 
 def _max_cost() -> float | None:

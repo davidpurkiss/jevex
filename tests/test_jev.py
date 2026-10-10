@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import random
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -446,18 +446,10 @@ def usd(tokens: float) -> str:
     return f"{tokens * 0.042 / 1_000_000:.12f}"
 
 
-@pytest.fixture
-def fresh_spend() -> Iterator[None]:
-    from jevex.jev import reset_process_cost
-
-    reset_process_cost()
-    yield
-    reset_process_cost()
-
-
-@pytest.mark.usefixtures("fresh_spend")
-async def test_spend_cap_blocks_request_before_sending(monkeypatch: pytest.MonkeyPatch) -> None:
-    from jevex.jev import JevBudgetExceededError, process_cost
+async def test_spend_cap_blocks_request_before_sending(
+    monkeypatch: pytest.MonkeyPatch, jev_spent: Callable[[], float]
+) -> None:
+    from jevex.jev import JevBudgetExceededError
 
     backend = RecordingBackend()  # reports 100 input tokens per request
     client = JevClient(backend)
@@ -465,13 +457,12 @@ async def test_spend_cap_blocks_request_before_sending(monkeypatch: pytest.Monke
     monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", usd(150 + ESTIMATE))
     await client.ask("s", {"q": Noul(instructions="?")})
     await client.ask("s", {"q": Noul(instructions="?")})
-    assert process_cost() == pytest.approx(2 * 100 * 0.042 / 1_000_000)
+    assert jev_spent() == pytest.approx(2 * 100 * 0.042 / 1_000_000)
     with pytest.raises(JevBudgetExceededError, match="spend cap"):
         await client.ask("s", {"q": Noul(instructions="?")})
     assert len(backend.calls) == 2
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_spend_cap_is_shared_across_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     from jevex.jev import JevBudgetExceededError
 
@@ -482,7 +473,6 @@ async def test_spend_cap_is_shared_across_clients(monkeypatch: pytest.MonkeyPatc
         await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_no_cap_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JEVEX_JEV_MAX_COST_USD", raising=False)
     client = JevClient(RecordingBackend())
@@ -491,7 +481,6 @@ async def test_no_cap_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.usage.requests == 5
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_bad_cap_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     from jevex.jev import JevError
 
@@ -500,11 +489,10 @@ async def test_bad_cap_value_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         await JevClient(RecordingBackend()).ask("s", {"q": Noul(instructions="?")})
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_ledger_cap_counts_spend_from_other_processes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, jev_spent: Callable[[], float]
 ) -> None:
-    from jevex.jev import JevBudgetExceededError, process_cost
+    from jevex.jev import JevBudgetExceededError
 
     ledger = tmp_path / "run.ledger"
     ledger.write_text("jev 0.0000040\nllm 5\n")  # another process's spend: ~95 tokens
@@ -517,10 +505,9 @@ async def test_ledger_cap_counts_spend_from_other_processes(
         await client.ask("s", {"q": Noul(instructions="?")})
     assert len(backend.calls) == 1
     assert ledger.read_text() == "jev 0.0000040\nllm 5\njev 0.000004200\n"
-    assert process_cost() == pytest.approx(0.0000042)  # this process's own spend
+    assert jev_spent() == pytest.approx(0.0000042)  # this process's own spend
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_ledger_records_spend_without_a_cap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -531,7 +518,6 @@ async def test_ledger_records_spend_without_a_cap(
     assert ledger.read_text() == "jev 0.000004200\n"
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_unreadable_ledger_blocks_requests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -547,7 +533,6 @@ async def test_unreadable_ledger_blocks_requests(
     assert backend.calls == []
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_ledger_in_a_missing_dir_blocks_requests(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -561,7 +546,6 @@ async def test_ledger_in_a_missing_dir_blocks_requests(
     assert backend.calls == []
 
 
-@pytest.mark.usefixtures("fresh_spend")
 async def test_ledger_never_loosens_the_process_cap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from jevex import Document, Extractor, Field, Pipeline, RunBudget
 from jevex.budgets import RunLedger
 from jevex.extractor import ExtractionResult
-from jevex.jev import JevBackendError, JevError, reset_process_cost
-from jevex.llm import LLMError, reset_process_llm_cost
+from jevex.jev import JevBackendError, JevError
+from jevex.llm import LLMError
 from jevex.monitoring import (
     DriftWindow,
     FieldDrift,
@@ -172,8 +172,6 @@ async def test_headroom_of_the_run_budget_and_the_process_caps(
     await store.record_spend(SpendEntry(amount_usd=0.25, kind="jev", run_id="r1"))
     ledger_file = tmp_path / "ledger"
     ledger_file.write_text("jev 0.1\nllm 3\n")
-    reset_process_cost()  # other tests' requests
-    reset_process_llm_cost()
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger_file))
     monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", "0.5")
     monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
@@ -193,7 +191,6 @@ async def test_run_and_process_headroom_separately(monkeypatch: pytest.MonkeyPat
     store = SQLiteStore(":memory:")
     ledger = RunLedger(RunBudget(max_jev_spend=1.0, period="run"), store, run_id="r1")
     await store.record_spend(SpendEntry(amount_usd=0.25, kind="jev", run_id="r1"))
-    reset_process_llm_cost()
     monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
     monkeypatch.delenv("JEVEX_JEV_MAX_COST_USD", raising=False)
     assert await run_headroom(ledger) == [Headroom("run", "jev", "run", 1.0, 0.25)]

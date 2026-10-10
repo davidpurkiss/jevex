@@ -196,17 +196,7 @@ class LLMBudgetExceededError(LLMError):
 
 # --- process-wide spend ----------------------------------------------------------------
 
-_process_cost = 0.0
-
-
-def process_llm_cost() -> float:
-    """USD spent on LLM calls by this process (calls with unknown prices count as 0)."""
-    return _process_cost
-
-
-def reset_process_llm_cost() -> None:
-    global _process_cost
-    _process_cost = 0.0
+_process_cost: float = 0.0
 
 
 def process_llm_cap() -> tuple[float, float] | None:
@@ -289,7 +279,5 @@ __all__ = [
     "cost",
     "gemini_flash_3x_price",
     "process_llm_cap",
-    "process_llm_cost",
     "rate_limited",
-    "reset_process_llm_cost",
 ]
