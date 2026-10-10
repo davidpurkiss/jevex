@@ -132,12 +132,13 @@ def learner(
     fake: FakeJev,
     llm: FakeLLM,
     *,
+    schemas: Sequence[SchemaSpec] = (SPEC,),
     store: Store | None = None,
     base: GeneratorRegistry | None = None,
     **kwargs: Any,
 ) -> GeneratorLearner:
     return GeneratorLearner(
-        [SPEC],
+        schemas,
         llm,
         fake.client(),
         generators=LearnedGenerators(store if store is not None else open_store(":memory:")),
@@ -808,6 +809,120 @@ async def test_an_unreadable_stored_example_is_left_out() -> None:
     fake = FakeJev(strict=True).choice(None, pick("9.1"), state=TEXT)
     outcome = await learned(fake, FakeLLM([WIDE]), example(), store=store, base=BASE)
     assert outcome.status == "accepted"
+
+
+# --- the unit of a bare number -------------------------------------------------------------
+
+
+class Engine(BaseModel):
+    power_ps: float = Field(description="Power", unit="PS")
+
+
+ENGINE = SchemaSpec.from_model(Engine)
+POWER = ENGINE.field("power_ps")
+IN_KW = "Power (kW) · SE: 110"
+BARE = {"regex": r": (\d+)", "group": 1, "normalise": ["parse_number"]}
+SELECT_POWER = "Which of these is the power (PS)?"
+
+
+def kw(raw: str) -> float:
+    """``raw`` kW in the field's PS."""
+    steps = [NormaliserStep(name="parse_number"), NormaliserStep(name="unit", args={"from": "kW"})]
+    return normalise(raw, steps, POWER)
+
+
+def power(text: str = IN_KW, value: float | None = None, *, eid: str = "ex-kw") -> VerifiedExample:
+    """An example of ``Engine.power_ps``, by default SE's 110 kW (149.6 PS)."""
+    start = text.index("110") if "110" in text else None
+    return example(
+        text,
+        kw("110") if value is None else value,
+        eid=eid,
+        field="Engine.power_ps",
+        evidence=(start, start + 3) if start is not None else None,
+    )
+
+
+def unit_choice(raw: str) -> Choice:
+    return Choice(instructions=f'Which unit is "{raw}" in?', options={"PS": None, "kW": None})
+
+
+async def test_a_bare_number_is_tested_in_the_unit_jev_picks() -> None:
+    fake = FakeJev(strict=True).choice(SELECT_POWER, pick("110")).choice("Which unit", "kW")
+    outcome = await learned(fake, FakeLLM([BARE]), power(), schemas=[ENGINE])
+    assert outcome.status == "accepted"
+    # Asked with the selector's question, in one request, as the select stage asks.
+    [call] = fake.calls
+    assert call.questions == {
+        "choice0": Choice(
+            instructions=SELECT_POWER, options={"110": None, "none": "None of these is the power"}
+        ),
+        "#unit0": unit_choice("110"),
+    }
+
+
+async def test_a_statement_naming_no_other_unit_asks_the_learner_nothing_new() -> None:
+    text = "Power (PS) · SE: 110"
+    fake = FakeJev(strict=True).choice(SELECT_POWER, pick("110"))
+    outcome = await learned(fake, FakeLLM([BARE]), power(text, 110.0), schemas=[ENGINE])
+    assert outcome.status == "accepted"
+    [call] = fake.calls
+    assert list(call.questions) == ["choice0"]
+
+
+@pytest.mark.parametrize(("unit", "confidence"), [("PS", 0.95), ("kW", 0.4)])
+async def test_a_bare_number_that_isnt_the_value_in_jevs_unit_is_rejected(
+    unit: str, confidence: float
+) -> None:
+    # Read in PS, "110" is 110 PS, not the example's 149.6; a kW read Jev isn't sure of
+    # makes the value no surer than the fallback threshold.
+    fake = (
+        FakeJev(strict=True)
+        .choice(SELECT_POWER, pick("110"))
+        .choice("Which unit", unit, confidence=confidence)
+    )
+    lrn = learner(fake, FakeLLM([BARE]), schemas=[ENGINE], fallback_threshold=0.5)
+    outcome = await lrn.learn(power())
+    assert outcome.status == "missed_trigger"
+    assert outcome.message == "Jev doesn't choose its value"
+    assert lrn.snapshot.version == 0
+
+
+async def test_a_bare_number_that_is_the_value_in_no_unit_is_rejected_without_asking_jev() -> None:
+    fake = FakeJev(strict=True)
+    outcome = await learned(fake, FakeLLM([BARE]), power(value=200.0), schemas=[ENGINE])
+    assert outcome.status == "missed_trigger"
+    assert outcome.message == "it finds no span with the value"
+    assert fake.calls == []
+
+
+async def test_stored_examples_are_compared_in_the_units_jev_picks() -> None:
+    # Read in kW, the old candidates get GT's 120 right; the new ones fool Jev with 90.
+    # Read in PS, both would be wrong, and the generator would pass.
+    gt = "Power (kW) · SE: 90 · GT: 120"
+    store = await stored(open_store(":memory:"), power(gt, kw("120"), eid="old"))
+    fake = (
+        FakeJev(strict=True)
+        .choice(SELECT_POWER, pick("110"), state=IN_KW)
+        .choice(SELECT_POWER, lambda q: "90" if "90" in q.options else "120", state=gt)
+        .choice("Which unit", "kW")
+    )
+    number = (NormaliserStep(name="parse_number"),)
+    gt_only = RegexGenerator(id="gt", pattern=r"GT: (\d+)", group=1, normalise=number)
+    base = GeneratorRegistry([gt_only])
+    outcome = await learned(
+        fake, FakeLLM([BARE]), power(), schemas=[ENGINE], store=store, base=base
+    )
+    assert outcome.status == "regressed"
+    assert outcome.message == "right on 0 of the 1 stored examples it changes, down from 1"
+    [old_new] = [c for c in fake.calls if c.state == {"statement": gt}]
+    units = {k: q for k, q in old_new.questions.items() if "#unit" in k}
+    assert units == {
+        "old/#unit0": unit_choice("120"),
+        "new/#unit0": unit_choice("90"),
+        "new/#unit1": unit_choice("120"),
+    }
+    assert sorted(old_new.questions.keys() - units.keys()) == ["new/choice0", "old/choice0"]
 
 
 # --- snapshots -----------------------------------------------------------------------------
