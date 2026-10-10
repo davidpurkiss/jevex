@@ -476,17 +476,15 @@ class ComponentGateStage:
     sees it.
 
     A group whose fields another route already found (embedded data, in ``fill_gaps``
-    mode) isn't asked about when ``skip_found`` allows it. It goes on
-    ``SchemaRun.ungated_groups`` with a ``groups_not_gated`` event, and its fields stay
-    categorise options. ``skip_found=None`` (the default) skips such groups only when the
-    pipeline's entity stage is :class:`~jevex.resolve.SingleEntity` with its default label,
-    the one structured values are found on. Under any other resolver, a field found for the
-    document can still be empty for each entity, and only the gate passes the components
-    that hold it.
+    mode) isn't asked about when the pipeline's entity stage is
+    :class:`~jevex.resolve.SingleEntity` with its default label, the one structured values
+    are found on. It goes on ``SchemaRun.ungated_groups`` with a ``groups_not_gated``
+    event, and its fields stay categorise options. Under any other resolver, or with no
+    pipeline to read, a field found for the document can still be empty for each entity,
+    and only the gate passes the components that hold it.
     """
 
     gate: ComponentGate = field(default_factory=NoulComponentGate)
-    skip_found: bool | None = None
     name: str = "component_gate"
 
     async def run(self, ctx: Context) -> None:
@@ -494,7 +492,7 @@ class ComponentGateStage:
         runs = ctx.active
         if parsed is None or not runs:
             return
-        skip = self.skip_found if self.skip_found is not None else _single_entity(ctx)
+        skip = _single_entity(ctx)
         for run in runs:
             run.ungated_groups = _found_groups(run) if skip else set()
         children = {
