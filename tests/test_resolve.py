@@ -1381,8 +1381,7 @@ async def test_jev_places_each_object_on_its_entity_and_the_rest_are_shared() ->
         item("offers[1]", "offers[1].name: Delivery", {"s3", "s4"}, price=structured(750, "s4")),
         item("offers[2]", "offers[2].sku: K-SE", {"s5", "s6"}, price=structured(24995, "s6")),
     ]
-    fake = places(Kestrova="SE L", K_SE="SE")
-    fake.choice("Which car", "SE", state="K-SE")
+    fake = places(**{"Kestrova": "SE L", "K-SE": "SE"})
     assert await place_document_values(run, fake.client()) == (2, 4)
     question = Choice(
         instructions="Which car does this statement apply to?",
@@ -1423,7 +1422,7 @@ async def test_a_value_only_placed_items_give_isnt_shared_and_valueless_ones_are
     run = car_run("SE", "SE L", "Sport")
     run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
     run.structured_items = [
-        item("trims[0]", "trims[0].name: SE", {"s1"}, price=structured(24995, "s1")),
+        item("trims[0]", "trims[0].name: SE", {"s0", "s1"}, price=structured(24995, "s1")),
         # Inside a placed item, so it isn't shared, though it applies to every car.
         item("trims[0].extras[0]", "extras", {"s1"}, price=structured(24995, "s1")),
         item("trims[1]", "trims[1].name: SE L", {"s2"}),  # gives no price
