@@ -16,7 +16,6 @@ outage is the ledger's own business (a wrapper around it), not jevex's.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -38,7 +37,8 @@ class SpendLedger(Protocol):
     """Spend records shared by every worker keeping the same run budget.
 
     Entries are :class:`~jevex.store.SpendEntry` charges (never refunds). Sums should be
-    exact at a nano-dollar (Jev charges a few per token), so a cap is hit exactly.
+    exact at a nano-dollar (Jev charges a few per token), so a budget's spend cap is hit
+    exactly.
     """
 
     async def record_spend(self, entry: SpendEntry) -> None:
@@ -59,21 +59,17 @@ class SpendLedger(Protocol):
         self,
         entry: SpendEntry,
         *,
-        cap_usd: float | None = None,
-        max_count: int | None = None,
+        max_count: int,
         since: datetime | None = None,
         kind: SpendKind | None = None,
     ) -> bool:
-        """Record ``entry`` only if it keeps the ledger within the given limits.
+        """Record ``entry`` only if that keeps the entries at or after ``since`` whose kind
+        is ``kind`` (every kind when ``None``), ``entry`` included, to at most
+        ``max_count``: a rate limit, such as LLM calls over the last minute.
 
-        Both limits count the entries at or after ``since`` whose kind is ``kind`` (every
-        kind when ``None``), plus ``entry`` itself: ``cap_usd`` caps their total and
-        ``max_count`` their number. So Jev and the LLM can have their own caps
-        (``kind=``), a spend cap per period (``since=``) and a rate limit (``max_count``
-        over the last minute). The check and the write must be atomic, so workers
-        sharing a limit can't overshoot it together. Returns whether the entry was
-        recorded. Raises ``ValueError`` for a cap that isn't finite and non-negative, a
-        negative ``max_count``, or an ``entry`` of another kind than ``kind``.
+        The check and the write must be atomic, so workers sharing a limit can't overshoot
+        it together. Returns whether the entry was recorded. Raises ``ValueError`` for a
+        negative ``max_count`` or an ``entry`` of another kind than ``kind``.
         """
         ...
 
@@ -88,12 +84,6 @@ _NANO = 1_000_000_000
 
 
 def _nano(usd: float) -> int:
-    return round(usd * _NANO)
-
-
-def _nano_cap(usd: float) -> int:
-    if not math.isfinite(usd) or usd < 0:
-        raise ValueError(f"cap_usd must be finite and non-negative, not {usd!r}")
     return round(usd * _NANO)
 
 
@@ -148,23 +138,15 @@ class MemoryLedger:
         self,
         entry: SpendEntry,
         *,
-        cap_usd: float | None = None,
-        max_count: int | None = None,
+        max_count: int,
         since: datetime | None = None,
         kind: SpendKind | None = None,
     ) -> bool:
-        cap = None if cap_usd is None else _nano_cap(cap_usd)
-        if max_count is not None and max_count < 0:
+        if max_count < 0:
             raise ValueError(f"max_count must be non-negative, not {max_count}")
         if kind is not None and entry.kind != kind:
             raise ValueError(f"a {entry.kind} entry can't be checked against {kind} limits")
-        counted = self._matching(since, kind)
-        if (
-            cap is not None
-            and sum(_nano(e.amount_usd) for e in counted) + _nano(entry.amount_usd) > cap
-        ):
-            return False
-        if max_count is not None and len(counted) + 1 > max_count:
+        if len(self._matching(since, kind)) + 1 > max_count:
             return False
         self._add(entry)
         return True
