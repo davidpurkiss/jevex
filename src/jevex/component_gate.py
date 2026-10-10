@@ -10,7 +10,10 @@ inline image) is lifted out after that block's own text. A block longer than ``m
 across several units (tables by row groups with their headers repeated) rather than cut,
 and headings with nothing after them join the table or section they introduce. Jev is
 asked one Noul per unit × field group ("Does this section contain the price?"), with every
-schema's questions about a unit in one request.
+schema's questions about a unit in one request. A table without header cells whose shape
+allows some (:func:`~jevex.tables.header_shape`) gets one more Noul in the request for the
+first unit holding it: whether its first row and column (or, with two columns, its first
+column) are headers. Before that answer the gate reads it as rows, as it splits it.
 
 A unit that passes for a group passes all its components and their descendants (and
 their ancestors, so the tree stays connected). The result lands on
@@ -28,11 +31,12 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from jevex._tasks import gather
+from jevex.interfaces import ComponentGateResult
 from jevex.jev import NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.resolve import SINGLE_ENTITY_LABEL, EntityStage, SingleEntity
 from jevex.schema import ReservedFieldNameError, UnsupportedFieldError
-from jevex.tables import infer_headers, row_roles
+from jevex.tables import header_shape, row_roles
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -42,12 +46,18 @@ if TYPE_CHECKING:
     from jevex.layout import Component, TableCell
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import SchemaSpec
+    from jevex.tables import HeaderShape
 
 DEFAULT_THRESHOLD = 0.3
 """Lower than the document gate's: a wrongly passed section costs a few statements, a
 wrongly failed one loses its values. Tuned from eval runs in #49."""
 
 DEFAULT_MAX_CHARS = 2000
+
+HEADER_THRESHOLD = 0.5
+"""A header-less table is read with headers when Jev's ``p`` reaches this. Unlike a gate
+group's, a wrong yes costs as much as a wrong no: invented headers become entities, and a
+table read as rows still holds its values."""
 
 _CONTAINERS = frozenset({"section", "column", "breakout"})
 
@@ -176,14 +186,14 @@ def _table_lines(table: Component) -> list[tuple[str, str]]:
     (:func:`~jevex.tables.row_roles`): the leading header rows stack, a header row repeated
     after the first body row replaces them, and a band ("Economy") holds until the next
     one. Bands and repeated header rows stay in place, so a band is only repeated in
-    pieces that hold rows it groups.
+    pieces that hold rows it groups. A table without header cells is all rows: whether it
+    has headers after all is what the gate asks about its first piece.
     """
     captions = [c.text.strip() for c in table.children if c.text.strip()]
     lines = [(caption, "\n".join(captions[:i])) for i, caption in enumerate(captions)]
     if not table.cells:
         head = "\n".join(captions)
         return lines + [(line, head) for line in table.text.split("\n") if line.strip()]
-    table = infer_headers(table)  # a comparison table's first row, as its statements have
     roles = row_roles(table)
     rows: dict[int, list[TableCell]] = {}
     for cell in sorted(table.cells, key=lambda c: (c.row, c.col)):
@@ -342,6 +352,14 @@ class NoulComponentGate:
     A group passes a unit when ``p >= threshold``. Question text comes from
     :meth:`~jevex.schema.SchemaSpec.component_gate_questions`, so ``Questions`` overrides
     apply.
+
+    A header-less table with a :func:`~jevex.tables.header_shape` is asked about once,
+    alongside the groups in the request for the first unit holding it (the piece with its
+    first row), and has headers when ``p >= HEADER_THRESHOLD``. A table is read once for
+    every schema, so the question is the first schema's
+    (:meth:`~jevex.schema.SchemaSpec.table_headers_question`,
+    :meth:`~jevex.schema.SchemaSpec.table_labels_question`). It's only asked in a request
+    the groups make: with no group to ask about, the table is read as rows.
     """
 
     def __init__(
@@ -356,7 +374,7 @@ class NoulComponentGate:
 
     async def gate(
         self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
-    ) -> dict[str, dict[str, list[str]]]:
+    ) -> ComponentGateResult:
         units = gate_units(parsed.root, max_chars=self.max_chars)
         questions: dict[str, tuple[str, str, Noul]] = {}
         for s in schemas:
@@ -366,17 +384,42 @@ class NoulComponentGate:
             s.name: {group: [] for group in s.groups} for s in schemas
         }
         if not units or not questions:
-            return out
+            return ComponentGateResult(components=out)
         parents = _parents(parsed.root)
+        shapes: dict[str, HeaderShape] = {
+            c.id: shape
+            for c in parsed.root.walk()
+            if c.type == "table" and (shape := header_shape(c)) is not None
+        }
+        # unit id -> {question key: table id}. A group's key starts "<schema name>.", and a
+        # schema name (a class name) has no space, so "table <id>" never takes one.
+        tables_in: dict[str, dict[str, str]] = {}
+        placed: set[str] = set()
+        for unit in units:
+            for cid in unit.component_ids:
+                if cid in shapes and cid not in placed:
+                    placed.add(cid)
+                    tables_in.setdefault(unit.id, {})[f"table {cid}"] = cid
+        header_questions: dict[HeaderShape, Noul] = {
+            "comparison": schemas[0].table_headers_question(),
+            "labels": schemas[0].table_labels_question(),
+        }
+        headed: set[str] = set()
 
         async def ask(unit: GateUnit) -> None:
-            answers = await jev.ask(unit.state(), {k: q for k, (_, _, q) in questions.items()})
+            tables = tables_in.get(unit.id, {})
+            asked = {k: q for k, (_, _, q) in questions.items()}
+            asked |= {key: header_questions[shapes[t]] for key, t in tables.items()}
+            answers = await jev.ask(unit.state(), asked)
             for key, answer in answers.items():
                 if not isinstance(answer, NoulAnswer):
                     raise UnexpectedAnswerError(
                         f"expected a Noul answer for {key!r}, got {answer.type}"
                     )
-                if answer.p >= self.threshold:
+                if key in tables:
+                    if answer.p >= HEADER_THRESHOLD:
+                        headed.add(tables[key])
+                elif answer.p >= self.threshold:
                     schema, group, _ = questions[key]
                     out[schema][group].extend(unit.component_ids)
 
@@ -391,7 +434,7 @@ class NoulComponentGate:
                         passed.add(parent)
                         parent = parents.get(parent)
                 groups[group] = sorted(passed, key=order.__getitem__)
-        return out
+        return ComponentGateResult(components=out, headed_tables=frozenset(headed))
 
 
 def _question_key(taken: Mapping[str, object], key: str) -> str:
@@ -420,9 +463,10 @@ def _parents(root: Component) -> dict[str, str]:
 class ComponentGateStage:
     """Runs a :class:`~jevex.interfaces.ComponentGate` for every active schema.
 
-    Sets ``SchemaRun.component_ids``. Without a parsed document the stage does nothing,
-    and ``component_ids`` stays ``None`` (nothing gated). A schema where no component
-    passes any group gets a ``no_relevant_components`` event.
+    Sets ``SchemaRun.component_ids``, and ``Context.headed_tables`` for the statement
+    stage. Without a parsed document the stage does nothing, and ``component_ids`` stays
+    ``None`` (nothing gated). A schema where no component passes any group gets a
+    ``no_relevant_components`` event.
 
     Each nested-model field's model (:meth:`~jevex.schema.SchemaSpec.child`, named
     ``"<Parent>.<field>"``) is gated too, in the same requests, and its results land on
@@ -464,7 +508,11 @@ class ComponentGateStage:
         specs = [_without(r.spec, r.ungated_groups) for r in runs]
         specs = [s for s in specs if s.fields]
         specs += [s for kids in children.values() for s in kids.values()]
-        decisions = await self.gate.gate(parsed, specs, ctx.jev) if specs else {}
+        decisions: dict[str, dict[str, list[str]]] = {}
+        if specs:
+            result = await self.gate.gate(parsed, specs, ctx.jev)
+            decisions = result.components
+            ctx.headed_tables = result.headed_tables
         order = {c.id: i for i, c in enumerate(parsed.root.walk())}
         for run in runs:
             if run.ungated_groups:

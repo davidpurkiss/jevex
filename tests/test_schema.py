@@ -470,6 +470,28 @@ def test_entity_questions_can_be_overridden() -> None:
     assert question.options[ALL_OPTION] == "It applies to every car"
 
 
+def test_table_header_questions_and_their_overrides() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.table_headers_question() == Noul(
+        instructions="Does the table's first row name its columns, and its first column name "
+        "its rows?"
+    )
+    assert spec.table_labels_question() == Noul(
+        instructions="Does the table's first column label the value beside it in each row?"
+    )
+
+    class Sheet(BaseModel):
+        __jevex__ = SchemaConfig(
+            table_headers_question="Are trims across the top?",
+            table_labels_question="Is each row a spec and its value?",
+        )
+        price: int = Field(description="Price")
+
+    sheet = SchemaSpec.from_model(Sheet)
+    assert sheet.table_headers_question().instructions == "Are trims across the top?"
+    assert sheet.table_labels_question().instructions == "Is each row a spec and its value?"
+
+
 def test_entity_question_rejects_the_reserved_label() -> None:
     with pytest.raises(ValueError, match="reserved"):
         SchemaSpec.from_model(VehicleSpec).entity_question(["SE", ALL_OPTION])

@@ -37,10 +37,10 @@ cell's text already holds them.
 
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
-statement per row, its cells joined with ``" | "``; a two-column one without headers whose
-first column holds labels (not numbers) reads as ``label: value`` instead (a label whose
-value cell is empty giving nothing, like a blank row), and a wider one shaped like a
-comparison table has its headers inferred (:func:`infer_headers`). The headers also travel
+statement per row, its cells joined with ``" | "``. Whether a header-less table has headers
+after all is a judgement of what its text means, so it's Jev's: the component gate asks
+about a table whose shape allows them (:func:`header_shape`), and the statement stage reads
+one Jev says yes to with them marked (:func:`infer_headers`). The headers also travel
 structured on :attr:`Statement.table <jevex.statements.Statement.table>`, so an
 entity resolver can split a comparison table by column (one trim per column).
 
@@ -70,6 +70,11 @@ _ELLIPSIS = "…"
 RowRole = Literal["header", "band", "body"]
 """A table row's part in reading the table (:func:`row_roles`)."""
 
+HeaderShape = Literal["comparison", "labels"]
+"""Where a table without header cells could have its headers (:func:`header_shape`):
+``"comparison"``, its first row and first column; ``"labels"``, its first column, as the
+label of the value beside it."""
+
 
 def _clean(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
@@ -85,33 +90,20 @@ def table_statements(table: Component) -> list[Statement]:
 
     A table with headers on both axes also gives a ``table_header`` statement per header
     label: a column's before the first body row, a row's before that row's cells."""
-    table = infer_headers(table)
     cells = [c for c in table.cells if _clean(c.text)]
     if not cells:
         return []
-    width = max(c.col + c.col_span for c in cells)
     rows: dict[int, list[TableCell]] = {}
     for c in cells:
         rows.setdefault(c.row, []).append(c)
     ordered = sorted(rows)
 
     if all(c.header for c in cells) or not any(c.header for c in cells):
-        # No headers, or nothing but headers: nothing to attach, so one statement per row,
-        # except that a two-column table without headers is read as labels and values.
-        pairs = not any(c.header for c in cells) and _label_value(cells, width)
-        empty_values = {c.row for c in table.cells if c.col == 1 and not _clean(c.text)}
+        # No headers, or nothing but headers: nothing to attach, so one statement per row.
         out: list[Statement] = []
         for r in ordered:
-            row = sorted(rows[r], key=lambda c: c.col)
-            if pairs and len(row) == 1 and row[0].col == 0 and r in empty_values:
-                continue  # a label without its value ("Towing | "), as a blank row gives nothing
-            if pairs and len(row) == 2:
-                label, value = _label(row[0].text), _clean(row[1].text)
-                ref = TableCellRef(row=r, col=1, row_headers=[label], row_labels=[label])
-                out.append(_statement(table, f"r{r}c1", _render(None, [label], [], value), ref))
-            else:
-                text = " | ".join(_clean(c.text) for c in row)
-                out.append(_statement(table, f"r{r}", text, TableCellRef(row=r, col=0)))
+            text = " | ".join(_clean(c.text) for c in sorted(rows[r], key=lambda c: c.col))
+            out.append(_statement(table, f"r{r}", text, TableCellRef(row=r, col=0)))
         return out
 
     def headers_of(header_rows: list[int]) -> dict[int, list[str]]:
@@ -246,36 +238,38 @@ def table_statements(table: Component) -> list[Statement]:
     return out
 
 
-def _label_value(cells: list[TableCell], width: int) -> bool:
-    """Whether a table without headers reads as ``label | value`` rows: two columns, no
-    spans, and a label (some letter, not just a number) in every first-column cell."""
-    return (
-        width == 2
-        and all(c.row_span == 1 and c.col_span == 1 for c in cells)
-        and all(any(ch.isalpha() for ch in c.text) for c in cells if c.col == 0)
-    )
+def header_shape(table: Component) -> HeaderShape | None:
+    """Where ``table`` could have headers it doesn't mark, judging by its shape alone, or
+    ``None`` when it marks some or has neither shape. Whether it does is Jev's to say: the
+    component gate asks only about a table with a shape, so this is the guard on asking.
 
+    ``"labels"``: two columns without spans, a label (some letter, not just a number) in
+    every first-column cell, and some value beside one (``Engine | 1.5 TSI``, but also
+    ``Smith | London``).
 
-def infer_headers(table: Component) -> Component:
-    """``table`` with its first row and first column marked as headers, when it has no
-    header cells but reads as a comparison table (``Spec | SE | GT`` over
-    ``Power | 150 PS | 200 PS`` in plain ``td``); otherwise ``table`` unchanged.
-
-    It must be at least three columns wide (two columns read as ``label: value``). The
-    first row must name every other column with a name (more letters than digits:
-    ``1.5 TSI`` is one, ``150 PS`` and ``2019`` aren't), and every row below must start with
-    a label (some letter: ``0-62 mph``, not ``2019``). The cells below the first row and
-    right of the first column must mostly be number-like. Those checks are the guard: a
-    table of plain records (``Name | City | Role``) has text in its body just like its
-    first row, so it keeps one statement per row, and so does a table whose first row is
-    already number-like data (``Power | 150 PS | 200 PS``). A first row of text data
-    (``Gearbox | Manual | Automatic``) can't be told from column names by shape, so it is
-    read as one.
+    ``"comparison"``: at least three columns, a first row naming every other column with a
+    name (more letters than digits: ``1.5 TSI`` is one, ``150 PS`` and ``2019`` aren't),
+    every row below starting with a label (some letter: ``0-62 mph``, not ``2019``), and
+    mostly number-like cells below the first row and right of the first column
+    (``Spec | SE | GT`` over ``Power | 150 PS | 200 PS``). A table of plain records
+    (``Name | City | Role``) has text in its body just like its first row, and a table whose
+    first row is number-like (``Power | 150 PS | 200 PS``) is data from the top, so neither
+    is asked about. A first row of text data (``Gearbox | Manual | Automatic``) can't be
+    told from column names by shape: that's what Jev is asked.
     """
     cells = [c for c in table.cells if _clean(c.text)]
     if not cells or any(c.header for c in table.cells):
-        return table
+        return None
     width = max(c.col + c.col_span for c in cells)
+    if width == 2:
+        firsts = [c for c in cells if c.col == 0]
+        pairs = (
+            bool(firsts)
+            and any(c.col == 1 for c in cells)
+            and all(c.row_span == 1 and c.col_span == 1 for c in cells)
+            and all(any(ch.isalpha() for ch in c.text) for c in firsts)
+        )
+        return "labels" if pairs else None
     top = min(c.row for c in cells)
     body_rows = {c.row for c in cells} - {top}
     first_row = [c for c in cells if c.row == top and c.col > 0]
@@ -292,9 +286,31 @@ def infer_headers(table: Component) -> Component:
         or not all(any(ch.isalpha() for ch in c.text) for c in labels)
         or sum(_number_like(c.text) for c in values) * 2 <= len(values)
     ):
+        return None
+    return "comparison"
+
+
+def infer_headers(table: Component) -> Component:
+    """``table`` with the headers its :func:`header_shape` allows marked, for a table Jev
+    said has them; ``table`` itself when it has no shape.
+
+    A comparison table gets its first row and first column marked, and is read like one
+    with ``th`` cells. A labels table gets its first column marked in the rows that have a
+    second cell, so each value reads ``label: value`` and a label whose value cell is empty
+    (``Towing | ``) gives nothing, as a blank row doesn't; a label alone in a row without
+    that cell (``Notes``) stays a statement of its own.
+    """
+    shape = header_shape(table)
+    if shape is None:
         return table
+    if shape == "comparison":
+        top = min(c.row for c in table.cells if _clean(c.text))
+        marked = {(c.row, c.col) for c in table.cells if c.row == top or c.col == 0}
+    else:
+        paired = {c.row for c in table.cells if c.col == 1}
+        marked = {(c.row, 0) for c in table.cells if c.col == 0 and c.row in paired}
     inferred = [
-        c.model_copy(update={"header": True}) if c.row == top or c.col == 0 else c
+        c.model_copy(update={"header": True}) if (c.row, c.col) in marked else c
         for c in table.cells
     ]
     return table.model_copy(update={"cells": inferred})
@@ -322,8 +338,6 @@ def row_roles(table: Component) -> dict[int, RowRole]:
     leading ones stack, and one repeated after the first body row replaces them.
     Everything else is ``"body"``, including blank rows (:func:`blank_rows`) and rows a
     data cell spans into. A table made only of headers, or without any, is all body rows.
-    Pass ``infer_headers(table)`` to read a header-less comparison table as its statements
-    do.
     """
     cells = [c for c in table.cells if _clean(c.text)]
     roles: dict[int, RowRole] = {c.row: "body" for c in cells}

@@ -48,7 +48,7 @@ from jevex.layout import DomLocation, ImageLocation
 from jevex.locales import locale_conventions
 from jevex.select import candidate_locale
 from jevex.statements import Statement
-from jevex.tables import header_prefix, table_statements
+from jevex.tables import header_prefix, infer_headers, table_statements
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -403,7 +403,10 @@ class StatementStage:
     split again. An id clash raises :class:`DuplicateStatementError` rather than
     replacing one. A statement longer than
     ``max_chars`` is cut (:func:`cut_statement`) and a ``statements_cut`` event lists
-    which. Without a parsed document the stage does nothing.
+    which. Without a parsed document the stage does nothing. A table without header cells
+    that the component gate found headers in (:attr:`Context.headed_tables
+    <jevex.pipeline.Context.headed_tables>`) is split with them marked
+    (:func:`~jevex.tables.infer_headers`).
 
     A :class:`~jevex.interfaces.LocaleAwareSplitter` (the default) splits by the
     document's locale (:attr:`Context.locale <jevex.pipeline.Context.locale>`: the
@@ -440,6 +443,8 @@ class StatementStage:
             if component.id in existing:
                 statements.update((s.id, s) for s in existing[component.id])
                 continue
+            if component.id in ctx.headed_tables:
+                component = infer_headers(component)
             for whole in split(component):
                 pieces = cut_statement(whole, self.max_chars)
                 if len(pieces) > 1:
