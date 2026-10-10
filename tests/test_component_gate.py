@@ -1167,10 +1167,15 @@ def gate_questions(fake: FakeJev) -> dict[str, JSONContent]:
     return {k: q.instructions for k, q in fake.calls[0].questions.items()}
 
 
+async def gate_for_one_entity(ctx: Context) -> None:
+    """Run the gate as the default pipeline does, under a ``SingleEntity`` entity stage."""
+    await Pipeline([ComponentGateStage(), EntityStage(resolver=SingleEntity())]).run(ctx)
+
+
 async def test_a_single_entity_pipeline_does_not_gate_groups_already_found() -> None:
     fake = FakeJev().noul("engine power", p=0.9, state="Power: 110 kW")
     ctx = found_price(fake)
-    await Pipeline([ComponentGateStage(), EntityStage()]).run(ctx)
+    await gate_for_one_entity(ctx)
 
     assert len(fake.calls) == len(gate_units(page()))
     assert gate_questions(fake) == {
@@ -1212,23 +1217,13 @@ async def test_found_groups_are_gated_without_a_pipeline_or_entity_stage() -> No
         assert set(f.calls[0].questions) == {"Car.price", "Car.performance"}
 
 
-async def test_skip_found_overrides_the_resolver_check() -> None:
-    fake = FakeJev()
-    await ComponentGateStage(skip_found=True).run(found_price(fake))
-    assert set(fake.calls[0].questions) == {"Car.performance"}
-    fake = FakeJev()
-    ctx = found_price(fake)
-    await Pipeline([ComponentGateStage(skip_found=False), EntityStage()]).run(ctx)
-    assert set(fake.calls[0].questions) == {"Car.price", "Car.performance"}
-
-
 async def test_a_group_is_gated_while_any_of_its_fields_is_still_needed() -> None:
     fake = FakeJev()
     ctx = found_price(fake)
     run = ctx.schemas["Car"]
     run.set_field(SINGLE_ENTITY_LABEL, "power_kw", FieldMeta(value=110.0, method="structured"))
     run.set_field(SINGLE_ENTITY_LABEL, "zero_to_62_s", FieldMeta(value=None, method="structured"))
-    await ComponentGateStage(skip_found=True).run(ctx)
+    await gate_for_one_entity(ctx)
     # 0-62 wasn't found (an empty value isn't a find), so its group is still asked about.
     assert set(fake.calls[0].questions) == {"Car.performance"}
 
@@ -1237,13 +1232,13 @@ async def test_merge_mode_gates_every_group() -> None:
     fake = FakeJev()
     ctx = found_price(fake)
     ctx.schemas["Car"].merge = True
-    await ComponentGateStage(skip_found=True).run(ctx)
+    await gate_for_one_entity(ctx)
     assert set(fake.calls[0].questions) == {"Car.price", "Car.performance"}
 
 
 async def test_other_schemas_are_still_gated_in_the_same_requests() -> None:
     fake = FakeJev()
-    await ComponentGateStage(skip_found=True).run(found_price(fake, Car, Book))
+    await gate_for_one_entity(found_price(fake, Car, Book))
     assert len(fake.calls) == len(gate_units(page()))
     assert gate_questions(fake) == {
         "Car.performance": "Does this section contain the engine power (kW) or 0-62 mph time (s)?",
@@ -1260,7 +1255,7 @@ async def test_a_found_nested_field_drops_its_models_questions_too() -> None:
     run = ctx.schemas["CarModel"]
     trims = [{"power_kw": 110.0, "price": Decimal(24995)}]
     run.set_field(SINGLE_ENTITY_LABEL, "trims", FieldMeta(value=trims, method="structured"))
-    await ComponentGateStage(skip_found=True).run(ctx)
+    await gate_for_one_entity(ctx)
     assert gate_questions(fake) == {"CarModel.name": "Does this section contain the model name?"}
     assert run.child_component_ids == {}
     assert run.component_ids == {"name": []}
@@ -1272,7 +1267,7 @@ async def test_with_every_group_found_nothing_is_asked_and_nothing_is_reported_m
     run = ctx.schemas["Car"]
     for name in ("power_kw", "zero_to_62_s"):
         run.set_field(SINGLE_ENTITY_LABEL, name, FieldMeta(value=1.0, method="structured"))
-    await ComponentGateStage(skip_found=True).run(ctx)
+    await gate_for_one_entity(ctx)
     assert fake.calls == []
     assert run.component_ids == {}
     assert run.relevant_fields("li1") == []
