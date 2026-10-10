@@ -1152,8 +1152,9 @@ async def test_the_rests_own_distinct_values_are_settled_by_their_own_question()
     assert rest.source is not None
     assert rest.source.statement == "lowPrice: 18995"
     assert rest.alternatives == [Alternative(value=Decimal("19995"), raw="19995", p=0.2)]
-    page_call, rest_call = settle_calls(fake)
-    assert page_call.questions == {
+    # The rest's values are offered alone, in the same request as the page's.
+    [call] = settle_calls(fake)
+    assert call.questions == {
         "select0": Choice(
             instructions="Which of these is the price (GBP)?",
             options={
@@ -1162,17 +1163,13 @@ async def test_the_rests_own_distinct_values_are_settled_by_their_own_question()
                 "26995": None,
                 "none": "None of these is the price",
             },
-        )
-    }
-    # Only the rest's values are offered, over the same blob's leaves.
-    assert rest_call.questions == {
-        "select0": Choice(
+        ),
+        "select1": Choice(
             instructions="Which of these is the price (GBP)?",
             options={"19995": None, "18995": None, "none": "None of these is the price"},
-        )
+        ),
     }
-    state = "@type: Car\nprice: 19995\nlowPrice: 18995\noffers[0].price: 26995"
-    assert rest_call.state == page_call.state == state
+    assert call.state == "@type: Car\nprice: 19995\nlowPrice: 18995\noffers[0].price: 26995"
 
 
 async def test_a_none_for_the_rest_leaves_it_unfound() -> None:

@@ -32,11 +32,10 @@ microdata disagreeing), Jev picks one with the field's own select question, the 
 becoming alternatives (:meth:`KeyPathMapper._settle`). Each object in an array
 (an entity candidate: a JSON-LD ``offers[]`` item) also gets the values its own leaves
 give (:class:`StructuredItem`, reusing Jev's readings, never asking anything new), as do
-the leaves outside every such object (:attr:`StructuredResult.rest`, whose distinct
-values are settled the same way, reusing the page's answer when they're the page's
-values). Once the entity
-stage knows a page holds more than one entity, it asks Jev which entity each object
-describes, gives each entity its objects' values and shares the rest
+the leaves outside every such object (:attr:`StructuredResult.rest`), though Jev
+settles the rest's distinct values like the page's, in the same requests. Once the
+entity stage knows a page holds more than one entity, it asks Jev which entity each
+object describes, gives each entity its objects' values and shares the rest
 (:func:`~jevex.resolve.place_document_values`), so there's no "document" record beside
 them.
 
@@ -407,9 +406,7 @@ class KeyPathMapper:
                         ),
                     )
                 )
-        answers: dict[tuple[str, str, frozenset[str]], ChoiceAnswer] = {}
-        fields = await self._settle(schemas, values, jev, events, answers)
-        outside = await self._settle(schemas, rest, jev, events, answers)
+        fields, outside = await self._settle(schemas, [values, rest], jev, events)
         return StructuredResult(statements, fields, events, items, outside, failures)
 
     async def _blob(
@@ -444,13 +441,12 @@ class KeyPathMapper:
     async def _settle(
         self,
         schemas: list[SchemaSpec],
-        found: dict[str, dict[str, list[_Value]]],
+        found: list[dict[str, dict[str, list[_Value]]]],
         jev: JevClient,
         events: list[tuple[str, str]],
-        answers: dict[tuple[str, str, frozenset[str]], ChoiceAnswer],
-    ) -> dict[str, dict[str, FieldMeta]]:
-        """Each field's meta: its value, or the one Jev picks when a single-value field is
-        given distinct values.
+    ) -> list[dict[str, dict[str, FieldMeta]]]:
+        """Each field's meta in each of ``found`` (the page's values, the rest's): its
+        value, or the one Jev picks when a single-value field is given distinct values.
 
         Jev is asked the field's own :meth:`~jevex.schema.FieldSpec.select_question` over
         the values (as their leaves give them, cut to :data:`MAX_VALUE_CHARS`; values
@@ -458,47 +454,50 @@ class KeyPathMapper:
         literal "none" is offered quoted), when there are two options or more, with
         the leaves of the blobs giving them as the state, cut to fit
         (:meth:`~jevex.jev.JevClient.fit_state`). Fields whose values come from the same
-        blobs are asked in one request. The picked value is as sure as Jev's answer (or
-        its own reading by Jev, if less sure), and the other values are its
+        blobs are asked in one request, and the same options for a field (the rest's,
+        when they're the page's) are asked once. The picked value is as sure as Jev's
+        answer (or its own reading by Jev, if less sure), and the other values are its
         alternatives; "none" leaves the field unfound, every value an alternative.
-
-        ``answers`` holds Jev's answer per schema, field and set of options, filled here:
-        the same options offered again (the rest's, when they're the page's) reuse the
-        answer instead of asking again.
         """
-        fields = {
-            s.name: {name: values[0].meta for name, values in found[s.name].items()}
-            for s in schemas
-        }
+        settled = [
+            {
+                s.name: {name: values[0].meta for name, values in by_schema[s.name].items()}
+                for s in schemas
+            }
+            for by_schema in found
+        ]
         # The blobs giving the values → (schema, field, option → value) asked about them.
         groups: dict[tuple[int, ...], list[tuple[SchemaSpec, str, dict[str, _Value]]]] = {}
+        # (schema, field, options) asked → each result it settles, with its own values.
+        targets: dict[tuple[str, str, frozenset[str]], list[tuple[int, dict[str, _Value]]]] = {}
         flats: dict[int, FlatBlob] = {}
-        for schema in schemas:
-            for name, values in found[schema.name].items():
-                if len(values) < 2:
-                    continue
-                options: dict[str, _Value] = {}
-                for value in values:
-                    option = value.raw[:MAX_VALUE_CHARS]
-                    options.setdefault(f'"{option}"' if option == NONE_OPTION else option, value)
-                if len(options) < 2:
-                    continue  # one option leaves Jev nothing to settle
-                offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
-                key = (schema.name, name, frozenset(offered))
-                if key in answers:
-                    fields[schema.name][name] = _settled(offered, answers[key])
-                    continue
-                if len(offered) < len(options):
-                    events.append(
-                        (
-                            "structured_values_skipped",
-                            f"{schema.name}.{name}: asked about {len(offered)} of "
-                            f"{len(options)} embedded values",
-                        )
-                    )
-                flats |= {v.flat.index: v.flat for v in offered.values()}
-                blobs = tuple(sorted({v.flat.index for v in offered.values()}))
-                groups.setdefault(blobs, []).append((schema, name, offered))
+        for i, by_schema in enumerate(found):
+            for schema in schemas:
+                for name, values in by_schema[schema.name].items():
+                    if len(values) < 2:
+                        continue
+                    options: dict[str, _Value] = {}
+                    for value in values:
+                        option = value.raw[:MAX_VALUE_CHARS]
+                        quoted = f'"{option}"' if option == NONE_OPTION else option
+                        options.setdefault(quoted, value)
+                    if len(options) < 2:
+                        continue  # one option leaves Jev nothing to settle
+                    offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
+                    key = (schema.name, name, frozenset(offered))
+                    if key not in targets:
+                        if len(offered) < len(options):
+                            events.append(
+                                (
+                                    "structured_values_skipped",
+                                    f"{schema.name}.{name}: asked about {len(offered)} of "
+                                    f"{len(options)} embedded values",
+                                )
+                            )
+                        flats |= {v.flat.index: v.flat for v in offered.values()}
+                        blobs = tuple(sorted({v.flat.index for v in offered.values()}))
+                        groups.setdefault(blobs, []).append((schema, name, offered))
+                    targets.setdefault(key, []).append((i, offered))
 
         async def ask(
             blobs: tuple[int, ...], asked: list[tuple[SchemaSpec, str, dict[str, _Value]]]
@@ -511,20 +510,20 @@ class KeyPathMapper:
                 "\n".join(_statement_text(leaf) for leaf in flats[i].leaves) for i in blobs
             )
             got = await jev.ask(jev.fit_state(text, questions), questions)
-            settled: list[ChoiceAnswer] = []
+            answers: list[ChoiceAnswer] = []
             for key in questions:
                 answer = got[key]
                 if not isinstance(answer, ChoiceAnswer):
                     raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-                settled.append(answer)
-            return settled
+                answers.append(answer)
+            return answers
 
         results = await gather(ask(blobs, asked) for blobs, asked in groups.items())
-        for asked, got in zip(groups.values(), results, strict=True):
-            for (schema, name, options), answer in zip(asked, got, strict=True):
-                answers[(schema.name, name, frozenset(options))] = answer
-                fields[schema.name][name] = _settled(options, answer)
-        return fields
+        for asked, answers in zip(groups.values(), results, strict=True):
+            for (schema, name, options), answer in zip(asked, answers, strict=True):
+                for i, offered in targets[(schema.name, name, frozenset(options))]:
+                    settled[i][schema.name][name] = _settled(offered, answer)
+        return settled
 
     async def _mappings(
         self,
