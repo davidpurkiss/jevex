@@ -4,8 +4,9 @@ Generators match a page's numbers and dates the way its locale writes them, and 
 normaliser chains they emit read them back the same way. :func:`locale_conventions`
 maps a BCP 47 tag (``de-DE``, ``en_US``, ``fr``) to :class:`LocaleConventions`; unknown
 or missing tags get en-GB's, which is what jevex assumed before locales were handled.
-These conventions aren't asked of Jev: "03/04/2024" or "45 mpg" reads the same in any
-statement, so only the document's locale says which date or which gallon it means.
+These conventions aren't asked of Jev: "03/04/2024" or "45 mpg" is written the same
+under either convention, so when the statement doesn't say, only the document's locale
+tells which date or which gallon it means.
 
 :func:`localise_steps` turns an en-GB normaliser chain into one for a locale by adding
 the arguments that differ (``decimal``, ``order``, ``gallon``), never overriding ones the

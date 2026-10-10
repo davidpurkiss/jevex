@@ -155,8 +155,8 @@ def _range(num: str, units: str, language: str) -> str:
     """Ranges with a dash or "to", or "between … and", plus the language's own words.
 
     A dash between numbers can also be a name or a score ("0-62 mph", "3-1"), and
-    Spanish "a" or Italian "e" join much else: the range is only proposed, and Jev's
-    Choice tells the readings apart."""
+    Spanish and Italian "a" join much else: the range is only proposed, and Jev's Choice
+    tells the readings apart."""
     to, between, and_ = "", "between", "and"
     if words := RANGE_WORDS.get(language):
         to = rf"|\s+(?i:{_words(words.to)})\s+"
@@ -601,8 +601,9 @@ class NounPhrase:
     their number grows with the square of a run's length, so runs break wherever a value
     rarely goes on: at punctuation, at a full stop followed by a space ("St. Ives" breaks
     too), and at :data:`STOPWORDS` (English function words, on every page). A name that
-    holds one ("Lord of the Rings") comes whole only from :class:`WholeStatement` or the
-    LLM fallback.
+    holds one ("Lord of the Rings") comes whole only from another generator
+    (:class:`KeyValue` for a ``Label: value`` pair or a table cell, :class:`WholeStatement`
+    for a short statement) or the LLM fallback.
     """
 
     id: str = "noun_phrase"
