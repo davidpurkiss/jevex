@@ -1537,28 +1537,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "3c8bcfb535e779f1": {
-    "request": {
-      "questions": {
-        "Book": {
-          "criteria": null,
-          "instructions": "Does this document describe a book for sale in an online bookshop?",
-          "type": "noul"
-        }
-      },
-      "state": "Tipping the Velvet | Books to Scrape - Sandbox\n\nHome\nBooks\nHistorical Fiction\nTipping the Velvet\nTipping the Velvet\n\u00a353.74\nIn stock (20 available)\nRating: One out of five stars\nWarning! This is a demo website for web scraping purposes. Prices and ratings here were randomly assigned and have no real meaning.\nProduct Description\n\"Erotic and absorbing...Written with starling power.\"--\"The New York Times Book Review \" Nan King, an oyster girl, is captivated by the music hall phenomenon Kitty Butler, a male impersonator extraordinaire treading the boards in Canterbury. Through a friend at the box office, Nan manages to visit all her shows and finally meet her heroine. Soon after, she becomes Kitty's \"Erotic and absorbing...Written with starling power.\"--\"The New York Times Book Review \" Nan King, an oyster girl, is captivated by the music hall phenomenon Kitty Butler, a male impersonator extraordinaire treading the boards in Canterbury. Through a friend at the box office, Nan manages to visit all her shows and finally meet her heroine. Soon after, she becomes Kitty's dresser and the two head for the bright lights of Leicester Square where they begin a glittering career as music-hall stars in an all-singing and dancing double act. At the same time, behind closed doors, they admit their attraction to each other and their affair begins. ...more\nProduct Information\nUPC 90fa61229261140a\nProduct Type Books\nPrice (excl. tax) \u00a353.74\nPrice (incl. tax) \u00a353.74\nTax \u00a30.00\nAvailability In stock (20 available)\nNumber of reviews 0\nProducts you recently viewed\nRating: Three out of five stars\nA Light in the ...\n\u00a351.77\nIn stock\nAdd to basket"
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "p": 0.96,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 698,
-      "model": "jev-1.13.0"
-    }
-  },
   "3ce859f8cc34de79": {
     "request": {
       "questions": {
@@ -1593,28 +1571,6 @@
         }
       },
       "input_tokens": 385,
-      "model": "jev-1.13.0"
-    }
-  },
-  "4490075a98f37f80": {
-    "request": {
-      "questions": {
-        "Book": {
-          "criteria": null,
-          "instructions": "Does this document describe a book for sale in an online bookshop?",
-          "type": "noul"
-        }
-      },
-      "state": "A Light in the Attic | Books to Scrape - Sandbox\n\nHome\nBooks\nPoetry\nA Light in the Attic\nA Light in the Attic\n\u00a351.77\nIn stock (22 available)\nRating: Three out of five stars\nWarning! This is a demo website for web scraping purposes. Prices and ratings here were randomly assigned and have no real meaning.\nProduct Description\nIt's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings from Shel Silverstein celebrates its 20th anniversary with this special edition. Silverstein's humorous and creative verse can amuse the dowdiest of readers. Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love th It's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings from Shel Silverstein celebrates its 20th anniversary with this special edition. Silverstein's humorous and creative verse can amuse the dowdiest of readers. Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love that Silverstein. Need proof of his genius? RockabyeRockabye baby, in the treetopDon't you know a treetopIs no safe place to rock?And who put you up there,And your cradle, too?Baby, I think someone down here'sGot it in for you. Shel, you never sounded so good. ...more\nProduct Information\nUPC a897fe39b1053632\nProduct Type Books\nPrice (excl. tax) \u00a351.77\nPrice (incl. tax) \u00a351.77\nTax \u00a30.00\nAvailability In stock (22 available)\nNumber of reviews 0"
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "p": 0.97,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 687,
       "model": "jev-1.13.0"
     }
   },
@@ -3638,28 +3594,6 @@
         }
       },
       "input_tokens": 402,
-      "model": "jev-1.13.0"
-    }
-  },
-  "8acc5f284c952c22": {
-    "request": {
-      "questions": {
-        "Book": {
-          "criteria": null,
-          "instructions": "Does this document describe a book for sale in an online bookshop?",
-          "type": "noul"
-        }
-      },
-      "state": "Sapiens: A Brief History of Humankind | Books to Scrape - Sandbox\n\nHome\nBooks\nHistory\nSapiens: A Brief History of Humankind\nSapiens: A Brief History of Humankind\n\u00a354.23\nIn stock (20 available)\nRating: Five out of five stars\nWarning! This is a demo website for web scraping purposes. Prices and ratings here were randomly assigned and have no real meaning.\nProduct Description\nFrom a renowned historian comes a groundbreaking narrative of humanity\u2019s creation and evolution\u2014a #1 international bestseller\u2014that explores the ways in which biology and history have defined us and enhanced our understanding of what it means to be \u201chuman.\u201dOne hundred thousand years ago, at least six different species of humans inhabited Earth. Yet today there is only one\u2014h From a renowned historian comes a groundbreaking narrative of humanity\u2019s creation and evolution\u2014a #1 international bestseller\u2014that explores the ways in which biology and history have defined us and enhanced our understanding of what it means to be \u201chuman.\u201dOne hundred thousand years ago, at least six different species of humans inhabited Earth. Yet today there is only one\u2014homo sapiens. What happened to the others? And what may happen to us?Most books about the history of humanity pursue either a historical or a biological approach, but Dr. Yuval Noah Harari breaks the mold with this highly original book that begins about 70,000 years ago with the appearance of modern cognition. From examining the role evolving humans have played in the global ecosystem to charting the rise of empires, Sapiens integrates history and science to reconsider accepted narratives, connect past developments with contemporary concerns, and examine specific events within the context of larger ideas.Dr. Harari also compels us to look ahead, because over the last few decades humans have begun to bend laws of natural selection that have governed life for the past four billion years. We are acquiring the ability to design not only the world around us, but also ourselves. Where is this leading us, and what do we want to become?Featuring 27 photographs, 6 maps, and 25 illustrations/diagrams, this provocative and insightful work is sure to spark debate and is essential reading for aficionados of Jared Diamond, James Gleick, Matt Ridley, Robert Wright, and Sharon Moalem. ...more\nProduct Information\nUPC 4165285e1663650f\nProduct Type Books\nPrice (excl. tax) \u00a354.23\nPrice (incl. tax) \u00a354.23\nTax \u00a30.00\nAvailability In stock (20 available)\nNumber of reviews 0\nProducts you recently viewed\nRating: Four out of five stars\nSharp Objects\n\u00a347.82\nIn stock\nAdd to basket\nRating: One out of five stars\nSoumission\n\u00a350.10\nIn stock\nAdd to basket\nRating: One out of five stars\nTipping the Velvet\n\u00a353.74\nIn stock\nAdd to basket\nRating: Three out of five stars\nA Light in the ...\n\u00a351.77\nIn stock\nAdd to basket"
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "p": 0.97,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 954,
       "model": "jev-1.13.0"
     }
   },

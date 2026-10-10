@@ -121,7 +121,8 @@ def pages() -> list[tuple[str, str, Document]]:
 
 async def main() -> None:
     reader = DefaultTextReader()
-    jev = JevClient(TypeSafeBackend())
+    backend = TypeSafeBackend()
+    jev = JevClient(backend)
     questions: dict[str, Noul] = {
         f"{w}|{s}": Noul(instructions=t.format(d=d))
         for w, t in WORDINGS.items()
@@ -129,15 +130,18 @@ async def main() -> None:
     }
     rows: list[dict[str, object]] = []
     scored: list[tuple[str | None, dict[str, float]]] = []
-    for group, name, doc in pages():
-        text = reader.read(doc)
-        assert text is not None, name
-        state = jev.fit_state(text.text.strip()[:DEFAULT_MAX_CHARS], questions)
-        answers = await jev.ask(state, questions)
-        ps = {k: round(a.p, 3) for k, a in answers.items() if isinstance(a, NoulAnswer)}
-        rows.append({"group": group, "page": name, "expected": EXPECTED.get(group), "p": ps})
-        scored.append((EXPECTED.get(group), ps))
-        print(group, name, flush=True)
+    try:
+        for group, name, doc in pages():
+            text = reader.read(doc)
+            assert text is not None, name
+            state = jev.fit_state(text.text.strip()[:DEFAULT_MAX_CHARS], questions)
+            answers = await jev.ask(state, questions)
+            ps = {k: round(a.p, 3) for k, a in answers.items() if isinstance(a, NoulAnswer)}
+            rows.append({"group": group, "page": name, "expected": EXPECTED.get(group), "p": ps})
+            scored.append((EXPECTED.get(group), ps))
+            print(group, name, flush=True)
+    finally:
+        await backend.aclose()
     day = datetime.now(UTC).date().isoformat()
     out = Path(__file__).with_name(f"results-{day}.json")
     results = {"threshold": DEFAULT_THRESHOLD, "schemas": SCHEMAS, "wordings": WORDINGS}

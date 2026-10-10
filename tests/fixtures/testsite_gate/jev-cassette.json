@@ -1412,37 +1412,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "1346dfc82a0c77a4": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova Sport\n\nDelmaro Kestrova Sport\nPeak output is 85 kW. This version is diesel. It seats 7.\nThe sprint from 0\u201362mph is over in 8.4s. The engine displaces 1395 cc. It emits 128 g/km of CO2.\nTop speed is 135 mph. The Sport costs \u00a321,495 on the road. It comes with a six-speed manual gearbox."
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.09,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.94,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 407,
-      "model": "jev-1.13.0"
-    }
-  },
   "16276ad0444d1761": {
     "request": {
       "questions": {
@@ -2380,37 +2349,6 @@
         }
       },
       "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
-  "20b916fd8ba13af4": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova specifications\n\nDelmaro Kestrova: specifications\nCompare the Delmaro Kestrova range below.\nSpecifications\nSpecification SE Sport GT Edition\nFuel Diesel Diesel Diesel Diesel\nDisplacement 1395cc 1395 cc 1,395 cc 1,395 cc\nPower output 70 kW 114 bhp 143PS 173 bhp\nAcceleration 0\u201362mph 9.1 8.4 s 7.7 s 6.5 s\nTop speed 128 mph 217 km/h 145 mph 249 km/h\nCO2 (g/km) 127 128 130 132\nPrice from 19,000 GBP \u00a321,495 \u00a323,995 25,995 GBP\nSeating capacity 7 7 7 7\nGearbox Manual Manual Automatic Manual"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.06,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.16,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 522,
       "model": "jev-1.13.0"
     }
   },
@@ -4829,37 +4767,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "45440ef98e1ddf07": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "2024 Aurel Marlow\n\n2024 Aurel Marlow\nPrice: \u00a329,635. Mileage: 8,150 mi.\nFuel\nPetrol\nColour\nPure White\nFirst registered\n2024"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.81,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.09,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 354,
-      "model": "jev-1.13.0"
-    }
-  },
   "45e8e0e4890b4abc": {
     "request": {
       "questions": {
@@ -6868,37 +6775,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "6beb4c06d12a4340": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova trims\n\nDelmaro Kestrova trims\nSE\nFuel type\nDiesel\nEngine size\n1,395 cc\nPower output\n70 kW\n0-62mph\n9.1 s\nMax speed\n128 mph\nCO2\n127\nPrice from\n19,000 GBP\nSeating capacity\n7\nTransmission\nManual\nSport\nFuel type\nDiesel\nDisplacement\n1,395 cc\nPeak power\n114bhp\n0-62mph\n8.4 s\nTop speed\n217 km/h\nCO2 emissions (g/km)\n128\nOTR price\n\u00a321,495\nSeats\n7\nTransmission\nManual\nGT\nFuel type\nDiesel\nDisplacement\n1395cc\nPeak power\n105 kW\n0-62 mph (s)\n7.7 s\nMax speed\n233 km/h\nCO2\n130\nOTR price\n23,995 GBP\nSeating capacity\n7\nTransmission\nAutomatic\nEdition\nPowertrain\nDiesel\nDisplacement\n1,395 cc\nPower output\n129 kW\nAcceleration 0\u201362mph\n6.5 s\nMaximum speed\n155 mph\nCO2\n132\nPrice\n\u00a325,995\nSeating\n7\nGearbox\nManual"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.07,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.14,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 622,
-      "model": "jev-1.13.0"
-    }
-  },
   "6c145dc5d555ff99": {
     "request": {
       "questions": {
@@ -7378,87 +7254,6 @@
         }
       },
       "input_tokens": 547,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7231708ebb028d91": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova SE\n\nDelmaro Kestrova SE\nIt will run on to a maximum of 128 mph. This version is diesel. It comes with a six-speed manual gearbox.\nExpect to pay \u00a319,000 for this version. There's room for 7 people. Its engine has a capacity of 1,395 cc.\nCO2 emissions are 127 g/km. Peak output is 94bhp. Accelerating from 0 to 62 mph takes just 9.1 seconds."
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.24,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.93,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 417,
-      "model": "jev-1.13.0"
-    }
-  },
-  "72c8c7eb0f186255": {
-    "request": {
-      "questions": {
-        "Listing.make/choice0": {
-          "instructions": "Which of these is the manufacturer (make) name?",
-          "options": {
-            "Brantis Parhelia": null,
-            "none": "None of these is the manufacturer (make) name"
-          },
-          "type": "choice"
-        },
-        "Listing.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "Brantis Parhelia": null,
-            "none": "None of these is the model name"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1",
-        "statement": "Brantis Parhelia"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing.make/choice0": {
-          "choice": "none",
-          "confidence": 0.42,
-          "probabilities": {
-            "Brantis Parhelia": 0.29,
-            "none": 0.71
-          },
-          "type": "choice"
-        },
-        "Listing.model/choice0": {
-          "choice": "Brantis Parhelia",
-          "confidence": 0.86,
-          "probabilities": {
-            "Brantis Parhelia": 0.93,
-            "none": 0.07
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 398,
       "model": "jev-1.13.0"
     }
   },
@@ -8635,37 +8430,6 @@
         }
       },
       "input_tokens": 348,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7f325a36b5737f55": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document describe a used car offered for sale?",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document describe a manufacturer's technical specification for one vehicle variant?",
-          "type": "noul"
-        }
-      },
-      "state": "Used cars page 1\n\nUsed cars: page 1\nAurel Marlow\nPrice: \u00a329,635\n8,150 miles\nFuel: Petrol\nPure White\nFirst registered in 2024\nView details\nCorvane Tamsin\nPrice: \u00a320,840\n43,850 miles on the clock\nFuel: Electric\nColour: Deep Black\nRegistered 2021\nView details\nFarlan Brixa\nPrice: \u00a312,540\n65,250 miles\nFuel: Plug-in hybrid\nMoonstone Grey\nFirst registered in 2016\nView details\nHalden Lumo\nPrice: \u00a314,130\nMileage: 66,240 mi\nFuel: Hybrid\nFinished in Forest Green\nFirst registered in 2019\nView details\nFarlan Brixa\n\u00a321,065\n37,310 miles\nFuel: Plug-in hybrid\nColour: Silver Frost\nFirst registered in 2019\nView details\nDelmaro Kestrova\nYours for \u00a311,280\n52,040 miles on the clock\nDiesel\nFinished in Racing Red\nRegistered 2021\nView details\nDelmaro Tovani\n\u00a36,480\n64,190 miles\nFuel: Petrol\nCopper Orange\nFirst registered in 2017\nView details\nBrantis Parhelia\nPrice: \u00a320,520\n20,590 miles\nFuel: Petrol\nRacing Red\nRegistered 2023\nView details\nBrantis Parhelia\n\u00a312,890\n50,840 miles\nFuel: Petrol\nColour: Atlantic Blue\n2019 reg\nView details\nGalvor Quorra\nYours for \u00a317,780\n46,270 miles\nDiesel\nFinished in Silver Frost\n2021 reg\nView details\nGalvor Rivette\nYours for \u00a33,000\nMileage: 55,250 mi\nPetrol\nColour: Atlantic Blue\nRegistered 2017\nView details\nEsquel Wrenna\nPrice: \u00a325,090\n7,550 miles on the clock\nElectric\nFinished in Forest Green\nRegistered 2025\nView details"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.98,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.02,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 848,
       "model": "jev-1.13.0"
     }
   },

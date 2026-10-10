@@ -572,14 +572,16 @@ async def test_the_default_question_passes_pages_holding_several_records() -> No
     }
     assert {len(pages[path].records) for path in docs} == {4}
     docs["books"] = Document.from_bytes(books.read_bytes(), content_type="text/html")
-    jev = JevClient(cassette(GATE_CASSETTE))
+    tape = cassette(GATE_CASSETTE)
+    jev = JevClient(tape)
     spec = [SchemaSpec.from_model(VehicleSpec)]
+    gate = NoulDocumentGate()
     try:
-        decisions = {
-            path: (await NoulDocumentGate().gate(d, spec, jev)) for path, d in docs.items()
-        }
+        decisions = {path: await gate.gate(d, spec, jev) for path, d in docs.items()}
     except CassetteMissError as exc:
         stale_recording(str(exc))
+    finally:
+        await tape.aclose()  # the API client a recording run opens
     passed = {path: d["VehicleSpec"].passed for path, d in decisions.items()}
     assert passed == {
         "specs/delmaro-kestrova-table.html": True,
