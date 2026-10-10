@@ -105,6 +105,13 @@ Import them lazily inside the code that needs them.
   `from __future__ import annotations`.
 - **Async:** anything that does I/O or calls Jev or an LLM is `async`. CPU-only work (parsing,
   splitting, generators, normalisers) is sync.
+- **Ask Jev for judgements, compute structure:** when code has to decide what text
+  *means* (which field, which entity, what a label refers to, whether something is
+  relevant), ask Jev an atomic question, batched into the stage's existing `ask`, instead
+  of hard-coding a heuristic or keyword list. Pass the context Jev needs to judge, rather
+  than baking a conclusion into the text. Structure that code can read for certain
+  (markup, header cells, spans, number syntax) stays in code. A heuristic that guesses
+  meaning needs its reason in its docstring (for example, it runs before Jev can be asked).
 - **Jev:** only `jev.py` imports `typesafe_sdk`. Stages build jevex's own question models.
   Question text comes from `SchemaSpec`/`FieldSpec`, never hard-coded in a stage, so that
   `Questions(...)` overrides keep working.
