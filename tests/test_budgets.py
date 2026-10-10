@@ -688,13 +688,18 @@ def test_the_store_reopens_on_a_new_loop_after_aclose(tmp_path: Path) -> None:
 
 
 async def test_an_owned_store_is_closed_even_if_the_jev_backend_fails_to_close(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class BadBackend(FakeJev):
         async def aclose(self) -> None:
             raise RuntimeError("close failed")
 
-    ex = Extractor([Car], jev=BadBackend().client(), store=f"sqlite:///{tmp_path / 'x.db'}")
+    def api_backend(model: str | None = None) -> BadBackend:
+        return BadBackend()
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    ex = Extractor([Car], store=f"sqlite:///{tmp_path / 'x.db'}")
+    assert isinstance(ex.jev.backend, BadBackend)  # the extractor's own, so it closes it
     store = await ex.store()
     assert isinstance(store, SQLiteStore)
     with pytest.raises(RuntimeError, match="close failed"):

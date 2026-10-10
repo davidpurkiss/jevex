@@ -682,18 +682,19 @@ async def test_the_test_site_passes_the_eval_gate(
 
         inner = AnthropicLLM()
     llm = llm_cassette(LLM_CASSETTE, inner)
-    jev = JevClient(cassette(JEV_CASSETTE))
+    tape = cassette(JEV_CASSETTE)
     try:
         # No community packs: the recording must depend only on the repo.
         async with Extractor(
             [VehicleSpec, Listing],
-            jev=jev,
+            jev=JevClient(tape),
             extraction_llm=llm,
             community_packs=False,
             pipeline=default_pipeline().replace("entities", EntityStage(MultiEntity())),
         ) as extractor:
             report = await evaluate(extractor, load_corpus(corpus))
     finally:
+        await tape.aclose()  # the API client a recording run opens
         if inner is not None:
             await inner.aclose()
     digest = corpus_digest(corpus)

@@ -367,7 +367,7 @@ async def pipeline(c: AsyncTypeSafeClient) -> dict[str, Any]:
     PageSpec.__name__ = "VehicleSpec"
     pages = render(generate(42))
     picks = {f: next(p for p in pages if p.family == f) for f in ("pdf", "table", "kv", "prose")}
-    del c  # each Extractor closes its own backend, so give each one a fresh client
+    del c  # this pass keeps the SDK's default retries, so it makes its own client
     out: dict[str, Any] = {
         "default_gate_question": SchemaSpec.from_model(VehicleSpec)
         .document_gate_question()
@@ -381,26 +381,30 @@ async def pipeline(c: AsyncTypeSafeClient) -> dict[str, Any]:
             p.content, url=f"https://site.test/{p.path}", content_type=p.content_type
         )
 
-    async with Extractor([VehicleSpec], jev=JevClient(TypeSafeBackend())) as ex:
-        r = await ex.extract(doc(picks["table"]))
-        out["default_gate_p_on_table_page"] = r.meta.gates["VehicleSpec"].p
-        spent_tokens += r.meta.jev.input_tokens
-    async with Extractor([PageSpec], jev=JevClient(TypeSafeBackend())) as ex:
-        for name, p in picks.items():
-            t0 = time.perf_counter()
-            r = await ex.extract(doc(p))
-            m = r.meta.jev
-            spent_tokens += m.input_tokens
-            out["pages"][name] = {
-                "path": p.path,
-                "entities": len(p.records),
-                "gate_p": r.meta.gates["VehicleSpec"].p,
-                "requests": m.requests,
-                "questions": m.questions,
-                "input_tokens": m.input_tokens,
-                "cost_usd": round(m.cost, 5),
-                "seconds": round(time.perf_counter() - t0, 2),
-            }
+    backend = TypeSafeBackend()
+    try:
+        async with Extractor([VehicleSpec], jev=JevClient(backend)) as ex:
+            r = await ex.extract(doc(picks["table"]))
+            out["default_gate_p_on_table_page"] = r.meta.gates["VehicleSpec"].p
+            spent_tokens += r.meta.jev.input_tokens
+        async with Extractor([PageSpec], jev=JevClient(backend)) as ex:
+            for name, p in picks.items():
+                t0 = time.perf_counter()
+                r = await ex.extract(doc(p))
+                m = r.meta.jev
+                spent_tokens += m.input_tokens
+                out["pages"][name] = {
+                    "path": p.path,
+                    "entities": len(p.records),
+                    "gate_p": r.meta.gates["VehicleSpec"].p,
+                    "requests": m.requests,
+                    "questions": m.questions,
+                    "input_tokens": m.input_tokens,
+                    "cost_usd": round(m.cost, 5),
+                    "seconds": round(time.perf_counter() - t0, 2),
+                }
+    finally:
+        await backend.aclose()
     return out
 
 

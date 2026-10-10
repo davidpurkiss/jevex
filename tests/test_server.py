@@ -573,6 +573,39 @@ async def test_extract_before_start_raises(fake_jev: FakeJev) -> None:
         service.extractor(["Nope"])
 
 
+class ClosingJev(FakeJev):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+async def test_the_service_closes_only_the_jev_client_it_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made = ClosingJev()
+
+    def api_backend(model: str | None = None) -> ClosingJev:
+        return made
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    given = ClosingJev()
+    service = Service([Book, Author], jev=JevClient(given))
+    await service.start()
+    service.extractor(["Book"])
+    await service.aclose()
+    assert given.closed == 0  # its maker closes it
+
+    service = Service([Book, Author])
+    await service.start()
+    service.extractor(["Book"])
+    service.extractor(["Author"])
+    await service.aclose()
+    assert made.closed == 1  # once, by the service: its extractors were given it
+
+
 class ClosingLLM(FakeLLM):
     def __init__(self) -> None:
         super().__init__([])
@@ -582,19 +615,13 @@ class ClosingLLM(FakeLLM):
         self.closed += 1
 
 
-@pytest.mark.parametrize("close_llms", [True, False])
-async def test_llms_are_closed_only_when_asked(fake_jev: FakeJev, close_llms: bool) -> None:
+async def test_llms_given_are_left_open(fake_jev: FakeJev) -> None:
     llm = ClosingLLM()
-    service = Service(
-        [Book],
-        jev=fake_jev.client(),
-        extraction_llm=llm,
-        generator_llm=llm,
-        close_llms=close_llms,
-    )
+    service = Service([Book], jev=fake_jev.client(), extraction_llm=llm, generator_llm=llm)
     await service.start()
+    service.extractor(["Book"])
     await service.aclose()
-    assert llm.closed == (1 if close_llms else 0)
+    assert llm.closed == 0  # its maker closes it
 
 
 def test_schemas_must_be_given_and_unique() -> None:

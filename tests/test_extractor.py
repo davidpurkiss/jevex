@@ -505,6 +505,40 @@ async def test_a_failing_refresh_of_learned_generators_keeps_the_ones_in_use(
     assert result.meta.generator_snapshot == learned.current.version
 
 
+class ClosingJev(FakeJev):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+async def test_the_extractor_closes_only_the_jev_client_it_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made: list[ClosingJev] = []
+
+    def api_backend(model: str | None = None) -> ClosingJev:
+        made.append(ClosingJev())
+        return made[-1]
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    given = ClosingJev()
+    async with Extractor([Car], jev=JevClient(given), pipeline=Pipeline([])) as ex:
+        await ex.extract(doc())
+    assert given.closed == 0  # its maker closes it
+    assert made == []
+
+    ex = Extractor([Car], pipeline=Pipeline([]))
+    await ex.extract(doc())
+    await ex.aclose()
+    assert [b.closed for b in made] == [1]
+    await ex.extract(doc())  # a closed extractor makes a new client for a later document
+    await ex.aclose()
+    assert [b.closed for b in made] == [1, 1]
+
+
 async def test_the_learner_retries_jev_as_documents_do() -> None:
     policy = RetryPolicy(max_retries=5)
     ex = Extractor(

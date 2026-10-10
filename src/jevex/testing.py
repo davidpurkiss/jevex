@@ -10,7 +10,9 @@ Useful for jevex's own tests and for testing your schemas without network or spe
 For realistic answers, record real responses once and replay them in CI::
 
     backend = cassette("tests/cassettes/golf.json")  # replay; JEVEX_RECORD=1 records
-    extractor = Extractor([VehicleSpec], jev=JevClient(backend))
+    async with Extractor([VehicleSpec], jev=JevClient(backend)) as extractor:
+        ...
+    await backend.aclose()  # the API client a recording run opens
 """
 
 from __future__ import annotations
@@ -266,8 +268,8 @@ class Cassette:
     is saved, as is a request Jev rejects as too big
     (:class:`~jevex.jev.JevTokenLimitError`), so the client's split replays too. In replay
     mode, an unrecorded request raises :class:`CassetteMissError`, so tests never reach
-    the network by accident. :meth:`aclose` closes ``inner`` (an
-    ``Extractor`` calls it when it closes), so a recording run doesn't leak connections.
+    the network by accident. :meth:`aclose` closes the API backend recording made, so a
+    recording run doesn't leak connections; an ``inner`` passed in is its maker's to close.
 
     A request asked again while recording (two identical cards on a page, say) gets the
     answer recorded for it in this run, as a replay would: Jev can answer the same request
@@ -279,6 +281,7 @@ class Cassette:
         self.path = Path(path)
         self.record = record
         self._inner = inner
+        self._made: TypeSafeBackend | None = None
         self._entries: dict[str, dict[str, object]] = (
             json.loads(self.path.read_text()) if self.path.exists() else {}
         )
@@ -306,7 +309,7 @@ class Cassette:
         self, key: str, state: JSONContent, questions: Mapping[str, Question]
     ) -> None:
         if self._inner is None:
-            self._inner = TypeSafeBackend()
+            self._inner = self._made = TypeSafeBackend()
         request = {
             "state": state,
             "questions": _QUESTIONS.dump_python(dict(questions), mode="json"),
@@ -324,20 +327,17 @@ class Cassette:
         self.save()
 
     async def aclose(self) -> None:
-        """Close the inner backend, the one passed in or the API backend recording made."""
-        await _aclose(self._inner)
+        """Close the API backend recording made, if it made one."""
+        made, self._made = self._made, None
+        if made is not None:
+            self._inner = None
+            await made.aclose()
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(self._entries, indent=2, sort_keys=True, default=str) + "\n"
         )
-
-
-async def _aclose(inner: object) -> None:
-    close = getattr(inner, "aclose", None)
-    if close is not None:
-        await close()
 
 
 def cassette(path: str | Path, *, inner: JevBackend | None = None) -> Cassette:
@@ -438,7 +438,7 @@ class LLMCassette:
     replay mode an unrecorded call
     raises :class:`CassetteMissError`; ``JEVEX_RECORD=1`` (see :func:`llm_cassette`) records.
     A call made again while recording gets the answer recorded for it in this run.
-    :meth:`aclose` closes ``inner`` when it has an ``aclose``.
+    ``inner`` is its maker's to close.
     """
 
     def __init__(self, path: str | Path, inner: LLM | None = None, *, record: bool = False):
@@ -502,10 +502,6 @@ class LLMCassette:
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._entries, indent=2, sort_keys=True) + "\n")
-
-    async def aclose(self) -> None:
-        """Close the inner LLM. An ``Extractor`` doesn't close LLMs it's given, so call it."""
-        await _aclose(self._inner)
 
 
 def llm_cassette(path: str | Path, inner: LLM | None = None) -> LLMCassette:

@@ -440,11 +440,11 @@ class Service:
     if it was a URL, closed by :meth:`aclose`. Without one, the extractors share an
     in-memory store, so the run budget and learned generators are still shared, and no
     document stats are recorded (nothing could read them). ``jev`` defaults to a client
-    from the ``TYPESAFE_*`` environment variables. The extractors don't close the LLMs
-    they're given; ``close_llms`` has :meth:`aclose` close them (for adapters built just
-    for the service). The other options are :class:`~jevex.extractor.Extractor`'s;
-    ``locale`` (the extractors' default locale, which a request's ``locale`` overrides for
-    its document) raises ``ValueError`` here if it isn't a language tag.
+    from the ``TYPESAFE_*`` environment variables, which :meth:`aclose` closes; one passed
+    in is the caller's to close, as are the LLMs. The other options are
+    :class:`~jevex.extractor.Extractor`'s; ``locale`` (the extractors' default locale,
+    which a request's ``locale`` overrides for its document) raises ``ValueError`` here if
+    it isn't a language tag.
 
     ``ledger`` (a :class:`~jevex.store.SpendLedger`) keeps the run budget's spend for
     every extractor, so the budget holds across all the schema sets served. Without it
@@ -469,7 +469,6 @@ class Service:
         threshold: float = 0.0,
         extraction_llm: LLM | None = None,
         generator_llm: LLM | None = None,
-        close_llms: bool = False,
         stats: bool = False,
         stats_budget_usd: float | None = None,
         drift_window: int = DRIFT_WINDOW,
@@ -493,11 +492,11 @@ class Service:
         self.budgets = budgets
         self.extraction_llm = extraction_llm
         self.generator_llm = generator_llm
-        self.close_llms = close_llms
         specs = [SchemaSpec.from_model(m) for m in self.models.values()]
         self.metrics = Metrics(drift=DriftWindow(drift_window, schemas=specs))
         self.run_id = uuid.uuid4().hex[:12]
         self._jev = jev
+        self._owns_jev = False
         self._store_source = store if isinstance(store, str | Path) else None
         self._store = None if isinstance(store, str | Path) else store
         self._owns_store = False
@@ -541,6 +540,7 @@ class Service:
             self._owns_store = True
         if self._jev is None:
             self._jev = JevClient.from_env()
+            self._owns_jev = True
 
     def extractor(self, names: Sequence[str]) -> Extractor:
         """The extractor for these schemas, made on first use. Raises
@@ -660,28 +660,25 @@ class Service:
         }
 
     async def aclose(self) -> None:
-        """Close the extractors (stopping their learners), the LLMs with ``close_llms``,
-        then the store if the service opened it."""
+        """Close the extractors (stopping their learners), then the Jev client and the
+        store if the service made them."""
         extractors, self._extractors = list(self._extractors.values()), {}
+        jev, owned_jev = self._jev, self._owns_jev
+        if owned_jev:
+            self._jev, self._owns_jev = None, False
+        store, owned_store = self._store, self._owns_store
+        if owned_store:
+            self._store, self._owns_store = None, False
         try:
             for extractor in extractors:
-                await extractor.aclose()  # closes the shared Jev client too
-            if self._jev is not None and not extractors:
-                close = getattr(self._jev.backend, "aclose", None)
-                if close is not None:
-                    await close()
-            if self.close_llms:
-                llms = {id(m): m for m in (self.extraction_llm, self.generator_llm) if m}
-                for llm in llms.values():
-                    close = getattr(llm, "aclose", None)
-                    if close is not None:
-                        await close()
+                await extractor.aclose()
         finally:
-            store, owned = self._store, self._owns_store
-            if owned:
-                self._store, self._owns_store = None, False
-            if owned and store is not None:
-                await store.aclose()
+            try:
+                if owned_jev and jev is not None:
+                    await jev.aclose()
+            finally:
+                if owned_store and store is not None:
+                    await store.aclose()
 
 
 def _failure(error: PartError) -> HTTPException:

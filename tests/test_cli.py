@@ -173,13 +173,18 @@ type Served = list[tuple[FastAPI, dict[str, object]]]
 
 @pytest.fixture
 def served(monkeypatch: pytest.MonkeyPatch) -> Served:
-    """``jevex serve``'s calls to ``uvicorn.run``, which returns at once."""
+    """The apps ``jevex serve`` runs, and where; serving starts and stops at once."""
+    import uvicorn
+
     calls: Served = []
 
-    def run(app: FastAPI, **options: object) -> None:
-        calls.append((app, options))
+    async def serve(self: uvicorn.Server, sockets: object = None) -> None:
+        config = self.config
+        assert isinstance(config.app, FastAPI)
+        calls.append((config.app, {"host": config.host, "port": config.port}))
+        self.started = True
 
-    monkeypatch.setattr("uvicorn.run", run)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve)
     return calls
 
 
@@ -275,6 +280,54 @@ def test_serve_needs_an_api_key(monkeypatch: pytest.MonkeyPatch, served: Served)
     assert main(["serve", "--schema", SCHEMA], err=err) == 1
     assert "TYPESAFE_API_KEY is not set" in err.getvalue()
     assert served == []
+
+
+class ClosingLLM(FakeLLM):
+    closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_serve_closes_the_llm_it_builds_once_serving_stops(
+    monkeypatch: pytest.MonkeyPatch, served: Served
+) -> None:
+    built = ClosingLLM([])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    code, _, err = run_cli("serve", "--schema", SCHEMA, "--llm", "anthropic:claude-sonnet-5-5")
+    assert (code, err) == (0, "")
+    assert len(served) == 1
+    assert built.closed
+    injected = ClosingLLM([])
+    argv = ["serve", "--schema", SCHEMA, "--llm", "anthropic:claude-sonnet-5-5"]
+    code = main(argv, jev=FakeJev().client(), llm=injected, out=io.StringIO(), err=io.StringIO())
+    assert code == 0
+    assert not injected.closed  # the caller's to close
+
+
+def test_serve_fails_when_the_server_doesnt_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    import uvicorn
+
+    async def refused(self: uvicorn.Server, sockets: object = None) -> None:
+        sys.exit(3)  # as uvicorn does when it can't bind the port, after logging why
+
+    monkeypatch.setattr(uvicorn.Server, "serve", refused)
+    built = ClosingLLM([])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    code, _, err = run_cli(
+        "serve", "--schema", SCHEMA, "--port", "9002", "--llm", "anthropic:claude-sonnet-5-5"
+    )
+    assert code == 1
+    assert "couldn't serve at http://127.0.0.1:9002 (see the log above)" in err
+    assert built.closed
 
 
 def test_serve_needs_the_server_extra(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:
@@ -460,24 +513,47 @@ def test_non_ascii_is_printed_as_is(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert "Café — 東京" in out
 
 
+class Closing(FakeJev):
+    """A Jev backend that notes when it's closed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
 @pytest.mark.usefixtures("pipeline")
-def test_the_jev_client_is_closed(page: Path) -> None:
+def test_the_jev_client_made_for_the_command_is_closed(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = Closing()
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+
+    def api_backend(model: str | None = None) -> Closing:
+        return backend
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    err = io.StringIO()
+    code = main(["extract", str(page), "--schema", SCHEMA], out=io.StringIO(), err=err)
+    assert (code, err.getvalue()) == (0, "")
+    assert backend.closed == 1
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_a_jev_client_passed_in_is_left_open(page: Path) -> None:
     from jevex.jev import JevClient
 
-    closed: list[bool] = []
-
-    class Closing(FakeJev):
-        async def aclose(self) -> None:
-            closed.append(True)
-
+    backend = Closing()
     code = main(
         ["extract", str(page), "--schema", SCHEMA],
-        jev=JevClient(Closing()),
+        jev=JevClient(backend),
         out=io.StringIO(),
         err=io.StringIO(),
     )
     assert code == 0
-    assert closed == [True]
+    assert backend.closed == 0  # its maker closes it
 
 
 # --- jevex learn ---------------------------------------------------------------------------

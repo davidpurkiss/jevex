@@ -18,7 +18,7 @@ expected record. See ``fixtures/books/README.md`` for where the pages came from.
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from decimal import Decimal
 from pathlib import Path
 
@@ -78,13 +78,15 @@ def page(name: str) -> Document:
 
 
 @pytest.fixture
-def recorded_jev() -> JevClient:
+async def recorded_jev() -> AsyncIterator[JevClient]:
     if not CASSETTE.exists() and os.environ.get(RECORD_ENV) != "1":
         pytest.skip(
             "no Jev recording yet; record with JEVEX_RECORD=1 TYPESAFE_API_KEY=... "
             "JEVEX_JEV_MAX_COST_USD=0.50 uv run pytest tests/test_smoke_books.py"
         )
-    return JevClient(cassette(CASSETTE))
+    tape = cassette(CASSETTE)
+    yield JevClient(tape)
+    await tape.aclose()  # the API client a recording run opens
 
 
 async def extract_recorded(name: str, jev: JevClient) -> ExtractionResult:

@@ -3,7 +3,7 @@ import hashlib
 import json
 import re
 import socket
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -25,7 +25,7 @@ from jevex.jev import (
     Score,
     ScoreAnswer,
 )
-from jevex.llm import LLMImage, LLMResponse
+from jevex.llm import LLMImage
 from jevex.testing import (
     Cassette,
     CassetteMissError,
@@ -266,66 +266,59 @@ class ClosableBackend:
             raise ConnectionError("close failed")
 
 
-async def test_cassette_closes_its_inner_backend(tmp_path: Path) -> None:
+async def test_cassette_leaves_an_inner_backend_passed_in_open(tmp_path: Path) -> None:
     inner = ClosableBackend(FakeJev().noul("Is it", p=0.8))
     recorder = Cassette(tmp_path / "c.json", record=True, inner=inner)
     await recorder.system_one("state", {"q": Noul(instructions="Is it fast?")})
     await recorder.aclose()
-    assert inner.closed == 1
-
-
-async def test_extractor_closes_a_cassettes_inner_backend(tmp_path: Path) -> None:
-    inner = ClosableBackend()
     async with Extractor([Car], jev=JevClient(Cassette(tmp_path / "c.json", inner=inner))):
         pass
-    assert inner.closed == 1
+    assert inner.closed == 0  # the test made it, so the test closes it
+
+
+def made_backends(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[ClosableBackend]:
+    """The API backends cassettes make to record, from now on."""
+    made: list[ClosableBackend] = []
+
+    def api_backend() -> ClosableBackend:
+        made.append(ClosableBackend(FakeJev().noul("Is it", p=0.8), fail=fail))
+        return made[-1]
+
+    monkeypatch.setattr(jevex.testing, "TypeSafeBackend", api_backend)
+    return made
 
 
 async def test_cassette_closes_the_api_backend_it_made_to_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    made: list[ClosableBackend] = []
-
-    def api_backend() -> ClosableBackend:
-        made.append(ClosableBackend(FakeJev().noul("Is it", p=0.8)))
-        return made[-1]
-
-    monkeypatch.setattr(jevex.testing, "TypeSafeBackend", api_backend)
+    made = made_backends(monkeypatch)
     recorder = Cassette(tmp_path / "c.json", record=True)
     await recorder.system_one("state", {"q": Noul(instructions="Is it fast?")})
     await recorder.aclose()
+    await recorder.aclose()
     assert [b.closed for b in made] == [1]
+    # A later recording makes a new one.
+    await recorder.system_one("state", {"q": Noul(instructions="Is it quick?")})
+    await recorder.aclose()
+    assert [b.closed for b in made] == [1, 1]
 
 
-async def test_cassette_close_without_a_closable_inner_is_a_no_op(tmp_path: Path) -> None:
+async def test_cassette_close_without_a_backend_it_made_is_a_no_op(tmp_path: Path) -> None:
     await Cassette(tmp_path / "c.json").aclose()  # replay: no inner
-    await Cassette(tmp_path / "c.json", record=True, inner=FakeJev()).aclose()  # no aclose
-    await LLMCassette(tmp_path / "llm.json").aclose()
-    await LLMCassette(tmp_path / "llm.json", FakeLLM([]), record=True).aclose()
 
 
-async def test_cassette_close_failure_propagates(tmp_path: Path) -> None:
-    inner = ClosableBackend(fail=True)
+async def test_cassette_close_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made_backends(monkeypatch, fail=True)
+    recorder = Cassette(tmp_path / "c.json", record=True)
+    await recorder.system_one("state", {"q": Noul(instructions="Is it fast?")})
     with pytest.raises(ConnectionError, match="close failed"):
-        await Cassette(tmp_path / "c.json", inner=inner).aclose()
+        await recorder.aclose()
 
 
 class Title(BaseModel):
     title: str
-
-
-class ClosableLLM:
-    def __init__(self) -> None:
-        self.llm = FakeLLM([{"title": "Dune"}])
-        self.closed = 0
-
-    async def structured[T: BaseModel](
-        self, prompt: str, schema: type[T], *, images: Sequence[LLMImage] = ()
-    ) -> LLMResponse[T]:
-        return await self.llm.structured(prompt, schema)
-
-    async def aclose(self) -> None:
-        self.closed += 1
 
 
 async def test_llm_recording_makes_a_repeated_call_once(tmp_path: Path) -> None:
@@ -341,14 +334,6 @@ async def test_llm_recording_makes_a_repeated_call_once(tmp_path: Path) -> None:
     assert [r.output for r in responses] == [Title(title="Dune")] * 2
     replayed = await LLMCassette(path).structured("Title: Dune", Title)
     assert replayed.output == Title(title="Dune")
-
-
-async def test_llm_cassette_closes_its_inner_llm(tmp_path: Path) -> None:
-    inner = ClosableLLM()
-    recorder = LLMCassette(tmp_path / "llm.json", inner, record=True)
-    assert (await recorder.structured("Title: Dune", Title)).output == Title(title="Dune")
-    await recorder.aclose()
-    assert inner.closed == 1
 
 
 def test_cassette_mode_follows_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -438,7 +423,6 @@ async def test_llm_cassette_keys_images_and_keeps_text_only_keys(tmp_path: Path)
     recorder = LLMCassette(tmp_path / "llm.json", inner, record=True)
     await recorder.structured("Title?", Title, images=[picture])
     await recorder.structured("Title?", Title)
-    await recorder.aclose()
     assert [c.images for c in inner.calls] == [(picture,), ()]
     replay = LLMCassette(tmp_path / "llm.json")
     assert (await replay.structured("Title?", Title, images=[picture])).output.title == "Dune"
