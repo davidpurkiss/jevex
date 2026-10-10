@@ -2,7 +2,7 @@ import asyncio
 import io
 import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -10,11 +10,12 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from jevex import Context, Extractor, Pipeline
+from jevex import Context, Document, Extractor, Pipeline
 from jevex.cli import main
 from jevex.errors import ExtractionError
 from jevex.eval import (
     EXACT,
+    DocumentRun,
     Expected,
     FieldScore,
     Tolerance,
@@ -23,7 +24,10 @@ from jevex.eval import (
     list_scores,
     load_corpus,
     match_records,
+    resolve_tolerances,
     rounding_slack,
+    run_document,
+    score_result,
     score_value,
     values_match,
 )
@@ -433,6 +437,36 @@ async def test_a_failing_document_is_scored_missing_and_the_run_continues(tmp_pa
     assert all("boom" in (d.error or "") for d in failed)
     assert report.summary()["errors"] == len(failed)
     assert report.overall().missing > 0
+
+
+async def test_score_result_scores_a_result_the_caller_keeps(tmp_path: Path) -> None:
+    build(42, tmp_path)
+    items = load_corpus(tmp_path)
+    table = next(i for i in items if "table" in i.path.name)
+    other = next(i for i in items if "table" not in i.path.name)
+
+    @dataclass
+    class Flaky:
+        name: str = "select"
+
+        async def run(self, ctx: Context) -> None:
+            if "table" in (ctx.document.url or ""):
+                raise RuntimeError("boom")
+
+    async with Extractor(
+        [VehicleSpec, Listing], jev=FakeJev().client(), pipeline=Pipeline([Flaky()])
+    ) as ex:
+        tolerances = resolve_tolerances(ex)
+        scored: dict[str, DocumentRun] = {}
+        for item in (table, other):
+            result = await ex.extract(Document.from_path(item.path, url=item.path.as_posix()))
+            scored[item.path.name] = run = score_result(item, result, 1.5, tolerances)
+            # What run_document gives for the same document, with the caller's timing.
+            assert run == replace(await run_document(ex, item, tolerances), seconds=1.5)
+    failed, ok = scored[table.path.name], scored[other.path.name]
+    assert (failed.status, ok.status) == ("failed", "ok")
+    assert "boom" in (failed.error or "")
+    assert all(f.correct == f.wrong == f.spurious == 0 for f in failed.fields.values())
 
 
 @dataclass

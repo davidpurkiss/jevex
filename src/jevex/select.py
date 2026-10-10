@@ -62,10 +62,12 @@ ACCEPT_AT = 0.5
 """Noul probability at or above which a bool is True or a list member is accepted."""
 
 
-ALSO_CATEGORY_P = 0.3
+ALSO_CATEGORY_P = 0.1
 """A statement whose top category is a field also goes to any other field with at least
 this probability: "In stock (22 available)" states both ``in_stock`` and
-``stock_count``. Such a second route can make a bool True, never False. Tuned in #49."""
+``stock_count``. Such a second route can make a bool True, never False. 0.1 was the
+largest gain in #49's sweep (accuracy +3 points over 0.3, precision unchanged;
+``docs/thresholds.md``)."""
 
 
 def field_statements(

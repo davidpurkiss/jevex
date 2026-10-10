@@ -619,6 +619,18 @@ async def run_document(
     seconds = time.perf_counter() - start
     if isinstance(result.cause, JevBackendError):
         result.raise_for_errors()
+    return score_result(item, result, seconds, tolerances)
+
+
+def score_result(
+    item: CorpusItem,
+    result: ExtractionResult,
+    seconds: float,
+    tolerances: Mapping[str, Mapping[str, Tolerance]],
+) -> DocumentRun:
+    """Score an extraction of ``item`` that took ``seconds`` (``tolerances`` as for
+    :func:`score_document`): a failed one scores as all missing. For callers that need the
+    result too, such as a threshold sweep reading the fallback's values."""
     meta = result.meta
     failed = result.status == "failed"
     methods: Counter[str] = Counter(

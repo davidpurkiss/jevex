@@ -274,11 +274,11 @@ async def test_enum_and_bool_fields_never_fall_back() -> None:
 async def test_rejected_answer_keeps_the_jev_answer_and_lists_the_llm_value() -> None:
     fake = FakeJev().noul(VERIFY, p=0.4)
     ctx = context(fake, [st("s1")], {"s1": "zero_to_62_s"})
-    picked(ctx, "s1", "zero_to_62_s", "62", 0.3)
+    picked(ctx, "s1", "zero_to_62_s", "62", 0.2)
     ctx.extraction_llm = llm(value=9.1, evidence="9.1 seconds")
     await FallbackStage().run(ctx)
     m = meta(ctx)
-    assert (m.value, m.confidence, m.method, m.verified) == (62.0, 0.3, "generator", None)
+    assert (m.value, m.confidence, m.method, m.verified) == (62.0, 0.2, "generator", None)
     assert m.alternatives == [Alternative(value=9.1, raw="9.1 seconds", p=0.4)]
     assert ctx.verified == []
     [event] = ctx.events
@@ -288,11 +288,11 @@ async def test_rejected_answer_keeps_the_jev_answer_and_lists_the_llm_value() ->
 
 async def test_a_rejected_answer_equal_to_the_jev_value_isnt_listed_as_its_alternative() -> None:
     ctx = context(FakeJev().noul(VERIFY, p=0.4), [st("s1")], {"s1": "zero_to_62_s"})
-    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.3)
+    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.2)
     ctx.extraction_llm = llm(value=9.1, evidence="9.1")
     await FallbackStage().run(ctx)
     m = meta(ctx)
-    assert (m.value, m.confidence, m.alternatives) == (9.1, 0.3, [])
+    assert (m.value, m.confidence, m.alternatives) == (9.1, 0.2, [])
     assert [e.kind for e in ctx.events] == ["llm_rejected"]
 
 
@@ -529,15 +529,15 @@ async def test_list_items_from_every_verified_statement_are_merged_in_order() ->
 async def test_an_llm_answer_keeps_the_alternatives_jev_weighed() -> None:
     fake = FakeJev().noul(VERIFY, p=0.9)
     ctx = context(fake, [st("s1")], {"s1": "zero_to_62_s"})
-    picked(ctx, "s1", "zero_to_62_s", "62", 0.3)
+    picked(ctx, "s1", "zero_to_62_s", "62", 0.2)
     run = ctx.schemas["Car"]
-    weighed = [Alternative(value="9.1", raw="9.1", p=0.25), Alternative(value=8.0, p=0.1)]
+    weighed = [Alternative(value="9.1", raw="9.1", p=0.15), Alternative(value=8.0, p=0.1)]
     run.set_field("doc", "zero_to_62_s", meta(ctx).model_copy(update={"alternatives": weighed}))
     ctx.extraction_llm = llm(value=9.1, evidence="9.1")
     await FallbackStage().run(ctx)
     assert meta(ctx).alternatives == [
-        Alternative(value=62.0, raw="62", p=0.3),
-        Alternative(value="9.1", raw="9.1", p=0.25),
+        Alternative(value=62.0, raw="62", p=0.2),
+        Alternative(value="9.1", raw="9.1", p=0.15),
         Alternative(value=8.0, p=0.1),
     ]
 
@@ -545,7 +545,7 @@ async def test_an_llm_answer_keeps_the_alternatives_jev_weighed() -> None:
 async def test_an_llm_answer_confirming_the_jev_value_doesnt_list_it_again() -> None:
     fake = FakeJev().noul(VERIFY, p=0.9)
     ctx = context(fake, [st("s1")], {"s1": "zero_to_62_s"})
-    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.3)
+    picked(ctx, "s1", "zero_to_62_s", "9.1", 0.2)
     ctx.extraction_llm = llm(value=9.1, evidence="9.1")
     await FallbackStage().run(ctx)
     m = meta(ctx)

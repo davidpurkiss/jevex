@@ -135,14 +135,14 @@ def test_a_statement_also_goes_to_fields_with_enough_category_probability() -> N
     run.categories["s1"] = ChoiceAnswer(
         choice="zero_to_62_s",
         confidence=0.5,
-        probabilities={"zero_to_62_s": 0.5, "automatic": 0.35, "model": 0.1, "none": 0.05},
+        probabilities={"zero_to_62_s": 0.5, "automatic": 0.35, "model": 0.05, "none": 0.1},
     )
     pairs = field_statements(ctx, run, run.scopes[0])
     assert [f.name for _, f in pairs] == ["zero_to_62_s", "automatic"]
     run.categories["s1"] = ChoiceAnswer(
         choice="model",
-        confidence=0.75,
-        probabilities={"model": 0.75, "automatic": 0.25},
+        confidence=0.95,
+        probabilities={"model": 0.95, "automatic": 0.05},
     )
     assert [f.name for _, f in field_statements(ctx, run, run.scopes[0])] == ["model"]
     # A "none" answer routes nowhere, however close a field came.

@@ -1709,7 +1709,7 @@ async def test_the_extractors_learner_tests_as_the_pipeline_runs() -> None:
         assert lrn.selector is selector
         assert lrn.normalisers is norm
         assert lrn.fallback_threshold == 0.7
-        assert lrn.learn_threshold == 0.9
+        assert lrn.learn_threshold == 0.95
 
 
 # --- learning modes ----------------------------------------------------------------------
