@@ -391,7 +391,8 @@ class NoulComponentGate:
             for c in parsed.root.walk()
             if c.type == "table" and (shape := header_shape(c)) is not None
         }
-        # unit id -> {question key: table id}; no schema's key has a space ("Schema.group").
+        # unit id -> {question key: table id}. A group's key starts "<schema name>.", and a
+        # schema name (a class name) has no space, so "table <id>" never takes one.
         tables_in: dict[str, dict[str, str]] = {}
         placed: set[str] = set()
         for unit in units:
