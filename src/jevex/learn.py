@@ -97,9 +97,11 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-LEARN_THRESHOLD = 0.9
-"""Verification probability at or above which an LLM answer is learned from. Provisional:
-the spec's open questions set the defaults from eval runs."""
+LEARN_THRESHOLD = 0.95
+"""Verification probability at or above which an LLM answer is learned from. Stricter
+than :data:`~jevex.fallback.VERIFY_THRESHOLD`, because a learned generator repeats its
+example's mistake on every later document: on the test site, 32 of 32 answers at 0.95 or
+above were right, against 32 of 33 at 0.9 (#49, ``docs/thresholds.md``)."""
 SAMPLE_SIZE = 20
 """How many of a field's stored examples a new generator is tested on (all, if fewer)."""
 REFRESH_GENERATORS = 30.0

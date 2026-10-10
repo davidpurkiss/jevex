@@ -84,12 +84,16 @@ if TYPE_CHECKING:
 
 CATEGORY_THRESHOLD = 0.5
 """Category probability at or above which Jev's "none" sends the statement to the LLM.
-Provisional: the spec's open questions set the defaults from eval runs."""
-FALLBACK_THRESHOLD = 0.5
-"""Selection confidence below which the LLM is asked. Provisional, like the others."""
-VERIFY_THRESHOLD = 0.8
+Swept from 0.3 to 0.7 on the test site, it changed nothing (#49,
+``docs/thresholds.md``), so it stays at the midpoint."""
+FALLBACK_THRESHOLD = 0.3
+"""Selection confidence below which the LLM is asked. On the test site, 0.3 kept the
+accuracy of 0.5 and 0.7 with 60% fewer LLM calls; 0.9 gained under a point for 11 times
+the calls (#49, ``docs/thresholds.md``)."""
+VERIFY_THRESHOLD = 0.7
 """Verification probability at or above which an LLM answer (or a vision value) is
-accepted. Provisional."""
+accepted. On the test site, every verified answer outside a make/model ambiguity was
+right from p 0.5 up; 0.7 keeps a margin (#49, ``docs/thresholds.md``)."""
 
 SELECTED = frozenset({"jev", "generator", "vision"})
 """Methods of the values the select and normalise stages record: a vision value is only

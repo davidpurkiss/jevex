@@ -73,7 +73,7 @@ from jevex.errors import (
     Status,
     status_of,
 )
-from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus
+from jevex.eval import EvalReport, Tolerance, evaluate, load_corpus, score_result
 from jevex.extractor import ExtractionResult, Extractor, document_stat
 from jevex.fallback import FallbackStage, LLMFieldExtractor
 from jevex.fetch import FetchError, RobotsDisallowedError, SimpleFetcher
@@ -538,6 +538,7 @@ __all__ = [
     "run_headroom",
     "schema_specs",
     "schemas_text",
+    "score_result",
     "score_results",
     "section_text",
     "stats_server",

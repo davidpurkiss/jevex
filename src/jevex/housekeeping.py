@@ -51,8 +51,10 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 PRUNE_AFTER = 50
-"""Scoped documents a learned generator gets to win once before it's disabled.
-Provisional: the spec's open questions set the defaults from eval runs (#49)."""
+"""Scoped documents a learned generator gets to win once before it's disabled. Not
+measured: #49's sweep runs no learning, and the test site's pages are too alike for a
+replay to tell a dead generator from a rare one, so it keeps its starting value
+(``docs/thresholds.md``)."""
 
 QUARANTINE_AFTER = 3
 """Failures (statements it raised on, over every document) after which a learned
