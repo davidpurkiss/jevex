@@ -1,0 +1,16 @@
+{
+  "4dc0fe8376b7c9c8": {
+    "model": "claude-opus-5-5",
+    "output": {
+      "evidence": "SE",
+      "stated": true,
+      "value": "SE"
+    },
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nStatement: Delmaro Kestrova SE\n\nField: trim\nDescription: Trim or variant name, e.g. SE L\nType: text\n\nIf the statement states the trim or variant name, e.g. SE L, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "usage": {
+      "cost": 0.002588,
+      "input_tokens": 522,
+      "output_tokens": 25
+    }
+  }
+}
