@@ -690,13 +690,23 @@ async def test_the_test_site_passes_the_eval_gate(
     digest = corpus_digest(corpus)
     if recording or os.environ.get(UPDATE_ENV) == "1":
         assert not report.failed, [d.error for d in report.failed]
+        # A part that failed (a fallback call refused for credit, say) leaves its answer out
+        # of the recording, so the gate would replay a run that never happened.
+        partial = {d.path: d.warnings for d in report.documents if d.status != "ok"}
+        assert not partial, partial
         # A new recording keeps the tolerances the committed baseline set.
         kept = Baseline.load(GATE_BASELINE).tolerances if GATE_BASELINE.exists() else None
         Baseline.from_report(report, corpus=digest, tolerances=kept).write(GATE_BASELINE)
         return
     baseline = Baseline.load(GATE_BASELINE)
     # A Jev or LLM request that wasn't recorded (run_document names the exception first).
-    stale = [d.error for d in report.failed if (d.error or "").startswith("CassetteMissError")]
+    # A fallback call that misses only makes its document partial, so warnings count too.
+    stale = [
+        m
+        for d in report.documents
+        for m in [d.error or "", *d.warnings]
+        if "CassetteMissError" in m
+    ]
     if stale:
         stale_recording(
             f"{len(stale)} test-site document(s) asked unrecorded questions: {stale[0]}"
