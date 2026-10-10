@@ -28,8 +28,8 @@ def _offline_tests_ignore_live_spend(
     live tests and cassette recording keep them. Tests that need a cap set their own.
 
     Offline tests also start with this process's Jev and LLM spend counters at zero, put
-    back afterwards, so a test asserting spend sees only its own and fake spend never
-    counts against a live test's cap."""
+    back afterwards: a test asserting spend sees only its own, and spend from before it
+    still counts against the caps."""
     if "live" in request.keywords or os.environ.get("JEVEX_RECORD") == "1":
         return
     for name in SPEND_ENV:
