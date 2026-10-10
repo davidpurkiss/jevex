@@ -13,6 +13,7 @@ StatementKind = Literal[
     "list_item",
     "key_value",
     "table_cell",
+    "table_header",
     "alt_text",
     "caption",
     "ocr",
@@ -43,12 +44,15 @@ class Span(BaseModel):
 
 
 class TableCellRef(BaseModel):
-    """Where a ``table_cell`` statement sits in its table, with the headers that give it
-    meaning. ``col_headers`` has one label per column the cell covers (stacked header rows
-    joined: "1.5 TSI SE"); entity resolvers use it to split a comparison table by column.
+    """Where a ``table_cell`` or ``table_header`` statement sits in its table, with the
+    headers that give it meaning. ``col_headers`` has one label per column the cell covers
+    (stacked header rows joined: "1.5 TSI SE"); entity resolvers use it to split a
+    comparison table by column.
     ``row_headers`` holds every header of the rows the cell covers, as its text shows them,
     and ``row_labels`` one label per covered row (that row's headers joined: "Kestrova
-    SE"), so a cell spanning two rows can go to each row's entity."""
+    SE"), so a cell spanning two rows can go to each row's entity. A column header's
+    statement has only ``col_headers`` (its own label), a row header's only
+    ``row_headers`` (its own label) and ``row_labels``."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -58,6 +62,13 @@ class TableCellRef(BaseModel):
     row_labels: list[str] = Field(default_factory=list[str])
     col_headers: list[str] = Field(default_factory=list[str])
     group: str | None = None
+    corner: str | None = None
+    """A header statement's corner cell: the header-row text over the row headers
+    ("Trim", "Specification"). Jev sees it as context, since only Jev can tell which axis
+    it names."""
+    axis_labels: list[str] = Field(default_factory=list[str])
+    """A header statement's fellow labels on its axis, itself included ("SE", "Sport",
+    "GT"): Jev sees them as context, since "Sport" alone needn't read as a trim."""
 
 
 class Statement(BaseModel):

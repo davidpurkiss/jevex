@@ -395,7 +395,13 @@ class FallbackStage:
     def trigger(
         self, run: SchemaRun, scope: str, statement: Statement, spec: FieldSpec
     ) -> Trigger | None:
-        """Why the statement falls back for ``spec``, if it does."""
+        """Why the statement falls back for ``spec``, if it does.
+
+        A ``table_header`` statement never does: half a comparison table's headers are field
+        labels ("Fuel"), which Jev categorises as the field and then finds no value in, so
+        asking the LLM would cost a call per label for nothing."""
+        if statement.kind == "table_header":
+            return None
         if not unique_spans(run.candidates.get((statement.id, spec.name), [])):
             return "no_candidates"
         selection = run.selections.get((scope, spec.name, statement.id))

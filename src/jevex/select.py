@@ -95,8 +95,14 @@ def field_statements(
 
 def statement_state(statement: Statement) -> JSONContent:
     """What Jev sees for one statement: its text plus the headings above it, capped by
-    :func:`~jevex.layout.section_text`."""
+    :func:`~jevex.layout.section_text`, and a table header's corner cell
+    (``table_corner``) and the labels on its axis (``table_headers``)."""
     state: dict[str, Any] = {"statement": statement.text}
+    if (ref := statement.table) is not None:
+        if ref.corner:
+            state["table_corner"] = ref.corner
+        if ref.axis_labels:
+            state["table_headers"] = ", ".join(ref.axis_labels)
     if section := section_text(statement.heading_trail):
         state["section"] = section
     return state

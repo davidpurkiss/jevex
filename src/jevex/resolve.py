@@ -127,16 +127,18 @@ class MultiEntity:
     When accepted groups overlap, a statement goes to the innermost (listing cards under
     a trim heading are each an entity; a table's columns beat the section around it),
     then to the higher priority above (a table's columns beat its rows). A label left
-    with nothing but its own heading is dropped.
+    with nothing but its own heading or header is dropped.
 
     With two or more entities, every statement no boundary claimed is asked one Choice
     (:meth:`~jevex.schema.SchemaSpec.entity_question`): which entity it applies to, or
-    "all of them". Those go on every scope's ``shared_statement_ids``: a value found only
-    in them is copied into each record with ``meta.shared`` set. Past 254 entities there
-    are too many options for a Choice, so those statements are left out (the entity stage
-    reports them as ``unassigned_statements``). With fewer than two entities, the
-    document is one entity labelled ``label``, as with :class:`SingleEntity`, and nothing
-    more is asked.
+    "all of them". A table's header statements (``table_header``) join their column's or
+    row's entity; one no boundary claimed (a row label when the columns are the entities)
+    applies to all of them without asking. Those go on every scope's
+    ``shared_statement_ids``: a value found only in them is copied into each record with
+    ``meta.shared`` set. Past 254 entities there are too many options for a Choice, so
+    those statements are left out (the entity stage reports them as
+    ``unassigned_statements``). With fewer than two entities, the document is one entity
+    labelled ``label``, as with :class:`SingleEntity`, and nothing more is asked.
     """
 
     confirm: bool = True
@@ -206,9 +208,14 @@ class MultiEntity:
         jev: JevClient,
     ) -> set[str]:
         """Ask which entity each unclaimed statement applies to. Fills ``owners``; returns
-        the ids of statements that apply to all of them."""
+        the ids of statements that apply to all of them.
+
+        An unclaimed table header isn't asked about: it heads the axis that isn't the
+        entities (a row label, "Power", over every trim's column), so it applies to all."""
+        shared = {s.id for s in ambiguous if s.kind == "table_header"}
+        ambiguous = [s for s in ambiguous if s.id not in shared]
         if len(labels) >= MAX_CHOICE_OPTIONS:
-            return set()
+            return shared
         question = schema.entity_question(labels)
 
         async def ask(statement: Statement) -> tuple[str, str]:
@@ -217,7 +224,6 @@ class MultiEntity:
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
             return statement.id, answer.choice
 
-        shared: set[str] = set()
         for sid, choice in await gather(ask(s) for s in ambiguous):
             if choice == ALL_OPTION:
                 shared.add(sid)
@@ -372,7 +378,8 @@ def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozense
 def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) -> list[_Group]:
     """Per table whose cells have row and column headers: its column labels as one group,
     and (with ``rows``) its row labels as another, each when there are ``min_labels`` or
-    more."""
+    more. A header's own statement (``table_header``) joins its label's group, but only a
+    label some cell already gives: an empty column proposes no entity."""
     depths = _depths(parsed.root)
     by_table: dict[str, list[Statement]] = {}
     for s in parsed.statements.values():
@@ -382,19 +389,38 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     for table_id, cells in by_table.items():
         # Only cells with headers on both axes: a header on one axis alone says what the
         # cell states (a key/value table), not which entity it's about.
-        refs = [(c.id, c.table) for c in cells if c.table is not None]
-        both = [(sid, ref) for sid, ref in refs if ref.row_headers and ref.col_headers]
-        axes = [[(sid, ref.col_headers) for sid, ref in both]]
+        refs = [(c.id, c.table, c.kind) for c in cells if c.table is not None]
+        both = [
+            (sid, r)
+            for sid, r, kind in refs
+            if kind == "table_cell" and r.row_headers and r.col_headers
+        ]
+        heads = [(sid, r) for sid, r, kind in refs if kind == "table_header"]
+        axes = [
+            (
+                [(sid, ref.col_headers) for sid, ref in both],
+                [(sid, ref.col_headers) for sid, ref in heads],
+            )
+        ]
         if rows:
             # A row's headers are levels ("Kestrova" spanning "SE" and "SE L"), joined into
             # one label as stacked column headers are. A cell spanning rows goes to each.
-            axes.append([(sid, ref.row_labels) for sid, ref in both])
-        for axis_no, axis in enumerate(axes):
+            axes.append(
+                (
+                    [(sid, ref.row_labels) for sid, ref in both],
+                    [(sid, ref.row_labels) for sid, ref in heads],
+                )
+            )
+        for axis_no, (axis, header_axis) in enumerate(axes):
             claims: dict[str, set[str]] = {}
             for sid, headers in axis:
                 for header in headers:
                     if label := _short(header):
                         claims.setdefault(label, set()).add(sid)
+            for sid, headers in header_axis:
+                for header in headers:
+                    if (label := _short(header)) in claims:
+                        claims[label].add(sid)
             if len(claims) < min_labels:
                 continue
             unique = _unique(list(claims))
@@ -474,15 +500,16 @@ def _scopes(
 
 
 def _drop_bare_headings(parsed: ParsedDocument, owners: dict[str, list[str]]) -> None:
-    """Drop labels that own nothing but headings (a trim heading whose listing cards are
-    entities of their own), leaving those headings unclaimed."""
+    """Drop labels that own nothing but headings: a trim heading whose listing cards are
+    entities of their own, or a table's row label when its columns won the cells. Those
+    headings are left unclaimed."""
     headings = {c.id for c in parsed.root.walk() if c.type == "heading"}
-    kept = {
-        label
-        for sid, labels in owners.items()
-        if parsed.statements[sid].component_id not in headings
-        for label in labels
-    }
+
+    def bare(sid: str) -> bool:
+        statement = parsed.statements[sid]
+        return statement.component_id in headings or statement.kind == "table_header"
+
+    kept = {label for sid, labels in owners.items() if not bare(sid) for label in labels}
     for sid in list(owners):
         owners[sid] = [label for label in owners[sid] if label in kept]
         if not owners[sid]:

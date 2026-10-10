@@ -227,13 +227,20 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
 
     assert (se.label, se_l.label) == ("SE", "SE L")
-    assert texts(parsed, se.statement_ids) == ["Power · SE: 150PS", "Warranty · SE / SE L: 3 years"]
+    # Each column's header statement is its entity's: the trim no cell states.
+    assert texts(parsed, se.statement_ids) == [
+        "SE",
+        "Power · SE: 150PS",
+        "Warranty · SE / SE L: 3 years",
+    ]
     assert texts(parsed, se_l.statement_ids) == [
         "The SE L has 3 doors.",
+        "SE L",
         "Power · SE L: 180PS",
         "Warranty · SE / SE L: 3 years",  # a cell spanning both columns is on both
     ]
-    shared = ["Kestrova", "Every Kestrova has 5 doors."]
+    # Row labels head every column, so they're shared without a question.
+    shared = ["Kestrova", "Every Kestrova has 5 doors.", "Power", "Warranty"]
     assert texts(parsed, se.shared_statement_ids) == shared
     assert texts(parsed, se_l.shared_statement_ids) == shared
     # A component is on a scope only when all its statements are: not the split table.
@@ -248,7 +255,8 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     }
     # The rows could be the entities just as well; Jev decides.
     assert rows.state == {"names": ["Power", "Warranty"], "section": "Kestrova"}
-    # Every statement no boundary claimed is asked which entity it's about.
+    # Every statement no boundary claimed is asked which entity it's about, except the
+    # table's headers.
     assert [c.state for c in assigned] == [
         {"statement": "Kestrova"},
         {"statement": "Every Kestrova has 5 doors.", "section": "Kestrova"},
@@ -274,7 +282,10 @@ async def test_multi_entity_scopes_give_downstream_stages_their_statements() -> 
         "Kestrova",
         "Every Kestrova has 5 doors.",
         "The SE L has 3 doors.",  # FakeJev said "all of them" to everything here
+        "SE",
+        "Power",
         "Power · SE: 150PS",
+        "Warranty",
         "Warranty · SE / SE L: 3 years",
     ]
 
@@ -354,10 +365,11 @@ async def test_multi_entity_gives_nested_groups_to_the_innermost() -> None:
     by_label = {s.label: texts(parsed, s.statement_ids) for s in scopes}
     assert by_label == {
         "SE": ["SE", "Engine", "150PS.", "Price", "£20,000."],
-        "SE L": ["SE L", "Engine", "180PS.", "Price", "£24,000."],
-        # A table's columns win over the section around it.
-        "Manual": ["0-62 mph · Manual: 8.9 s"],
-        "Automatic": ["0-62 mph · Automatic: 9.2 s"],
+        # The table's row label isn't a column's, so the section around it claims it.
+        "SE L": ["SE L", "Engine", "180PS.", "0-62 mph", "Price", "£24,000."],
+        # A table's columns win over the section around it, headers included.
+        "Manual": ["Manual", "0-62 mph · Manual: 8.9 s"],
+        "Automatic": ["Automatic", "0-62 mph · Automatic: 9.2 s"],
     }
 
 
@@ -403,9 +415,13 @@ async def test_multi_entity_lets_jev_pick_a_tables_rows_as_the_entities() -> Non
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert (se.label, se_l.label) == ("SE", "SE L")
     assert texts(parsed, se_l.statement_ids) == [
+        "SE L",
         "SE L · Power: 180PS",
         "SE L · Price: £24,000",
     ]
+    # The column labels head every row: shared, and not asked about.
+    assert texts(parsed, se_l.shared_statement_ids) == ["Power", "Price"]
+    assert all("entity" not in c.questions for c in fake.calls)
 
 
 async def test_multi_entity_joins_a_rows_stacked_headers_into_one_label() -> None:
@@ -418,7 +434,12 @@ async def test_multi_entity_joins_a_rows_stacked_headers_into_one_label() -> Non
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     # One label per row, not "Kestrova" holding every row's cells.
     assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
-    assert len(se.statement_ids) == len(se_l.statement_ids) == 2
+    assert texts(parsed, se_l.statement_ids) == [
+        "Kestrova",  # the outer row header covers both rows, so it's on both
+        "SE L",
+        "Kestrova · SE L · Power: 180PS",
+        "Kestrova · SE L · Price: £24,000",
+    ]
 
 
 async def test_multi_entity_gives_a_cell_spanning_rows_to_each_rows_entity() -> None:
@@ -436,8 +457,18 @@ async def test_multi_entity_gives_a_cell_spanning_rows_to_each_rows_entity() -> 
     ]
     assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
     warranty = "Kestrova · SE · SE L · Warranty: 3 years"
-    assert texts(parsed, se.statement_ids) == ["Kestrova · SE · Power: 150PS", warranty]
-    assert texts(parsed, se_l.statement_ids) == [warranty, "Kestrova · SE L · Power: 180PS"]
+    assert texts(parsed, se.statement_ids) == [
+        "Kestrova",
+        "SE",
+        "Kestrova · SE · Power: 150PS",
+        warranty,
+    ]
+    assert texts(parsed, se_l.statement_ids) == [
+        "Kestrova",
+        warranty,
+        "SE L",
+        "Kestrova · SE L · Power: 180PS",
+    ]
 
 
 async def test_multi_entity_prefers_a_tables_columns_when_jev_accepts_both_axes() -> None:
@@ -445,6 +476,10 @@ async def test_multi_entity_prefers_a_tables_columns_when_jev_accepts_both_axes(
     fake = FakeJev().noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
+    # The rows' labels lost their cells to the columns, so they're not entities: they're
+    # shared, without a question.
+    assert texts(parsed, scopes[0].shared_statement_ids)[-2:] == ["Power", "Warranty"]
+    assert not any(c.state == {"statement": "Power"} for c in fake.calls)
 
 
 async def test_multi_entity_without_confirm_splits_tables_by_column_only() -> None:
@@ -488,7 +523,9 @@ async def test_multi_entity_leaves_statements_out_past_the_choice_option_limit()
     scopes = await MultiEntity(confirm=False).resolve(parsed, VEHICLE, fake.client())
     assert len(scopes) == 255
     assert fake.calls == []  # 255 labels + "all of them" don't fit one Choice
-    assert all(len(s.statement_ids) == 1 and not s.shared_statement_ids for s in scopes)
+    assert texts(parsed, scopes[7].statement_ids) == ["Trim 7", "Power · Trim 7: 7"]
+    # The paragraph is left out; the row label needs no question, so it's still shared.
+    assert all(texts(parsed, s.shared_statement_ids) == ["Power"] for s in scopes)
 
 
 @pytest.mark.parametrize("p", [-0.1, 1.5])
@@ -540,10 +577,11 @@ async def test_entity_stage_gives_multi_entity_only_what_passed_the_component_ga
     # The paragraphs were gated out, so no entity question is asked about them.
     assert len(fake.calls) == 2  # the columns and the rows
     assert texts(parsed, se_l.statement_ids) == [
+        "SE L",
         "Power · SE L: 180PS",
         "Warranty · SE / SE L: 3 years",
     ]
-    assert se.shared_statement_ids == se_l.shared_statement_ids == []
+    assert texts(parsed, se.shared_statement_ids) == ["Power", "Warranty"]
 
 
 async def test_entity_stage_drops_statements_a_resolver_gives_from_gated_out_parts() -> None:
@@ -676,16 +714,25 @@ async def test_parent_child_splits_table_columns_into_children_asking_nothing() 
     assert fake.calls == []
 
     assert (parent.label, parent.parent, parent.field) == ("document", None, None)
-    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+    # Row labels head every child's column, so they're the parent's (children inherit).
+    assert texts(parsed, parent.statement_ids) == [
+        "Kestrova",
+        "Every Kestrova has 5 doors.",
+        "Power",
+        "Doors",
+        "Warranty",
+    ]
     assert parent.shared_statement_ids == []
     assert (se.label, se.parent, se.field) == ("SE", "document", "trims")
     assert (se_l.label, se_l.parent, se_l.field) == ("SE L", "document", "trims")
     assert texts(parsed, se.statement_ids) == [
+        "SE",
         "Power · SE: 150PS",
         "Doors · SE: -",
         "Warranty · SE / SE L: 3 years",
     ]
     assert texts(parsed, se_l.statement_ids) == [
+        "SE L",
         "Power · SE L: 180PS",
         "Doors · SE L: 3",
         "Warranty · SE / SE L: 3 years",  # a cell spanning both columns is on both
@@ -701,8 +748,17 @@ async def test_parent_child_can_take_a_tables_rows_as_the_children() -> None:
         parsed, CAR, FakeJev(strict=True).client()
     )
     assert [c.label for c in children] == ["Power", "Doors", "Warranty"]
-    assert texts(parsed, children[0].statement_ids) == ["Power · SE: 150PS", "Power · SE L: 180PS"]
-    assert texts(parsed, parent.statement_ids) == ["Kestrova", "Every Kestrova has 5 doors."]
+    assert texts(parsed, children[0].statement_ids) == [
+        "Power",
+        "Power · SE: 150PS",
+        "Power · SE L: 180PS",
+    ]
+    assert texts(parsed, parent.statement_ids) == [
+        "Kestrova",
+        "Every Kestrova has 5 doors.",
+        "SE",
+        "SE L",
+    ]
 
 
 async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> None:
@@ -715,19 +771,18 @@ async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> No
         parsed, CAR, FakeJev(strict=True).client()
     )
     assert (se.label, se_l.label) == ("SE", "SE L")
-    assert (
-        texts(parsed, se.statement_ids)
-        == texts(parsed, se_l.statement_ids)
-        == ["SE · SE L · Warranty: 3 years"]
-    )
+    warranty = "SE · SE L · Warranty: 3 years"
+    assert texts(parsed, se.statement_ids) == ["SE", warranty]
+    assert texts(parsed, se_l.statement_ids) == [warranty, "SE L"]
 
 
 async def test_parent_child_takes_a_single_column_as_one_child() -> None:
     parsed = await parse(
         "<table><tr><th></th><th>SE</th></tr><tr><th>Power</th><td>150PS</td></tr></table>"
     )
-    _, se = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
-    assert texts(parsed, se.statement_ids) == ["Power · SE: 150PS"]
+    parent, se = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
+    assert texts(parsed, se.statement_ids) == ["SE", "Power · SE: 150PS"]
+    assert texts(parsed, parent.statement_ids) == ["Power"]
 
 
 async def test_parent_child_joins_the_same_column_label_across_tables() -> None:
@@ -737,8 +792,14 @@ async def test_parent_child_joins_the_same_column_label_across_tables() -> None:
     )
     parsed = await parse(table.format("Power", "150PS", "180PS") + table.format("Doors", "5", "3"))
     _, se, se_l = await ParentChild().resolve(parsed, CAR, FakeJev(strict=True).client())
-    assert texts(parsed, se.statement_ids) == ["Power · SE: 150PS", "Doors · SE: 5"]
-    assert texts(parsed, se_l.statement_ids) == ["Power · SE L: 180PS", "Doors · SE L: 3"]
+    # Each table states the trim in its header; the child holds both.
+    assert texts(parsed, se.statement_ids) == ["SE", "Power · SE: 150PS", "SE", "Doors · SE: 5"]
+    assert texts(parsed, se_l.statement_ids) == [
+        "SE L",
+        "Power · SE L: 180PS",
+        "SE L",
+        "Doors · SE L: 3",
+    ]
 
 
 async def test_parent_child_takes_components_of_a_type_as_children() -> None:

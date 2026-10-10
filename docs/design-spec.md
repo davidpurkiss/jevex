@@ -198,10 +198,10 @@ class Component(BaseModel):
 | Paragraph | One per sentence (pysbd) |
 | List item | One each |
 | Key/value line, definition list | One per pair |
-| Table | One per cell, rendered with its headers: `Performance › 0-62 mph (s) · 1.5 TSI SE: 9.1` |
+| Table | One per cell, rendered with its headers: `Performance › 0-62 mph (s) · 1.5 TSI SE: 9.1`. With headers on both axes, also one per header label (`SE`), with the corner cell as context Jev sees |
 | Image | Alt text and caption as statements; OCR text parsed into components recursively |
 
-Table headers do double duty: they give each cell its meaning, and they mark entity boundaries for `MultiEntity`.
+Table headers do triple duty: they give each cell its meaning, they mark entity boundaries for `MultiEntity`, and they can be values themselves. A trim named only by its column header ("SE") is stated by no cell, so each header is a statement of its own (#266). It belongs to the entity its column or row defines; one heading the other axis (a row label over every trim's column) is shared without a question. It never triggers the LLM fallback, since most headers are field labels that hold no value.
 
 **Image stage**
 

@@ -1,5 +1,5 @@
 {
-  "accuracy": 0.6635071090047393,
+  "accuracy": 0.6777251184834123,
   "corpus": "7205cd71b82d698f88d4bd75c182282e715e9ea1af939eda79ffce58a999ee2e",
   "documents": 6,
   "fields": {
@@ -16,14 +16,14 @@
     "VehicleSpec.fuel_type": 1.0,
     "VehicleSpec.make": 0.1,
     "VehicleSpec.model": 0.1,
-    "VehicleSpec.power_kw": 0.6,
+    "VehicleSpec.power_kw": 0.5,
     "VehicleSpec.price_gbp": 0.6,
     "VehicleSpec.seats": 1.0,
     "VehicleSpec.top_speed_mph": 0.6,
-    "VehicleSpec.trim": 0.3,
+    "VehicleSpec.trim": 0.7,
     "VehicleSpec.zero_to_62_s": 1.0
   },
-  "llm_calls_per_document": 0.8333333333333334,
+  "llm_calls_per_document": 0.6666666666666666,
   "locale": null,
   "mode": "eval",
   "tolerances": {

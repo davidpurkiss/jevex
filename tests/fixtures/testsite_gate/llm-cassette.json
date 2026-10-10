@@ -22,23 +22,9 @@
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 GT: 143PS\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004836,
+      "cost": 0.004596,
       "input_tokens": 539,
-      "output_tokens": 134
-    }
-  },
-  "cedb35a59f4705c4": {
-    "model": "claude-opus-5-5",
-    "output": {
-      "evidence": "Power output \u00b7 Edition: 173 bhp",
-      "stated": true,
-      "value": 129.0
-    },
-    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 Edition: 173 bhp\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
-    "usage": {
-      "cost": 0.004688,
-      "input_tokens": 542,
-      "output_tokens": 126
+      "output_tokens": 122
     }
   },
   "d1e92ba2be3918ff": {
@@ -50,9 +36,9 @@
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications\nStatement: Compare the Delmaro Kestrova range below.\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.00686,
+      "cost": 0.00826,
       "input_tokens": 520,
-      "output_tokens": 239
+      "output_tokens": 309
     }
   },
   "eec3aca60e4fa71c": {

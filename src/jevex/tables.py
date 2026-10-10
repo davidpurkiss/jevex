@@ -21,6 +21,20 @@ A spec table's cell "9.1" means nothing alone; rendered as
   data elsewhere ("Towing" with no value for any trim). They give no statement and are
   neither a band nor a header row, so the rows below keep their own headers.
 
+In a table with headers on both axes (a comparison table), each header cell is also a
+``table_header`` statement, because a header can be a value no cell states: the trim "SE"
+heading its column. Its text is the header's own label (``SE``, stacked headers joined).
+The corner, the header-row text over the row headers ("Trim", "Specification"), goes on
+:attr:`TableCellRef.corner <jevex.statements.TableCellRef.corner>`, and Jev sees it as
+context: whether it names the row headers ("Trim" over SE, SE L), the column headers, or
+neither is Jev's to judge. So are the other labels on the header's axis
+(:attr:`~jevex.statements.TableCellRef.axis_labels`): "Sport" alone needn't read as a trim,
+but among "SE, Sport, GT" it does. Each label gives one statement however many columns or rows
+repeat it. Headers
+that are only field labels ("Fuel") are categorised like any statement, and Jev finds
+no value in them. Key/value tables and tables with column headers alone give none: their
+headers label the values, and every cell's text already holds them.
+
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
 statement per row, its cells joined with ``" | "``; a two-column one without headers whose
@@ -60,7 +74,10 @@ def _label(text: str) -> str:
 
 
 def table_statements(table: Component) -> list[Statement]:
-    """One statement per non-empty data cell of ``table`` (or per row, without headers)."""
+    """One statement per non-empty data cell of ``table`` (or per row, without headers).
+
+    A table with headers on both axes also gives a ``table_header`` statement per header
+    label: a column's before the first body row, a row's before that row's cells."""
     table = infer_headers(table)
     cells = [c for c in table.cells if _clean(c.text)]
     if not cells:
@@ -128,7 +145,37 @@ def table_statements(table: Component) -> list[Statement]:
                 for covered in range(c.row, c.row + c.row_span):
                     row_header_cells.setdefault(covered, []).append(c)
 
-    out = []
+    # Header statements, only with headers on both axes (see the module docstring).
+    row_header_cols = {c.col for cells in row_header_cells.values() for c in cells}
+    both_axes = bool(header_rows) and bool(row_header_cols)
+    seen: set[str] = set()
+    # A header over no data (a blank row's "Towing", an empty column) names nothing.
+    data = [c for c in cells if not c.header]
+    data_rows = {row for c in data for row in range(c.row, c.row + c.row_span)}
+    data_cols = {col for c in data for col in range(c.col, c.col + c.col_span)}
+
+    def row_labels_of(c: TableCell) -> list[str]:
+        """One label per row ``c`` covers: that row's headers, joined ("Kestrova SE")."""
+        per_row = [
+            [_label(h.text) for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)]
+            for covered in range(c.row, c.row + c.row_span)
+        ]
+        return list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
+
+    row_axis = list(
+        dict.fromkeys(
+            _label(c.text)
+            for r in body
+            if roles[r] == "body"
+            for c in rows[r]
+            if c.header
+            and _label(c.text)
+            and any(r2 in data_rows for r2 in range(c.row, c.row + c.row_span))
+        )
+    )
+    out: list[Statement] = []
+    if both_axes:
+        out += _column_header_statements(table, header_rows[-1], col_headers, data_cols, seen)
     for r in body:
         row = sorted(rows[r], key=lambda c: c.col)
         if roles[r] != "body":
@@ -136,9 +183,24 @@ def table_statements(table: Component) -> list[Statement]:
                 group = _label(row[0].text)  # a band ("Performance")
             else:
                 col_headers = headers_of([r])  # a header row repeated mid-table
+                if both_axes:
+                    out += _column_header_statements(table, r, col_headers, data_cols, seen)
             continue
         for c in row:
             if c.header:
+                label = _label(c.text)
+                covers_data = any(r2 in data_rows for r2 in range(c.row, c.row + c.row_span))
+                if both_axes and label and covers_data and label not in seen:
+                    seen.add(label)
+                    ref = TableCellRef(
+                        row=r,
+                        col=c.col,
+                        row_headers=[label],
+                        row_labels=row_labels_of(c),
+                        corner=" ".join(col_headers.get(c.col, [])) or None,
+                        axis_labels=row_axis,
+                    )
+                    out.append(_statement(table, f"h{r}c{c.col}", label, ref, "table_header"))
                 continue
             # A data cell spanning rows takes every covered row's headers, and one label
             # per covered row: its headers, joined ("Kestrova SE").
@@ -318,11 +380,49 @@ def _render(group: str | None, rows: list[str], cols: list[str], value: str) -> 
     return f"{group} › {text}" if group else text
 
 
-def _statement(table: Component, suffix: str, text: str, ref: TableCellRef) -> Statement:
+def _column_header_statements(
+    table: Component,
+    row: int,
+    col_headers: dict[int, list[str]],
+    data_cols: set[int],
+    seen: set[str],
+) -> list[Statement]:
+    """A ``table_header`` statement per label of a column holding data, unless already
+    ``seen``: its stacked headers joined (``1.5 TSI SE``), with the corner (the header-row
+    text left of the first data column) and the row's column labels as context."""
+    first = min(data_cols, default=0)
+    corner = " ".join(
+        " ".join(labels) for col, labels in sorted(col_headers.items()) if col < first
+    )
+    labels = {
+        col: label
+        for col in sorted(col_headers)
+        if col in data_cols and (label := " ".join(col_headers[col]))
+    }
+    axis = list(dict.fromkeys(labels.values()))
+    out: list[Statement] = []
+    for col, label in labels.items():
+        if label in seen:
+            continue
+        seen.add(label)
+        ref = TableCellRef(
+            row=row, col=col, col_headers=[label], corner=corner.strip() or None, axis_labels=axis
+        )
+        out.append(_statement(table, f"h{row}c{col}", label, ref, "table_header"))
+    return out
+
+
+def _statement(
+    table: Component,
+    suffix: str,
+    text: str,
+    ref: TableCellRef,
+    kind: Literal["table_cell", "table_header"] = "table_cell",
+) -> Statement:
     return Statement(
         id=f"{table.id}.{suffix}",
         text=text,
-        kind="table_cell",
+        kind=kind,
         component_id=table.id,
         heading_trail=list(table.heading_trail),
         location=table.location,

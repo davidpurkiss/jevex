@@ -11,8 +11,10 @@ list item              one each; a ``Label: value`` item, a ``dd``   ``list_item
 heading                one (a product page's title is its ``h1``)    ``sentence``
 caption                one                                           ``caption``
 image                  its alt text                                  ``alt_text``
-table                  one per cell, with its row and column         ``table_cell``
-                       headers (:mod:`jevex.tables`)
+table                  one per cell, with its row and column         ``table_cell`` /
+                       headers, and one per header label of a        ``table_header``
+                       table with headers on both axes
+                       (:mod:`jevex.tables`)
 containers             none; their children are split instead
 =====================  ===========================================  ===============
 
@@ -22,7 +24,8 @@ statements. Components that already have statements (the image stage's ``vision`
 statements) aren't split again.
 
 Each statement carries its component's ``heading_trail`` and ``location``. Ids are
-``<component id>.<n>`` (table cells: ``<table id>.r<row>c<col>``), so they're unique
+``<component id>.<n>`` (table cells: ``<table id>.r<row>c<col>``, headers
+``<table id>.h<row>c<col>``), so they're unique
 and stable for a given tree.
 
 A statement longer than :data:`MAX_STATEMENT_CHARS` (a whole product description in one
