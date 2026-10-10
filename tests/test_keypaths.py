@@ -1096,31 +1096,23 @@ async def test_a_settled_jev_reading_is_only_as_sure_as_the_reading() -> None:
     assert [(a.value, a.raw) for a in meta.alternatives] == [("petrol", "Petrol")]
 
 
-async def test_list_fields_and_a_reserved_none_value_arent_offered() -> None:
+async def test_one_option_left_asks_nothing() -> None:
+    # A literal "none" can't be offered, and values cut to the same text are one option:
+    # either way one option is left, so the first value stands without a request.
+    paths = {"model": "model", "name": "model", "color[]": "colours", "colour[]": "colours"}
     data = {"model": "none", "name": "Golf", "color": ["Red"], "colour": ["Blue"]}
-    fake = mapping_jev(
-        {"model": "model", "name": "model", "color[]": "colours", "colour[]": "colours"}
-    ).choice("Which of these is the model name", "Golf", confidence=0.9)
+    fake = mapping_jev(paths)
     fields = await extract(KeyPathMapper(), fake, data)
-    assert fields["model"].value == "Golf"
+    assert fields["model"].value == "none"
     assert fields["colours"].value == ["Red"]  # a list field takes the first path's values
-    [call] = settle_calls(fake)
-    [question] = call.questions.values()
-    assert isinstance(question, Choice)
-    assert list(question.options) == ["Golf", "none"]
-
-
-async def test_long_values_are_cut_in_the_options_and_too_many_are_capped() -> None:
     long = {"model": "A" * 250 + "x", "name": "A" * 250 + "y"}
-    fake = mapping_jev({"model": "model", "name": "model"})
-    fake.choice("Which of these is the model name", "A" * 200)
-    fields = await extract(KeyPathMapper(), fake, long)
-    assert fields["model"].value == long["model"]  # the first value cut the same stands
-    [call] = settle_calls(fake)
-    [question] = call.questions.values()
-    assert isinstance(question, Choice)
-    assert list(question.options) == ["A" * 200, "none"]
+    fake2 = mapping_jev(paths)
+    fields = await extract(KeyPathMapper(), fake2, long)
+    assert fields["model"].value == long["model"]
+    assert settle_calls(fake) == settle_calls(fake2) == []
 
+
+async def test_too_many_values_are_capped() -> None:
     many = {"offers": [{"price": 1000 + i} for i in range(300)]}
     fake = mapping_jev({"offers[].price": "price"}).choice("Which of these is the price", "1253")
     result = await KeyPathMapper().extract(page(many), [SchemaSpec.from_model(Car)], fake.client())

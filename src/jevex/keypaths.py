@@ -448,7 +448,8 @@ class KeyPathMapper:
 
         Jev is asked the field's own :meth:`~jevex.schema.FieldSpec.select_question` over
         the values (as their leaves give them, cut to :data:`MAX_VALUE_CHARS`; values
-        that read the same once cut are one option, the first standing for it), with
+        that read the same once cut are one option, the first standing for it, and a
+        literal "none" isn't offered), when that leaves two options or more, with
         the leaves of the blobs giving them as the state, cut to fit
         (:meth:`~jevex.jev.JevClient.fit_state`). Fields whose values come from the same
         blobs are asked in one request. The picked value is as sure as Jev's answer (or
@@ -470,6 +471,8 @@ class KeyPathMapper:
                 for value in values:
                     options.setdefault(value.raw[:MAX_VALUE_CHARS], value)
                 options.pop(NONE_OPTION, None)
+                if len(options) < 2:
+                    continue  # one option leaves Jev nothing to settle
                 if len(options) >= MAX_CHOICE_OPTIONS:
                     events.append(
                         (
