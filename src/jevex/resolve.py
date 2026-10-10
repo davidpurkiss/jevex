@@ -9,7 +9,6 @@ Jev says is about one trim.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, get_args
 
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
 
     from jevex.interfaces import EntityResolver, ParsedDocument
     from jevex.jev import JevClient, JSONContent
+    from jevex.keypaths import StructuredItem
     from jevex.layout import Component
     from jevex.pipeline import Context
     from jevex.results import FieldMeta
@@ -617,7 +617,7 @@ class EntityStage:
     Values recorded for the whole document before entities were known (embedded data)
     move onto the scopes when none of them is the document
     (:func:`place_document_values`, a ``document_values_placed`` event): each to the
-    entity an embedded object names, else shared by every entity.
+    entity Jev says its embedded object describes, else shared by every entity.
 
     Without a parsed document (no layout stage ran), every schema gets one empty scope,
     labelled as the resolver would label a single entity, so structured-data-only
@@ -648,7 +648,7 @@ class EntityStage:
                 run.scopes = [
                     EntityScope(label=label if isinstance(label, str) else SINGLE_ENTITY_LABEL)
                 ]
-                self._place_document_values(ctx, run)
+                await self._place_document_values(ctx, run)
                 return
             relevant = run.relevant_components()
             # The resolver sees only what passed the component gate, so a resolver that
@@ -665,7 +665,7 @@ class EntityStage:
                         s for s in scope.shared_statement_ids if s in view.statements
                     ]
             run.scopes = [s for s in scopes if s.field is None]
-            self._place_document_values(ctx, run)
+            await self._place_document_values(ctx, run)
             children.extend(self._child_runs(ctx, run, scopes))
             if not scopes:
                 ctx.event(self.name, "no_entities", f"{run.name}: the resolver found no entities")
@@ -683,10 +683,10 @@ class EntityStage:
         for child in children:
             ctx.schemas[child.name] = child
 
-    def _place_document_values(self, ctx: Context, run: SchemaRun) -> None:
+    async def _place_document_values(self, ctx: Context, run: SchemaRun) -> None:
         """Give the entities what earlier routes found for the whole document (embedded
         data), so it isn't a record of its own: see :func:`place_document_values`."""
-        placed = place_document_values(run)
+        placed = await place_document_values(run, ctx.jev)
         if placed is not None:
             matched, shared = placed
             ctx.event(
@@ -742,21 +742,28 @@ class EntityStage:
         return [kids[0] for kids in by_parent.values()]
 
 
-def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
+async def place_document_values(run: SchemaRun, jev: JevClient) -> tuple[int, int] | None:
     """Move the values recorded for the whole document (on :data:`SINGLE_ENTITY_LABEL`,
     by the structured stage, before entities are known) onto ``run``'s scopes, when
     none of them is the document.
 
-    With one scope, they become its own. With more, each field's value goes:
+    With one scope, they become its own. With more, Jev is asked which entity each of
+    :attr:`~jevex.pipeline.SchemaRun.structured_items` giving a value describes: one
+    :meth:`~jevex.schema.SchemaSpec.entity_question` Choice per object, with its leaves'
+    statements as the state: the question :class:`MultiEntity` asks about an unclaimed
+    statement. Then each field's value goes:
 
-    - to an entity that one of :attr:`~jevex.pipeline.SchemaRun.structured_items` names
-      (:func:`match_label`), from the first such item that gives the field (an item
-      holding another matched item isn't matched itself);
+    - to the entity an object describes, from the first such object that gives the field
+      (an object holding another placed object isn't placed itself: a vehicle and its
+      offers);
     - to every other entity, marked ``shared`` (so a value of the entity's own replaces
       it, :meth:`~jevex.pipeline.SchemaRun.offer_field`): the document's value, unless it
-      came from an item matched to an entity; then the value from outside every item
-      (:attr:`~jevex.pipeline.SchemaRun.structured_rest`), else from the first item
-      matched to no entity (and not inside one that was).
+      came from an object placed on an entity; then the value from outside every object
+      (:attr:`~jevex.pipeline.SchemaRun.structured_rest`), else from the first object
+      that applies to every entity (and isn't inside a placed one).
+
+    Past 254 entities there are too many options for a Choice, so nothing is asked and
+    every object applies to every entity.
 
     Returns how many values went to an entity of its own and how many were shared (each
     entity counted), or ``None`` when there was nothing to move.
@@ -770,30 +777,36 @@ def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
         for name, meta in page.items():
             run.set_field(labels[0], name, meta)
         return sum(m.found for m in page.values()), 0
-    owner = {item.path: match_label(item.names, labels) for item in run.structured_items}
-    named = [i for i in run.structured_items if owner[i.path] is not None]
-    # An object holding a matched object (a vehicle and its offers) isn't matched itself:
+    items = [
+        i for i in run.structured_items if any(m.found for m in i.fields.get(run.name, {}).values())
+    ]
+    owners = await _item_owners(items, labels, run.spec, jev)
+    placed = [(i, label) for i, label in zip(items, owners, strict=True) if label is not None]
+    # An object holding a placed object (a vehicle and its offers) isn't placed itself:
     # its other values are the page's, and the inner objects' are theirs.
-    matched = [i for i in named if not any(o.statement_ids < i.statement_ids for o in named)]
-    for outer in {i.path for i in named} - {i.path for i in matched}:
-        owner[outer] = None
-    taken = {sid for item in matched for sid in item.statement_ids}
+    matched = [
+        (i, label)
+        for i, label in placed
+        if not any(o.statement_ids < i.statement_ids for o, _ in placed)
+    ]
+    taken = {sid for item, _ in matched for sid in item.statement_ids}
     loose = [
-        i for i in run.structured_items if owner[i.path] is None and not i.statement_ids & taken
+        i
+        for i, label in zip(items, owners, strict=True)
+        if label is None and not i.statement_ids & taken
     ]
     counts = [0, 0]
     for name, meta in page.items():
         own: dict[str, FieldMeta] = {}
-        for item in matched:
-            found = item.fields.get(run.name, {}).get(name)
-            label = owner[item.path]
-            if found is not None and found.found and label is not None:
+        for item, label in matched:
+            found = item.fields[run.name].get(name)
+            if found is not None and found.found:
                 own.setdefault(label, found)
         shared: FieldMeta | None = meta
         if meta.found and meta.source is not None and meta.source.statement_id in taken:
             others = [
                 run.structured_rest.get(name),
-                *(i.fields.get(run.name, {}).get(name) for i in loose),
+                *(i.fields[run.name].get(name) for i in loose),
             ]
             shared = next((m for m in others if m is not None and m.found), None)
         for label in labels:
@@ -806,37 +819,24 @@ def place_document_values(run: SchemaRun) -> tuple[int, int] | None:
     return counts[0], counts[1]
 
 
-def match_label(names: Sequence[str], labels: Sequence[str]) -> str | None:
-    """The entity label one of ``names`` names, if exactly one is best.
+async def _item_owners(
+    items: list[StructuredItem], labels: list[str], schema: SchemaSpec, jev: JevClient
+) -> list[str | None]:
+    """The entity label Jev says each object describes, or ``None`` when it applies to
+    every entity (or there are too many entities to ask). The state is the object's text
+    alone, cut to fit one request (:meth:`~jevex.jev.JevClient.fit_state`, which sizes
+    plain text): its first leaves say what it is."""
+    if len(labels) >= MAX_CHOICE_OPTIONS:
+        return [None] * len(items)
+    questions = {"entity": schema.entity_question(labels)}
 
-    Words are compared ignoring case and punctuation. A name equal to a label is best;
-    otherwise the longest label found whole within a name ("SE L" in "Kestrova SE L",
-    over "SE"). A tie, or no label in any name, gives ``None``: a name inside a label
-    ("SE" in "Kestrova SE") isn't enough, since a model's name is inside all of them.
-    """
-    best: tuple[bool, int] | None = None
-    found: set[str] = set()
-    for name in names:
-        words = _words(name)
-        for label in labels:
-            target = _words(label)
-            if not target or not _contains(words, target):
-                continue
-            rank = (words == target, len(target))
-            if best is None or rank > best:
-                best, found = rank, {label}
-            elif rank == best:
-                found.add(label)
-    return next(iter(found)) if len(found) == 1 else None
+    async def ask(item: StructuredItem) -> str | None:
+        answer = (await jev.ask(jev.fit_state(item.text, questions), questions))["entity"]
+        if not isinstance(answer, ChoiceAnswer):
+            raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+        return None if answer.choice == ALL_OPTION else answer.choice
 
-
-def _words(text: str) -> list[str]:
-    return re.findall(r"\w+", text.casefold())
-
-
-def _contains(words: list[str], part: list[str]) -> bool:
-    n = len(part)
-    return any(words[i : i + n] == part for i in range(len(words) - n + 1))
+    return await gather(ask(i) for i in items)
 
 
 class InvalidScopeError(ValueError):

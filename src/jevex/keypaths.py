@@ -27,11 +27,11 @@ Mapped values are normalised like any candidate: numbers, money and dates take t
 the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
 bool values that don't read directly are asked of Jev as the field's own question. They
 are recorded on the default entity with ``method="structured"``. Each object in an array
-that names itself (:data:`NAME_KEYS`; a JSON-LD ``offers[]`` item called "SE L") also
-gets the values its own leaves give (:class:`StructuredItem`, reusing Jev's readings,
-never asking anything new), as do the leaves outside such objects
-(:attr:`StructuredResult.rest`). Once the entity stage knows a page holds more than one
-entity, it gives each the values of the object naming it and shares the rest
+(an entity candidate: a JSON-LD ``offers[]`` item) also gets the values its own leaves
+give (:class:`StructuredItem`, reusing Jev's readings, never asking anything new), as do
+the leaves outside every such object (:attr:`StructuredResult.rest`). Once the entity
+stage knows a page holds more than one entity, it asks Jev which entity each object
+describes, gives each entity its objects' values and shares the rest
 (:func:`~jevex.resolve.place_document_values`), so there's no "document" record beside
 them.
 
@@ -123,10 +123,6 @@ under Jev's limit because the longest question counts against it too."""
 MEMORY_SIZE = 1024
 """Fingerprint × schema entries a store-less mapper remembers (least recently used go)."""
 
-NAME_KEYS = frozenset({"name", "model", "vehicleconfiguration", "trim", "variant", "title"})
-"""Keys (any case) whose string values name an array's object, so it can be matched to an
-entity (:class:`StructuredItem`)."""
-
 _SKIP_KEYS = frozenset({"@context", "@id"})
 _QUOTE = frozenset(".[]")
 
@@ -145,17 +141,14 @@ class Leaf:
 
 
 @dataclass(frozen=True)
-class NamedItem:
-    """An object in an array (an entity candidate) that names something: ``offers[1]``
-    with ``name: "SE L"``."""
+class ArrayItem:
+    """An object in an array (an entity candidate): ``offers[1]``."""
 
     path: str
     """With indices: ``offers[1]``."""
     start: int
     end: int
     """Its leaves are the blob's ``leaves[start:end]``, nested objects and arrays included."""
-    names: tuple[str, ...]
-    """String values under :data:`NAME_KEYS`, outside any array nested in the item."""
 
 
 @dataclass(frozen=True)
@@ -167,8 +160,8 @@ class FlatBlob:
     leaves: tuple[Leaf, ...]
     entities: tuple[str, ...]
     """Collapsed paths of arrays of objects, e.g. ``offers[]`` (entity candidates)."""
-    items: tuple[NamedItem, ...] = ()
-    """The entity candidates' objects that name something, in document order."""
+    items: tuple[ArrayItem, ...] = ()
+    """The entity candidates' objects that hold any leaf, in document order."""
 
     @property
     def fingerprint(self) -> str:
@@ -201,37 +194,36 @@ def flatten(blob: StructuredBlob, index: int = 0) -> FlatBlob:
     """Leaves of ``blob.data`` with their key paths. ``@context``/``@id`` are skipped."""
     leaves: list[Leaf] = []
     entities: list[str] = []
-    found: list[NamedItem] = []
+    found: list[ArrayItem] = []
 
-    def walk(value: Any, path: str, shape: str, key: str, names: list[str] | None) -> None:
+    def walk(value: Any, path: str, shape: str) -> None:
         if isinstance(value, dict):
             for k, child in value.items():  # pyright: ignore[reportUnknownVariableType]
                 if k in _SKIP_KEYS:
                     continue
                 name = str(k)  # pyright: ignore[reportUnknownArgumentType]
-                walk(child, _key(path, name), _key(shape, name), name, names)
+                walk(child, _key(path, name), _key(shape, name))
         elif isinstance(value, list):
             items: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
             if any(isinstance(item, dict) for item in items) and f"{shape}[]" not in entities:
                 entities.append(f"{shape}[]")
             for i, item in enumerate(items):
-                if not isinstance(item, dict):
-                    walk(item, f"{path}[{i}]", f"{shape}[]", key, None)
-                    continue
-                start, own = len(leaves), list[str]()
-                walk(item, f"{path}[{i}]", f"{shape}[]", key, own)
-                if own:
-                    found.append(NamedItem(f"{path}[{i}]", start, len(leaves), tuple(own)))
+                start = len(leaves)
+                walk(item, f"{path}[{i}]", f"{shape}[]")
+                if isinstance(item, dict) and len(leaves) > start:
+                    found.append(ArrayItem(f"{path}[{i}]", start, len(leaves)))
         elif isinstance(value, str | int | float | bool) and not (
             isinstance(value, str) and not value.strip()
         ):
             leaves.append(Leaf(len(leaves), path or "$", shape or "$", value))
-            if names is not None and isinstance(value, str) and key.lower() in NAME_KEYS:
-                names.append(value.strip())
 
-    walk(blob.data, "", "", "", None)
+    walk(blob.data, "", "")
     found.sort(key=lambda item: item.start)
     return FlatBlob(blob, index, tuple(leaves), tuple(entities), tuple(found))
+
+
+def _statement_text(leaf: Leaf) -> str:
+    return f"{leaf.path}: {_text(leaf.value)}"
 
 
 def _text(value: str | int | float | bool) -> str:
@@ -242,13 +234,14 @@ def _text(value: str | int | float | bool) -> str:
 
 @dataclass(frozen=True)
 class StructuredItem:
-    """The values one named object in an array gives (a JSON-LD ``offers[]`` item called
-    "SE L"), so the entity stage can give them to the entity it names."""
+    """The values one object in an array gives (a JSON-LD ``offers[]`` item), so the entity
+    stage can give them to the entity Jev says it describes."""
 
     path: str
     """With indices: ``offers[1]``."""
-    names: tuple[str, ...]
-    """What the object calls itself (see :data:`NAME_KEYS`)."""
+    text: str
+    """Its leaves' structured statements, one per line: what Jev reads to judge which
+    entity the object describes."""
     statement_ids: frozenset[str]
     """The structured statements of its leaves."""
     fields: dict[str, dict[str, FieldMeta]]
@@ -265,7 +258,7 @@ class StructuredResult:
     events: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     """``(kind, message)`` pairs for document meta."""
     items: list[StructuredItem] = field(default_factory=list[StructuredItem])
-    """Named objects in arrays, with the values each gives, in document order."""
+    """Objects in arrays, with the values each gives, in document order."""
     rest: dict[str, dict[str, FieldMeta]] = field(default_factory=dict[str, dict[str, FieldMeta]])
     """Like :attr:`fields`, read only from leaves in none of :attr:`items`."""
     store_errors: list[tuple[str, StoreError]] = field(default_factory=list[tuple[str, StoreError]])
@@ -373,7 +366,7 @@ class KeyPathMapper:
             statements.extend(
                 Statement(
                     id=flat.statement_id(leaf),
-                    text=f"{leaf.path}: {_text(leaf.value)}",
+                    text=_statement_text(leaf),
                     kind="structured",
                     component_id=f"structured.{flat.index}",
                     location=flat.blob.location,
@@ -399,7 +392,7 @@ class KeyPathMapper:
                 items.append(
                     StructuredItem(
                         path=item.path,
-                        names=item.names,
+                        text="\n".join(_statement_text(leaf) for leaf in own),
                         statement_ids=frozenset(flat.statement_id(leaf) for leaf in own),
                         fields=await self._blob(
                             flat, schemas, mapping, document, jev, own, ask=False
