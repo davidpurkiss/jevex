@@ -332,11 +332,8 @@ def prepare_corpus(spec: CorpusSpec, config_dir: Path, work: Path) -> PreparedCo
     Raises :class:`BenchRunError` for an unset ``env``, a schema or pipeline that doesn't
     load, and :class:`~jevex.benchmarks.CorpusLockError` for a corpus that doesn't match.
     """
-    from jevex.cli import (
-        CliError,
-        load_pipeline,
-        load_schema,
-    )  # cli imports jevex, which imports us
+    # Imported here: jevex.cli imports jevex, which imports this module.
+    from jevex.cli import CliError, load_pipeline, load_schema
 
     try:
         schemas = tuple(load_schema(s) for s in spec.schemas)
