@@ -116,6 +116,11 @@ Import them lazily inside the code that needs them.
   (or a `Cassette`) and never the network; `pytest-socket` blocks it. Async tests are
   plain `async def` (asyncio auto mode). When a stage generates questions, assert the exact
   question text, because it is user-visible behaviour.
+- **Change the tests, not the API:** when a deliberate behaviour change breaks existing
+  tests, update those tests to the new behaviour. Never add an opt-in flag, a default that
+  keeps the old behaviour, an alias or a compatibility shim just so old tests keep passing.
+  jevex is pre-v1, so there's no backwards compatibility to preserve. Configuration has
+  to be justified by real callers, not by tests.
 - **Exports:** add public names to `jevex/__init__.py` and `__all__`.
 
 ## Definition of done
