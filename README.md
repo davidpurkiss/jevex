@@ -338,9 +338,7 @@ from jevex import Budgets, Extractor, RunBudget, SpendEntry
 class BillingLedger:  # four async methods; see jevex.store.ledger
     async def record_spend(self, entry: SpendEntry) -> None: ...
     async def spend(self, *, since=None, kind=None, run_id=None) -> float: ...
-    async def try_spend(
-        self, entry, *, cap_usd=None, max_count=None, since=None, kind=None
-    ) -> bool: ...
+    async def try_spend(self, entry, *, max_count, since=None, kind=None) -> bool: ...
     async def spend_entries(self, *, since=None, kind=None) -> list[SpendEntry]: ...
 
 
@@ -352,12 +350,13 @@ extractor = Extractor(
 )
 ```
 
-`try_spend` must check its limits and record the entry atomically, so workers sharing a
-cap can't overshoot it together. Sums should be exact to a nano-dollar, because Jev
-charges a few nano-dollars per token. When the ledger raises, jevex can't confirm the
-spend, so the LLM call that needed it isn't made. The failure is reported in
-`result.errors` (kind `ledger`), and Jev and generators carry on. Retrying, buffering or
-failing open during an outage is up to the ledger, for example a wrapper around it.
+`try_spend` keeps the LLM rate limit (`llm_rpm`): it must check `max_count` and record
+the entry atomically, so workers sharing the limit can't overshoot it together. Sums
+should be exact to a nano-dollar, because Jev charges a few nano-dollars per token. When
+the ledger raises, jevex can't confirm the spend, so the LLM call that needed it isn't
+made. The failure is reported in `result.errors` (kind `ledger`), and Jev and generators
+carry on. Retrying, buffering or failing open during an outage is up to the ledger, for
+example a wrapper around it.
 
 ### Packs
 

@@ -726,7 +726,7 @@ def _worker(path: str, rounds: int, barrier: Barrier) -> None:
         barrier.wait()
         for _ in range(rounds):
             await store.record_generator_stats("shared", documents=1, hits=1)
-            await store.try_spend(charge(0.01, "jev"), cap_usd=2.0)
+            await store.try_spend(charge(0.01, "jev"), max_count=200)
         await store.aclose()
 
     asyncio.run(run())
@@ -750,6 +750,6 @@ def test_several_processes_share_one_database(tmp_path: Path) -> None:
     count, total = conn.execute("SELECT COUNT(*), SUM(amount_nano_usd) FROM spend").fetchone()
     conn.close()
     assert (documents, hits) == (480, 480)
-    # 480 attempts at $0.01 against a $2 cap, crossed mid-run: exactly 200 recorded.
+    # 480 attempts against a limit of 200, crossed mid-run: exactly 200 recorded.
     assert count == 200
     assert total == 2 * 1_000_000_000

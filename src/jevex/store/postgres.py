@@ -7,7 +7,7 @@ several independent stores can share one database.
 Concurrency: each operation is one transaction on a pooled connection, at Postgres's
 default isolation (read committed). Counters are single upserts (``count = count + 1``),
 so concurrent increments add up. ``try_spend`` locks the spend table against other
-writers for its check and insert, so workers sharing a cap can't overshoot it together;
+writers for its check and insert, so workers sharing a limit can't overshoot it together;
 readers aren't blocked. Rows written together are locked in one order, so two workers
 can't deadlock on them.
 
@@ -146,7 +146,6 @@ CREATE INDEX documents_at ON {s}.documents (at);
 _MIGRATION_LOCK = 0x6A65_7665_7853_7431  # "jevexSt1"
 
 _NANO = 1_000_000_000
-_INT64_MAX = 2**63 - 1
 
 # Text comparisons in ORDER BY use byte order, as SQLite does, not the database's locale.
 _C: LiteralString = 'COLLATE "C"'
@@ -165,12 +164,6 @@ def _utc(value: datetime) -> datetime:
 
 def _nano(usd: float) -> int:
     return round(usd * _NANO)
-
-
-def _nano_cap(usd: float) -> int:
-    if not math.isfinite(usd) or usd < 0:
-        raise ValueError(f"cap_usd must be finite and non-negative, not {usd!r}")
-    return min(round(usd * _NANO), _INT64_MAX)
 
 
 def _json(value: Any) -> Json:
@@ -646,30 +639,25 @@ class PostgresStore:
         self,
         entry: SpendEntry,
         *,
-        cap_usd: float | None = None,
-        max_count: int | None = None,
+        max_count: int,
         since: datetime | None = None,
         kind: SpendKind | None = None,
     ) -> bool:
-        cap = None if cap_usd is None else _nano_cap(cap_usd)
-        if max_count is not None and max_count < 0:
+        if max_count < 0:
             raise ValueError(f"max_count must be non-negative, not {max_count}")
         if kind is not None and entry.kind != kind:
             raise ValueError(f"a {entry.kind} entry can't be checked against {kind} limits")
         where, params = self._spend_filter(since, kind, None)
-        total = self._q("SELECT COALESCE(SUM(amount_nano_usd), 0), COUNT(*) FROM {s}.spend" + where)
+        counted = self._q("SELECT COUNT(*) FROM {s}.spend" + where)
         values = self._spend_params(entry)
 
         async def op(conn: AsyncConnection[Any]) -> bool:
             # Self-conflicting and held to commit: one check-and-insert at a time, while
             # plain reads carry on.
             await conn.execute(self._q("LOCK TABLE {s}.spend IN SHARE ROW EXCLUSIVE MODE"))
-            row = await (await conn.execute(total, params)).fetchone()
+            row = await (await conn.execute(counted, params)).fetchone()
             assert row is not None  # an aggregate always gives a row
-            spent, count = int(row[0]), int(row[1])
-            if cap is not None and spent + _nano(entry.amount_usd) > cap:
-                return False
-            if max_count is not None and count + 1 > max_count:
+            if int(row[0]) + 1 > max_count:
                 return False
             await conn.execute(self._insert_spend(), values)
             return True

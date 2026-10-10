@@ -256,7 +256,7 @@ async def test_a_failed_write_rolls_back_and_the_store_keeps_working(
 async def test_a_cancelled_write_still_commits(postgres_url: str, pg_schema: str) -> None:
     store = PostgresStore(postgres_url, db_schema=pg_schema)
     await store.record_generator_stats("g1", documents=1)  # opens the pool
-    task = asyncio.create_task(store.try_spend(charge(0.25), cap_usd=1.0))
+    task = asyncio.create_task(store.try_spend(charge(0.25), max_count=1))
     await asyncio.sleep(0)  # the write is sent
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -311,7 +311,7 @@ def _worker(url: str, schema: str, rounds: int, barrier: Barrier) -> None:
         for _ in range(rounds):
             await asyncio.gather(
                 store.record_generator_stats("shared", documents=1, hits=1),
-                store.try_spend(charge(0.01), cap_usd=2.0),
+                store.try_spend(charge(0.01), max_count=200),
                 store.count_unsure_key_paths("fp", "S", ["$.b", "$.a"]),
                 store.count_unsure_key_paths("fp", "S", ["$.a", "$.b"]),
             )
@@ -335,7 +335,7 @@ def test_several_processes_share_one_store(postgres_url: str, pg_schema: str) ->
     assert query(postgres_url, f"SELECT documents, hits FROM {pg_schema}.generator_stats") == [
         (300, 300)
     ]
-    # 300 attempts at $0.01 against a $2 cap, crossed mid-run: exactly 200 recorded.
+    # 300 attempts against a limit of 200, crossed mid-run: exactly 200 recorded.
     assert query(postgres_url, f"SELECT COUNT(*), SUM(amount_nano_usd) FROM {pg_schema}.spend") == [
         (200, 2 * 1_000_000_000)
     ]

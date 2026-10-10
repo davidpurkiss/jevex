@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import random
 import sqlite3
 import time
@@ -140,7 +139,6 @@ ALTER TABLE generator_stats ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
 }
 
 _NANO = 1_000_000_000
-_INT64_MAX = 2**63 - 1
 
 
 def _ts(value: datetime) -> float:
@@ -157,12 +155,6 @@ def _nano(usd: float) -> int:
     # Integer billionths of a dollar: Jev charges a few nano-dollars per token, and
     # integer sums are exact, so a cap is hit exactly.
     return round(usd * _NANO)
-
-
-def _nano_cap(usd: float) -> int:
-    if not math.isfinite(usd) or usd < 0:
-        raise ValueError(f"cap_usd must be finite and non-negative, not {usd!r}")
-    return min(round(usd * _NANO), _INT64_MAX)
 
 
 def _json(value: Any) -> str:
@@ -611,25 +603,21 @@ class SQLiteStore:
         self,
         entry: SpendEntry,
         *,
-        cap_usd: float | None = None,
-        max_count: int | None = None,
+        max_count: int,
         since: datetime | None = None,
         kind: SpendKind | None = None,
     ) -> bool:
-        cap = None if cap_usd is None else _nano_cap(cap_usd)
-        if max_count is not None and max_count < 0:
+        if max_count < 0:
             raise ValueError(f"max_count must be non-negative, not {max_count}")
         if kind is not None and entry.kind != kind:
             raise ValueError(f"a {entry.kind} entry can't be checked against {kind} limits")
         where, params = self._spend_filter(since, kind, None)
-        sql = f"SELECT COALESCE(SUM(amount_nano_usd), 0), COUNT(*) FROM spend{where}"
+        sql = f"SELECT COUNT(*) FROM spend{where}"
 
         def run() -> bool:
             with self._write() as cur:
-                spent, count = cur.execute(sql, params).fetchone()
-                if cap is not None and int(spent) + _nano(entry.amount_usd) > cap:
-                    return False
-                if max_count is not None and int(count) + 1 > max_count:
+                (count,) = cur.execute(sql, params).fetchone()
+                if int(count) + 1 > max_count:
                     return False
                 self._insert_spend(cur, entry)
                 return True
