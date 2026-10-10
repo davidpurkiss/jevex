@@ -173,13 +173,18 @@ type Served = list[tuple[FastAPI, dict[str, object]]]
 
 @pytest.fixture
 def served(monkeypatch: pytest.MonkeyPatch) -> Served:
-    """``jevex serve``'s calls to ``uvicorn.run``, which returns at once."""
+    """The apps ``jevex serve`` runs, and where; serving starts and stops at once."""
+    import uvicorn
+
     calls: Served = []
 
-    def run(app: FastAPI, **options: object) -> None:
-        calls.append((app, options))
+    async def serve(self: uvicorn.Server, sockets: object = None) -> None:
+        config = self.config
+        assert isinstance(config.app, FastAPI)
+        calls.append((config.app, {"host": config.host, "port": config.port}))
+        self.started = True
 
-    monkeypatch.setattr("uvicorn.run", run)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve)
     return calls
 
 
@@ -275,6 +280,45 @@ def test_serve_needs_an_api_key(monkeypatch: pytest.MonkeyPatch, served: Served)
     assert main(["serve", "--schema", SCHEMA], err=err) == 1
     assert "TYPESAFE_API_KEY is not set" in err.getvalue()
     assert served == []
+
+
+class ClosingLLM(FakeLLM):
+    closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_serve_closes_the_llm_it_builds_once_serving_stops(
+    monkeypatch: pytest.MonkeyPatch, served: Served
+) -> None:
+    built = ClosingLLM([])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    code, _, err = run_cli("serve", "--schema", SCHEMA, "--llm", "anthropic:claude-sonnet-5-5")
+    assert (code, err) == (0, "")
+    assert len(served) == 1
+    assert built.closed
+    injected = ClosingLLM([])
+    argv = ["serve", "--schema", SCHEMA, "--llm", "anthropic:claude-sonnet-5-5"]
+    code = main(argv, jev=FakeJev().client(), llm=injected, out=io.StringIO(), err=io.StringIO())
+    assert code == 0
+    assert not injected.closed  # the caller's to close
+
+
+def test_serve_fails_when_the_server_doesnt_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    import uvicorn
+
+    async def refused(self: uvicorn.Server, sockets: object = None) -> None:
+        return  # as uvicorn does when it can't bind the port: it logs why and returns
+
+    monkeypatch.setattr(uvicorn.Server, "serve", refused)
+    code, _, err = run_cli("serve", "--schema", SCHEMA, "--port", "9002")
+    assert code == 1
+    assert "couldn't serve at http://127.0.0.1:9002 (see the log above)" in err
 
 
 def test_serve_needs_the_server_extra(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:

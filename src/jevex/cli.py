@@ -102,6 +102,8 @@ from jevex.testsite.waves import DEFAULT_WAVES, format_waves, parse_waves
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    import uvicorn
+
     from jevex.baseline import EvalMode, GateResult
     from jevex.baselines import BaselineSystem
     from jevex.eval import EvalReport
@@ -903,7 +905,6 @@ def _serve(
             threshold=args.threshold,
             extraction_llm=model,
             generator_llm=model,
-            close_llms=llm is None,  # an adapter built here is the service's to close
             stats=args.stats,
             stats_budget_usd=args.stats_budget,
             locale=args.locale,
@@ -917,7 +918,27 @@ def _serve(
         file=stdout,
     )
     stdout.flush()
-    uvicorn.run(create_app(service), host=args.host, port=args.port)
+    server = uvicorn.Server(uvicorn.Config(create_app(service), host=args.host, port=args.port))
+    _serve_until_stopped(server, model if llm is None else None)
+    if not server.started:
+        raise CliError(f"couldn't serve at http://{args.host}:{args.port} (see the log above)")
+
+
+def _serve_until_stopped(server: uvicorn.Server, owned: LLM | None) -> None:
+    """Run ``server`` until it stops (Ctrl-C included), then close ``owned``, the adapter
+    this command built, on the loop that used it: uvicorn's own ``run`` closes its loop
+    before returning."""
+    factory = server.config.get_loop_factory()
+    loop = factory() if factory is not None else asyncio.new_event_loop()
+    try:
+        with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C is how serving ends
+            loop.run_until_complete(server.serve())
+        close = getattr(owned, "aclose", None)
+        if close is not None:
+            loop.run_until_complete(close())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
 
 
 def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:

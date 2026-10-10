@@ -10,7 +10,9 @@ Useful for jevex's own tests and for testing your schemas without network or spe
 For realistic answers, record real responses once and replay them in CI::
 
     backend = cassette("tests/cassettes/golf.json")  # replay; JEVEX_RECORD=1 records
-    extractor = Extractor([VehicleSpec], jev=JevClient(backend))
+    async with Extractor([VehicleSpec], jev=JevClient(backend)) as extractor:
+        ...
+    await backend.aclose()  # the API client a recording run opens
 """
 
 from __future__ import annotations

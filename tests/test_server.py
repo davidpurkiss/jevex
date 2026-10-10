@@ -615,19 +615,13 @@ class ClosingLLM(FakeLLM):
         self.closed += 1
 
 
-@pytest.mark.parametrize("close_llms", [True, False])
-async def test_llms_are_closed_only_when_asked(fake_jev: FakeJev, close_llms: bool) -> None:
+async def test_llms_given_are_left_open(fake_jev: FakeJev) -> None:
     llm = ClosingLLM()
-    service = Service(
-        [Book],
-        jev=fake_jev.client(),
-        extraction_llm=llm,
-        generator_llm=llm,
-        close_llms=close_llms,
-    )
+    service = Service([Book], jev=fake_jev.client(), extraction_llm=llm, generator_llm=llm)
     await service.start()
+    service.extractor(["Book"])
     await service.aclose()
-    assert llm.closed == (1 if close_llms else 0)
+    assert llm.closed == 0  # its maker closes it
 
 
 def test_schemas_must_be_given_and_unique() -> None:
