@@ -1194,7 +1194,7 @@ async def test_children_inherit_the_parents_values_and_their_own_win() -> None:
 async def test_children_are_categorised_only_for_the_nested_fields_their_section_passed() -> None:
     # The intro passes the gate for doors but not power, so its statement is offered doors
     # alone; the table passes for both.
-    fake = car_jev().noul("contain the power (PS)?", p=0.1, state="Every Kestrova")
+    fake = car_jev().noul("contain the power (PS)?", p=0.05, state="Every Kestrova")
     result, fake = await extract_car(MODEL_PAGE, fake)
 
     [gate] = [

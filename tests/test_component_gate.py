@@ -726,6 +726,14 @@ async def test_threshold_is_inclusive_and_validated() -> None:
         NoulComponentGate(max_chars=0)
 
 
+async def test_the_default_threshold_passes_a_section_at_p_0_1() -> None:
+    specs = [SchemaSpec.from_model(Book)]
+    passed = await NoulComponentGate().gate(parsed(page()), specs, FakeJev(default_p=0.1).client())
+    assert "p3" in passed.components["Book"]["title"]
+    failed = await NoulComponentGate().gate(parsed(page()), specs, FakeJev(default_p=0.09).client())
+    assert failed.components["Book"]["title"] == []
+
+
 TABLE_HEADERS = "Does the table's first row name its columns, and its first column name its rows?"
 TABLE_LABELS = "Does the table's first column label the value beside it in each row?"
 
