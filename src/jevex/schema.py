@@ -79,6 +79,12 @@ class SchemaConfig(BaseModel):
     """Template for ``MultiEntity``'s boundary Noul, with ``{label}`` and ``{entity}``."""
     entity_question: str | None = None
     """Template for ``MultiEntity``'s assignment Choice, with ``{entity}``."""
+    table_headers_question: str | None = None
+    """The component gate's Noul about a table without header cells shaped like a
+    comparison table: whether its first row and first column are headers."""
+    table_labels_question: str | None = None
+    """The component gate's Noul about a two-column table without header cells: whether
+    its first column labels the value beside it."""
 
 
 def Field(
@@ -330,6 +336,23 @@ class SchemaSpec:
             )
             questions[group] = Noul(instructions=override or _gate_instructions(members))
         return questions
+
+    def table_headers_question(self) -> Noul:
+        """For the component gate: are a header-less table's first row and first column
+        headers (``Spec | SE | GT`` over ``Power | 150 PS | 200 PS``), or is its first row
+        data like the rest (``Gearbox | Manual | Automatic``)?"""
+        return Noul(
+            instructions=self.config.table_headers_question
+            or "Does the table's first row name its columns, and its first column name its rows?"
+        )
+
+    def table_labels_question(self) -> Noul:
+        """For the component gate: is a header-less two-column table labels and values
+        (``Engine | 1.5 TSI``), or records (``Smith | London``)?"""
+        return Noul(
+            instructions=self.config.table_labels_question
+            or "Does the table's first column label the value beside it in each row?"
+        )
 
     def key_path_question(self, path: str, example: str) -> Choice:
         """For embedded data: which field (or none) does the key path ``path`` hold?

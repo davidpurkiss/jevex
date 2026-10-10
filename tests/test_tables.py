@@ -19,6 +19,7 @@ from jevex.tables import (
     axis_text,
     blank_rows,
     header_prefix,
+    header_shape,
     infer_headers,
     row_roles,
     table_statements,
@@ -43,6 +44,11 @@ def table(*cells: TableCell, trail: list[str] | None = None) -> Component:
 
 def texts(component: Component) -> list[str]:
     return [s.text for s in table_statements(component)]
+
+
+def headed_texts(component: Component) -> list[str]:
+    """The statements of a header-less table Jev said has headers."""
+    return texts(infer_headers(component))
 
 
 def test_cells_carry_row_and_column_headers() -> None:
@@ -165,7 +171,7 @@ def test_a_table_without_headers_gives_one_statement_per_row() -> None:
     assert texts(table()) == []
 
 
-def test_a_two_column_table_without_headers_reads_as_labels_and_values() -> None:
+def test_a_two_column_table_with_inferred_labels_reads_as_labels_and_values() -> None:
     t = table(
         cell(0, 0, "Engine:"),
         cell(0, 1, "1.5 TSI"),
@@ -173,13 +179,16 @@ def test_a_two_column_table_without_headers_reads_as_labels_and_values() -> None
         cell(1, 1, "9.1"),
         cell(2, 1, "a value without its label"),
     )
-    statements = table_statements(t)
+    assert header_shape(t) == "labels"
+    # Until Jev says the first column labels the values, it's rows.
+    assert texts(t) == ["Engine: | 1.5 TSI", "0-62 mph (s) | 9.1", "a value without its label"]
+    statements = table_statements(infer_headers(t))
     assert [s.text for s in statements] == [
         "Engine: 1.5 TSI",
         "0-62 mph (s): 9.1",
         "a value without its label",
     ]
-    assert [s.id for s in statements] == ["t1.r0c1", "t1.r1c1", "t1.r2"]
+    assert [s.id for s in statements] == ["t1.r0c1", "t1.r1c1", "t1.r2c1"]
     ref = statements[0].table
     assert ref is not None
     assert (ref.row, ref.col, ref.row_headers, ref.col_headers) == (0, 1, ["Engine"], [])
@@ -187,9 +196,15 @@ def test_a_two_column_table_without_headers_reads_as_labels_and_values() -> None
 
 def test_two_columns_without_labels_or_with_spans_stay_rows() -> None:
     numbers = table(cell(0, 0, "2019"), cell(0, 1, "150 PS"), cell(1, 0, "2021"), cell(1, 1, "163"))
-    assert texts(numbers) == ["2019 | 150 PS", "2021 | 163"]
     spanning = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, "Note", cols=2))
-    assert texts(spanning) == ["Engine | 1.5 TSI", "Note"]
+    # Labels with no value beside any of them, or values with no label.
+    no_values = table(cell(0, 0, "Engine"), cell(0, 1, " "), cell(1, 0, "Power"))
+    no_labels = table(cell(0, 1, "1.5 TSI"), cell(1, 1, "150 PS"))
+    for t in (numbers, spanning, no_values, no_labels):
+        assert header_shape(t) is None
+        assert infer_headers(t) is t
+    assert headed_texts(numbers) == ["2019 | 150 PS", "2021 | 163"]
+    assert headed_texts(spanning) == ["Engine | 1.5 TSI", "Note"]
 
 
 def test_statements_carry_the_tables_context() -> None:
@@ -598,9 +613,10 @@ def test_bold_td_labels_are_headers_through_the_cleaner_and_parser() -> None:
     assert [s.table.col_headers for s in cells if s.table] == [["SE"], ["GT"]] * 2
 
 
-def test_header_less_two_column_html_table_reads_as_labels_and_values() -> None:
+def test_header_less_two_column_html_table_reads_as_labels_and_values_when_headed() -> None:
     t = html_table("<tr><td>Engine</td><td>1.5 TSI</td></tr><tr><td>Power</td><td>150 PS</td></tr>")
-    assert texts(t) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+    assert texts(t) == ["Engine | 1.5 TSI", "Power | 150 PS"]
+    assert headed_texts(t) == ["Engine: 1.5 TSI", "Power: 150 PS"]
 
 
 def test_a_label_with_an_empty_value_in_a_label_value_table_gives_nothing() -> None:
@@ -610,36 +626,42 @@ def test_a_label_with_an_empty_value_in_a_label_value_table_gives_nothing() -> N
         "<tr><td>Kerb weight</td><td>&nbsp;</td></tr>"
         "<tr><td>Power</td><td>150 PS</td></tr>"
     )
-    assert texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
-    assert [s.id.split(".")[-1] for s in table_statements(plain)] == ["r0c1", "r3c1"]
+    assert texts(plain) == ["Engine | 1.5 TSI", "Towing", "Kerb weight", "Power | 150 PS"]
+    assert headed_texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+    assert [s.id.split(".")[-1] for s in table_statements(infer_headers(plain))] == [
+        "r0c1",
+        "r3c1",
+    ]
     # The bold-label version of the same table gave nothing already, as a blank row.
     bold = html_table(
         "<tr><td><b>Engine</b></td><td>1.5 TSI</td></tr>"
         "<tr><td><b>Towing</b></td><td></td></tr>"
         "<tr><td><b>Power</b></td><td>150 PS</td></tr>"
     )
-    assert texts(bold) == texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+    assert texts(bold) == headed_texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
 
 
 def test_a_header_less_table_that_isnt_label_value_keeps_rows_with_empty_cells() -> None:
     # Numbers in the first column: rows of values, so an empty value keeps its row.
     numbers = html_table("<tr><td>2019</td><td>150 PS</td></tr><tr><td>2021</td><td></td></tr>")
+    assert header_shape(numbers) is None
     assert texts(numbers) == ["2019 | 150 PS", "2021"]
     # Wider than two columns: one statement per row, empty cells left out.
     wide = html_table(
         "<tr><td>Kestrova</td><td>SE</td><td>£24,995</td></tr>"
         "<tr><td>Kestrova</td><td></td><td></td></tr>"
     )
+    assert header_shape(wide) is None
     assert texts(wide) == ["Kestrova | SE | £24,995", "Kestrova"]
     # A label alone in its row, with no value cell at all, isn't a label without a value.
     no_cell = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, "Notes"))
-    assert texts(no_cell) == ["Engine: 1.5 TSI", "Notes"]
+    assert headed_texts(no_cell) == ["Engine: 1.5 TSI", "Notes"]
     # A value whose label cell is empty stays a statement.
     no_label = table(cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, ""), cell(1, 1, "Red"))
-    assert texts(no_label) == ["Engine: 1.5 TSI", "Red"]
+    assert headed_texts(no_label) == ["Engine: 1.5 TSI", "Red"]
 
 
-def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_headers() -> None:
+def test_a_header_less_comparison_table_read_with_its_first_row_and_column_as_headers() -> None:
     t = html_table(
         "<tr><td>Spec</td><td>1.5 TSI SE</td><td>GT</td></tr>"
         "<tr><td>Power</td><td>150 PS</td><td>200 PS</td></tr>"
@@ -648,7 +670,9 @@ def test_a_header_less_comparison_table_infers_its_first_row_and_column_as_heade
         "<tr><td>Towing (kg)</td><td></td><td></td></tr>"
         "<tr><td>Price</td><td>&pound;24,995</td><td>&pound;31,250</td></tr>"
     )
-    statements = table_statements(t)
+    assert header_shape(t) == "comparison"
+    assert texts(t)[:2] == ["Spec | 1.5 TSI SE | GT", "Power | 150 PS | 200 PS"]
+    statements = table_statements(infer_headers(t))
     assert [s.text for s in statements if s.kind == "table_header"] == [
         "1.5 TSI SE",
         "GT",
@@ -683,7 +707,7 @@ def test_an_inferred_comparison_table_keeps_an_empty_corner_and_bands() -> None:
         "<tr><td>Economy</td></tr>"
         "<tr><td>Combined (mpg)</td><td colspan=2>52.3</td></tr>"
     )
-    assert texts(t) == [
+    assert headed_texts(t) == [
         "SE",
         "GT",
         "Power",
@@ -705,6 +729,7 @@ def test_a_header_less_table_of_plain_records_stays_rows() -> None:
         "Alice | London | Engineer",
         "Bob | Leeds | Designer",
     ]
+    assert header_shape(records) is None
     assert infer_headers(records) is records
 
 
@@ -729,10 +754,12 @@ def test_header_inference_needs_a_comparison_tables_shape() -> None:
         rows(("Spec", "SE", "GT"), ("Performance",)),
     ]
     for t in unchanged:
+        assert header_shape(t) is None
         assert infer_headers(t) is t
         assert all(s.table and not s.table.col_headers for s in table_statements(t))
     # Tables that already have headers are left as they are.
     headed = table(cell(0, 1, "SE", header=True), cell(1, 0, "Power"), cell(1, 1, "150 PS"))
+    assert header_shape(headed) is None
     assert infer_headers(headed) is headed
 
 

@@ -485,6 +485,30 @@ async def test_stage_keeps_statements_already_on_a_component_in_reading_order() 
     ]
 
 
+async def test_stage_reads_the_tables_the_gate_found_headers_in_with_them() -> None:
+    def kv(cid: str) -> Component:
+        cells = [
+            TableCell(row=0, col=0, text="Engine"),
+            TableCell(row=0, col=1, text="1.5 TSI"),
+            TableCell(row=1, col=0, text="Power"),
+            TableCell(row=1, col=1, text="150 PS"),
+        ]
+        return comp("table", "Engine | 1.5 TSI\nPower | 150 PS", cid=cid).model_copy(
+            update={"cells": cells}
+        )
+
+    ctx = context(comp("section", cid="root", children=[kv("yes"), kv("no")]))
+    ctx.headed_tables = frozenset({"yes"})
+    await StatementStage().run(ctx)
+    assert ctx.parsed is not None
+    assert [(sid, s.text) for sid, s in ctx.parsed.statements.items()] == [
+        ("yes.r0c1", "Engine: 1.5 TSI"),
+        ("yes.r1c1", "Power: 150 PS"),
+        ("no.r0", "Engine | 1.5 TSI"),
+        ("no.r1", "Power | 150 PS"),
+    ]
+
+
 async def test_stage_refuses_duplicate_statement_ids() -> None:
     clash = Statement(id="p.0", text="x", kind="structured", component_id="ld", location=LOC)
     ctx = context(

@@ -109,6 +109,22 @@ class GateDecision(BaseModel):
     passed_pages: list[int] = Field(default_factory=list[int])
 
 
+class ComponentGateResult(BaseModel):
+    """A component gate's answers about one document.
+
+    ``components`` is ``{schema name: {group: [component ids]}}``: the components relevant
+    to each field group. ``headed_tables`` are the ids of tables without header cells that
+    have headers after all (:func:`~jevex.tables.header_shape`), which the statement stage
+    reads with them marked (:func:`~jevex.tables.infer_headers`); any other such table is
+    read one row at a time.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    components: dict[str, dict[str, list[str]]]
+    headed_tables: frozenset[str] = frozenset()
+
+
 class Scope(BaseModel):
     """Where a candidate generator applies. Empty means "everywhere"."""
 
@@ -235,17 +251,18 @@ class BudgetedImageProcessor(ImageProcessor, Protocol):
 
 @runtime_checkable
 class ComponentGate(Protocol):
-    """The ids of components relevant to each field group, per schema.
+    """The ids of components relevant to each field group, per schema, and which
+    header-less tables have headers (:class:`ComponentGateResult`).
 
-    Returns ``{schema name: {group: [component ids]}}``. Taking every schema at once lets
-    an implementation ask all their questions about one component in one request.
-    ``schemas`` includes each nested model's spec (named ``"<Parent>.<field>"``); leaving
-    one out of the result leaves that child run ungated.
+    Taking every schema at once lets an implementation ask all their questions about one
+    component in one request, a table's headers included. ``schemas`` includes each nested
+    model's spec (named ``"<Parent>.<field>"``); leaving one out of
+    :attr:`~ComponentGateResult.components` leaves that child run ungated.
     """
 
     async def gate(
         self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
-    ) -> dict[str, dict[str, list[str]]]: ...
+    ) -> ComponentGateResult: ...
 
 
 @runtime_checkable

@@ -281,6 +281,9 @@ class Context:
     schemas: dict[str, SchemaRun]
     parsed: ParsedDocument | None = None
     structured: list[Statement] = field(default_factory=list["Statement"])
+    headed_tables: frozenset[str] = frozenset()
+    """Tables without header cells that the component gate found headers in, by component
+    id: the statement stage reads them with those marked (:func:`~jevex.tables.infer_headers`)."""
     timings: dict[str, float] = field(default_factory=dict[str, float])
     events: list[Event] = field(default_factory=list[Event])
     stopped: bool = False

@@ -118,7 +118,7 @@ from jevex.images import (
     VisionProcessor,
     text_components,
 )
-from jevex.interfaces import LLMAnswer
+from jevex.interfaces import ComponentGateResult, LLMAnswer
 from jevex.jev import JevTransientError, RetryPolicy
 from jevex.keypaths import (
     FlatBlob,
@@ -261,10 +261,12 @@ from jevex.structured import (
     StructuredSource,
 )
 from jevex.tables import (
+    HeaderShape,
     RowRole,
     axis_text,
     blank_rows,
     header_prefix,
+    header_shape,
     infer_headers,
     row_roles,
     table_statements,
@@ -301,6 +303,7 @@ __all__ = [
     "ChildFieldError",
     "CleanStage",
     "Component",
+    "ComponentGateResult",
     "ComponentGateStage",
     "ComponentType",
     "Context",
@@ -351,6 +354,7 @@ __all__ = [
     "GeneratorSpec",
     "GeneratorStats",
     "GeneratorUse",
+    "HeaderShape",
     "Headroom",
     "Housekeeper",
     "HtmlLayoutParser",
@@ -503,6 +507,7 @@ __all__ = [
     "generator_spec_json_schema",
     "generator_use",
     "header_prefix",
+    "header_shape",
     "html_language",
     "import_pack",
     "infer_headers",

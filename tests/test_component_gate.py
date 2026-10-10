@@ -9,6 +9,7 @@ from jevex import (
     BoilerplateCleaner,
     CategoriseStage,
     Component,
+    ComponentGateResult,
     ComponentGateStage,
     Context,
     Document,
@@ -23,6 +24,7 @@ from jevex import (
     ParentChild,
     Pipeline,
     Questions,
+    SchemaConfig,
     SchemaSpec,
     SingleEntity,
     Statement,
@@ -216,11 +218,11 @@ def test_an_oversized_tables_blank_row_is_a_body_row_without_gaps() -> None:
     assert not any(line.startswith(" |") or line.endswith("| ") for line in lines)
 
 
-def test_an_oversized_comparison_table_without_headers_repeats_its_inferred_header_row() -> None:
-    grid = [("Spec", "SE", "GT")] + [(f"Spec {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, 30)]
-    t = Component.model_validate(
+def plain_table(*grid: tuple[str, ...], cid: str = "t") -> Component:
+    """A table of ``td`` cells only: no header cells."""
+    return Component.model_validate(
         {
-            "id": "t",
+            "id": cid,
             "type": "table",
             "text": "\n".join(" | ".join(row) for row in grid),
             "cells": [
@@ -228,12 +230,21 @@ def test_an_oversized_comparison_table_without_headers_repeats_its_inferred_head
                 for r, row in enumerate(grid)
                 for c, text in enumerate(row)
             ],
-            "location": DomLocation(dom_path="/t"),
+            "location": DomLocation(dom_path=f"/{cid}"),
         }
     )
-    units = gate_units(comp("section", "", "r", t), max_chars=120)
+
+
+def spec_grid(rows: int) -> list[tuple[str, ...]]:
+    return [("Spec", "SE", "GT")] + [(f"Spec {r}", f"{r}0 PS", f"{r}5 PS") for r in range(1, rows)]
+
+
+def test_an_oversized_table_without_headers_splits_as_rows() -> None:
+    # Whether its first row is a header isn't known yet: the gate asks about the first piece.
+    units = gate_units(comp("section", "", "r", plain_table(*spec_grid(30))), max_chars=120)
     assert len(units) > 1
-    assert all(u.text.startswith("Spec | SE | GT\nSpec ") for u in units)
+    assert units[0].text.startswith("Spec | SE | GT\nSpec 1 | 10 PS")
+    assert not any("Spec | SE | GT" in u.text for u in units[1:])
 
 
 def banded_table(*rows: tuple[str, ...]) -> Component:
@@ -608,7 +619,7 @@ async def test_groups_pass_the_units_jev_says_contain_them() -> None:
     result = await NoulComponentGate().gate(
         parsed(page()), [SchemaSpec.from_model(Car)], fake.client()
     )
-    groups = result["Car"]
+    groups = result.components["Car"]
     # Passing units bring their ancestors, in reading order.
     assert groups["price"] == ["root", "s-price", "h2", "p2", "t1"]
     assert groups["performance"] == ["root", "s-perf", "h3", "l1", "li1", "li2"]
@@ -622,7 +633,7 @@ async def test_a_value_past_max_chars_still_passes_its_component() -> None:
     result = await NoulComponentGate().gate(
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
-    assert result["Car"]["price"] == ["root", "p"]
+    assert result.components["Car"]["price"] == ["root", "p"]
 
 
 async def test_a_scanned_page_passes_only_the_ocr_text_jev_says_contains_the_field() -> None:
@@ -632,8 +643,8 @@ async def test_a_scanned_page_passes_only_the_ocr_text_jev_says_contains_the_fie
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
     # The image passes as the price section's ancestor; the rest of the page doesn't.
-    assert result["Car"]["price"] == ["root", "img", "img-t5", "img-t6", "img-t7"]
-    assert result["Car"]["performance"] == []
+    assert result.components["Car"]["price"] == ["root", "img", "img-t5", "img-t6", "img-t7"]
+    assert result.components["Car"]["performance"] == []
 
 
 def with_children(root: Component, cid: str, children: list[Component]) -> Component:
@@ -656,7 +667,7 @@ async def test_an_inline_image_passes_only_the_text_read_from_it_that_holds_the_
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
     by_id = {c.id: c for c in root.walk()}
-    passed = [(by_id[c].type, by_id[c].text) for c in result["Car"]["price"]]
+    passed = [(by_id[c].type, by_id[c].text) for c in result.components["Car"]["price"]]
     # The paragraph and image pass as the price section's ancestors; the intro doesn't.
     assert passed == [
         ("section", ""),
@@ -704,15 +715,149 @@ async def test_threshold_is_inclusive_and_validated() -> None:
     result = await NoulComponentGate(threshold=0.3).gate(
         parsed(page()), [SchemaSpec.from_model(Book)], fake.client()
     )
-    assert "p3" in result["Book"]["title"]
+    assert "p3" in result.components["Book"]["title"]
     strict = await NoulComponentGate(threshold=0.31).gate(
         parsed(page()), [SchemaSpec.from_model(Book)], fake.client()
     )
-    assert strict["Book"]["title"] == []
+    assert strict.components["Book"]["title"] == []
     with pytest.raises(ValueError, match="threshold"):
         NoulComponentGate(threshold=1.5)
     with pytest.raises(ValueError, match="max_chars"):
         NoulComponentGate(max_chars=0)
+
+
+TABLE_HEADERS = "Does the table's first row name its columns, and its first column name its rows?"
+TABLE_LABELS = "Does the table's first column label the value beside it in each row?"
+
+
+def headers_asked(fake: FakeJev) -> list[tuple[str, JSONContent]]:
+    """The table questions asked: (key, instructions)."""
+    return [
+        (key, q.instructions)
+        for call in fake.calls
+        for key, q in call.questions.items()
+        if key.startswith("table ")
+    ]
+
+
+async def test_a_header_less_comparison_table_is_asked_about_its_headers() -> None:
+    grid = [("Spec", "SE", "GT"), ("Power", "150 PS", "200 PS"), ("0-62 mph", "9.1", "7.4")]
+    root = comp("section", "", "root", comp("paragraph", "From £24,995.", "p"), plain_table(*grid))
+    fake = FakeJev().noul(TABLE_HEADERS, p=0.8)
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    assert headers_asked(fake) == [("table t", TABLE_HEADERS)]
+    # In the table's own request, with its groups.
+    [call] = [c for c in fake.calls if "table t" in c.questions]
+    assert set(call.questions) == {"Car.price", "Car.performance", "table t"}
+    assert call.state == {
+        "content": "Spec | SE | GT\nPower | 150 PS | 200 PS\n0-62 mph | 9.1 | 7.4"
+    }
+    assert result.headed_tables == {"t"}
+    # Asking doesn't pass the table for any group.
+    assert result.components["Car"] == {"price": [], "performance": []}
+
+
+async def test_a_no_or_unsure_answer_leaves_the_table_without_headers() -> None:
+    grid = [("Gearbox", "Manual", "Auto"), ("Power", "150 PS", "200 PS")]
+    root = comp("section", "", "root", plain_table(*grid))
+    for p in (0.1, 0.49):
+        fake = FakeJev().noul(TABLE_HEADERS, p=p)
+        result = await NoulComponentGate().gate(
+            parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+        )
+        assert headers_asked(fake) == [("table t", TABLE_HEADERS)]
+        assert result.headed_tables == frozenset()
+    fake = FakeJev().noul(TABLE_HEADERS, p=0.5)
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    assert result.headed_tables == {"t"}
+
+
+async def test_a_header_less_two_column_table_is_asked_whether_it_holds_labels() -> None:
+    root = comp(
+        "section",
+        "",
+        "root",
+        plain_table(("Engine", "1.5 TSI"), ("Power", "150 PS"), cid="kv"),
+        plain_table(("Smith", "London"), ("Jones", "Leeds"), cid="people"),
+    )
+    fake = (
+        FakeJev().noul(TABLE_LABELS, p=0.9, state="Engine").noul(TABLE_LABELS, p=0.1, state="Smith")
+    )
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    assert headers_asked(fake) == [("table kv", TABLE_LABELS), ("table people", TABLE_LABELS)]
+    assert result.headed_tables == {"kv"}
+
+
+async def test_tables_with_headers_or_without_a_header_shape_are_not_asked_about() -> None:
+    headed = Component.model_validate(
+        {
+            "id": "th",
+            "type": "table",
+            "text": "Spec | SE\nPower | 150 PS",
+            "cells": [
+                {"row": 0, "col": 0, "text": "Spec", "header": True},
+                {"row": 0, "col": 1, "text": "SE", "header": True},
+                {"row": 1, "col": 0, "text": "Power"},
+                {"row": 1, "col": 1, "text": "150 PS"},
+            ],
+            "location": DomLocation(dom_path="/th"),
+        }
+    )
+    records = plain_table(("Name", "City", "Role"), ("Alice", "London", "Engineer"), cid="rec")
+    years = plain_table(("2019", "150 PS"), ("2021", "163 PS"), cid="years")
+    root = comp("section", "", "root", headed, records, years)
+    fake = FakeJev(default_p=1.0)
+    result = await NoulComponentGate().gate(
+        parsed(root), [SchemaSpec.from_model(Car)], fake.client()
+    )
+    assert len(fake.calls) == 3
+    assert headers_asked(fake) == []
+    assert result.headed_tables == frozenset()
+
+
+async def test_an_oversized_header_less_table_is_asked_about_with_its_first_piece() -> None:
+    root = comp("section", "", "root", plain_table(*spec_grid(30)))
+    fake = FakeJev().noul(TABLE_HEADERS, p=0.9)
+    gate = NoulComponentGate(max_chars=120)
+    result = await gate.gate(parsed(root), [SchemaSpec.from_model(Car)], fake.client())
+    units = gate_units(root, max_chars=120)
+    assert len(fake.calls) == len(units) > 1
+    [first] = [c for c in fake.calls if "table t" in c.questions]
+    assert first.state == units[0].state()
+    assert result.headed_tables == {"t"}
+
+
+async def test_the_table_question_is_the_first_schemas_and_can_be_overridden() -> None:
+    class Spec(BaseModel):
+        """A spec sheet."""
+
+        __jevex__ = SchemaConfig(
+            table_headers_question="Are the trims across the top and the specs down the side?",
+            table_labels_question="Is each row a spec and its value?",
+        )
+
+        power_kw: float = Field(description="Engine power", unit="kW")
+
+    root = comp(
+        "section",
+        "",
+        "root",
+        plain_table(("Spec", "SE", "GT"), ("Power", "150 PS", "200 PS"), cid="cmp"),
+        plain_table(("Engine", "1.5 TSI"), cid="kv"),
+    )
+    fake = FakeJev()
+    specs = [SchemaSpec.from_model(Spec), SchemaSpec.from_model(Car)]
+    await NoulComponentGate().gate(parsed(root), specs, fake.client())
+    assert headers_asked(fake) == [
+        ("table cmp", "Are the trims across the top and the specs down the side?"),
+        ("table kv", "Is each row a spec and its value?"),
+    ]
 
 
 # --- the stage and what it does downstream -------------------------------------------
@@ -746,6 +891,27 @@ async def test_stage_sets_component_ids_and_scopes_keep_only_passing_components(
     book = ctx.schemas["Book"]
     assert book.scopes[0].component_ids == []
     assert [e.kind for e in ctx.events] == ["no_relevant_components"]
+
+
+async def test_the_statements_read_a_header_less_table_as_jev_answered() -> None:
+    html = (
+        b"<html><body><h1>Kestrova</h1><table>"
+        b"<tr><td>Spec</td><td>SE</td><td>GT</td></tr>"
+        b"<tr><td>Power</td><td>150 PS</td><td>200 PS</td></tr>"
+        b"</table></body></html>"
+    )
+    root = await HtmlLayoutParser().parse(Document.from_bytes(html))
+    for p, expected in [
+        (0.9, ["SE", "GT", "Power", "Power · SE: 150 PS", "Power · GT: 200 PS"]),
+        (0.2, ["Spec | SE | GT", "Power | 150 PS | 200 PS"]),
+    ]:
+        fake = FakeJev().noul(TABLE_HEADERS, p=p)
+        ctx = context(fake, root)
+        await ComponentGateStage().run(ctx)
+        await StatementStage().run(ctx)
+        assert ctx.parsed is not None
+        tables = [s.text for s in ctx.parsed.statements.values() if s.table is not None]
+        assert tables == expected
 
 
 async def test_the_resolver_sees_only_gated_components() -> None:
@@ -902,10 +1068,10 @@ async def test_a_gate_that_ignores_nested_models_leaves_the_child_run_ungated() 
     class ParentsOnly:
         async def gate(
             self, parsed: ParsedDocument, schemas: list[SchemaSpec], jev: JevClient
-        ) -> dict[str, dict[str, list[str]]]:
+        ) -> ComponentGateResult:
             asked.append([s.name for s in schemas])
             ids = [c.id for c in parsed.root.walk()]
-            return {"CarModel": {"name": ids, "trims": ids}}
+            return ComponentGateResult(components={"CarModel": {"name": ids, "trims": ids}})
 
     ctx = Context.create(
         Document.from_bytes(b"<p/>"), [SchemaSpec.from_model(CarModel)], FakeJev().client()
@@ -1189,7 +1355,9 @@ async def test_a_real_page_gates_by_section() -> None:
     def texts(ids: list[str]) -> set[str]:
         return {by_id[i].text for i in ids if by_id[i].text}
 
-    assert "0-62 mph: 9.1 s" in texts(result["Car"]["performance"])
-    assert "On the road from £24,995." in texts(result["Car"]["price"])
-    newsletter = texts(result["Car"]["price"]) | texts(result["Car"]["performance"])
+    assert "0-62 mph: 9.1 s" in texts(result.components["Car"]["performance"])
+    assert "On the road from £24,995." in texts(result.components["Car"]["price"])
+    newsletter = texts(result.components["Car"]["price"]) | texts(
+        result.components["Car"]["performance"]
+    )
     assert "Sign up for our weekly deals." not in newsletter
