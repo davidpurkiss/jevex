@@ -12,7 +12,8 @@ cache, end to end through the default pipeline with ``MultiEntity``, scored with
 and an LLM miss is caught by the fallback and scored as no answer, so a row is only valid
 with none::
 
-    # live: fill the cache (Jev and the fallback LLM; about $0.6 for 20 pages)
+    # live: fill the cache, one pass per ALSO_CATEGORY_P (the first, over 20 pages, cost
+    # about $0.02 Jev and $0.50 LLM; later passes reuse cached answers and cost far less)
     (set -a; . .env; set +a; ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_FOR_TESTS" \\
         JEVEX_JEV_MAX_COST_USD=0.50 JEVEX_LLM_MAX_COST_USD=2 \\
         uv run python benchmarks/thresholds/sweep.py --live --cache /tmp/sweep-7 --seed 7)
@@ -57,7 +58,15 @@ from jevex import (
 from jevex.document import Document
 from jevex.eval import CorpusItem, match_records, resolve_tolerances, score_value
 from jevex.extractor import default_pipeline
-from jevex.jev import Answer, JevBackend, JevClient, JevResponse, JSONContent, Question
+from jevex.jev import (
+    Answer,
+    JevBackend,
+    JevClient,
+    JevResponse,
+    JSONContent,
+    Question,
+    TypeSafeBackend,
+)
 from jevex.llm import LLM, LLMImage, LLMResponse, LLMUsage
 from jevex.testsite import build
 from jevex.testsite.schemas import Listing, VehicleSpec
@@ -67,6 +76,7 @@ if TYPE_CHECKING:
 
     from jevex import ExtractionResult
     from jevex.eval import Tolerance
+    from jevex.llm.anthropic import AnthropicLLM
 
 FAMILIES = ("table", "kv", "prose", "grid", "listing")
 """HTML only: their bytes are the same on every machine, so the cache keys are too."""
@@ -134,9 +144,9 @@ class PromptCache:
     """An LLM answered from a per-prompt cache; misses go to ``inner`` (or raise). A cached
     answer reports its original usage, so offline runs still price each setting.
 
-    Neither cache has an ``aclose``: an :class:`~jevex.Extractor` closes its backend and
-    LLM when it closes, and each setting's extractor would close the live clients the
-    next setting still needs. :func:`main` closes them once."""
+    Neither cache has an ``aclose``: an :class:`~jevex.Extractor` closes its Jev backend
+    when it closes, and each setting's extractor would close the live client the next
+    setting still needs. :func:`main` closes both live clients once."""
 
     def __init__(self, path: Path, inner: LLM | None) -> None:
         self.path = path
@@ -309,7 +319,7 @@ async def main(argv: list[str]) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--live", action="store_true", help="Fill the cache from real APIs")
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--per-family", type=int, default=3)
+    parser.add_argument("--per-family", type=int, default=4)
     parser.add_argument(
         "--only",
         type=_setting,
@@ -322,15 +332,13 @@ async def main(argv: list[str]) -> int:
     out_path = args.out.resolve() if args.out else None
     os.chdir(args.cache)  # relative document URLs, so cached states match across machines
     items = corpus(Path("."), args.seed, args.per_family)
-    inner_jev: JevBackend | None = None
-    inner_llm: LLM | None = None
+    live: tuple[TypeSafeBackend, AnthropicLLM] | None = None
     if args.live:
-        from jevex.jev import TypeSafeBackend
         from jevex.llm.anthropic import AnthropicLLM
 
-        inner_jev, inner_llm = TypeSafeBackend(), AnthropicLLM()
-    jev = QuestionCache(Path("jev.json"), inner_jev)
-    llm = PromptCache(Path("llm.json"), inner_llm)
+        live = (TypeSafeBackend(), AnthropicLLM())
+    jev = QuestionCache(Path("jev.json"), live[0] if live else None)
+    llm = PromptCache(Path("llm.json"), live[1] if live else None)
     settings = args.only or (PERMISSIVE if args.live else grid())
     rows: list[dict[str, Any]] = []
     try:
@@ -340,10 +348,9 @@ async def main(argv: list[str]) -> int:
     finally:
         jev.save()
         llm.save()
-        for inner in (inner_jev, inner_llm):
-            close = getattr(inner, "aclose", None)
-            if close is not None:
-                await close()
+        if live is not None:
+            await live[0].aclose()
+            await live[1].aclose()
     out = {
         "seed": args.seed,
         "pages": [i.path.as_posix() for i in items],

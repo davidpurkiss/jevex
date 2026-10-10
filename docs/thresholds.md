@@ -19,6 +19,12 @@ The defaults below were set from live eval runs on the synthetic test site (#49)
 The tuning set was 20 pages: the first four of each HTML family (table, kv, prose, grid,
 listing) of test-site seed 7. Settings were scored with `jevex.eval`, under `MultiEntity`.
 
+The sweep ran on main at `d48a134` (#290) with this change applied, before #292 (numbers
+alone as candidates) and #294 were merged. Those change the candidates the thresholds act
+on. The gate and books recordings were redone on the merged code, and they agree in
+direction: against main's gate baseline, accuracy 0.739 → 0.749 and LLM calls per
+document 1.17 → 0.67. A rerun of the sweep would measure the current code.
+
 **One live pass, then the grid offline.** One live pass at a permissive setting (category
 0.3, fallback 0.9, verify 0, `ALSO_CATEGORY_P` 0.1) filled a cache of Jev answers (per
 question) and LLM answers (per prompt). For a given `ALSO_CATEGORY_P`, a lower category

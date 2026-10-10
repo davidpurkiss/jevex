@@ -1,4 +1,5 @@
 {
+ "code": "main at d48a134 (#290) plus #49's change, before #292 and #294",
  "note": "Assembled from several runs of sweep.py (not one run's output): the seed-7 live permissive pass, its offline grid and replay, and the seed-11 live validation runs. Grid rows omit per-field scores to keep the file small.",
  "date": "2026-10-10",
  "llm": "claude-opus-5-5 (jevex's Anthropic default)",
