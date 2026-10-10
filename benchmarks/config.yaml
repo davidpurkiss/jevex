@@ -63,15 +63,9 @@ corpora:
     seed: 42
     sample: 200
     lock: corpora/books.lock
-  # Real spec sheets we may not redistribute: kept outside the repo, only aggregate
-  # numbers published.
-  - name: spec-sheets-local
+  # Real UK manufacturers' price guides and spec pages, never committed: fetch them from
+  # their manifest with corpora/fetch.py into the directory the env var names.
+  - name: spec-sheets
     kind: directory
     env: JEVEX_BENCH_SPEC_SHEETS
-    publish: aggregate
-    lock: corpora/spec-sheets-local.lock
-  # Press-kit spec sheets whose terms allow committing them, checked per source.
-  - name: spec-sheets-press
-    kind: directory
-    path: corpora/spec-sheets-press
-    lock: corpora/spec-sheets-press.lock
+    lock: corpora/spec-sheets.lock

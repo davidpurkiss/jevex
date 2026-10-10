@@ -6,6 +6,8 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 | --- | --- |
 | `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora (`jevex.benchmarks.BenchmarkConfig`) |
 | `corpora/<name>.lock` | A corpus's lock: hashes of its `truth.json` and of every document (`jevex corpus lock`, `jevex corpus check`) |
+| `corpora/spec-sheets/` | The real spec-sheet corpus as the repo holds it: `manifest.json` (each document's URL and sha256), the labels (`truth.json`, labelled by `LABELLING.md`'s rules) and the labelling's checking scripts |
+| `corpora/fetch.py` | Fetches a corpus from its `manifest.json`: a uv script (`fetch.py.lock`) |
 | `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.baseline_instructions`) |
 | `baselines/<tool>_baseline.py` | An open-source tool as a baseline: a uv script with its pinned tool version, run in its own environment (`<tool>_baseline.py.lock`) |
 | `gate_wording/` | The live comparisons of document-gate wordings behind #242's default (`compare.py`, results per date) and of the test site's `Listing` docstring behind #261's (`listing_docstring.py`, `listing-docstring-<date>.json`) |
@@ -28,7 +30,20 @@ jevex corpus books --out /tmp/books
 jevex corpus check /tmp/books benchmarks/corpora/books.lock
 ```
 
-The spec-sheet locks follow once their sources are chosen.
+`corpora/spec-sheets.lock` is the real spec-sheet corpus: 25 UK manufacturers' price
+guides and spec pages, labelled for #212. The documents are the manufacturers' and are
+never committed. Fetch them from their URLs (robots.txt honoured, a second between requests
+to one host), which checks each document's sha256 and copies the labels alongside, then
+check the lot:
+
+```sh
+uv run --script benchmarks/corpora/fetch.py benchmarks/corpora/spec-sheets/manifest.json \
+    --out /tmp/spec-sheets
+jevex corpus check /tmp/spec-sheets benchmarks/corpora/spec-sheets.lock
+```
+
+A dead link, a robots.txt refusal or a changed document fails the fetch, naming the
+document, and nothing already in the directory is overwritten.
 
 ## Baselines
 
