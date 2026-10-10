@@ -382,7 +382,7 @@ def _four_digit_year(yy: int) -> int:
     return 2000 + yy if yy < 70 else 1900 + yy
 
 
-_SIGN_BEFORE = re.compile(r"(?:^|\s|\bto)$", re.IGNORECASE)
+_SIGN_BEFORE = re.compile(r"(?:^|[\s(:-]|\bto)$", re.IGNORECASE)
 """What may come right before a range's signed number (searched up to the number)."""
 
 
@@ -390,9 +390,9 @@ def parse_range(value: Any, *, decimal: str = ".") -> list[int | float]:
     """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]; with
     ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0].
 
-    A sign that starts the text or follows a space or "to" is the number's own:
-    "-5 to -2" → [-5, -2], "+5 to 10" → [5, 10] (a minus sign, U+2212, counts as "-"). One
-    right after a number or unit is the range's dash: "5-7" → [5, 7].
+    A sign that starts the text or follows a space, "(", ":", a range's dash or "to" is the
+    number's own: "-5 to -2" → [-5, -2], "-5--2" → [-5, -2] (a minus sign, U+2212, counts
+    as "-"). One right after a number or unit is the range's dash: "5-7" → [5, 7].
     """
     if isinstance(value, list | tuple):
         return [parse_number(v, decimal=decimal) for v in value]  # pyright: ignore[reportUnknownVariableType]
