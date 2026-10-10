@@ -1,4 +1,5 @@
-"""Sweep the extraction thresholds over the synthetic test site (#49, #297).
+"""Sweep the extraction thresholds over the synthetic test site (#49, #297) or a corpus
+directory (#296).
 
 Live and billed: run only with keys, under spend caps. Live passes ask Jev and the
 fallback LLM everything the grid's most permissive setting for each ``ALSO_CATEGORY_P`` and
@@ -24,6 +25,9 @@ with none::
     uv run python benchmarks/thresholds/sweep.py --cache /tmp/sweep-7 --seed 7 --out grid.json
     # live, a few settings only (a validation seed)
     ... sweep.py --live --cache /tmp/sweep-11 --seed 11 --only 0.5,0.5,0.8,0.3,0.3 --only ...
+    # a corpus directory (truth.json and its documents) instead of the test site, with the
+    # benchmark's fallback model (benchmarks/config.yaml)
+    ... sweep.py --live --cache /tmp/sweep-real --corpus DIR --model claude-haiku-4-5-20251001
 
 Swept: the fallback's ``category_threshold``, ``fallback_threshold`` and
 ``verify_threshold``, ``jevex.select.ALSO_CATEGORY_P`` (a statement's second fields), and
@@ -73,7 +77,7 @@ from jevex.jev import (
     Question,
     TypeSafeBackend,
 )
-from jevex.llm import LLM, LLMImage, LLMResponse, LLMUsage
+from jevex.llm import ANTHROPIC_MODEL, LLM, LLMImage, LLMResponse, LLMUsage
 from jevex.testsite import build
 from jevex.testsite.schemas import Listing, VehicleSpec
 
@@ -84,6 +88,8 @@ if TYPE_CHECKING:
     from jevex.eval import Tolerance
     from jevex.llm.anthropic import AnthropicLLM
 
+SCHEMAS: dict[str, type[BaseModel]] = {s.__name__: s for s in (VehicleSpec, Listing)}
+"""The schemas a corpus may be labelled in: the test site's (and the spec-sheets corpus's)."""
 FAMILIES = ("table", "kv", "prose", "grid", "listing")
 """HTML only: their bytes are the same on every machine, so the cache keys are too."""
 CATEGORY = (0.3, 0.4, 0.5, 0.6, 0.7)
@@ -197,7 +203,7 @@ class PromptCache:
         self.path.write_text(json.dumps(self.entries, sort_keys=True) + "\n")
 
 
-def corpus(root: Path, seed: int, per_family: int) -> list[CorpusItem]:
+def testsite_corpus(root: Path, seed: int, per_family: int) -> list[CorpusItem]:
     """The first ``per_family`` pages of each HTML family of ``seed``, interleaved."""
     manifest = build(seed, root / "site", waves=[list(FAMILIES)])
     by_family = {f: [p for p in manifest["pages"] if p["family"] == f] for f in FAMILIES}
@@ -211,8 +217,17 @@ def corpus(root: Path, seed: int, per_family: int) -> list[CorpusItem]:
     return load_corpus(root / "site")
 
 
+def document_url(item: CorpusItem, root: Path) -> str:
+    """The document's path under the corpus root: cache keys hold it (through the
+    statements' state), so they match across machines and checkouts."""
+    return item.path.relative_to(root).as_posix()
+
+
 def llm_values(
-    item: CorpusItem, result: ExtractionResult, tolerances: Mapping[str, Mapping[str, Tolerance]]
+    item: CorpusItem,
+    url: str,
+    result: ExtractionResult,
+    tolerances: Mapping[str, Mapping[str, Tolerance]],
 ) -> dict[tuple[str, str, str, str], tuple[float, bool]]:
     """(verification p, right?) per value the fallback answered, keyed by document,
     statement, field and value: an answer copied into several records (shared, or onto
@@ -237,7 +252,7 @@ def llm_values(
                 continue
             sid = meta.source.statement_id if meta.source else ""
             right = score_value(exp.values.get(name), meta.value, own[name]).correct > 0
-            key = (item.path.as_posix(), sid, name, repr(meta.value))
+            key = (url, sid, name, repr(meta.value))
             # Right in any record it was paired into counts as right.
             out[key] = (meta.confidence, right or out.get(key, (0.0, False))[1])
     return out
@@ -245,6 +260,7 @@ def llm_values(
 
 async def run_setting(
     items: list[CorpusItem],
+    root: Path,
     jev: QuestionCache,
     llm: PromptCache,
     setting: Setting,
@@ -272,7 +288,7 @@ async def run_setting(
     jevex.select.ALSO_CATEGORY_P = also  # only select.field_statements reads it, per call
     try:
         async with Extractor(
-            [VehicleSpec, Listing],
+            corpus_schemas(items),
             jev=JevClient(jev),
             pipeline=pipeline,
             extraction_llm=llm,
@@ -281,15 +297,14 @@ async def run_setting(
         ) as extractor:
             tolerances = resolve_tolerances(extractor)
             for item in items:
-                document = Document.from_path(
-                    item.path, url=item.path.as_posix(), locale=item.locale
-                )
+                url = document_url(item, root)
+                document = Document.from_path(item.path, url=url, locale=item.locale)
                 start = time.perf_counter()
                 result = await extractor.extract(document)
                 report.documents.append(
                     score_result(item, result, time.perf_counter() - start, tolerances)
                 )
-                calibration |= llm_values(item, result, tolerances)
+                calibration |= llm_values(item, url, result, tolerances)
     finally:
         jevex.select.ALSO_CATEGORY_P = library_also
     summary = report.summary()
@@ -310,6 +325,12 @@ async def run_setting(
         "partial": {d.path: d.warnings for d in report.documents if d.status == "partial"},
         "methods": dict(sum((d.methods for d in report.documents), Counter[str]())),
     }
+
+
+def corpus_schemas(items: Sequence[CorpusItem]) -> list[type[BaseModel]]:
+    """The schemas ``items`` are labelled in, so a corpus labelled in one isn't asked about
+    the other."""
+    return [SCHEMAS[name] for name in dict.fromkeys(item.schema for item in items)]
 
 
 def grid() -> list[Setting]:
@@ -339,8 +360,12 @@ async def main(argv: list[str]) -> int:
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--live", action="store_true", help="Fill the cache from real APIs")
-    parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--per-family", type=int, default=4)
+    parser.add_argument(
+        "--corpus", type=Path, help="A corpus directory (truth.json) instead of the test site"
+    )
+    parser.add_argument("--seed", type=int, default=7, help="The test site's seed")
+    parser.add_argument("--per-family", type=int, default=4, help="Test-site pages per family")
+    parser.add_argument("--model", default=ANTHROPIC_MODEL, help="The fallback LLM (Anthropic)")
     parser.add_argument(
         "--only",
         type=_setting,
@@ -351,20 +376,25 @@ async def main(argv: list[str]) -> int:
 
     args.cache.mkdir(parents=True, exist_ok=True)
     out_path = args.out.resolve() if args.out else None
-    os.chdir(args.cache)  # relative document URLs, so cached states match across machines
-    items = corpus(Path("."), args.seed, args.per_family)
+    # The test site is built in the cache directory, and its URLs keep the "site/" prefix
+    # earlier caches were keyed by.
+    root = args.corpus.resolve() if args.corpus else Path(".")
+    os.chdir(args.cache)
+    items = (
+        load_corpus(root) if args.corpus else testsite_corpus(Path("."), args.seed, args.per_family)
+    )
     live: tuple[TypeSafeBackend, AnthropicLLM] | None = None
     if args.live:
         from jevex.llm.anthropic import AnthropicLLM
 
-        live = (TypeSafeBackend(), AnthropicLLM())
+        live = (TypeSafeBackend(), AnthropicLLM(args.model))
     jev = QuestionCache(Path("jev.json"), live[0] if live else None)
     llm = PromptCache(Path("llm.json"), live[1] if live else None)
     settings = args.only or (PERMISSIVE if args.live else grid())
     rows: list[dict[str, Any]] = []
     try:
         for setting in settings:
-            rows.append(await run_setting(items, jev, llm, setting))
+            rows.append(await run_setting(items, root, jev, llm, setting))
             print(setting, rows[-1]["summary"]["accuracy"], file=sys.stderr, flush=True)
     finally:
         jev.save()
@@ -373,8 +403,9 @@ async def main(argv: list[str]) -> int:
             await live[0].aclose()
             await live[1].aclose()
     out = {
-        "seed": args.seed,
-        "pages": [i.path.as_posix() for i in items],
+        "corpus": args.corpus.name if args.corpus else f"testsite seed {args.seed}",
+        "model": args.model,
+        "pages": [document_url(i, root) for i in items],
         "rows": rows,
     }
     text = json.dumps(out, indent=1, default=str)

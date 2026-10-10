@@ -35,6 +35,7 @@ from jevex.examples.books import Book
 from jevex.fetch import RobotsDisallowedError, SimpleFetcher
 from jevex.llm import gemini_flash_3x_price
 from jevex.testsite import build
+from jevex.testsite.schemas import VehicleSpec
 
 ROOT = Path(__file__).parent.parent
 CONFIG = ROOT / "benchmarks" / "config.yaml"
@@ -842,3 +843,97 @@ def test_the_public_names_are_exported() -> None:
     for name in ("BenchmarkConfig", "CorpusLock", "books_corpus", "bootstrap_interval"):
         assert name in jevex.__all__
         assert getattr(jevex, name) is not None
+
+
+# --- the threshold sweep and the prune replay (benchmarks/thresholds/) -------------------
+
+THRESHOLDS = ROOT / "benchmarks" / "thresholds"
+
+
+@pytest.fixture
+def thresholds(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """A loader for the threshold scripts as modules (prune.py imports sweep.py by name)."""
+    import importlib
+
+    monkeypatch.setattr(sys, "path", [str(THRESHOLDS), *sys.path])
+    for name in ("sweep", "prune"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    return importlib.import_module
+
+
+def kia_corpus(root: Path) -> Path:
+    """Two of the spec-sheets corpus's labels, over pages that state one variant each."""
+    truth = json.loads((SPEC_SHEETS / "truth.json").read_text())
+    pages = [p for p in truth["pages"] if p["path"].startswith("kia-")]
+    root.mkdir(exist_ok=True)
+    for page in pages:
+        (root / page["path"]).write_text("<html><body><p>Price: £15,995</p></body></html>")
+    (root / "truth.json").write_text(json.dumps({"pages": pages}))
+    return root
+
+
+def test_the_sweep_runs_a_corpus_in_its_own_schemas_with_relative_urls(
+    thresholds: Any, tmp_path: Path
+) -> None:
+    sweep = thresholds("sweep")
+    items = load_corpus(kia_corpus(tmp_path))
+    assert [sweep.document_url(i, tmp_path) for i in items] == [
+        "kia-picanto-pricing.html",
+        "kia-sportage-pricing.html",
+    ]
+    assert sweep.corpus_schemas(items) == [VehicleSpec]
+
+
+def test_first_win_waits_counts_the_documents_a_generator_ran_on_before_it_won(
+    thresholds: Any,
+) -> None:
+    prune = thresholds("prune")
+
+    def use(documents: int, wins: int, field: str = "VehicleSpec.co2_g_km") -> dict[str, Any]:
+        return {"field": field, "documents": documents, "hits": wins, "wins": wins}
+
+    documents = [
+        {"index": 0, "fallback": {"VehicleSpec.co2_g_km": 2}, "generators": {}},
+        {"index": 1, "fallback": {}, "generators": {"co2": use(0, 0)}},
+        {"index": 2, "fallback": {}, "generators": {"co2": use(1, 0), "kw": use(0, 0, "kw")}},
+        {"index": 3, "fallback": {"VehicleSpec.co2_g_km": 1}, "generators": {"co2": use(1, 0)}},
+        {"index": 4, "fallback": {}, "generators": {"co2": use(1, 1), "kw": use(1, 0, "kw")}},
+        {"index": 5, "fallback": {}, "generators": {"co2": use(1, 1), "kw": use(1, 0, "kw")}},
+    ]
+    assert prune.first_win_waits(documents) == {
+        "co2": {
+            "field": "VehicleSpec.co2_g_km",
+            "learned_after": 1,
+            "documents": 4,
+            "wins": 2,
+            "documents_before_first_win": 2,
+        },
+        "kw": {
+            "field": "kw",
+            "learned_after": 2,
+            "documents": 2,
+            "wins": 0,
+            "documents_before_first_win": None,
+        },
+    }
+    assert prune.fallback_gaps(documents) == {"VehicleSpec.co2_g_km": [3]}
+
+
+async def test_an_offline_prune_replay_without_answers_counts_its_misses(
+    thresholds: Any, tmp_path: Path
+) -> None:
+    prune = thresholds("prune")
+    sweep = thresholds("sweep")
+    corpus = kia_corpus(tmp_path / "corpus")
+    jev = sweep.QuestionCache(tmp_path / "jev.json", None)
+    llm = sweep.PromptCache(tmp_path / "llm.json", None)
+    generator_llm = sweep.PromptCache(tmp_path / "generator.json", None)
+    out = await prune.replay(corpus, jev, llm, generator_llm)
+    # Each document's first Jev request misses, which fails it: nothing to score or learn.
+    assert jev.misses == 2
+    assert (out["summary"]["documents"], out["summary"]["errors"]) == (2, 2)
+    assert [d["page"] for d in out["documents"]] == [
+        "kia-picanto-pricing.html",
+        "kia-sportage-pricing.html",
+    ]
+    assert out["first_win_waits"] == out["fallback_gaps"] == {}
