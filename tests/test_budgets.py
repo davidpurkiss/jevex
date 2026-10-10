@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,7 +22,7 @@ from jevex import (
 )
 from jevex.budgets import period_start
 from jevex.jev import JevBackendError, Noul
-from jevex.llm import LLMImage, LLMResponse, LLMUsage, reset_process_llm_cost
+from jevex.llm import LLMImage, LLMResponse, LLMUsage
 from jevex.pipeline import Context, SchemaRun, for_each_schema
 from jevex.store import LedgerError, MemoryLedger, SpendEntry, SQLiteStore, Store
 from jevex.testing import FakeJev, FakeLLM
@@ -42,14 +42,6 @@ class Boat(BaseModel):
     """A boat."""
 
     name: str = Field(description="Boat name")
-
-
-@pytest.fixture(autouse=True)
-def fresh_llm_spend(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv("JEVEX_LLM_MAX_COST_USD", raising=False)
-    reset_process_llm_cost()
-    yield
-    reset_process_llm_cost()
 
 
 def llm(price: tuple[float, float] = (0.0, 0.0)) -> FakeLLM:

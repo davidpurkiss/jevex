@@ -5,7 +5,7 @@ Skipped when the extras aren't installed (``uv sync --all-extras``); CI installs
 
 import base64
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -26,8 +26,6 @@ from jevex.llm import (  # noqa: E402
     LLMImage,
     LLMRefusalError,
     ModelPrice,
-    process_llm_cost,
-    reset_process_llm_cost,
 )
 from jevex.llm.anthropic import FALLBACK_BETA, AnthropicLLM  # noqa: E402
 from jevex.llm.gemini import GeminiLLM  # noqa: E402
@@ -40,14 +38,6 @@ class Book(BaseModel):
 
 
 type Handler = Callable[[httpx2.Request], httpx2.Response]
-
-
-@pytest.fixture(autouse=True)
-def fresh_spend(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv("JEVEX_LLM_MAX_COST_USD", raising=False)
-    reset_process_llm_cost()
-    yield
-    reset_process_llm_cost()
 
 
 # --- Anthropic -------------------------------------------------------------------------
@@ -76,7 +66,9 @@ def message(
     }
 
 
-async def test_anthropic_structured_output_with_fallbacks_and_effort() -> None:
+async def test_anthropic_structured_output_with_fallbacks_and_effort(
+    llm_spent: Callable[[], float],
+) -> None:
     seen: dict[str, Any] = {}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -89,7 +81,7 @@ async def test_anthropic_structured_output_with_fallbacks_and_effort() -> None:
     assert response.output == Book(title="Dune")
     assert response.model == "claude-opus-5-5"
     assert response.usage.cost == pytest.approx((12 * 4 + 7 * 20) / 1_000_000)
-    assert process_llm_cost() == pytest.approx(response.usage.cost)
+    assert llm_spent() == pytest.approx(response.usage.cost)
     assert seen["beta"] == FALLBACK_BETA
     body = seen["body"]
     assert body["fallbacks"] == "default"
@@ -119,7 +111,9 @@ async def test_anthropic_cost_uses_the_model_that_served() -> None:
     assert response.usage.cost == pytest.approx((12 * 2 + 7 * 10) / 1_000_000)
 
 
-async def test_anthropic_dated_snapshot_is_costed_at_its_base_price() -> None:
+async def test_anthropic_dated_snapshot_is_costed_at_its_base_price(
+    llm_spent: Callable[[], float],
+) -> None:
     body = message('{"title": "Dune"}', model="claude-haiku-4-5-20251001")
     body["usage"]["iterations"] = [
         {"type": "message", "model": "claude-opus-5-5", "input_tokens": 100, "output_tokens": 5},
@@ -138,7 +132,7 @@ async def test_anthropic_dated_snapshot_is_costed_at_its_base_price() -> None:
     response = await llm.structured("x", Book)
     assert response.model == "claude-haiku-4-5-20251001"
     assert response.usage.cost == pytest.approx((100 * 4 + 5 * 20 + 12 * 1 + 7 * 5) / 1_000_000)
-    assert process_llm_cost() == pytest.approx(response.usage.cost)
+    assert llm_spent() == pytest.approx(response.usage.cost)
 
 
 async def test_anthropic_cost_sums_fallback_attempts_at_their_own_prices() -> None:
@@ -173,13 +167,13 @@ async def test_anthropic_iteration_without_a_model_is_priced_as_the_serving_mode
     assert response.usage.cost == pytest.approx((12 * 4 + 7 * 20) / 1_000_000)
 
 
-async def test_anthropic_refusal_still_records_usage() -> None:
+async def test_anthropic_refusal_still_records_usage(llm_spent: Callable[[], float]) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=message(None, stop="refusal"))
 
     with pytest.raises(LLMRefusalError, match="declined"):
         await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
-    assert process_llm_cost() > 0
+    assert llm_spent() > 0
 
 
 async def test_anthropic_truncated_output_is_an_llm_error() -> None:
@@ -213,13 +207,15 @@ async def test_anthropic_refusal() -> None:
         await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
 
 
-async def test_anthropic_output_that_fails_the_schema_is_an_llm_error() -> None:
+async def test_anthropic_output_that_fails_the_schema_is_an_llm_error(
+    llm_spent: Callable[[], float],
+) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=message('{"name": "wrong"}'))
 
     with pytest.raises(LLMError):
         await AnthropicLLM(client=anthropic_client(handler)).structured("x", Book)
-    assert process_llm_cost() > 0  # the failed call still counts
+    assert llm_spent() > 0  # the failed call still counts
 
 
 async def test_anthropic_api_errors_are_llm_errors() -> None:
@@ -302,7 +298,9 @@ async def test_openai_unknown_price_is_none() -> None:
     assert response.usage.cost is None
 
 
-async def test_openai_invalid_output_is_an_llm_error_and_still_costs() -> None:
+async def test_openai_invalid_output_is_an_llm_error_and_still_costs(
+    llm_spent: Callable[[], float],
+) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=openai_response('{"name": "wrong"}'))
 
@@ -311,7 +309,7 @@ async def test_openai_invalid_output_is_an_llm_error_and_still_costs() -> None:
     )
     with pytest.raises(LLMError, match="doesn't match Book"):
         await llm.structured("x", Book)
-    assert process_llm_cost() == pytest.approx((10 * 1 + 4 * 2) / 1_000_000)
+    assert llm_spent() == pytest.approx((10 * 1 + 4 * 2) / 1_000_000)
 
 
 async def test_openai_refusal() -> None:
@@ -369,7 +367,9 @@ def gemini_response(
     }
 
 
-async def test_gemini_structured_output_sends_the_json_schema() -> None:
+async def test_gemini_structured_output_sends_the_json_schema(
+    llm_spent: Callable[[], float],
+) -> None:
     seen: dict[str, Any] = {}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -390,7 +390,7 @@ async def test_gemini_structured_output_sends_the_json_schema() -> None:
     assert (response.usage.input_tokens, response.usage.output_tokens) == (12, 12)
     # Thinking tokens are billed as output.
     assert response.usage.cost == pytest.approx((12 * 1.50 + 12 * 9.00) / 1_000_000)
-    assert process_llm_cost() == pytest.approx(response.usage.cost)
+    assert llm_spent() == pytest.approx(response.usage.cost)
     assert seen["url"].endswith("/models/gemini-3.5-flash:generateContent")
     body = seen["body"]
     assert body["contents"] == [{"role": "user", "parts": [{"text": "Title: Dune"}]}]
@@ -444,7 +444,9 @@ async def test_gemini_explicit_prices() -> None:
     assert response.usage.cost == pytest.approx((12 * 1 + 7 * 2) / 1_000_000)
 
 
-async def test_gemini_blocked_prompt_is_a_refusal_and_still_costs() -> None:
+async def test_gemini_blocked_prompt_is_a_refusal_and_still_costs(
+    llm_spent: Callable[[], float],
+) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
             200,
@@ -457,19 +459,19 @@ async def test_gemini_blocked_prompt_is_a_refusal_and_still_costs() -> None:
 
     with pytest.raises(LLMRefusalError, match=r"blocked the prompt.*PROHIBITED_CONTENT"):
         await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
-    assert process_llm_cost() == pytest.approx(12 * 1.50 / 1_000_000)
+    assert llm_spent() == pytest.approx(12 * 1.50 / 1_000_000)
 
 
 @pytest.mark.parametrize(
     "reason", ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"]
 )
-async def test_gemini_safety_stop_is_a_refusal(reason: str) -> None:
+async def test_gemini_safety_stop_is_a_refusal(reason: str, llm_spent: Callable[[], float]) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=gemini_response(None, finish=reason))
 
     with pytest.raises(LLMRefusalError, match=f"declined.*{reason}"):
         await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
-    assert process_llm_cost() > 0
+    assert llm_spent() > 0
 
 
 async def test_gemini_truncated_output_is_an_llm_error() -> None:
@@ -497,16 +499,18 @@ async def test_gemini_no_candidates_is_an_llm_error() -> None:
         await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
 
 
-async def test_gemini_invalid_output_is_an_llm_error_and_still_costs() -> None:
+async def test_gemini_invalid_output_is_an_llm_error_and_still_costs(
+    llm_spent: Callable[[], float],
+) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(200, json=gemini_response('{"name": "wrong"}'))
 
     with pytest.raises(LLMError, match="doesn't match Book"):
         await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
-    assert process_llm_cost() == pytest.approx((12 * 1.50 + 7 * 9.00) / 1_000_000)
+    assert llm_spent() == pytest.approx((12 * 1.50 + 7 * 9.00) / 1_000_000)
 
 
-async def test_gemini_api_errors_are_llm_errors() -> None:
+async def test_gemini_api_errors_are_llm_errors(llm_spent: Callable[[], float]) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
             400,
@@ -515,7 +519,7 @@ async def test_gemini_api_errors_are_llm_errors() -> None:
 
     with pytest.raises(LLMError, match=r"Gemini API error.*API key not valid"):
         await GeminiLLM("gemini-3.5-flash", client=gemini_client(handler)).structured("x", Book)
-    assert process_llm_cost() == 0
+    assert llm_spent() == 0
 
 
 async def test_gemini_spent_cap_makes_no_call(monkeypatch: pytest.MonkeyPatch) -> None:

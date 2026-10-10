@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -13,22 +13,12 @@ from jevex.llm import (
     check_budget,
     cost,
     gemini_flash_3x_price,
-    process_llm_cost,
-    reset_process_llm_cost,
 )
 from jevex.testing import CassetteMissError, FakeLLM, LLMCassette, UnscriptedQuestionError
 
 
 class Book(BaseModel):
     title: str
-
-
-@pytest.fixture(autouse=True)
-def fresh_spend(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.delenv("JEVEX_LLM_MAX_COST_USD", raising=False)
-    reset_process_llm_cost()
-    yield
-    reset_process_llm_cost()
 
 
 # --- costing and budgets ---------------------------------------------------------------
@@ -73,18 +63,20 @@ def test_gemini_flash_3x_promotion_ends_with_2026() -> None:
     assert gemini_flash_3x_price(date(2027, 1, 1)) == ModelPrice(1.50, 7.50)
 
 
-async def test_process_budget_stops_further_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_process_budget_stops_further_calls(
+    monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
+) -> None:
     llm = FakeLLM(lambda p, s: {"title": "Dune"}, price=(1_000_000, 1_000_000))  # $1 per token
     monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "5")
     await llm.structured("abc", Book)  # ~2 + ~5 tokens: $7, over the cap afterwards
-    assert process_llm_cost() > 5
+    assert llm_spent() > 5
     with pytest.raises(LLMBudgetExceededError, match="spend cap"):
         await llm.structured("abc", Book)
     assert len(llm.calls) == 1
 
 
 async def test_ledger_cap_counts_spend_from_other_processes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, llm_spent: Callable[[], float]
 ) -> None:
     ledger = tmp_path / "run.ledger"
     ledger.write_text("llm 4\njev 9\n")
@@ -96,7 +88,7 @@ async def test_ledger_cap_counts_spend_from_other_processes(
     with pytest.raises(LLMBudgetExceededError, match=r"\$10\.0000 of \$5\.00"):
         await llm.structured("abc", Book)
     assert len(llm.calls) == 1
-    assert process_llm_cost() == pytest.approx(6)
+    assert llm_spent() == pytest.approx(6)
 
 
 async def test_free_calls_leave_the_ledger_alone(
@@ -129,6 +121,13 @@ async def test_ledger_never_loosens_the_process_cap(
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(tmp_path / "b.ledger"))  # empty
     with pytest.raises(LLMBudgetExceededError):
         await llm.structured("abc", Book)
+
+
+def test_each_offline_test_starts_with_no_process_spend(
+    jev_spent: Callable[[], float], llm_spent: Callable[[], float]
+) -> None:
+    # The tests above spent $6 or more; the spend assertions rely on not seeing it.
+    assert (jev_spent(), llm_spent()) == (0, 0)
 
 
 def test_unreadable_ledger_blocks_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
