@@ -7,13 +7,19 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from jevex.schema import Field
+from jevex.schema import Field, SchemaConfig
 
 FuelType = Literal["petrol", "diesel", "hybrid", "phev", "ev"]
 
 
 class VehicleSpec(BaseModel):
     """A manufacturer's technical specification for one vehicle variant."""
+
+    # Named after what one record is. As "vehicle spec" (the class name), MultiEntity's
+    # boundary Noul read a spec table's row labels and a price list's equipment headings as
+    # specs of their own: on the spec-sheets corpus it accepted 1,355 labels naming no
+    # labelled trim, against 257 as "vehicle variant" (#322).
+    __jevex__ = SchemaConfig(entity_name="vehicle variant")
 
     make: str = Field(description="Manufacturer (make) name")
     model: str = Field(description="Model name")
