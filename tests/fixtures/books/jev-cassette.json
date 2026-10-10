@@ -19,10 +19,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.97,
-            "title": 0.03
+            "none": 0.98,
+            "title": 0.02
           },
           "type": "choice"
         }
@@ -53,11 +53,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.87,
+          "confidence": 0.85,
           "probabilities": {
-            "51.77": 0.09,
+            "51.77": 0.1,
             "none": 0.0,
-            "\u00a351.77": 0.91
+            "\u00a351.77": 0.9
           },
           "type": "choice"
         }
@@ -89,12 +89,12 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.83,
+          "confidence": 0.76,
           "probabilities": {
-            "none": 0.13,
+            "none": 0.18,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.87
+            "title": 0.82
           },
           "type": "choice"
         }
@@ -127,13 +127,13 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "price",
-          "confidence": 0.28,
+          "choice": "none",
+          "confidence": 0.33,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.33,
-            "price": 0.4,
-            "rating": 0.27,
+            "none": 0.44,
+            "price": 0.33,
+            "rating": 0.23,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -206,12 +206,12 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.4,
+          "choice": "price",
+          "confidence": 0.41,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.52,
-            "price": 0.48,
+            "none": 0.47,
+            "price": 0.53,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -243,10 +243,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.66,
+          "confidence": 0.72,
           "probabilities": {
-            "none": 0.83,
-            "title": 0.17
+            "none": 0.86,
+            "title": 0.14
           },
           "type": "choice"
         }
@@ -276,10 +276,10 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "Soumission",
-          "confidence": 0.64,
+          "confidence": 0.74,
           "probabilities": {
-            "Soumission": 0.82,
-            "none": 0.18
+            "Soumission": 0.87,
+            "none": 0.13
           },
           "type": "choice"
         }
@@ -409,7 +409,7 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.99,
+          "confidence": 0.98,
           "probabilities": {
             "51.77": 0.01,
             "none": 0.0,
@@ -447,13 +447,13 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.49,
+          "confidence": 0.57,
           "probabilities": {
-            "in_stock": 0.42,
+            "in_stock": 0.36,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.58,
+            "stock_count": 0.64,
             "title": 0.0
           },
           "type": "choice"
@@ -527,14 +527,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.94,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.96,
+            "none": 0.95,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.04
+            "title": 0.05
           },
           "type": "choice"
         }
@@ -564,7 +564,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.99,
+          "confidence": 0.98,
           "probabilities": {
             "none": 0.99,
             "title": 0.01
@@ -647,6 +647,103 @@
         }
       },
       "input_tokens": 355,
+      "model": "jev-1.13.0"
+    }
+  },
+  "1bf9c6b7db1b5eef": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "Attic": null,
+            "It's": null,
+            "It's hard": null,
+            "Lemon-faced": null,
+            "Lemon-faced adults": null,
+            "Light": null,
+            "adults": null,
+            "fidgety": null,
+            "fidgety kids": null,
+            "fidgety kids sit": null,
+            "fidgety kids sit still": null,
+            "hard": null,
+            "imagine": null,
+            "kids": null,
+            "kids sit": null,
+            "kids sit still": null,
+            "laugh": null,
+            "love": null,
+            "love th": null,
+            "love th It's": null,
+            "love th It's hard": null,
+            "none": "None of these is the title of the book",
+            "read": null,
+            "rhythmic": null,
+            "rhythmic words": null,
+            "sit": null,
+            "sit still": null,
+            "smile": null,
+            "still": null,
+            "th": null,
+            "th It's": null,
+            "th It's hard": null,
+            "words": null,
+            "world": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "A Light in the Attic \u203a Product Description",
+        "statement": "Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love th It's hard to imagine a world without A Light in the Attic."
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "none",
+          "confidence": 0.77,
+          "probabilities": {
+            "Attic": 0.06999999999999999,
+            "It's": 0.0,
+            "It's hard": 0.0,
+            "Lemon-faced": 0.0,
+            "Lemon-faced adults": 0.0,
+            "Light": 0.15000000000000002,
+            "adults": 0.0,
+            "fidgety": 0.0,
+            "fidgety kids": 0.0,
+            "fidgety kids sit": 0.0,
+            "fidgety kids sit still": 0.0,
+            "hard": 0.0,
+            "imagine": 0.0,
+            "kids": 0.0,
+            "kids sit": 0.0,
+            "kids sit still": 0.0,
+            "laugh": 0.0,
+            "love": 0.0,
+            "love th": 0.0,
+            "love th It's": 0.0,
+            "love th It's hard": 0.0,
+            "none": 0.78,
+            "read": 0.0,
+            "rhythmic": 0.0,
+            "rhythmic words": 0.0,
+            "sit": 0.0,
+            "sit still": 0.0,
+            "smile": 0.0,
+            "still": 0.0,
+            "th": 0.0,
+            "th It's": 0.0,
+            "th It's hard": 0.0,
+            "words": 0.0,
+            "world": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 615,
       "model": "jev-1.13.0"
     }
   },
@@ -764,10 +861,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.73,
+          "confidence": 0.68,
           "probabilities": {
-            "none": 0.86,
-            "title": 0.14
+            "none": 0.84,
+            "title": 0.16
           },
           "type": "choice"
         }
@@ -797,15 +894,59 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.92,
+          "confidence": 0.94,
           "probabilities": {
-            "none": 0.96,
-            "title": 0.04
+            "none": 0.97,
+            "title": 0.03
           },
           "type": "choice"
         }
       },
       "input_tokens": 341,
+      "model": "jev-1.13.0"
+    }
+  },
+  "1f63af8e70ebcee3": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "A Brief History of Humankind": null,
+            "Brief": null,
+            "Brief History": null,
+            "History": null,
+            "Humankind": null,
+            "Sapiens": null,
+            "Sapiens: A Brief History of Humankind": null,
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Sapiens: A Brief History of Humankind"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "Sapiens: A Brief History of Humankind",
+          "confidence": 1.0,
+          "probabilities": {
+            "A Brief History of Humankind": 0.0,
+            "Brief": 0.0,
+            "Brief History": 0.0,
+            "History": 0.0,
+            "Humankind": 0.0,
+            "Sapiens": 0.0,
+            "Sapiens: A Brief History of Humankind": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 386,
       "model": "jev-1.13.0"
     }
   },
@@ -834,14 +975,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.89,
+          "confidence": 0.88,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.92,
+            "none": 0.9,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.08
+            "title": 0.1
           },
           "type": "choice"
         }
@@ -991,7 +1132,7 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.05,
+          "p": 0.06,
           "type": "noul"
         },
         "Book.rating": {
@@ -1074,11 +1215,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.82,
+          "confidence": 0.83,
           "probabilities": {
-            "51.77": 0.12,
+            "51.77": 0.11,
             "none": 0.0,
-            "\u00a351.77": 0.88
+            "\u00a351.77": 0.89
           },
           "type": "choice"
         }
@@ -1186,10 +1327,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.39,
+          "confidence": 0.32,
           "probabilities": {
-            "none": 0.69,
-            "title": 0.31
+            "none": 0.66,
+            "title": 0.34
           },
           "type": "choice"
         }
@@ -1257,7 +1398,7 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.99,
+          "confidence": 0.98,
           "probabilities": {
             "none": 0.01,
             "title": 0.99
@@ -1293,13 +1434,13 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.75,
+          "confidence": 0.77,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.2,
+            "none": 0.18,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.8
+            "title": 0.82
           },
           "type": "choice"
         }
@@ -1329,10 +1470,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.85,
+          "confidence": 0.86,
           "probabilities": {
-            "none": 0.92,
-            "title": 0.08
+            "none": 0.93,
+            "title": 0.07
           },
           "type": "choice"
         }
@@ -1368,11 +1509,11 @@
           "choice": "stock_count",
           "confidence": 0.62,
           "probabilities": {
-            "in_stock": 0.31,
+            "in_stock": 0.32,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.69,
+            "stock_count": 0.68,
             "title": 0.0
           },
           "type": "choice"
@@ -1445,9 +1586,9 @@
           "choice": "\u00a353.74",
           "confidence": 0.98,
           "probabilities": {
-            "53.74": 0.02,
+            "53.74": 0.01,
             "none": 0.0,
-            "\u00a353.74": 0.98
+            "\u00a353.74": 0.99
           },
           "type": "choice"
         }
@@ -1480,13 +1621,13 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.74,
+          "confidence": 0.77,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.8,
+            "none": 0.82,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.2
+            "title": 0.18
           },
           "type": "choice"
         }
@@ -1628,7 +1769,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.99,
+          "confidence": 1.0,
           "probabilities": {
             "none": 1.0,
             "title": 0.0
@@ -1740,12 +1881,12 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.63,
+          "confidence": 0.57,
           "probabilities": {
-            "in_stock": 0.29,
+            "in_stock": 0.34,
             "none": 0.0,
             "price": 0.0,
-            "stock_count": 0.71,
+            "stock_count": 0.66,
             "title": 0.0
           },
           "type": "choice"
@@ -1777,11 +1918,46 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "A Light in the",
-          "confidence": 0.31,
+          "confidence": 0.37,
           "probabilities": {
-            "A Light in the": 0.54,
+            "A Light in the": 0.58,
             "Light": 0.03,
-            "none": 0.43
+            "none": 0.39
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 349,
+      "model": "jev-1.13.0"
+    }
+  },
+  "52dec5e3f66bf79a": {
+    "request": {
+      "questions": {
+        "Book.price/choice0": {
+          "instructions": "Which of these is the price (GBP)?",
+          "options": {
+            "0.00": null,
+            "none": "None of these is the price",
+            "\u00a30.00": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Tipping the Velvet \u203a Product Information",
+        "statement": "Tax: \u00a30.00"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.price/choice0": {
+          "choice": "\u00a30.00",
+          "confidence": 0.19,
+          "probabilities": {
+            "0.00": 0.21,
+            "none": 0.33,
+            "\u00a30.00": 0.46
           },
           "type": "choice"
         }
@@ -1826,7 +2002,7 @@
     "response": {
       "answers": {
         "Book.in_stock": {
-          "p": 0.04,
+          "p": 0.03,
           "type": "noul"
         },
         "Book.price": {
@@ -1847,6 +2023,53 @@
         }
       },
       "input_tokens": 362,
+      "model": "jev-1.13.0"
+    }
+  },
+  "5421e035dbeed5b7": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "Attic": null,
+            "It's": null,
+            "It's hard": null,
+            "It's hard to imagine a world without A Light in the Attic": null,
+            "Light": null,
+            "hard": null,
+            "imagine": null,
+            "none": "None of these is the title of the book",
+            "world": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "A Light in the Attic \u203a Product Description",
+        "statement": "It's hard to imagine a world without A Light in the Attic."
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "none",
+          "confidence": 0.67,
+          "probabilities": {
+            "Attic": 0.03,
+            "It's": 0.0,
+            "It's hard": 0.0,
+            "It's hard to imagine a world without A Light in the Attic": 0.12,
+            "Light": 0.14,
+            "hard": 0.0,
+            "imagine": 0.0,
+            "none": 0.71,
+            "world": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 409,
       "model": "jev-1.13.0"
     }
   },
@@ -1950,11 +2173,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a354.23",
-          "confidence": 0.73,
+          "confidence": 0.76,
           "probabilities": {
-            "54.23": 0.18,
+            "54.23": 0.16,
             "none": 0.0,
-            "\u00a354.23": 0.82
+            "\u00a354.23": 0.84
           },
           "type": "choice"
         }
@@ -1977,7 +2200,7 @@
     "response": {
       "answers": {
         "Book": {
-          "p": 0.96,
+          "p": 0.95,
           "type": "noul"
         }
       },
@@ -2026,7 +2249,7 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.99,
+          "p": 0.98,
           "type": "noul"
         },
         "Book.rating": {
@@ -2034,11 +2257,11 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.98,
+          "p": 0.97,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.88,
+          "p": 0.89,
           "type": "noul"
         }
       },
@@ -2081,39 +2304,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5b107038020201cd": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "Sharp Objects": null,
-            "none": "None of these is the title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Sharp Objects"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "Sharp Objects",
-          "confidence": 0.91,
-          "probabilities": {
-            "Sharp Objects": 0.95,
-            "none": 0.05
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 344,
-      "model": "jev-1.13.0"
-    }
-  },
   "5c30ec59d9799544": {
     "request": {
       "questions": {
@@ -2135,10 +2325,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.77,
+          "confidence": 0.74,
           "probabilities": {
-            "none": 0.88,
-            "title": 0.12
+            "none": 0.87,
+            "title": 0.13
           },
           "type": "choice"
         }
@@ -2207,10 +2397,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.76,
+          "confidence": 0.8,
           "probabilities": {
-            "none": 0.88,
-            "title": 0.12
+            "none": 0.9,
+            "title": 0.1
           },
           "type": "choice"
         }
@@ -2242,12 +2432,12 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.98,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.01,
+            "none": 0.03,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.99
+            "title": 0.97
           },
           "type": "choice"
         }
@@ -2278,11 +2468,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.98,
+          "confidence": 0.97,
           "probabilities": {
-            "53.74": 0.01,
+            "53.74": 0.02,
             "none": 0.0,
-            "\u00a353.74": 0.99
+            "\u00a353.74": 0.98
           },
           "type": "choice"
         }
@@ -2314,12 +2504,12 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.97,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.98,
+            "none": 0.97,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.02
+            "title": 0.03
           },
           "type": "choice"
         }
@@ -2349,10 +2539,10 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.87,
+          "confidence": 0.9,
           "probabilities": {
-            "none": 0.06,
-            "title": 0.94
+            "none": 0.05,
+            "title": 0.95
           },
           "type": "choice"
         }
@@ -2420,10 +2610,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.66,
+          "confidence": 0.62,
           "probabilities": {
-            "none": 0.83,
-            "title": 0.17
+            "none": 0.81,
+            "title": 0.19
           },
           "type": "choice"
         }
@@ -2453,10 +2643,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.6,
+          "confidence": 0.68,
           "probabilities": {
-            "none": 0.8,
-            "title": 0.2
+            "none": 0.84,
+            "title": 0.16
           },
           "type": "choice"
         }
@@ -2489,7 +2679,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.99,
+          "confidence": 1.0,
           "probabilities": {
             "in_stock": 0.0,
             "none": 1.0,
@@ -2531,10 +2721,10 @@
           "confidence": 0.59,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.68,
+            "none": 0.67,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.32
+            "title": 0.33
           },
           "type": "choice"
         }
@@ -2596,7 +2786,7 @@
     "response": {
       "answers": {
         "Book": {
-          "p": 0.93,
+          "p": 0.95,
           "type": "noul"
         }
       },
@@ -2662,7 +2852,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.99,
+          "confidence": 0.98,
           "probabilities": {
             "none": 0.99,
             "title": 0.01
@@ -2746,6 +2936,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "6e621c241c42cd4f": {
+    "request": {
+      "questions": {
+        "Book.price/choice0": {
+          "instructions": "Which of these is the price (GBP)?",
+          "options": {
+            "0.00": null,
+            "none": "None of these is the price",
+            "\u00a30.00": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Product Information",
+        "statement": "Tax: \u00a30.00"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.price/choice0": {
+          "choice": "none",
+          "confidence": 0.11,
+          "probabilities": {
+            "0.00": 0.21,
+            "none": 0.41,
+            "\u00a30.00": 0.38
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 355,
+      "model": "jev-1.13.0"
+    }
+  },
   "6e9127c8db2a3b78": {
     "request": {
       "questions": {
@@ -2768,7 +2993,7 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a354.23",
-          "confidence": 0.99,
+          "confidence": 0.98,
           "probabilities": {
             "54.23": 0.01,
             "none": 0.0,
@@ -2802,10 +3027,10 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.72,
+          "confidence": 0.66,
           "probabilities": {
-            "none": 0.14,
-            "title": 0.86
+            "none": 0.17,
+            "title": 0.83
           },
           "type": "choice"
         }
@@ -2870,10 +3095,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.67,
+          "confidence": 0.76,
           "probabilities": {
-            "none": 0.84,
-            "title": 0.16
+            "none": 0.88,
+            "title": 0.12
           },
           "type": "choice"
         }
@@ -2904,7 +3129,7 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a347.82",
-          "confidence": 0.98,
+          "confidence": 0.97,
           "probabilities": {
             "47.82": 0.02,
             "none": 0.0,
@@ -2938,10 +3163,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.46,
+          "confidence": 0.48,
           "probabilities": {
-            "none": 0.73,
-            "title": 0.27
+            "none": 0.74,
+            "title": 0.26
           },
           "type": "choice"
         }
@@ -3048,11 +3273,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a354.23",
-          "confidence": 0.63,
+          "confidence": 0.79,
           "probabilities": {
-            "54.23": 0.25,
+            "54.23": 0.14,
             "none": 0.0,
-            "\u00a354.23": 0.75
+            "\u00a354.23": 0.86
           },
           "type": "choice"
         }
@@ -3084,12 +3309,12 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.96,
+          "confidence": 0.95,
           "probabilities": {
-            "none": 0.97,
+            "none": 0.96,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.03
+            "title": 0.04
           },
           "type": "choice"
         }
@@ -3159,12 +3384,12 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.66,
+          "confidence": 0.7,
           "probabilities": {
-            "in_stock": 0.27,
+            "in_stock": 0.24,
             "none": 0.0,
             "price": 0.0,
-            "stock_count": 0.73,
+            "stock_count": 0.76,
             "title": 0.0
           },
           "type": "choice"
@@ -3198,11 +3423,11 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.46,
+          "confidence": 0.45,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.57,
-            "price": 0.43,
+            "none": 0.56,
+            "price": 0.44,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -3210,6 +3435,43 @@
         }
       },
       "input_tokens": 390,
+      "model": "jev-1.13.0"
+    }
+  },
+  "7e30ceb66e3d201d": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "Information": null,
+            "Product": null,
+            "Product Information": null,
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind",
+        "statement": "Product Information"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "none",
+          "confidence": 0.95,
+          "probabilities": {
+            "Information": 0.0,
+            "Product": 0.0,
+            "Product Information": 0.04,
+            "none": 0.96
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 351,
       "model": "jev-1.13.0"
     }
   },
@@ -3306,7 +3568,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.95,
+          "p": 0.96,
           "type": "noul"
         }
       },
@@ -3367,7 +3629,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.91,
+          "p": 0.93,
           "type": "noul"
         }
       },
@@ -3437,10 +3699,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.92,
+          "confidence": 0.9,
           "probabilities": {
-            "none": 0.96,
-            "title": 0.04
+            "none": 0.95,
+            "title": 0.05
           },
           "type": "choice"
         }
@@ -3508,11 +3770,11 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "none",
-          "confidence": 0.42,
+          "confidence": 0.51,
           "probabilities": {
-            "A Light in the": 0.36,
+            "A Light in the": 0.31,
             "Light": 0.02,
-            "none": 0.62
+            "none": 0.67
           },
           "type": "choice"
         }
@@ -3543,16 +3805,60 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.66,
+          "confidence": 0.72,
           "probabilities": {
-            "53.74": 0.22,
+            "53.74": 0.19,
             "none": 0.0,
-            "\u00a353.74": 0.78
+            "\u00a353.74": 0.81
           },
           "type": "choice"
         }
       },
       "input_tokens": 356,
+      "model": "jev-1.13.0"
+    }
+  },
+  "8a18bb14497aa101": {
+    "request": {
+      "questions": {
+        "Book.in_stock/bool": {
+          "criteria": null,
+          "instructions": "Does the statement say the book is in stock?",
+          "type": "noul"
+        },
+        "Book.stock_count/choice0": {
+          "instructions": "Which of these is the number of copies available?",
+          "options": {
+            "20": null,
+            "In stock (20 available)": null,
+            "none": "None of these is the number of copies available"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Tipping the Velvet \u203a Product Information",
+        "statement": "Availability: In stock (20 available)"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.in_stock/bool": {
+          "p": 0.99,
+          "type": "noul"
+        },
+        "Book.stock_count/choice0": {
+          "choice": "20",
+          "confidence": 0.98,
+          "probabilities": {
+            "20": 0.99,
+            "In stock (20 available)": 0.01,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 372,
       "model": "jev-1.13.0"
     }
   },
@@ -3659,57 +3965,17 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.48,
+          "confidence": 0.61,
           "probabilities": {
-            "none": 0.39,
+            "none": 0.29,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.61
+            "title": 0.71
           },
           "type": "choice"
         }
       },
       "input_tokens": 376,
-      "model": "jev-1.13.0"
-    }
-  },
-  "8f2930d1f5b1f80a": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "A Brief History of Humankind": null,
-            "Brief History": null,
-            "Humankind": null,
-            "Sapiens": null,
-            "Sapiens: A Brief History of Humankind": null,
-            "none": "None of these is the title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Sapiens: A Brief History of Humankind"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "Sapiens: A Brief History of Humankind",
-          "confidence": 1.0,
-          "probabilities": {
-            "A Brief History of Humankind": 0.0,
-            "Brief History": 0.0,
-            "Humankind": 0.0,
-            "Sapiens": 0.0,
-            "Sapiens: A Brief History of Humankind": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 374,
       "model": "jev-1.13.0"
     }
   },
@@ -3777,12 +4043,12 @@
       "answers": {
         "Book": {
           "choice": "price",
-          "confidence": 0.34,
+          "confidence": 0.3,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.29,
-            "price": 0.45,
-            "rating": 0.25,
+            "none": 0.33,
+            "price": 0.42,
+            "rating": 0.24,
             "stock_count": 0.0,
             "title": 0.01
           },
@@ -3834,11 +4100,11 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.98,
+          "p": 0.99,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.02,
+          "p": 0.03,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -3846,7 +4112,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.95,
+          "p": 0.96,
           "type": "noul"
         }
       },
@@ -3875,10 +4141,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.97,
-            "title": 0.03
+            "none": 0.98,
+            "title": 0.02
           },
           "type": "choice"
         }
@@ -3947,10 +4213,10 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.19,
+          "confidence": 0.2,
           "probabilities": {
-            "none": 0.41,
-            "title": 0.59
+            "none": 0.4,
+            "title": 0.6
           },
           "type": "choice"
         }
@@ -3982,12 +4248,12 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.95,
+            "none": 0.97,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.05
+            "title": 0.03
           },
           "type": "choice"
         }
@@ -4040,7 +4306,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.11,
+          "p": 0.12,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -4256,15 +4522,15 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.03,
+          "p": 0.04,
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.98,
+          "p": 0.97,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.87,
+          "p": 0.85,
           "type": "noul"
         }
       },
@@ -4452,11 +4718,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.73,
+          "confidence": 0.74,
           "probabilities": {
-            "53.74": 0.18,
+            "53.74": 0.17,
             "none": 0.0,
-            "\u00a353.74": 0.82
+            "\u00a353.74": 0.83
           },
           "type": "choice"
         }
@@ -4526,10 +4792,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.29,
+          "confidence": 0.26,
           "probabilities": {
-            "none": 0.64,
-            "title": 0.36
+            "none": 0.63,
+            "title": 0.37
           },
           "type": "choice"
         }
@@ -4579,44 +4845,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "b00246eb901ced49": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "A Brief History of Humankind": null,
-            "Brief History": null,
-            "Humankind": null,
-            "Sapiens": null,
-            "none": "None of these is the title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Sapiens: A Brief History of Humankind"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "A Brief History of Humankind",
-          "confidence": 0.37,
-          "probabilities": {
-            "A Brief History of Humankind": 0.5,
-            "Brief History": 0.0,
-            "Humankind": 0.0,
-            "Sapiens": 0.42,
-            "none": 0.08
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 358,
-      "model": "jev-1.13.0"
-    }
-  },
   "b1b8b14a655f3510": {
     "request": {
       "questions": {
@@ -4654,15 +4882,15 @@
     "response": {
       "answers": {
         "Book.in_stock": {
-          "p": 0.23,
+          "p": 0.2,
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.54,
+          "p": 0.61,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.78,
+          "p": 0.81,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -4670,7 +4898,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.67,
+          "p": 0.66,
           "type": "noul"
         }
       },
@@ -4722,7 +4950,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.04,
+          "p": 0.05,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -4730,7 +4958,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.98,
+          "p": 0.97,
           "type": "noul"
         }
       },
@@ -4877,10 +5105,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.92,
+          "confidence": 0.93,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.9400000000000001,
+            "none": 0.94,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
@@ -4914,10 +5142,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.69,
+          "confidence": 0.56,
           "probabilities": {
-            "none": 0.85,
-            "title": 0.15
+            "none": 0.78,
+            "title": 0.22
           },
           "type": "choice"
         }
@@ -4949,14 +5177,14 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.41,
+          "choice": "title",
+          "confidence": 0.46,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.53,
+            "none": 0.43,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.47
+            "title": 0.5700000000000001
           },
           "type": "choice"
         }
@@ -5028,7 +5256,7 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.02,
+          "p": 0.01,
           "type": "noul"
         },
         "Book.rating": {
@@ -5036,11 +5264,11 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.01,
+          "p": 0.02,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.8,
+          "p": 0.77,
           "type": "noul"
         }
       },
@@ -5196,7 +5424,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.99,
+          "p": 0.98,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -5346,7 +5574,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.97,
+          "confidence": 0.96,
           "probabilities": {
             "none": 0.98,
             "title": 0.02
@@ -5444,7 +5672,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.02,
+          "p": 0.03,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -5485,11 +5713,11 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.33,
+          "confidence": 0.29,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.44,
-            "price": 0.34,
+            "none": 0.41,
+            "price": 0.37,
             "rating": 0.22,
             "stock_count": 0.0,
             "title": 0.0
@@ -5663,12 +5891,12 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.38,
+          "choice": "price",
+          "confidence": 0.45,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.5,
-            "price": 0.5,
+            "none": 0.44,
+            "price": 0.56,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -5702,12 +5930,12 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.83,
+          "confidence": 0.68,
           "probabilities": {
-            "none": 0.87,
+            "none": 0.76,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.13
+            "title": 0.24
           },
           "type": "choice"
         }
@@ -5749,6 +5977,85 @@
         }
       },
       "input_tokens": 342,
+      "model": "jev-1.13.0"
+    }
+  },
+  "daf299eabadd0fb2": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "A Brief History of Humankind": null,
+            "Brief": null,
+            "Brief History": null,
+            "History": null,
+            "Humankind": null,
+            "Sapiens": null,
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Sapiens: A Brief History of Humankind"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "Sapiens",
+          "confidence": 0.51,
+          "probabilities": {
+            "A Brief History of Humankind": 0.34,
+            "Brief": 0.0,
+            "Brief History": 0.0,
+            "History": 0.0,
+            "Humankind": 0.0,
+            "Sapiens": 0.58,
+            "none": 0.08
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 370,
+      "model": "jev-1.13.0"
+    }
+  },
+  "db25717946fe0ac4": {
+    "request": {
+      "questions": {
+        "Book.title/choice0": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "Objects": null,
+            "Sharp": null,
+            "Sharp Objects": null,
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Sharp Objects"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.title/choice0": {
+          "choice": "Sharp Objects",
+          "confidence": 0.95,
+          "probabilities": {
+            "Objects": 0.0,
+            "Sharp": 0.0,
+            "Sharp Objects": 0.96,
+            "none": 0.04
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 356,
       "model": "jev-1.13.0"
     }
   },
@@ -5814,7 +6121,7 @@
     "response": {
       "answers": {
         "Book.in_stock/bool": {
-          "p": 0.99,
+          "p": 0.98,
           "type": "noul"
         },
         "Book.stock_count/choice0": {
@@ -5852,10 +6159,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.65,
+          "confidence": 0.54,
           "probabilities": {
-            "none": 0.83,
-            "title": 0.17
+            "none": 0.77,
+            "title": 0.23
           },
           "type": "choice"
         }
@@ -5885,10 +6192,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.44,
+          "confidence": 0.32,
           "probabilities": {
-            "none": 0.72,
-            "title": 0.28
+            "none": 0.66,
+            "title": 0.34
           },
           "type": "choice"
         }
@@ -5918,7 +6225,7 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.89,
+          "confidence": 0.9,
           "probabilities": {
             "none": 0.95,
             "title": 0.05
@@ -5951,10 +6258,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.43,
+          "confidence": 0.1,
           "probabilities": {
-            "none": 0.71,
-            "title": 0.29
+            "none": 0.55,
+            "title": 0.45
           },
           "type": "choice"
         }
@@ -5988,14 +6295,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.94,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.96,
+            "none": 0.95,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.04
+            "title": 0.05
           },
           "type": "choice"
         }
@@ -6029,13 +6336,13 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.61,
+          "confidence": 0.58,
           "probabilities": {
-            "in_stock": 0.33,
+            "in_stock": 0.35,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.67,
+            "stock_count": 0.65,
             "title": 0.0
           },
           "type": "choice"
@@ -6082,15 +6389,15 @@
     "response": {
       "answers": {
         "Book.in_stock": {
-          "p": 0.91,
+          "p": 0.9,
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.89,
+          "p": 0.91,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.93,
+          "p": 0.94,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -6098,7 +6405,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.79,
+          "p": 0.78,
           "type": "noul"
         }
       },
@@ -6180,94 +6487,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "ec00ba2da0a23bbf": {
-    "request": {
-      "questions": {
-        "Book.stock_count/choice0": {
-          "instructions": "Which of these is the number of copies available?",
-          "options": {
-            "20": null,
-            "In stock (20 available)": null,
-            "none": "None of these is the number of copies available"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Tipping the Velvet \u203a Product Information",
-        "statement": "Availability: In stock (20 available)"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.stock_count/choice0": {
-          "choice": "20",
-          "confidence": 0.98,
-          "probabilities": {
-            "20": 0.99,
-            "In stock (20 available)": 0.01,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 355,
-      "model": "jev-1.13.0"
-    }
-  },
-  "ec2d0873c70065a2": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "Attic": null,
-            "Lemon-faced adults": null,
-            "Light": null,
-            "fidgety kids sit still": null,
-            "imagine": null,
-            "laugh": null,
-            "love th It's hard": null,
-            "none": "None of these is the title of the book",
-            "read": null,
-            "rhythmic words": null,
-            "smile": null,
-            "world": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "A Light in the Attic \u203a Product Description",
-        "statement": "Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love th It's hard to imagine a world without A Light in the Attic."
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "none",
-          "confidence": 0.64,
-          "probabilities": {
-            "Attic": 0.05,
-            "Lemon-faced adults": 0.0,
-            "Light": 0.26,
-            "fidgety kids sit still": 0.0,
-            "imagine": 0.0,
-            "laugh": 0.0,
-            "love th It's hard": 0.02,
-            "none": 0.67,
-            "read": 0.0,
-            "rhythmic words": 0.0,
-            "smile": 0.0,
-            "world": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 453,
-      "model": "jev-1.13.0"
-    }
-  },
   "ee6b48572b120add": {
     "request": {
       "questions": {
@@ -6291,60 +6510,17 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "Tipping the Velvet",
-          "confidence": 0.94,
+          "confidence": 0.97,
           "probabilities": {
             "Tipping": 0.0,
-            "Tipping the Velvet": 0.95,
+            "Tipping the Velvet": 0.98,
             "Velvet": 0.0,
-            "none": 0.05
+            "none": 0.02
           },
           "type": "choice"
         }
       },
       "input_tokens": 365,
-      "model": "jev-1.13.0"
-    }
-  },
-  "ef085fae8ed76ab1": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "Attic": null,
-            "It's hard": null,
-            "It's hard to imagine a world without A Light in the Attic": null,
-            "Light": null,
-            "imagine": null,
-            "none": "None of these is the title of the book",
-            "world": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "A Light in the Attic \u203a Product Description",
-        "statement": "It's hard to imagine a world without A Light in the Attic."
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "none",
-          "confidence": 0.67,
-          "probabilities": {
-            "Attic": 0.02,
-            "It's hard": 0.0,
-            "It's hard to imagine a world without A Light in the Attic": 0.21,
-            "Light": 0.05,
-            "imagine": 0.0,
-            "none": 0.72,
-            "world": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 396,
       "model": "jev-1.13.0"
     }
   },
@@ -6447,10 +6623,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.92,
           "probabilities": {
-            "none": 0.97,
-            "title": 0.03
+            "none": 0.96,
+            "title": 0.04
           },
           "type": "choice"
         }
@@ -6480,10 +6656,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.76,
+          "confidence": 0.74,
           "probabilities": {
-            "none": 0.88,
-            "title": 0.12
+            "none": 0.87,
+            "title": 0.13
           },
           "type": "choice"
         }
@@ -6532,19 +6708,19 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.08,
+          "p": 0.1,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.08,
+          "p": 0.09,
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.05,
+          "p": 0.06,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.94,
+          "p": 0.95,
           "type": "noul"
         }
       },
@@ -6572,10 +6748,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.26,
+          "confidence": 0.18,
           "probabilities": {
-            "none": 0.63,
-            "title": 0.37
+            "none": 0.59,
+            "title": 0.41
           },
           "type": "choice"
         }
@@ -6604,7 +6780,7 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "History",
-          "confidence": 0.97,
+          "confidence": 0.98,
           "probabilities": {
             "History": 0.99,
             "none": 0.01
@@ -6680,12 +6856,12 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "A Light in the Attic",
-          "confidence": 0.98,
+          "confidence": 0.96,
           "probabilities": {
-            "A Light in the Attic": 0.99,
+            "A Light in the Attic": 0.97,
             "Attic": 0.0,
             "Light": 0.0,
-            "none": 0.01
+            "none": 0.03
           },
           "type": "choice"
         }
