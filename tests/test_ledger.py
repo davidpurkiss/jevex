@@ -86,28 +86,6 @@ async def test_tiny_jev_charges_add_up_exactly(ledger: SpendLedger) -> None:
     assert await ledger.spend() == pytest.approx(0.000042, rel=1e-9)
 
 
-async def test_try_spend_respects_the_cap(ledger: SpendLedger) -> None:
-    assert await ledger.try_spend(charge(0.6, at=T0), cap_usd=1.0)
-    assert not await ledger.try_spend(charge(0.5, at=T0), cap_usd=1.0)
-    assert await ledger.try_spend(charge(0.4, "jev", at=T0), cap_usd=1.0)
-    assert await ledger.spend() == pytest.approx(1.0)
-    # Spend before ``since`` doesn't count against the cap (a new period).
-    later = T0 + timedelta(days=1)
-    assert await ledger.try_spend(charge(0.9, at=later), cap_usd=1.0, since=later)
-    # No limits: the entry is simply recorded.
-    assert await ledger.try_spend(charge(5.0, at=later))
-
-
-async def test_try_spend_caps_per_kind(ledger: SpendLedger) -> None:
-    await ledger.record_spend(charge(0.9, "llm", at=T0))
-    # Jev has its own cap: LLM spend doesn't count against it.
-    assert await ledger.try_spend(charge(0.5, "jev", at=T0), cap_usd=0.6, kind="jev")
-    assert not await ledger.try_spend(charge(0.2, "jev", at=T0), cap_usd=0.6, kind="jev")
-    assert not await ledger.try_spend(charge(0.2, "llm", at=T0), cap_usd=1.0, kind="llm")
-    with pytest.raises(ValueError, match="llm entry"):
-        await ledger.try_spend(charge(0.1, "llm"), cap_usd=1.0, kind="jev")
-
-
 async def test_try_spend_max_count_is_a_rate_limit(ledger: SpendLedger) -> None:
     now = T0
     for _ in range(3):
@@ -134,16 +112,26 @@ async def test_llm_call_entries_count_calls_but_add_no_spend(ledger: SpendLedger
 
 
 async def test_try_spend_rejects_bad_limits(ledger: SpendLedger) -> None:
-    for cap in (-1.0, float("nan"), float("inf")):
-        with pytest.raises(ValueError, match="cap_usd"):
-            await ledger.try_spend(charge(0.1), cap_usd=cap)
     with pytest.raises(ValueError, match="max_count"):
         await ledger.try_spend(charge(0.1), max_count=-1)
-    assert await ledger.try_spend(charge(0.1), cap_usd=1e30)  # huge caps are fine
+    with pytest.raises(ValueError, match="llm entry"):
+        await ledger.try_spend(charge(0.1, "llm"), max_count=1, kind="jev")
+    assert await ledger.spend() == 0.0
+
+
+async def test_try_spend_counts_only_its_kind(ledger: SpendLedger) -> None:
+    await ledger.record_spend(charge(0.9, "llm", at=T0))
+    assert await ledger.try_spend(charge(0.5, "jev", at=T0), max_count=1, kind="jev")
+    assert not await ledger.try_spend(charge(0.2, "jev", at=T0), max_count=1, kind="jev")
+    # Without a kind, every entry counts.
+    assert not await ledger.try_spend(charge(0.2, at=T0), max_count=2)
+    assert await ledger.spend() == pytest.approx(1.4)
 
 
 async def test_concurrent_try_spend_never_overshoots(ledger: SpendLedger) -> None:
-    results = await asyncio.gather(*(ledger.try_spend(charge(0.1), cap_usd=1.0) for _ in range(30)))
+    results = await asyncio.gather(
+        *(ledger.try_spend(charge(0.1), max_count=10) for _ in range(30))
+    )
     assert sum(results) == 10
     assert await ledger.spend() == pytest.approx(1.0)
 
