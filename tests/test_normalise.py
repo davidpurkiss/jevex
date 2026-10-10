@@ -167,10 +167,22 @@ def test_parse_date_rejects(raw: str) -> None:
         ("5%-7%", [5, 7]),
         ("5-7", [5, 7]),
         ("5kg-7kg", [5, 7]),
+        ("5 -7", [5, 7]),
+        ("5kg -7kg", [5, 7]),
+        ("-5 -2", [-5, 2]),
+        ("5 - -7", [5, -7]),
+        ("5 \u2013 -7", [5, -7]),
+        ("5 and -7", [5, -7]),
     ],
 )
 def test_parse_range(raw: str, value: list[int]) -> None:
     assert parse_range(raw) == value
+
+
+@pytest.mark.parametrize("raw", ["5", "-7 °C", "five to seven"])
+def test_parse_range_rejects(raw: str) -> None:
+    with pytest.raises(NormaliseError, match="not a range"):
+        parse_range(raw)
 
 
 # --- decimal commas and other locales (#56) -------------------------------------------
@@ -231,6 +243,8 @@ def test_parse_money_with_a_decimal_comma(raw: str, value: Decimal) -> None:
         ("zwischen 4 und 5", [4, 5]),
         ("-1,5 bis -0,5", [-1.5, -0.5]),
         ("de 4 à 5", [4, 5]),
+        ("1,4 -2,0", [1.4, 2.0]),
+        ("zwischen -1,5 und -0,5", [-1.5, -0.5]),
     ],
 )
 def test_parse_range_with_a_decimal_comma(raw: str, value: list[float]) -> None:

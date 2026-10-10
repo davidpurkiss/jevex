@@ -216,6 +216,7 @@ CLIMATE = SchemaSpec.from_model(Climate)
         ("Operating range -5--2 °C", "-5--2", [-5, -2]),
         ("Operating range 5 to -2 °C", "5 to -2", [5, -2]),
         ("Operating range (-5–7 °C)", "-5–7", [-5, 7]),
+        ("Operating range 5 - -7 °C", "5 - -7", [5, -7]),
     ],
 )
 def test_ranges_keep_their_signs(text: str, raw: str, value: list[int]) -> None:
@@ -242,7 +243,11 @@ def test_a_signed_range_is_a_key_values_chain() -> None:
 
 @pytest.mark.parametrize(
     ("text", "raw", "value"),
-    [("Seats 5-7", "5-7", [5, 7]), ("0-62 mph in 9.1 s", "0-62 mph", [0, 62])],
+    [
+        ("Seats 5-7", "5-7", [5, 7]),
+        ("Seats 5 -7", "5 -7", [5, 7]),
+        ("0-62 mph in 9.1 s", "0-62 mph", [0, 62]),
+    ],
 )
 def test_a_dash_between_numbers_is_not_a_sign(text: str, raw: str, value: list[float]) -> None:
     [cand] = Range().generate(st(text))
