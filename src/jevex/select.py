@@ -416,9 +416,15 @@ class SelectStage:
             if units:
                 candidates = run.candidates[key] = _in_units(candidates, units, conventions)
             selection = self.selector.selection(spec, candidates, answers)
-            if selection.candidate and (unit := units.get(selection.candidate.raw)):
-                # The value is only as sure as the unit it's read in.
-                confidence = min(selection.confidence, unit.confidence)
+            picks = (
+                (selection.accepted or [selection.candidate])
+                if spec.many
+                else [selection.candidate]
+            )
+            read = [units[c.raw].confidence for c in picks if c is not None and c.raw in units]
+            if read:
+                # The value is only as sure as the units it's read in.
+                confidence = min(selection.confidence, *read)
                 selection = selection.model_copy(update={"confidence": confidence})
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection

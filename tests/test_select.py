@@ -703,6 +703,26 @@ async def test_a_value_is_only_as_confident_as_its_unit() -> None:
     assert meta.confidence == 0.55
 
 
+async def test_a_list_value_is_only_as_confident_as_its_least_sure_unit() -> None:
+    class Powers(BaseModel):
+        outputs_ps: list[float] = Field(
+            default_factory=list, description="Power outputs", unit="PS"
+        )
+
+    fake = (
+        FakeJev()
+        .noul("as one of the power outputs", p=0.9)
+        .choice('Which unit is "110" in?', "kW", confidence=0.6)
+        .choice('Which unit is "150" in?', "PS", confidence=0.95)
+    )
+    ctx = context(fake, [st("s1", "Power (kW): 110 / 150")], {"s1": "outputs_ps"}, models=(Powers,))
+    await run_both(ctx)
+    await NormaliseStage().run(ctx)
+    meta = ctx.schemas["Powers"].fields["doc"]["outputs_ps"]
+    assert meta.value == [pytest.approx(149.558, abs=0.001), 150]
+    assert meta.confidence == 0.6
+
+
 async def test_each_bare_span_gets_its_own_unit_question() -> None:
     fake = (
         FakeJev()
