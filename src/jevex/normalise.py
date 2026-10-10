@@ -122,9 +122,10 @@ def strip(value: Any) -> Any:
 
     Runs of whitespace, no-break spaces included (statements keep them for numbers'
     thousands), become one plain space: "A\u00a0Light" → "A Light".
+    Leading punctuation is part of the text (".NET", "...And Justice for All").
     """
     if isinstance(value, str):
-        return _SPACE_RUN.sub(" ", value).strip().strip(" \t\r\n.;,")
+        return _SPACE_RUN.sub(" ", value).strip().rstrip(" .;,")
     return value
 
 
@@ -245,7 +246,20 @@ _MONEY = re.compile(
 _MONEY_DECIMAL_COMMA = re.compile(
     rf"(?P<num>\d{{1,3}}(?:{_GROUP}\d{{3}})+(?:,\d+)?|\d+(?:,\d+)?)\s?" + _MONEY_MULTIPLIER
 )
-_CURRENCY_UNITS = {"GBP", "USD", "EUR", "JPY", "CHF", "AUD", "CAD"}
+_CURRENCY_UNITS = {
+    "GBP",
+    "USD",
+    "EUR",
+    "JPY",
+    "CHF",
+    "AUD",
+    "CAD",
+    "NZD",
+    "HKD",
+    "SGD",
+    "MXN",
+    "CNY",
+}
 
 
 def parse_money(
@@ -368,18 +382,28 @@ def _four_digit_year(yy: int) -> int:
     return 2000 + yy if yy < 70 else 1900 + yy
 
 
+_SIGN_BEFORE = re.compile(r"(?:^|\s|\bto)$", re.IGNORECASE)
+"""What may come right before a range's signed number (searched up to the number)."""
+
+
 def parse_range(value: Any, *, decimal: str = ".") -> list[int | float]:
     """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]; with
-    ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0]."""
+    ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0].
+
+    A sign that starts the text or follows a space or "to" is the number's own:
+    "-5 to -2" → [-5, -2], "+5 to 10" → [5, 10] (a minus sign, U+2212, counts as "-"). One
+    right after a number or unit is the range's dash: "5-7" → [5, 7].
+    """
     if isinstance(value, list | tuple):
         return [parse_number(v, decimal=decimal) for v in value]  # pyright: ignore[reportUnknownVariableType]
-    text = str(value).replace("–", " ").replace("—", " ")
-    numbers = [m.group() for m in _number_pattern(decimal).finditer(text)]
+    text = str(value).replace("\u2212", "-").replace("–", " ").replace("—", " ")
+    numbers = [
+        m.group() if _SIGN_BEFORE.search(text, 0, m.start()) else m.group().lstrip("+-")
+        for m in _number_pattern(decimal).finditer(text)
+    ]
     if len(numbers) < 2:
         raise NormaliseError(f"not a range: {value!r}")
-    lo = parse_number(numbers[0].lstrip("+-"), decimal=decimal)
-    hi = parse_number(numbers[1].lstrip("+-"), decimal=decimal)
-    return [lo, hi]
+    return [parse_number(numbers[0], decimal=decimal), parse_number(numbers[1], decimal=decimal)]
 
 
 # --- registry and chains ---------------------------------------------------------------
