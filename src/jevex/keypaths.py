@@ -47,9 +47,9 @@ The stage's :data:`StructuredMode` decides what the layout route (stages 5–13)
   values only for those fields (a schema with none left is finished). It's the default
   because a page's embedded data is often only its metadata (a press release's make and
   model): finishing on any value would leave the page's own text (its price table)
-  unread. The component gate and
-  the categoriser still consider every field: they run before entities are resolved, and
-  a found field stays a categorise option so statements about it aren't misrouted.
+  unread. The component gate and the categoriser still consider every field: they run
+  before entities are resolved, and a found field stays a categorise option so statements
+  about it aren't misrouted.
 - ``merge``: the layout route looks for every field, and
   :meth:`~jevex.pipeline.SchemaRun.offer_field` settles each disagreement by confidence,
   recording the losing value in ``meta.conflicts``.

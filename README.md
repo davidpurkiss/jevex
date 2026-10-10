@@ -26,7 +26,7 @@ structured stage's `mode` decides what happens next:
 from jevex import StructuredStage
 from jevex.extractor import default_pipeline
 
-pipeline = default_pipeline().replace("structured", StructuredStage(mode="fill_gaps"))
+pipeline = default_pipeline().replace("structured", StructuredStage(mode="merge"))
 ```
 
 On a page with several entities (a comparison table under `MultiEntity`), embedded values

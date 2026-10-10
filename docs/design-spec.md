@@ -152,7 +152,7 @@ An `EntityScope` is a label plus the components (or table cells) belonging to it
 
 ## Structured-data stage
 
-When a page embeds machine-readable data, jevex uses it first. By default it stops there: the layout route runs only when the page has no embedded data, or when the caller opts in.
+When a page embeds machine-readable data, jevex uses it first. By default it then runs the layout route only for the fields the embedded data left empty (`fill_gaps`); `structured_only` stops at the embedded data, and `merge` reads both routes for every field.
 
 **Sources read:** JSON-LD (schema.org `Vehicle`, `Car`, `Product`, `Offer`), microdata and RDFa, embedded app state (`__NEXT_DATA__`, Nuxt payloads, `window.__INITIAL_STATE__`), and `data-*` attributes.
 
