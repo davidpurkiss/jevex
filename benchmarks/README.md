@@ -9,6 +9,7 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 | `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.baseline_instructions`) |
 | `baselines/<tool>_baseline.py` | An open-source tool as a baseline: a uv script with its pinned tool version, run in its own environment (`<tool>_baseline.py.lock`) |
 | `gate_wording/` | The live comparison of document-gate wordings behind #242's default (`compare.py`, results per date) |
+| `thresholds/` | The threshold sweep behind #49's defaults (`sweep.py`; results per date, written up in `docs/thresholds.md`) |
 
 `corpora/testsite.lock` is the seed-42 test site. Rebuild the site and check it:
 

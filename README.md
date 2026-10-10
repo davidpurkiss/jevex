@@ -184,7 +184,7 @@ method works too.
 ## Learning generators
 
 With a `generator_llm` as well, each answer Jev verified with probability at least
-`learn_threshold` (0.9 by default) is turned into a generator in the background, so the
+`learn_threshold` (0.95 by default) is turned into a generator in the background, so the
 same pattern never needs the LLM again. The LLM writes an RE2 pattern and a chain of
 built-in normalisers. The generator is kept only if it finds the value in the statement it
 came from, Jev picks that value there, and it doesn't make Jev wrong on the field's stored
