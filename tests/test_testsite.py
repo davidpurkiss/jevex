@@ -10,6 +10,7 @@ import pytest
 
 from jevex import testsite
 from jevex.document import sniff_content_type
+from jevex.schema import SchemaSpec
 from jevex.testsite import (
     DEFAULT_WAVES,
     FAMILIES,
@@ -144,6 +145,14 @@ def test_ground_truth_validates_against_the_schemas() -> None:
         assert page.records
         for record in page.records:
             SCHEMAS[page.schema].model_validate(record["values"])
+
+
+def test_the_document_gate_asks_what_sets_a_listing_apart_from_a_spec_page() -> None:
+    """A spec page quoting a price passed "a used car offered for sale" (#261)."""
+    assert SchemaSpec.from_model(Listing).document_gate_question().instructions == (
+        "Does this document include a used car advertised for sale, with its mileage and "
+        "year of registration? It may include several."
+    )
 
 
 def test_multi_entity_pages_have_one_record_per_entity() -> None:
