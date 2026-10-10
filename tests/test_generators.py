@@ -23,6 +23,7 @@ from jevex.generators import (
 )
 from jevex.generators.builtin import MAX_PHRASE_WORDS
 from jevex.generators.regex import MAX_PATTERN_LENGTH
+from jevex.generators.units import mentioned
 from jevex.interfaces import (
     CandidateGenerator,
     FieldAwareGenerator,
@@ -92,6 +93,19 @@ def test_unit_must_end_at_a_word_boundary() -> None:
     assert chain(NumberWithUnit(), "5 seats", "5") == ["parse_number"]
     assert raws(NumberWithUnit(), "150 psi") == ["150"]
     assert raws(NumberWithUnit(), "2 Lanes") == ["2"]
+
+
+@pytest.mark.parametrize(
+    ("text", "units"),
+    [
+        ("Power (kW) · SE: 110", ["kW"]),
+        ("150PS / 110 kW, 0-62 mph in 9.1 secs", ["PS", "kW", "mph", "s"]),
+        ("Torque: 250 Nm (184 lb-ft), 250 nm", ["Nm", "lb ft"]),
+        ("5 seats, 150 psi, 2 Lanes, CO2, Ps", []),
+    ],
+)
+def test_mentioned_finds_units_with_or_without_a_number(text: str, units: list[str]) -> None:
+    assert mentioned(text) == units
 
 
 def test_numbers_inside_words_are_ignored() -> None:

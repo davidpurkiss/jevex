@@ -275,6 +275,24 @@ def test_member_question_default_and_override() -> None:
     assert spec.field("colours").member_question("red") == Noul(instructions="Is red a Colours?")
 
 
+def test_unit_question_default_and_override() -> None:
+    class M(BaseModel):
+        power: float = Field(description="Power", unit="PS")
+        torque: float = Field(
+            description="Torque",
+            unit="Nm",
+            questions=Questions(unit="Is {value} the {description} in Nm or lb ft?"),
+        )
+
+    spec = SchemaSpec.from_model(M)
+    assert spec.field("power").unit_question("110", ["PS", "kW"]) == Choice(
+        instructions='Which unit is "110" in?', options={"PS": None, "kW": None}
+    )
+    assert spec.field("torque").unit_question("250", ["Nm", "lb ft"]) == Choice(
+        instructions="Is 250 the Torque (Nm) in Nm or lb ft?", options={"Nm": None, "lb ft": None}
+    )
+
+
 class GatedCar(BaseModel):
     """A car's specification."""
 

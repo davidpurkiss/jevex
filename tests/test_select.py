@@ -1,11 +1,22 @@
 import asyncio
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any, Literal
 
 import pytest
 from pydantic import BaseModel
 
-from jevex import Candidate, Context, Document, DomLocation, Field, SchemaSpec, Statement
+from jevex import (
+    Candidate,
+    Context,
+    Document,
+    DomLocation,
+    Field,
+    NormaliserStep,
+    Questions,
+    SchemaSpec,
+    Statement,
+)
 from jevex.entities import EntityScope
 from jevex.errors import PartError
 from jevex.generators import GeneratorRegistry, GeneratorSpec, RegexGenerator
@@ -639,6 +650,130 @@ async def test_merge_asks_about_found_fields_and_records_the_losing_value() -> N
     meta = run.fields["doc"]["fuel_type"]
     assert (meta.value, meta.method, meta.confidence) == ("diesel", "jev", 0.9)
     assert meta.conflicts == [Conflict(value="petrol", method="structured", confidence=0.6)]
+
+
+# --- the unit of a bare number ---------------------------------------------------------
+
+
+class Engine(BaseModel):
+    power_ps: float = Field(description="Power", unit="PS")
+    economy: float = Field(description="Fuel economy", unit="l/100km")
+    price: Decimal = Field(description="Price", unit="GBP")
+    doors: int = Field(description="Number of doors")
+
+
+async def extract_engine(
+    fake: FakeJev, text: str, field: str, document: Document | None = None
+) -> FieldMeta:
+    ctx = context(fake, [st("s1", text)], {"s1": field}, models=(Engine,), document=document)
+    await run_both(ctx)
+    await NormaliseStage().run(ctx)
+    return ctx.schemas["Engine"].fields["doc"][field]
+
+
+@pytest.mark.parametrize(("unit", "value"), [("kW", 149.558), ("PS", 110)])
+async def test_a_bare_number_is_read_in_the_unit_jev_picks(unit: str, value: float) -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the power", "110", confidence=0.9)
+        .choice('Which unit is "110" in?', unit)
+    )
+    meta = await extract_engine(fake, "Power (kW) · SE: 110", "power_ps")
+    assert only_call_questions(fake) == {
+        "Engine.power_ps/choice0": Choice(
+            instructions="Which of these is the power (PS)?",
+            options={"110": None, "none": "None of these is the power"},
+        ),
+        "Engine.power_ps#unit0": Choice(
+            instructions='Which unit is "110" in?', options={"PS": None, "kW": None}
+        ),
+    }
+    assert meta.value == pytest.approx(value, abs=0.001)
+    assert meta.confidence == 0.9
+
+
+async def test_every_bare_span_gets_its_own_unit_question() -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the power", "150", confidence=0.9)
+        .choice('Which unit is "150" in?', "PS")
+        .choice('Which unit is "110" in?', "kW")
+    )
+    ctx = context(
+        fake, [st("s1", "Power: 150 / 110 kW, 250 Nm")], {"s1": "power_ps"}, models=(Engine,)
+    )
+    await run_both(ctx)
+    questions = only_call_questions(fake)
+    assert {k: q.instructions for k, q in questions.items() if "#unit" in k} == {
+        "Engine.power_ps#unit0": 'Which unit is "150" in?',
+    }
+    run = ctx.schemas["Engine"]
+    chains = {c.raw: c.normalise for c in run.candidates[("s1", "power_ps")]}
+    # "110 kW" says its unit already; "250 Nm" is torque, not power.
+    assert chains["150"] == [
+        NormaliserStep(name="parse_number"),
+        NormaliserStep(name="unit", args={"from": "PS"}),
+    ]
+    assert chains["110 kW"] == [
+        NormaliserStep(name="parse_number"),
+        NormaliserStep(name="unit", args={"from": "kW"}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "field"),
+    [
+        ("Power (PS) · SE: 110", "power_ps"),  # only the field's own unit
+        ("Power: 110 kW", "power_ps"),  # the number carries its unit
+        ("Power · SE: 110, 0-62 mph in 9 s", "power_ps"),  # units of other dimensions
+        ("Price (USD) · SE: 18,495", "price"),  # a currency: nothing to convert
+        ("Doors (5 m long) · 5", "doors"),  # a field without a unit
+    ],
+)
+async def test_statements_naming_no_other_unit_ask_nothing_new(text: str, field: str) -> None:
+    fake = FakeJev(strict=True).choice("Which of these is the", "none")
+    await run_both(context(fake, [st("s1", text)], {"s1": field}, models=(Engine,)))
+    assert list(only_call_questions(fake)) == [f"Engine.{field}/choice0"]
+
+
+async def test_the_unit_question_can_be_overridden() -> None:
+    class Overridden(BaseModel):
+        power_ps: float = Field(
+            description="Power",
+            unit="PS",
+            questions=Questions(unit='Is "{value}" in PS or kW? ({description})'),
+        )
+
+    fake = FakeJev()
+    ctx = context(
+        fake, [st("s1", "Power (kW) · SE: 110")], {"s1": "power_ps"}, models=(Overridden,)
+    )
+    await run_both(ctx)
+    question = only_call_questions(fake)["Overridden.power_ps#unit0"]
+    assert question.instructions == 'Is "110" in PS or kW? (Power (PS))'
+
+
+async def test_mpg_is_read_in_the_pages_gallons() -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the fuel economy", "40", confidence=0.9)
+        .choice('Which unit is "40" in?', "mpg")
+    )
+    us = Document.from_bytes(b"<p/>", url="https://example.com", locale="en-US")
+    meta = await extract_engine(fake, "Economy (mpg) · Combined: 40", "economy", document=us)
+    assert meta.value == pytest.approx(235.214583 / 40)
+
+
+async def test_a_unit_that_cannot_convert_gives_a_normalise_error_not_a_value() -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the fuel economy", "0", confidence=0.9)
+        .choice('Which unit is "0" in?', "mpg")
+    )
+    meta = await extract_engine(fake, "Economy (mpg) · Electric: 0", "economy")
+    assert meta.value is None
+    assert meta.error == "can't convert zero fuel economy"
+    assert meta.confidence == 0.9
 
 
 # --- batching --------------------------------------------------------------------------

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING
 
-from jevex.generators.units import spellings
+from jevex.generators.units import alternation, canonical
 from jevex.interfaces import Scope
 from jevex.locales import (
     EN_GB,
@@ -49,25 +49,6 @@ if TYPE_CHECKING:
 
     from jevex.locales import LocaleConventions
     from jevex.schema import FieldSpec
-
-
-def _unit_alternation() -> str:
-    parts: list[str] = []
-    for spelling, _canonical, case_sensitive in spellings():
-        escaped = re.escape(spelling).replace(r"\ ", r"\s?")
-        parts.append(escaped if case_sensitive else f"(?i:{escaped})")
-    return "|".join(parts)
-
-
-_UNIT_TO_CANONICAL = {
-    (spelling if case_sensitive else spelling.lower()): canonical
-    for spelling, canonical, case_sensitive in spellings()
-}
-
-
-def _canonical_unit(found: str) -> str:
-    compact = re.sub(r"\s+", " ", found)
-    return _UNIT_TO_CANONICAL.get(compact) or _UNIT_TO_CANONICAL.get(compact.lower(), compact)
 
 
 def _candidate(
@@ -173,7 +154,7 @@ def _range(num: str, units: str, language: str) -> str:
 def _patterns(conventions: LocaleConventions) -> _Patterns:
     language = conventions.language
     num = _num(conventions)
-    units = _unit_alternation()
+    units = alternation()
     mult = _multiplier(language)
     amount = f"(?:{num}){_round(conventions)}{mult}?"
     # Without a multiplier, "€ 1 Billion" or "€ 1,2 Bio." would give a truncated "€ 1".
@@ -254,7 +235,7 @@ class NumberWithUnit:
         out: list[Candidate] = []
         covered: set[int] = set()
         for m in patterns.number_with_unit.finditer(text):
-            unit = _canonical_unit(m.group("unit"))
+            unit = canonical(m.group("unit"))
             steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))
             out.append(_candidate(statement, m.start(), m.end(), self.id, *steps))
             covered.add(m.start("num"))
@@ -350,7 +331,7 @@ class Year:
 def _range_steps(m: re.Match[str], patterns: _Patterns) -> list[NormaliserStep]:
     steps = [_step("parse_range")]
     if m.group("unit"):
-        steps.append(_step("unit", **{"from": _canonical_unit(m.group("unit"))}))
+        steps.append(_step("unit", **{"from": canonical(m.group("unit"))}))
     return patterns.steps(*steps)
 
 
@@ -390,7 +371,7 @@ def _number_chain(value: str, patterns: _Patterns) -> list[NormaliserStep] | Non
     if m := patterns.money.search(value):
         found.append((m.start(), 1, patterns.steps(_step("parse_money", currency=_currency(m)))))
     if m := patterns.number_with_unit.search(value):
-        unit = _canonical_unit(m.group("unit"))
+        unit = canonical(m.group("unit"))
         steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))
         found.append((m.start(), 2, steps))
     if m := patterns.number.search(value):

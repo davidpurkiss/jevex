@@ -14,6 +14,11 @@ After categorising, each statement is assigned to a field (or none). Then:
   - enum fields: a Choice over the options plus "not stated" (``list[...]``: one Noul per
     option).
   - bool fields: a Noul.
+  - fields with a unit: for each bare-number candidate (no ``unit`` step) in a statement
+    that names another unit of the field's dimension ("Power (kW) · SE: 110" for a field
+    in PS), a Choice asking which unit it's in, the field's own unit first. The answer
+    becomes the candidate's ``{unit: {from: ...}}`` step. A statement naming no other
+    unit asks nothing more.
 
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
@@ -31,19 +36,24 @@ from typing import TYPE_CHECKING, Any
 
 from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
+from jevex.generators.units import mentioned
 from jevex.interfaces import Selection
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, JSONContent, NoulAnswer
 from jevex.layout import section_text
+from jevex.locales import locale_conventions, localise_steps
+from jevex.normalise import canonical_unit, dimension
 from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
+from jevex.statements import NormaliserStep
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from jevex.entities import EntityScope
     from jevex.interfaces import CandidateGenerator, CandidateSelector
-    from jevex.jev import Answer, Question
+    from jevex.jev import Answer, Choice, Question
+    from jevex.locales import LocaleConventions
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import FieldSpec
     from jevex.statements import Candidate, Statement
@@ -109,6 +119,53 @@ def unique_spans(candidates: list[Candidate]) -> dict[str, Candidate]:
         by_raw.setdefault(cand.raw, cand)
     by_raw.pop(NONE_OPTION, None)
     return by_raw
+
+
+# --- the unit of a bare number ---------------------------------------------------------
+
+_NUMBER_STEPS = frozenset({"parse_number", "parse_range"})
+
+
+def _bare(candidate: Candidate) -> bool:
+    """A number or range whose chain doesn't say what unit it's in."""
+    names = {step.name for step in candidate.normalise}
+    return "unit" not in names and bool(names & _NUMBER_STEPS)
+
+
+def _unit_questions(
+    statement: Statement, field: FieldSpec, candidates: list[Candidate]
+) -> dict[str, Choice]:
+    """By raw span, a Choice asking which unit each bare-number candidate is in.
+
+    Asked only when the statement spells out a unit of the field's dimension other than
+    the field's own (:func:`~jevex.generators.units.mentioned`): otherwise the number is
+    read in the field's unit, as :func:`~jevex.normalise.normalise` does. Options are the
+    field's unit, then the others in the order the statement names them.
+    """
+    if field.kind != "number" or field.unit is None or (wanted := dimension(field.unit)) is None:
+        return {}
+    own = canonical_unit(field.unit)
+    others = [u for u in mentioned(statement.text) if u != own and dimension(u) == wanted]
+    if not others:
+        return {}
+    spans = dict.fromkeys(c.raw for c in candidates if _bare(c))
+    return {raw: field.unit_question(raw, [own, *others]) for raw in spans}
+
+
+def _in_units(
+    candidates: list[Candidate], units: Mapping[str, str], conventions: LocaleConventions
+) -> list[Candidate]:
+    """The candidates, each bare one whose span has an answer in ``units`` with that unit
+    as its chain's last step (localised, so mpg is read in the locale's gallons)."""
+    out: list[Candidate] = []
+    for cand in candidates:
+        unit = units.get(cand.raw)
+        if unit is not None and _bare(cand):
+            step = NormaliserStep(name="unit", args={"from": unit})
+            chain = [*cand.normalise, *localise_steps([step], conventions)]
+            cand = cand.model_copy(update={"normalise": chain})
+        out.append(cand)
+    return out
 
 
 # --- the default candidate selector ----------------------------------------------------
@@ -238,11 +295,17 @@ class _Ask:
     run: SchemaRun
     spec: FieldSpec
     questions: dict[str, Question]
+    units: dict[str, Choice]
+    """:func:`_unit_questions`, by raw span; keyed apart from the selector's questions."""
     scopes: list[str] = field(default_factory=list[str])
 
     @property
     def prefix(self) -> str:
         return f"{self.run.name}.{self.spec.name}/"
+
+    @property
+    def unit_prefix(self) -> str:
+        return f"{self.run.name}.{self.spec.name}#unit"
 
 
 @dataclass
@@ -268,6 +331,7 @@ class SelectStage:
 
     async def run(self, ctx: Context) -> None:
         plans = self._plan(ctx)
+        conventions = locale_conventions(ctx.locale)
         replies = await gather(
             ctx.jev.ask(statement_state(statement), _merged(asks))
             for statement, asks in plans.values()
@@ -281,7 +345,14 @@ class SelectStage:
                     for key, answer in answers.items()
                     if key.startswith(ask.prefix)
                 }
-                self._read(ask, statement, mine, order.get(sid, len(order)), outcomes)
+                units = {
+                    raw: answer.choice
+                    for i, raw in enumerate(ask.units)
+                    if isinstance(answer := answers.get(f"{ask.unit_prefix}{i}"), ChoiceAnswer)
+                }
+                self._read(
+                    ask, statement, mine, units, conventions, order.get(sid, len(order)), outcomes
+                )
         for (schema, scope, field_name), found in outcomes.items():
             run = ctx.schemas[schema]
             _record_direct(ctx, run, scope, run.spec.field(field_name), found)
@@ -298,7 +369,9 @@ class SelectStage:
                         questions = self._questions(run, statement, spec)
                         if not questions:
                             continue
-                        asks[key] = _Ask(run=run, spec=spec, questions=questions)
+                        candidates = run.candidates.get((statement.id, spec.name), [])
+                        units = _unit_questions(statement, spec, candidates)
+                        asks[key] = _Ask(run=run, spec=spec, questions=questions, units=units)
                     asks[key].scopes.append(scope.label)
         return {sid: plan for sid, plan in plans.items() if plan[1]}
 
@@ -322,12 +395,17 @@ class SelectStage:
         ask: _Ask,
         statement: Statement,
         answers: dict[str, Answer],
+        units: dict[str, str],
+        conventions: LocaleConventions,
         order: int,
         outcomes: dict[tuple[str, str, str], list[_Outcome]],
     ) -> None:
         spec, run = ask.spec, ask.run
         if spec.needs_candidates:
-            candidates = run.candidates.get((statement.id, spec.name), [])
+            key = (statement.id, spec.name)
+            candidates = run.candidates.get(key, [])
+            if units:
+                candidates = run.candidates[key] = _in_units(candidates, units, conventions)
             selection = self.selector.selection(spec, candidates, answers)
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection
@@ -342,7 +420,11 @@ class SelectStage:
 
 def _merged(asks: Mapping[tuple[str, str], _Ask]) -> dict[str, Question]:
     """All of a statement's questions in one request, namespaced per schema and field."""
-    return {f"{ask.prefix}{key}": q for ask in asks.values() for key, q in ask.questions.items()}
+    out: dict[str, Question] = {}
+    for ask in asks.values():
+        out.update((f"{ask.prefix}{key}", q) for key, q in ask.questions.items())
+        out.update((f"{ask.unit_prefix}{i}", q) for i, q in enumerate(ask.units.values()))
+    return out
 
 
 def _direct(
