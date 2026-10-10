@@ -97,7 +97,9 @@ class Outcome:
 async def fetch_corpus(manifest: Path, out: Path, fetcher: SimpleFetcher) -> list[Outcome]:
     """Fetch ``manifest``'s documents and copy its labels into ``out``, one outcome per file.
 
-    Raises ``ValueError`` (a pydantic ``ValidationError``) if the manifest isn't valid.
+    A document that can't be read or written in ``out`` fails on its own, as one that can't
+    be fetched does. Raises ``ValueError`` (a pydantic ``ValidationError``) if the manifest
+    isn't valid, and ``OSError`` if it can't be read or ``out`` can't be made.
     """
     corpus = await asyncio.to_thread(_open, manifest, out)
     async with asyncio.TaskGroup() as group:
@@ -113,7 +115,10 @@ def _open(manifest: Path, out: Path) -> Manifest:
 
 
 async def _fetch(document: ManifestDocument, out: Path, fetcher: SimpleFetcher) -> Outcome:
-    there = await asyncio.to_thread(_already_there, document, out)
+    try:
+        there = await asyncio.to_thread(_already_there, document, out)
+    except OSError as exc:
+        return Outcome(document.file, "failed", str(exc))
     if there is not None:
         return there
     try:
@@ -127,7 +132,10 @@ async def _fetch(document: ManifestDocument, out: Path, fetcher: SimpleFetcher) 
             "failed",
             f"{document.url} has sha256 {found}, not {document.sha256}; not written",
         )
-    await asyncio.to_thread(_write, out / document.file, fetched.content)
+    try:
+        await asyncio.to_thread(_write, out / document.file, fetched.content)
+    except OSError as exc:
+        return Outcome(document.file, "failed", str(exc))
     return Outcome(document.file, "fetched")
 
 

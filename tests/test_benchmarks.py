@@ -588,6 +588,20 @@ async def test_fetch_keeps_what_is_there_and_never_overwrites(tmp_path: Path) ->
     assert statuses(rerun)["truth.json"] == "present"
 
 
+async def test_fetch_reports_a_document_it_cant_keep_and_carries_on(tmp_path: Path) -> None:
+    manifest = write_manifest(
+        tmp_path / "src",
+        manifest_entry("a.pdf", "/a.pdf", PDF),
+        manifest_entry("b.html", "/b.html", HTML, kind="html"),
+    )
+    out = tmp_path / "corpus"
+    (out / "a.pdf").mkdir(parents=True)  # not a file the script can read or replace
+    outcomes = await fetch_script().fetch_corpus(manifest, out, maker_site())
+    assert statuses(outcomes) == {"a.pdf": "failed", "b.html": "fetched", "truth.json": "copied"}
+    assert outcomes[0].describe().startswith("failed   a.pdf: [Errno 21] Is a directory")
+    assert (out / "b.html").read_bytes() == HTML
+
+
 async def test_fetch_works_before_the_labels_exist(tmp_path: Path) -> None:
     manifest = write_manifest(tmp_path / "src", manifest_entry("a.pdf", "/a.pdf", PDF), truth=None)
     out = tmp_path / "corpus"

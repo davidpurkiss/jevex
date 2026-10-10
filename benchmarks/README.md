@@ -6,7 +6,7 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 | --- | --- |
 | `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora (`jevex.benchmarks.BenchmarkConfig`) |
 | `corpora/<name>.lock` | A corpus's lock: hashes of its `truth.json` and of every document (`jevex corpus lock`, `jevex corpus check`) |
-| `corpora/spec-sheets/` | The real spec-sheet corpus as the repo holds it: `manifest.json` (each document's URL and sha256), the labels (`truth.json`, written to `LABELLING.md`) and the labelling's checking scripts |
+| `corpora/spec-sheets/` | The real spec-sheet corpus as the repo holds it: `manifest.json` (each document's URL and sha256), the labels (`truth.json`, labelled by `LABELLING.md`'s rules) and the labelling's checking scripts |
 | `corpora/fetch.py` | Fetches a corpus from its `manifest.json`: a uv script (`fetch.py.lock`) |
 | `baselines/prompt-v1.md` | The instructions every baseline gets, with `{schemas}` where the schemas are written out (`jevex.baselines.baseline_instructions`) |
 | `baselines/<tool>_baseline.py` | An open-source tool as a baseline: a uv script with its pinned tool version, run in its own environment (`<tool>_baseline.py.lock`) |
