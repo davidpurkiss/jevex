@@ -64,7 +64,11 @@ _WHITESPACE = re.compile(r"[ \t\n\r\f\v]+")  # a no-break space stays: it can gr
 
 
 def is_key_value(text: str) -> bool:
-    """Whether ``text`` reads as one ``Label: value`` pair."""
+    """Whether ``text`` reads as one ``Label: value`` pair.
+
+    That the text before the colon labels the value is a guess, made in code because it
+    shapes the statements (and OCR lines) Jev is later asked about; Jev still judges
+    which field, if any, the pair states."""
     text = text.strip()
     m = _KEY_VALUE.match(text)
     if m is None:
@@ -214,7 +218,9 @@ def sentences(text: str, *, language: str = "en") -> list[str]:
 
     Fragments pysbd splits after a mid-sentence abbreviation (:data:`ABBREVIATIONS`, plus
     ``language``'s own in :data:`LANGUAGE_ABBREVIATIONS`) or a dotted model name ("ID.3")
-    are joined back up. A new pysbd segmenter is built per call:
+    are joined back up. Those word lists guess where a sentence ends; they are code
+    because sentences are what Jev is asked about, and asking about each full stop would
+    cost a question per sentence. A new pysbd segmenter is built per call:
     they keep per-call state, so sharing one across threads loses text.
     """
     segmenter_class, lang = _pysbd_language(language)

@@ -119,7 +119,9 @@ class MultiEntity:
     its columns), so each proposed label is checked with one Noul
     (:meth:`~jevex.schema.SchemaSpec.boundary_question`), a group's labels in one
     request. Labels at ``boundary_p`` or above are entities; the same label in two places
-    (the "SE" column of two tables) is one entity. With ``confirm=False`` nothing is
+    (the "SE" column of two tables) is one entity: a page that splits one comparison over
+    several tables repeats its headers in each (a label repeated within one group is
+    numbered instead, "Golf (2)"). With ``confirm=False`` nothing is
     asked and every proposed label is an entity, except table rows (only columns are
     proposed): use it only for pages whose structure is known to be one entity per
     group, since otherwise topic sections split the record.
@@ -518,7 +520,11 @@ def _is_headed(component: Component) -> bool:
 
 
 def _label(component: Component) -> str:
-    """A member's label: its first heading, else its first text."""
+    """A member's label: its first heading, else its first text.
+
+    The first text is a guess at a name (a card's could be its price). It's only
+    proposed: :class:`MultiEntity` asks Jev whether it names an entity, and
+    :class:`ParentChild`'s caller has said the member is one."""
     texts = [c for c in component.walk() if c.text.strip()]
     heading = next((c for c in texts if c.type == "heading"), None)
     first = heading or (texts[0] if texts else None)
