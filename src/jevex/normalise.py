@@ -27,7 +27,12 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, cast, get_args, get_ori
 from pydantic import TypeAdapter, ValidationError
 
 from jevex.generators.units import spellings
-from jevex.locales import ALL_MONTH_NAMES, ALL_MULTIPLIERS, THOUSANDS_AFTER_DECIMAL_COMMA
+from jevex.locales import (
+    ALL_MONTH_NAMES,
+    ALL_MULTIPLIERS,
+    ALL_RANGE_JOINS,
+    THOUSANDS_AFTER_DECIMAL_COMMA,
+)
 from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 
@@ -382,28 +387,35 @@ def _four_digit_year(yy: int) -> int:
     return 2000 + yy if yy < 70 else 1900 + yy
 
 
-_SIGN_BEFORE = re.compile(r"(?:^|[\s(:-]|\bto)$", re.IGNORECASE)
-"""What may come right before a range's signed number (searched up to the number)."""
+_SIGN_BEFORE = re.compile(r"(?:^|[\s(:])$")
+"""What may come right before a range's first signed number (searched up to the number)."""
+
+_JOIN = re.compile(rf"[-–—]|\b(?:{'|'.join(sorted(ALL_RANGE_JOINS))})\b", re.IGNORECASE)
+"""What joins a range's two numbers other than the second one's sign: a dash or a word."""
 
 
 def parse_range(value: Any, *, decimal: str = ".") -> list[int | float]:
     """ "5–7" / "380 to 1,237 litres" / "between 4 and 5" → [lo, hi]; with
     ``decimal=","``, "1,4–2,0 l" → [1.4, 2.0].
 
-    A sign that starts the text or follows a space, "(", ":", a range's dash or "to" is the
-    number's own: "-5 to -2" → [-5, -2], "-5--2" → [-5, -2] (a minus sign, U+2212, counts
-    as "-"). One right after a number or unit is the range's dash: "5-7" → [5, 7].
+    A minus sign (U+2212) counts as "-"; en and em dashes join numbers but are never
+    signs. The first number's sign is its own when it starts the text or follows a space,
+    "(" or ":". The second's is its own only when a dash or a range word
+    (:data:`~jevex.locales.ALL_RANGE_JOINS`) also joins the numbers: "-5 to -2" → [-5, -2],
+    "-5--2" → [-5, -2], "5 - -7" → [5, -7]. Otherwise it's the range's dash, spaced or
+    not: "5-7" and "5 -7" → [5, 7]. A range needs something joining its numbers, so "5 -7"
+    read as [5, -7] isn't one.
     """
     if isinstance(value, list | tuple):
         return [parse_number(v, decimal=decimal) for v in value]  # pyright: ignore[reportUnknownVariableType]
-    text = str(value).replace("\u2212", "-").replace("–", " ").replace("—", " ")
-    numbers = [
-        m.group() if _SIGN_BEFORE.search(text, 0, m.start()) else m.group().lstrip("+-")
-        for m in _number_pattern(decimal).finditer(text)
-    ]
-    if len(numbers) < 2:
+    text = str(value).replace("\u2212", "-")
+    found = list(_number_pattern(decimal).finditer(text))
+    if len(found) < 2:
         raise NormaliseError(f"not a range: {value!r}")
-    return [parse_number(numbers[0], decimal=decimal), parse_number(numbers[1], decimal=decimal)]
+    lo, hi = found[:2]
+    lo_text = lo.group() if _SIGN_BEFORE.search(text, 0, lo.start()) else lo.group().lstrip("+-")
+    hi_text = hi.group() if _JOIN.search(text, lo.end(), hi.start()) else hi.group().lstrip("+-")
+    return [parse_number(lo_text, decimal=decimal), parse_number(hi_text, decimal=decimal)]
 
 
 # --- registry and chains ---------------------------------------------------------------

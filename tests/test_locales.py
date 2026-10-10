@@ -11,7 +11,7 @@ from jevex import (
     locale_conventions,
     localise_steps,
 )
-from jevex.locales import EN_GB, MONTH_NAMES, MULTIPLIERS, RANGE_WORDS
+from jevex.locales import ALL_RANGE_JOINS, EN_GB, MONTH_NAMES, MULTIPLIERS, RANGE_WORDS
 
 
 def steps(*items: object) -> list[NormaliserStep]:
@@ -102,6 +102,10 @@ def test_languages_with_their_own_words() -> None:
     assert set(MONTH_NAMES) == {"en", "de", "fr", "es", "it", "nl"}
     assert set(MULTIPLIERS) == set(RANGE_WORDS) == {"de", "fr", "es", "it", "nl"}
     assert "mil" not in MULTIPLIERS["es"]  # a million, or a thousandth of an inch, in English
+
+
+def test_range_joins_are_every_languages_to_and_and_words() -> None:
+    assert {"to", "and", "bis", "und", "à", "et", "a", "y", "e", "tot", "en"} == ALL_RANGE_JOINS
 
 
 @pytest.mark.parametrize("locale", ["en-US", "en_us", "es-US", "en-Latn-US"])

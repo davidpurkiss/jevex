@@ -140,8 +140,10 @@ def _range(num: str, units: str, language: str) -> str:
     Spanish and Italian "a" join much else: the range is only proposed, and Jev's Choice
     tells the readings apart. Either end may carry a minus sign ("-5 to -2", "between -5
     and 5"), but not the first right after a word or number ("A-5", "2024-03"): that dash
-    joins them. The number generator still proposes the unsigned numbers, so Jev also
-    picks between the signed and unsigned readings."""
+    joins them. A dash before the second number is its sign only when another dash or
+    word joins the two ("5 - -7"); in "5 -7" it's the range's, as ``parse_range`` reads
+    it. The number generator still proposes the unsigned numbers, so Jev also picks
+    between the signed and unsigned readings."""
     to, between, and_ = "", "between", "and"
     if words := RANGE_WORDS.get(language):
         to = rf"|\s+(?i:{_words(words.to)})\s+"

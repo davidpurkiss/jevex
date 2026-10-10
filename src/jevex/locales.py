@@ -368,6 +368,12 @@ RANGE_WORDS: dict[str, RangeWords] = {
 }
 """Range words by language, matched on top of English "to" and "between … and"."""
 
+ALL_RANGE_JOINS: frozenset[str] = frozenset(
+    {"to", "and"} | {w for words in RANGE_WORDS.values() for w in (*words.to, *words.and_)}
+)
+"""Every language's words joining a range's two numbers, English "to" and "and" included
+(``parse_range`` reads them whatever the page's language)."""
+
 
 def _subtags(locale: str) -> tuple[str, str | None]:
     """The language and region of a tag: ``de-DE`` → ("de", "DE"), ``zh-Hant-TW`` →
