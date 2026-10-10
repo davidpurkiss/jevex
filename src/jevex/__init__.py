@@ -218,6 +218,7 @@ from jevex.resolve import (
     ParentChild,
     SingleEntity,
     place_document_values,
+    sibling_labels,
 )
 from jevex.results import Extracted, FieldMeta, Source
 from jevex.review import ReviewItem, ReviewQueue, ReviewSink, review_items
@@ -544,6 +545,7 @@ __all__ = [
     "score_result",
     "score_results",
     "section_text",
+    "sibling_labels",
     "stats_server",
     "status_of",
     "store_error",

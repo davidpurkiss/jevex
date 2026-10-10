@@ -30,6 +30,8 @@ from jevex.jev import (
     Question,
     UnexpectedAnswerError,
 )
+from jevex.layout import LayoutStage
+from jevex.split import StatementStage
 from jevex.testing import FakeJev
 
 LOC = DomLocation(dom_path="/p")
@@ -227,6 +229,36 @@ PAGE = b"""<!doctype html><html><head><title>Delmaro Kestrova</title></head><bod
 </main>
 <footer>&copy; 2026 Example Motors</footer>
 </body></html>"""
+
+
+class Trim(BaseModel):
+    """A car trim."""
+
+    trim: str = Field(description="Trim name")
+
+
+async def test_a_section_s_name_is_categorised_beside_its_siblings_names() -> None:
+    fake = FakeJev(strict=True).choice("Which detail", "none")
+    page = (
+        b"<section><h2>SE</h2><p>150PS.</p></section><section><h2>Sport</h2><p>180PS.</p></section>"
+    )
+    ctx = Context.create(
+        Document.from_bytes(page, content_type="text/html"),
+        [SchemaSpec.from_model(Trim)],
+        fake.client(),
+    )
+    await LayoutStage().run(ctx)
+    await StatementStage().run(ctx)
+    assert ctx.parsed is not None
+    every = [c.id for c in ctx.parsed.root.walk()]
+    ctx.schemas["Trim"].scopes = [EntityScope(label="doc", component_ids=every)]
+    await CategoriseStage().run(ctx)
+    assert [c.state for c in fake.calls] == [
+        {"statement": "SE", "sibling_labels": "SE, Sport"},
+        {"statement": "150PS.", "section": "SE"},
+        {"statement": "Sport", "sibling_labels": "SE, Sport"},
+        {"statement": "180PS.", "section": "Sport"},
+    ]
 
 
 def pick_first_candidate(q: Choice) -> str:

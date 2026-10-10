@@ -35,10 +35,12 @@ from jevex.resolve import (
     EntityStage,
     SingleEntity,
     place_document_values,
+    sibling_labels,
 )
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import ALL_OPTION
 from jevex.split import StatementStage
+from jevex.tables import MAX_AXIS_CHARS
 from jevex.testing import FakeJev
 
 
@@ -496,6 +498,90 @@ async def test_multi_entity_without_confirm_asks_no_boundary_questions() -> None
     scopes = await MultiEntity(confirm=False).resolve(parsed, VEHICLE, fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
     assert all("entity" in c.questions for c in fake.calls)
+
+
+def labelled(parsed: ParsedDocument) -> dict[str, str]:
+    """``sibling_labels`` keyed by statement text."""
+    return {parsed.statements[sid].text: labels for sid, labels in sibling_labels(parsed).items()}
+
+
+async def test_the_headings_of_a_run_of_sections_carry_the_run_s_names() -> None:
+    parsed = await parse(
+        "<h1>Kestrova trims</h1><section><h2>SE</h2><p>150PS.</p></section>"
+        "<section><h2>Sport</h2><p>180PS.</p></section>"
+        "<section><h2>GT</h2><p>200PS. Heated seats.</p></section>"
+    )
+    assert labelled(parsed) == {
+        "SE": "SE, Sport, GT",
+        "Sport": "SE, Sport, GT",
+        "GT": "SE, Sport, GT",
+    }
+    # The statement stage put them on the statements.
+    assert {s.text: s.sibling_labels for s in parsed.statements.values()} == {
+        "Kestrova trims": None,
+        "SE": "SE, Sport, GT",
+        "150PS.": None,
+        "Sport": "SE, Sport, GT",
+        "180PS.": None,
+        "GT": "SE, Sport, GT",
+        "200PS.": None,
+        "Heated seats.": None,
+    }
+
+
+async def test_topic_sections_carry_their_names_too_for_jev_to_judge() -> None:
+    parsed = await parse(
+        "<section><h2>Performance</h2><p>9.1 s</p></section>"
+        "<section><h2>Dimensions</h2><p>4.2 m</p><p>1.8 m</p></section>"
+    )
+    assert labelled(parsed) == {
+        "Performance": "Performance, Dimensions",
+        "Dimensions": "Performance, Dimensions",
+    }
+
+
+async def test_a_card_without_a_heading_is_named_by_its_first_text() -> None:
+    parsed = await parse(
+        "<article><p>Golf</p><p>£20,000</p></article><article><p>Polo</p><p>£15,000</p></article>"
+    )
+    assert labelled(parsed) == {"Golf": "Golf, Polo", "Polo": "Golf, Polo"}
+
+
+async def test_a_name_in_nested_runs_carries_the_innermost_run_s_names() -> None:
+    # Each outer section is named by its first heading, the inner "SE" (or "GT").
+    parsed = await parse(
+        "<section><section><h3>SE</h3><p>a</p></section><section><h3>SE L</h3><p>b</p>"
+        "</section></section><section><section><h3>GT</h3><p>c</p></section>"
+        "<section><h3>GT X</h3><p>d</p></section></section>"
+    )
+    assert labelled(parsed) == {
+        "SE": "SE, SE L",
+        "SE L": "SE, SE L",
+        "GT": "GT, GT X",
+        "GT X": "GT, GT X",
+    }
+
+
+async def test_a_long_run_s_names_are_capped_around_each_name() -> None:
+    sections = "".join(f"<section><h2>Trim {i:02}</h2><p>x</p></section>" for i in range(60))
+    labels = labelled(await parse(sections))
+    assert len(labels) == 60
+    assert all(len(text) <= MAX_AXIS_CHARS for text in labels.values())
+    assert labels["Trim 00"].startswith("Trim 00, Trim 01, ")
+    assert labels["Trim 00"].endswith(", …")
+    assert labels["Trim 59"].startswith("…, ")
+    assert labels["Trim 59"].endswith(", Trim 58, Trim 59")
+
+
+async def test_a_lone_section_or_a_name_without_statements_carries_nothing() -> None:
+    assert sibling_labels(await parse("<section><h2>SE</h2><p>150PS.</p></section>")) == {}
+    parsed = await parse(
+        "<section><h2>SE</h2><p>150PS.</p></section><section><h2>GT</h2><p>200PS.</p></section>"
+    )
+    # A splitter that gave the "GT" heading no statement leaves "SE" alone in its run.
+    gt = next(sid for sid, s in parsed.statements.items() if s.text == "GT")
+    del parsed.statements[gt]
+    assert sibling_labels(parsed) == {}
 
 
 async def test_headers_of_a_table_whose_axes_are_rejected_are_asked_about() -> None:

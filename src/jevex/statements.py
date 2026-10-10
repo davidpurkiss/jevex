@@ -90,6 +90,10 @@ class Statement(BaseModel):
     location: Location
     table: TableCellRef | None = None
     """Set on ``table_cell`` and ``table_header`` statements."""
+    sibling_labels: str | None = None
+    """Set on a statement naming one of a run of sibling sections or cards (a trim's
+    heading): every member's name, its own included, as Jev sees them ("SE, Sport, GT";
+    :func:`~jevex.resolve.sibling_labels`). Context, as a table header's ``axis`` is."""
 
 
 class NormaliserStep(BaseModel):

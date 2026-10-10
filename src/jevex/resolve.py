@@ -19,6 +19,7 @@ from jevex.layout import section_text
 from jevex.pipeline import SchemaRun, for_each_schema
 from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
 from jevex.select import statement_state
+from jevex.tables import axis_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -450,12 +451,9 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
 
 def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     """Runs of same-shaped siblings, and sibling sections that each start with a heading."""
-    by_component: dict[str, list[str]] = {}
-    for s in parsed.statements.values():
-        by_component.setdefault(s.component_id, []).append(s.id)
+    by_component = _by_component(parsed)
     groups: list[_Group] = []
-
-    def group(rule: int, depth: int, members: list[Component]) -> None:
+    for rule, depth, members in _sibling_runs(parsed.root):
         found: list[tuple[str, frozenset[str]]] = []
         for member in members:
             label = _label(member)
@@ -466,26 +464,66 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
             labels = _unique([label for label, _ in found])
             members_ = [(u, ids) for u, (_, ids) in zip(labels, found, strict=True)]
             groups.append(_Group(rule, depth, list(members[0].heading_trail), members_))
+    return groups
+
+
+def sibling_labels(parsed: ParsedDocument) -> dict[str, str]:
+    """Context for the statements that name a run of sibling sections or cards: each
+    member's label statements (its first heading, else its first text: the name
+    :class:`MultiEntity` proposes for it) mapped to the run's labels, its own included,
+    joined and capped as a table header's axis is (:func:`~jevex.tables.axis_text`).
+
+    "Sport" alone needn't read as a trim, but among "SE, Sport, GT, Edition" it does.
+    Which field a label fills, if any, and whether the run names entities at all stay
+    Jev's to judge. A statement naming members of nested runs gets the innermost run's
+    labels, as :class:`MultiEntity` gives it to the innermost entity."""
+    by_component = _by_component(parsed)
+    out: dict[str, str] = {}
+    for _, _, members in sorted(_sibling_runs(parsed.root), key=lambda r: (-r[1], r[0])):
+        named = [
+            (by_component[c.id], _short(c.text))
+            for member in members
+            if (c := _label_component(member)) is not None and c.id in by_component
+        ]
+        if len(named) < 2:
+            continue
+        labels = [label for _, label in named]
+        for at, (ids, _) in enumerate(named):
+            for sid in ids:
+                out.setdefault(sid, axis_text(labels, at))
+    return out
+
+
+def _by_component(parsed: ParsedDocument) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for s in parsed.statements.values():
+        out.setdefault(s.component_id, []).append(s.id)
+    return out
+
+
+def _sibling_runs(root: Component) -> list[tuple[int, int, list[Component]]]:
+    """(rule, depth, members) for every run of same-shaped sibling containers (rule 1)
+    and of headed sections not all of one shape (rule 2)."""
+    runs: list[tuple[int, int, list[Component]]] = []
 
     def visit(parent: Component, depth: int) -> None:
         shapes: dict[tuple[str, tuple[str, ...]], list[Component]] = {}
         for child in parent.children:
             if child.type in _CONTAINERS and len(child.children) >= 2:
                 shapes.setdefault(_shape(child), []).append(child)
-        runs = [same for same in shapes.values() if len(same) >= 2]
-        for same in runs:
-            group(1, depth + 1, same)
+        same_shape = [same for same in shapes.values() if len(same) >= 2]
+        runs.extend((1, depth + 1, same) for same in same_shape)
         # Headed sections of different shapes ("SE" with one paragraph, "SE L" with two).
-        # When they're all one shape, the run above already asks about them.
+        # When they're all one shape, the run above already holds them.
         headed = [c for c in parent.children if _is_headed(c)]
         ids = {c.id for c in headed}
-        if len(headed) >= 2 and not any(ids <= {c.id for c in same} for same in runs):
-            group(2, depth + 1, headed)
+        if len(headed) >= 2 and not any(ids <= {c.id for c in same} for same in same_shape):
+            runs.append((2, depth + 1, headed))
         for child in parent.children:
             visit(child, depth + 1)
 
-    visit(parsed.root, 0)
-    return groups
+    visit(root, 0)
+    return runs
 
 
 def _scopes(
@@ -573,15 +611,20 @@ def _is_headed(component: Component) -> bool:
 
 
 def _label(component: Component) -> str:
-    """A member's label: its first heading, else its first text.
+    """A member's label: the text of :func:`_label_component`."""
+    first = _label_component(component)
+    return _short(first.text) if first else ""
+
+
+def _label_component(component: Component) -> Component | None:
+    """The component naming a member: its first heading, else its first text.
 
     The first text is a guess at a name (a card's could be its price). It's only
     proposed: :class:`MultiEntity` asks Jev whether it names an entity (unless
     ``confirm=False``), and :class:`ParentChild`'s caller has said the member is one."""
     texts = [c for c in component.walk() if c.text.strip()]
     heading = next((c for c in texts if c.type == "heading"), None)
-    first = heading or (texts[0] if texts else None)
-    return _short(first.text) if first else ""
+    return heading or (texts[0] if texts else None)
 
 
 def _short(text: str) -> str:

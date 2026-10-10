@@ -125,6 +125,17 @@ def test_state_includes_the_heading_trail() -> None:
     assert statement_state(st("s", "9.1 s")) == {"statement": "9.1 s"}
 
 
+def test_state_includes_the_names_beside_a_section_s_name() -> None:
+    sport = st("s", "Sport", trail=["Kestrova trims"]).model_copy(
+        update={"sibling_labels": "SE, Sport, GT"}
+    )
+    assert statement_state(sport) == {
+        "statement": "Sport",
+        "sibling_labels": "SE, Sport, GT",
+        "section": "Kestrova trims",
+    }
+
+
 # --- candidates ------------------------------------------------------------------------
 
 

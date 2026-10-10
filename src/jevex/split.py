@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from jevex.interfaces import LocaleAwareSplitter
 from jevex.layout import DomLocation, ImageLocation
 from jevex.locales import locale_conventions
+from jevex.resolve import sibling_labels
 from jevex.select import candidate_locale
 from jevex.statements import Statement
 from jevex.tables import header_prefix, infer_headers, table_statements
@@ -406,7 +407,9 @@ class StatementStage:
     which. Without a parsed document the stage does nothing. A table without header cells
     that the component gate found headers in (:attr:`Context.headed_tables
     <jevex.pipeline.Context.headed_tables>`) is split with them marked
-    (:func:`~jevex.tables.infer_headers`).
+    (:func:`~jevex.tables.infer_headers`). A statement naming one of a run of sibling
+    sections or cards (a trim's heading) gets the run's names as context
+    (:func:`~jevex.resolve.sibling_labels`), whichever splitter made it.
 
     A :class:`~jevex.interfaces.LocaleAwareSplitter` (the default) splits by the
     document's locale (:attr:`Context.locale <jevex.pipeline.Context.locale>`: the
@@ -457,6 +460,8 @@ class StatementStage:
                         )
                     statements[statement.id] = statement
         parsed.statements = statements
+        for sid, labels in sibling_labels(parsed).items():
+            statements[sid] = statements[sid].model_copy(update={"sibling_labels": labels})
         if cut:
             ctx.event(
                 self.name,

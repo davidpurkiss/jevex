@@ -203,6 +203,8 @@ class Component(BaseModel):
 
 Table headers do triple duty: they give each cell its meaning, they mark entity boundaries for `MultiEntity`, and they can be values themselves. A trim named only by its column header ("SE") is stated by no cell, so each header is a statement of its own (#266). It belongs to the entity its column or row defines; one heading the other axis (a row label over every trim's column) is shared without a question. It never triggers the LLM fallback, since most headers are field labels that hold no value.
 
+A section's or card's name has the same problem as a header: "Sport" alone needn't read as a trim. A statement naming one of a run of sibling sections or cards (their heading, else their first text: the names `MultiEntity` proposes) carries the run's names as context Jev sees ("SE, Sport, GT, Edition"), as a header carries its axis (#276). Which field the name fills, if any, is still Jev's to judge.
+
 **Image stage**
 
 - `ImageProcessor` is an interface. The default runs OCR on images and on scanned PDF pages (pages with no text layer).

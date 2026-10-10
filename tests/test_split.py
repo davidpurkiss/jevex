@@ -509,6 +509,71 @@ async def test_stage_reads_the_tables_the_gate_found_headers_in_with_them() -> N
     ]
 
 
+def trim_section(name: str, cid: str) -> Component:
+    return comp(
+        "section",
+        cid=cid,
+        children=[
+            comp("heading", name, cid=f"{cid}h"),
+            comp("paragraph", f"Power: {len(name)}00 PS", cid=f"{cid}p"),
+        ],
+    )
+
+
+async def test_stage_gives_the_names_of_a_run_of_sections_to_each_name() -> None:
+    root = comp(
+        "section",
+        cid="root",
+        children=[
+            comp("heading", "Kestrova trims", cid="title"),
+            trim_section("SE", "a"),
+            trim_section("Sport", "b"),
+            trim_section("GT", "c"),
+        ],
+    )
+    ctx = context(root)
+    await StatementStage().run(ctx)
+    assert ctx.parsed is not None
+    assert {sid: s.sibling_labels for sid, s in ctx.parsed.statements.items()} == {
+        "title.0": None,
+        "ah.0": "SE, Sport, GT",
+        "ap.0": None,
+        "bh.0": "SE, Sport, GT",
+        "bp.0": None,
+        "ch.0": "SE, Sport, GT",
+        "cp.0": None,
+    }
+
+
+async def test_stage_gives_the_names_to_every_piece_of_a_cut_name_from_any_splitter() -> None:
+    class Headings:
+        def split(self, component: Component) -> list[Statement]:
+            if component.type != "heading":
+                return []
+            return [
+                Statement(
+                    id=f"{component.id}.0",
+                    text=component.text,
+                    kind="sentence",
+                    component_id=component.id,
+                    location=LOC,
+                )
+            ]
+
+    long = "Sport " * 30
+    root = comp("section", cid="root", children=[trim_section("SE", "a"), trim_section(long, "b")])
+    ctx = context(root)
+    await StatementStage(Headings(), max_chars=100).run(ctx)
+    assert ctx.parsed is not None
+    # Each name is shortened as an entity label is.
+    names = "SE, " + "Sport " * 12 + "Sport…"
+    assert {sid: s.sibling_labels for sid, s in ctx.parsed.statements.items()} == {
+        "ah.0": names,
+        "bh.0:0": names,
+        "bh.0:1": names,
+    }
+
+
 async def test_stage_refuses_duplicate_statement_ids() -> None:
     clash = Statement(id="p.0", text="x", kind="structured", component_id="ld", location=LOC)
     ctx = context(
