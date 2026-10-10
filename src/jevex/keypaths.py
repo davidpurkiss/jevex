@@ -41,10 +41,13 @@ them.
 
 The stage's :data:`StructuredMode` decides what the layout route (stages 5–13) does next:
 
-- ``structured_only`` (default): a schema the embedded data gave any value is finished;
-  the layout route runs only for schemas it gave nothing.
-- ``fill_gaps``: the layout route runs while a field is left empty, and selects values
-  only for those fields (a schema with none left is finished). The component gate and
+- ``structured_only``: a schema the embedded data gave any value is finished; the layout
+  route runs only for schemas it gave nothing.
+- ``fill_gaps`` (default): the layout route runs while a field is left empty, and selects
+  values only for those fields (a schema with none left is finished). It's the default
+  because a page's embedded data is often only its metadata (a press release's make and
+  model): finishing on any value would leave the page's own text (its price table)
+  unread. The component gate and
   the categoriser still consider every field: they run before entities are resolved, and
   a found field stays a categorise option so statements about it aren't misrouted.
 - ``merge``: the layout route looks for every field, and
@@ -1017,7 +1020,7 @@ class StructuredStage:
     """
 
     extractor: StructuredExtractor = field(default_factory=KeyPathMapper)
-    mode: StructuredMode = "structured_only"
+    mode: StructuredMode = "fill_gaps"
     name: str = "structured"
 
     def __post_init__(self) -> None:

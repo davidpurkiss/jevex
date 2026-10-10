@@ -576,14 +576,19 @@ async def test_structured_only_skips_the_layout_route_for_a_schema_the_data_gave
     assert skipped.data == {"schema": "Car"}
 
 
-async def test_structured_only_is_the_default_and_one_value_is_enough() -> None:
-    assert StructuredStage().mode == "structured_only"
-    assert {s.mode for s in default_pipeline() if isinstance(s, StructuredStage)} == {
-        "structured_only"
-    }
+async def test_structured_only_finishes_on_one_value() -> None:
     result, look = await run_mode("structured_only", {"model": "model"})
     assert look.seen == []
     assert result.one(Car).meta.price.found is False
+
+
+async def test_fill_gaps_is_the_default_so_metadata_alone_leaves_the_page_to_be_read() -> None:
+    assert StructuredStage().mode == "fill_gaps"
+    assert {s.mode for s in default_pipeline() if isinstance(s, StructuredStage)} == {"fill_gaps"}
+    # A press release's embedded data names the model; its price is in the page's text.
+    result, look = await run_mode("fill_gaps", {"model": "model"})
+    assert look.seen == ["Car"]
+    assert result.one(Car).record.model == "Golf"
 
 
 async def test_without_values_from_embedded_data_the_layout_route_runs() -> None:
