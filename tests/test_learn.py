@@ -311,6 +311,15 @@ async def test_the_synthesis_prompt_asks_for_recall_with_the_example() -> None:
     )
 
 
+async def test_an_example_without_evidence_leaves_the_words_line_out() -> None:
+    llm = FakeLLM(lambda _p, _s: DRAFT)
+    ex = example("62 mph takes 1,395 seconds", 1395.0, source="human")
+    assert ex.evidence is None
+    await learned(FakeJev().choice(None, pick("1,395")), llm, ex)
+    assert "Its value: 1395.0\n\nThe pattern will run" in llm.calls[0].prompt
+    assert "The words that state it" not in llm.calls[0].prompt
+
+
 async def test_the_prompt_can_be_overridden() -> None:
     llm = FakeLLM(lambda _p, _s: DRAFT)
     await learned(

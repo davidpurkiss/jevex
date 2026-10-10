@@ -63,7 +63,6 @@ def _step(name: str, **args: object) -> NormaliserStep:
     return NormaliserStep(name=name, args=dict(args))
 
 
-_CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
 # "£25k", "£1.5m", "€2bn", and spelled or spaced: "£1.5 million", "EUR 3 bn", "£2 m".
 _ENGLISH = "million|billion|thousand|mn|bn|m"
@@ -207,11 +206,11 @@ def _for_locale(locale: str | None) -> _Patterns:
 _EN_GB = _patterns(EN_GB)
 
 
-def _currency(m: re.Match[str]) -> str:
+def _currency(m: re.Match[str], conventions: LocaleConventions) -> str:
     if m.group("sym"):
-        return _CURRENCY_SYMBOLS[m.group("sym")]
+        return conventions.currency(m.group("sym"))
     if "sym2" in m.re.groupindex and m.group("sym2"):
-        return _CURRENCY_SYMBOLS[m.group("sym2")]
+        return conventions.currency(m.group("sym2"))
     return m.group("c2") or m.group("c3")
 
 
@@ -268,7 +267,7 @@ class Money:
                 m.start(),
                 m.end(),
                 self.id,
-                *patterns.steps(_step("parse_money", currency=_currency(m))),
+                *patterns.steps(_step("parse_money", currency=_currency(m, patterns.conventions))),
             )
             for m in patterns.money.finditer(statement.text)
         ]
@@ -369,7 +368,13 @@ def _number_chain(value: str, patterns: _Patterns) -> list[NormaliserStep] | Non
     if m := patterns.range.search(value):
         found.append((m.start(), 0, _range_steps(m, patterns)))
     if m := patterns.money.search(value):
-        found.append((m.start(), 1, patterns.steps(_step("parse_money", currency=_currency(m)))))
+        found.append(
+            (
+                m.start(),
+                1,
+                patterns.steps(_step("parse_money", currency=_currency(m, patterns.conventions))),
+            )
+        )
     if m := patterns.number_with_unit.search(value):
         unit = canonical(m.group("unit"))
         steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))
@@ -575,7 +580,9 @@ class NounPhrase:
     nothing marks where one value ends and the next begins in a name such as "Delmaro
     Kestrova SE" (a make, a model and a trim), so a run of up to ``MAX_PHRASE_WORDS``
     words also gives every contiguous part of it, and Jev picks. A longer run is cut
-    into consecutive chunks of that many words, with no sub-runs.
+    into consecutive chunks of that many words, with no sub-runs. Numbers are words like
+    any other ("308" in "Peugeot 308"): whether one is a name or a quantity is select's
+    to judge, and its Choice can answer "none".
 
     Where runs break is a guess about where values end, made in code because Jev can
     only pick spans, not propose them. Each sub-run is an option in select's Choice, and
@@ -602,13 +609,10 @@ class NounPhrase:
                 phrases = [run[i:j] for i in range(n) for j in range(i + 1, n + 1)]
             else:
                 phrases = [run[i : i + MAX_PHRASE_WORDS] for i in range(0, n, MAX_PHRASE_WORDS)]
-            for words in phrases:
-                if not all(w.group().replace(",", "").replace(".", "").isdigit() for w in words):
-                    out.append(
-                        _candidate(
-                            statement, words[0].start(), words[-1].end(), self.id, _step("strip")
-                        )
-                    )
+            out.extend(
+                _candidate(statement, words[0].start(), words[-1].end(), self.id, _step("strip"))
+                for words in phrases
+            )
             run.clear()
 
         last_end = 0
