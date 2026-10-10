@@ -232,6 +232,13 @@ def test_signed_ranges_in_the_page_languages_words() -> None:
     assert normalise(cand.raw, cand.normalise, field) == [-1.5, 2.5]
 
 
+def test_a_signed_range_is_a_key_values_chain() -> None:
+    field = CLIMATE.field("operating")
+    [cand] = KeyValue().generate_for(st("Operating range: -5 to -2 °C"), field)
+    assert cand.raw == "-5 to -2 °C"
+    assert normalise(cand.raw, cand.normalise, field) == [-5, -2]
+
+
 @pytest.mark.parametrize(
     ("text", "raw", "value"),
     [("Seats 5-7", "5-7", [5, 7]), ("0-62 mph in 9.1 s", "0-62 mph", [0, 62])],
