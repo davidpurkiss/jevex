@@ -9,7 +9,8 @@ time, in the background:
    human) are queued, and they are stored as verified examples first, so they serve as
    regression tests for later generators even if learning is cut short.
 2. **Covered?** If the generators in use already propose a span that normalises to the
-   value, the miss wasn't one of recall and there's nothing to learn.
+   value (a bare number in any unit the statement names), the miss wasn't one of recall
+   and there's nothing to learn.
 3. **Synthesise.** ``generator_llm`` writes the pattern and normalisers as structured
    output (:class:`GeneratorDraft`), asked for recall, not for the only match. The
    learner fills in the id, field, scope and provenance. An example from a document with
@@ -17,12 +18,13 @@ time, in the background:
    generator scoped to it, its chain written for that locale's conventions.
 4. **Validate.** :meth:`~jevex.generators.GeneratorSpec.parse`: the pattern compiles
    under RE2 within the length cap, and the normalisers are built in.
-5. **Test.** The generator must find the value in the triggering statement, and Jev
-   must choose it there among every generator's candidates. On up to ``sample_size`` of
-   the field's stored examples (the newest), it must not lower accuracy: wherever it
-   changes the candidates, Jev picks from the old and the new set (one request per
-   example) and the new set must be right at least as often. Each example runs under its
-   own document's locale, as the candidate stage would run it.
+5. **Test.** The generator must find the value in the triggering statement (read the
+   same way), and Jev must choose it there among every generator's candidates, asked as
+   the select stage asks (which unit a bare number is in included). On up to
+   ``sample_size`` of the field's stored examples (the newest), it must not lower
+   accuracy: wherever it changes the candidates, Jev picks from the old and the new set
+   (one request per example) and the new set must be right at least as often. Each
+   example runs under its own document's locale, as the candidate stage would run it.
 6. **Hot-swap.** An accepted spec is put in the store and published as a new
    :class:`GeneratorSnapshot`. A document takes the current snapshot when it starts and
    keeps it to the end; later documents get the new one. Other processes sharing the
@@ -77,7 +79,16 @@ from jevex.packs import (
     layered_generators,
     stored_generators,
 )
-from jevex.select import JevCandidateSelector, statement_state, unique_spans
+from jevex.select import (
+    JevCandidateSelector,
+    in_units,
+    keyed_units,
+    select_in_units,
+    statement_state,
+    unique_spans,
+    unit_answers,
+    unit_questions,
+)
 from jevex.statements import Statement, StatementKind
 from jevex.store import LedgerError, StoreError
 
@@ -87,7 +98,7 @@ if TYPE_CHECKING:
 
     from jevex.housekeeping import Housekeeper
     from jevex.interfaces import CandidateSelector, Learner, Selection
-    from jevex.jev import Answer, JevClient
+    from jevex.jev import Answer, Choice, JevClient, Question
     from jevex.llm import LLM
     from jevex.packs import Pack
     from jevex.pipeline import Context
@@ -414,6 +425,23 @@ class _Rejected(Exception):
         self.spec = spec
 
 
+@dataclass(frozen=True)
+class _Choosing:
+    """What the select stage asks Jev about a statement's candidates for one field: the
+    selector's questions, and which unit each bare number is in
+    (:func:`~jevex.select.unit_questions`)."""
+
+    candidates: list[Candidate]
+    questions: dict[str, Question]
+    units: dict[str, Choice]
+
+    def keyed(self, prefix: str = "") -> dict[str, Question]:
+        return {
+            **{f"{prefix}{key}": q for key, q in self.questions.items()},
+            **keyed_units(self.units, prefix),
+        }
+
+
 # --- the learner ---------------------------------------------------------------------------
 
 
@@ -577,7 +605,10 @@ class GeneratorLearner:
         expected = self._expected(example, spec)
         where = self._where(example)
         current = self.snapshot.on(self.base)
-        if self._finds(self._generate(current, statement, spec, schema, where), spec, expected):
+        found = self._generate(current, statement, spec, schema, where)
+        if self._finds(self._readings(statement, spec, found, where[0]), spec, expected):
+            # A bare number only Jev's unit answer gets wrong is beyond a generator's
+            # fixing: the span is the same, and the first generator to give it wins.
             raise _Rejected("covered", "the generators in use already find the value")
         draft = await self._synthesise(example, statement, spec, unrecorded)
         try:
@@ -585,7 +616,8 @@ class GeneratorLearner:
         except InvalidGeneratorError as exc:
             raise _Rejected("invalid_spec", str(exc)) from None
         generator = generator_spec.to_generator()
-        if not self._finds(generator.generate(statement), spec, expected):
+        found = self._readings(statement, spec, generator.generate(statement), where[0])
+        if not self._finds(found, spec, expected):
             raise _Rejected("missed_trigger", "it finds no span with the value", generator_spec)
         try:
             refusal = await self.ledger.refuse_document()
@@ -681,10 +713,9 @@ class GeneratorLearner:
         registry: GeneratorRegistry,
         expected: Any,
     ) -> bool:
-        candidates = self._generate(registry, statement, spec, schema, where)
-        questions = self.selector.questions(statement, spec, candidates)
-        answers = await jev.ask(statement_state(statement), questions)
-        selection = self._right(spec, candidates, answers, expected)
+        choosing = self._choosing(statement, spec, registry, schema, where)
+        replies = await jev.ask(statement_state(statement), choosing.keyed())
+        selection = self._right(spec, choosing, replies, "", where[0], expected)
         return selection is not None and selection.confidence >= self.fallback_threshold
 
     async def _regression(
@@ -739,35 +770,56 @@ class GeneratorLearner:
         """Whether the old and the new candidates each lead to ``expected``; ``None`` when
         the generator doesn't change the candidates (Jev isn't asked). Both sets go in one
         request."""
-        before = self._generate(old, statement, spec, schema, where)
-        after = self._generate(new, statement, spec, schema, where)
-        if unique_spans(before).keys() == unique_spans(after).keys():
+        before = self._choosing(statement, spec, old, schema, where)
+        after = self._choosing(statement, spec, new, schema, where)
+        if unique_spans(before.candidates).keys() == unique_spans(after.candidates).keys():
             return None
-        old_q = self.selector.questions(statement, spec, before)
-        new_q = self.selector.questions(statement, spec, after)
         replies = await jev.ask(
-            statement_state(statement),
-            {
-                **{f"old/{k}": q for k, q in old_q.items()},
-                **{f"new/{k}": q for k, q in new_q.items()},
-            },
+            statement_state(statement), {**before.keyed("old/"), **after.keyed("new/")}
         )
+        locale = where[0]
         return (
-            self._right(spec, before, _strip(replies, "old/"), expected) is not None,
-            self._right(spec, after, _strip(replies, "new/"), expected) is not None,
+            self._right(spec, before, replies, "old/", locale, expected) is not None,
+            self._right(spec, after, replies, "new/", locale, expected) is not None,
+        )
+
+    def _choosing(
+        self,
+        statement: Statement,
+        spec: FieldSpec,
+        registry: GeneratorRegistry,
+        schema: str,
+        where: _Where,
+    ) -> _Choosing:
+        candidates = self._generate(registry, statement, spec, schema, where)
+        return _Choosing(
+            candidates=candidates,
+            questions=self.selector.questions(statement, spec, candidates),
+            units=unit_questions(statement, spec, candidates),
         )
 
     def _right(
         self,
         spec: FieldSpec,
-        candidates: list[Candidate],
-        answers: dict[str, Answer],
+        choosing: _Choosing,
+        replies: dict[str, Answer],
+        prefix: str,
+        locale: str | None,
         expected: Any,
     ) -> Selection | None:
-        """The selection, if it picked ``expected``."""
+        """The selection from the ``replies`` under ``prefix``, read as the select stage
+        reads them (:func:`~jevex.select.select_in_units`), if it picked ``expected``."""
+        answers = {k: replies[prefix + k] for k in choosing.questions if prefix + k in replies}
         if not answers:
             return None
-        selection = self.selector.selection(spec, candidates, answers)
+        _, selection = select_in_units(
+            self.selector,
+            spec,
+            choosing.candidates,
+            answers,
+            unit_answers(choosing.units, replies, prefix),
+            locale_conventions(locale),
+        )
         picks = selection.accepted if spec.many else []
         if not picks and selection.candidate is not None:
             picks = [selection.candidate]
@@ -799,6 +851,24 @@ class GeneratorLearner:
             return normalise(example.value, [], spec, registry=self.normalisers)
         except NormaliseError as exc:
             raise _Rejected("unlearnable", f"its value doesn't fit {spec.name}: {exc}") from None
+
+    def _readings(
+        self, statement: Statement, spec: FieldSpec, candidates: list[Candidate], locale: str | None
+    ) -> list[Candidate]:
+        """``candidates``, and each bare number read in every unit the select stage could
+        ask Jev it's in (:func:`~jevex.select.unit_questions`): what Jev's answer can make
+        of them, before it's asked."""
+        units = unit_questions(statement, spec, candidates)
+        options = dict.fromkeys(unit for q in units.values() for unit in q.options)
+        conventions = locale_conventions(locale)
+        return [
+            *candidates,
+            *(
+                c
+                for unit in options
+                for c in in_units(candidates, dict.fromkeys(units, unit), conventions)
+            ),
+        ]
 
     def _finds(self, candidates: list[Candidate], spec: FieldSpec, expected: Any) -> bool:
         """Whether any candidate normalises to ``expected`` (or, for a list field, to a
@@ -851,10 +921,6 @@ class GeneratorLearner:
 
 _Where = tuple[str | None, str | None]
 """An example's ``(locale, document_source)``."""
-
-
-def _strip(answers: dict[str, Answer], prefix: str) -> dict[str, Answer]:
-    return {k.removeprefix(prefix): a for k, a in answers.items() if k.startswith(prefix)}
 
 
 _KINDS: frozenset[str] = frozenset(get_args(StatementKind))

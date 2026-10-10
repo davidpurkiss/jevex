@@ -141,7 +141,7 @@ def _bare(candidate: Candidate) -> bool:
     return "unit" not in names and bool(names & _NUMBER_STEPS)
 
 
-def _unit_questions(
+def unit_questions(
     statement: Statement, field: FieldSpec, candidates: list[Candidate]
 ) -> dict[str, Choice]:
     """By raw span, a Choice asking which unit each bare-number candidate is in.
@@ -161,20 +161,60 @@ def _unit_questions(
     return {raw: field.unit_question(raw, [own, *others]) for raw in spans}
 
 
-def _in_units(
-    candidates: list[Candidate], units: Mapping[str, ChoiceAnswer], conventions: LocaleConventions
+def keyed_units(units: Mapping[str, Choice], prefix: str = "") -> dict[str, Choice]:
+    """:func:`unit_questions` keyed for a request, ``<prefix>#unit<i>``: apart from the
+    selector's own keys, which the selector reads unprefixed."""
+    return {f"{prefix}#unit{i}": q for i, q in enumerate(units.values())}
+
+
+def unit_answers(
+    units: Mapping[str, Choice], answers: Mapping[str, Answer], prefix: str = ""
+) -> dict[str, ChoiceAnswer]:
+    """By raw span, the answers to :func:`keyed_units`' questions."""
+    return {
+        raw: answer
+        for i, raw in enumerate(units)
+        if isinstance(answer := answers.get(f"{prefix}#unit{i}"), ChoiceAnswer)
+    }
+
+
+def in_units(
+    candidates: list[Candidate], units: Mapping[str, str], conventions: LocaleConventions
 ) -> list[Candidate]:
-    """The candidates, each bare one whose span has an answer in ``units`` with that unit
+    """The candidates, each bare one whose span has a unit in ``units`` with that unit
     as its chain's last step (localised, so mpg is read in the locale's gallons)."""
     out: list[Candidate] = []
     for cand in candidates:
         unit = units.get(cand.raw)
         if unit is not None and _bare(cand):
-            step = NormaliserStep(name="unit", args={"from": unit.choice})
+            step = NormaliserStep(name="unit", args={"from": unit})
             chain = [*cand.normalise, *localise_steps([step], conventions)]
             cand = cand.model_copy(update={"normalise": chain})
         out.append(cand)
     return out
+
+
+def select_in_units(
+    selector: CandidateSelector,
+    field: FieldSpec,
+    candidates: list[Candidate],
+    answers: Mapping[str, Answer],
+    units: Mapping[str, ChoiceAnswer],
+    conventions: LocaleConventions,
+) -> tuple[list[Candidate], Selection]:
+    """The candidates read in the ``units`` Jev picked (:func:`in_units`), and the
+    ``selector``'s selection over them given its ``answers``. The select stage and the
+    learner's tests both read answers this way, so a generator is tested as documents
+    will run it."""
+    if units:
+        candidates = in_units(candidates, {raw: a.choice for raw, a in units.items()}, conventions)
+    selection = selector.selection(field, candidates, answers)
+    picks = (selection.accepted or [selection.candidate]) if field.many else [selection.candidate]
+    read = [units[c.raw].confidence for c in picks if c is not None and c.raw in units]
+    if read:
+        # The value is only as sure as the units it's read in.
+        selection = selection.model_copy(update={"confidence": min(selection.confidence, *read)})
+    return candidates, selection
 
 
 # --- the default candidate selector ----------------------------------------------------
@@ -314,16 +354,18 @@ class _Ask:
     spec: FieldSpec
     questions: dict[str, Question]
     units: dict[str, Choice]
-    """:func:`_unit_questions`, by raw span; keyed apart from the selector's questions."""
+    """:func:`unit_questions`, by raw span; keyed apart from the selector's questions."""
     scopes: list[str] = field(default_factory=list[str])
 
     @property
-    def prefix(self) -> str:
-        return f"{self.run.name}.{self.spec.name}/"
+    def name(self) -> str:
+        """``Schema.field``: the selector's questions go under ``<name>/``, the unit
+        questions under ``<name>#unit``."""
+        return f"{self.run.name}.{self.spec.name}"
 
     @property
-    def unit_prefix(self) -> str:
-        return f"{self.run.name}.{self.spec.name}#unit"
+    def prefix(self) -> str:
+        return f"{self.name}/"
 
 
 @dataclass
@@ -363,11 +405,7 @@ class SelectStage:
                     for key, answer in answers.items()
                     if key.startswith(ask.prefix)
                 }
-                units = {
-                    raw: answer
-                    for i, raw in enumerate(ask.units)
-                    if isinstance(answer := answers.get(f"{ask.unit_prefix}{i}"), ChoiceAnswer)
-                }
+                units = unit_answers(ask.units, answers, ask.name)
                 self._read(
                     ask, statement, mine, units, conventions, order.get(sid, len(order)), outcomes
                 )
@@ -388,7 +426,7 @@ class SelectStage:
                         if not questions:
                             continue
                         candidates = run.candidates.get((statement.id, spec.name), [])
-                        units = _unit_questions(statement, spec, candidates)
+                        units = unit_questions(statement, spec, candidates)
                         asks[key] = _Ask(run=run, spec=spec, questions=questions, units=units)
                     asks[key].scopes.append(scope.label)
         return {sid: plan for sid, plan in plans.items() if plan[1]}
@@ -421,20 +459,9 @@ class SelectStage:
         spec, run = ask.spec, ask.run
         if spec.needs_candidates:
             key = (statement.id, spec.name)
-            candidates = run.candidates.get(key, [])
-            if units:
-                candidates = run.candidates[key] = _in_units(candidates, units, conventions)
-            selection = self.selector.selection(spec, candidates, answers)
-            picks = (
-                (selection.accepted or [selection.candidate])
-                if spec.many
-                else [selection.candidate]
+            run.candidates[key], selection = select_in_units(
+                self.selector, spec, run.candidates.get(key, []), answers, units, conventions
             )
-            read = [units[c.raw].confidence for c in picks if c is not None and c.raw in units]
-            if read:
-                # The value is only as sure as the units it's read in.
-                confidence = min(selection.confidence, *read)
-                selection = selection.model_copy(update={"confidence": confidence})
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection
             return
@@ -451,7 +478,7 @@ def _merged(asks: Mapping[tuple[str, str], _Ask]) -> dict[str, Question]:
     out: dict[str, Question] = {}
     for ask in asks.values():
         out.update((f"{ask.prefix}{key}", q) for key, q in ask.questions.items())
-        out.update((f"{ask.unit_prefix}{i}", q) for i, q in enumerate(ask.units.values()))
+        out.update(keyed_units(ask.units, ask.name))
     return out
 
 
