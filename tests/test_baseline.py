@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from jevex import Context, Extractor
+from jevex import Context, EntityStage, Extractor, MultiEntity
 from jevex.baseline import (
     Baseline,
     BaselineError,
@@ -21,6 +21,7 @@ from jevex.baseline import (
 )
 from jevex.cli import format_gate, main
 from jevex.eval import DocumentRun, EvalReport, FieldScore, evaluate, load_corpus
+from jevex.extractor import default_pipeline
 from jevex.jev import JevClient
 from jevex.results import FieldMeta
 from jevex.testing import RECORD_ENV, FakeJev, FakeLLM, cassette, llm_cassette, stale_recording
@@ -657,6 +658,10 @@ async def test_the_test_site_passes_the_eval_gate(
     """CI's regression gate: the test-site corpus above through the default pipeline, with
     Jev and the fallback LLM replayed from recordings, against ``baseline.json``.
 
+    Entities are resolved with ``MultiEntity``, the car finder's default: most of the
+    corpus's pages hold several records (four trims, a grid of listings), which
+    ``SingleEntity`` would merge into one.
+
     ``JEVEX_RECORD=1`` records all three (see ``fixtures/testsite_gate/README.md``);
     ``JEVEX_UPDATE_BASELINE=1`` rewrites only the baseline from the recordings, offline.
     A stale recording fails in CI, like the books smoke test (``stale_recording``).
@@ -681,7 +686,11 @@ async def test_the_test_site_passes_the_eval_gate(
     try:
         # No community packs: the recording must depend only on the repo.
         async with Extractor(
-            [VehicleSpec, Listing], jev=jev, extraction_llm=llm, community_packs=False
+            [VehicleSpec, Listing],
+            jev=jev,
+            extraction_llm=llm,
+            community_packs=False,
+            pipeline=default_pipeline().replace("entities", EntityStage(MultiEntity())),
         ) as extractor:
             report = await evaluate(extractor, load_corpus(corpus))
     finally:
