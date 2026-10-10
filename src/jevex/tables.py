@@ -172,14 +172,13 @@ def table_statements(table: Component) -> list[Statement]:
 
     # A row header's fellow labels are the others in its column ("SE", "GT" under the
     # trims; "Kestrova", "Delmaro" under the models).
-    row_axes: dict[int, list[str]] = {}
+    first_seen: dict[int, dict[str, None]] = {}
     for r in body:
         if roles[r] == "body":
             for c in rows[r]:
                 if c.header and (label := _label(c.text)) and covers_data(c):
-                    axis = row_axes.setdefault(c.col, [])
-                    if label not in axis:
-                        axis.append(label)
+                    first_seen.setdefault(c.col, {})[label] = None
+    row_axes = {col: list(labels) for col, labels in first_seen.items()}
     row_positions = {
         col: {label: i for i, label in enumerate(labels)} for col, labels in row_axes.items()
     }
