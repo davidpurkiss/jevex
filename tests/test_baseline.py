@@ -699,7 +699,7 @@ async def test_the_test_site_passes_the_eval_gate(
         Baseline.from_report(report, corpus=digest, tolerances=kept).write(GATE_BASELINE)
         return
     baseline = Baseline.load(GATE_BASELINE)
-    # A Jev or LLM request that wasn't recorded (run_document names the exception first).
+    # A Jev or LLM request that wasn't recorded: each error and warning names its exception.
     # A fallback call that misses only makes its document partial, so warnings count too.
     stale = [
         m
