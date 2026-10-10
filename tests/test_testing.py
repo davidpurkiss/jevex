@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import re
@@ -16,6 +17,7 @@ from jevex.jev import (
     ChoiceAnswer,
     JevClient,
     JevResponse,
+    JevTransientError,
     JSONContent,
     Noul,
     NoulAnswer,
@@ -177,6 +179,64 @@ async def test_cassette_miss_raises_with_hint(tmp_path: Path) -> None:
         await Cassette(tmp_path / "empty.json").system_one("s", {"q": Noul(instructions="?")})
 
 
+class Drifting:
+    """A live Jev that answers the same request differently each time, after a pause in
+    which a duplicate request can arrive; ``fail_first`` raises a transient error once."""
+
+    def __init__(self, *, fail_first: bool = False) -> None:
+        self.calls = 0
+        self.fail_first = fail_first
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        self.calls += 1
+        await asyncio.sleep(0)
+        if self.fail_first and self.calls == 1:
+            raise JevTransientError("503")
+        return JevResponse(answers={q: NoulAnswer(p=self.calls / 10) for q in questions})
+
+
+async def test_recording_asks_a_repeated_request_once_so_the_run_matches_its_replay(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "c.json"
+    live = Drifting()
+    questions = {"q": Noul(instructions="Is it fast?")}
+    recorder = Cassette(path, record=True, inner=live)
+
+    together = await asyncio.gather(*(recorder.system_one("state", questions) for _ in range(2)))
+    later = await recorder.system_one("state", questions)
+
+    assert live.calls == 1
+    assert together == [later, later]
+    assert await Cassette(path).system_one("state", questions) == later
+
+
+async def test_recording_asks_again_after_a_failed_call(tmp_path: Path) -> None:
+    live = Drifting(fail_first=True)
+    recorder = Cassette(tmp_path / "c.json", record=True, inner=live)
+    questions = {"q": Noul(instructions="Is it fast?")}
+
+    with pytest.raises(JevTransientError):
+        await recorder.system_one("state", questions)
+    answered = await recorder.system_one("state", questions)
+
+    assert live.calls == 2
+    assert answered.answers["q"] == NoulAnswer(p=0.2)
+
+
+async def test_recording_a_new_run_asks_jev_again(tmp_path: Path) -> None:
+    path = tmp_path / "c.json"
+    questions = {"q": Noul(instructions="Is it fast?")}
+    await Cassette(path, record=True, inner=Drifting()).system_one("state", questions)
+
+    rerecorded = await Cassette(path, record=True, inner=Drifting()).system_one("state", questions)
+
+    assert rerecorded.answers["q"] == NoulAnswer(p=0.1)
+    assert len(json.loads(path.read_text())) == 1
+
+
 class Car(BaseModel):
     """A car."""
 
@@ -262,6 +322,21 @@ class ClosableLLM:
 
     async def aclose(self) -> None:
         self.closed += 1
+
+
+async def test_llm_recording_makes_a_repeated_call_once(tmp_path: Path) -> None:
+    titles = iter(["Dune", "Emma"])
+    inner = FakeLLM(lambda _prompt, _schema: {"title": next(titles)})
+    path = tmp_path / "llm.json"
+    recorder = LLMCassette(path, inner, record=True)
+
+    calls = [recorder.structured("Title: Dune", Title) for _ in range(2)]
+    responses = await asyncio.gather(*calls)
+
+    assert len(inner.calls) == 1
+    assert [r.output for r in responses] == [Title(title="Dune")] * 2
+    replayed = await LLMCassette(path).structured("Title: Dune", Title)
+    assert replayed.output == Title(title="Dune")
 
 
 async def test_llm_cassette_closes_its_inner_llm(tmp_path: Path) -> None:
