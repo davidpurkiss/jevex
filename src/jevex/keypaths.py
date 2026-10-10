@@ -26,7 +26,10 @@
 Mapped values are normalised like any candidate: numbers, money and dates take the chain
 the built-in generators find ("1,498 cc" → 1498), strings are taken whole, and enum or
 bool values that don't read directly are asked of Jev as the field's own question. They
-are recorded on the default entity with ``method="structured"``. Each object in an array
+are recorded on the default entity with ``method="structured"``. When the leaves give a
+single-value field distinct values (three offers at different prices, or JSON-LD and
+microdata disagreeing), Jev picks one with the field's own select question, the others
+becoming alternatives (:meth:`KeyPathMapper._settle`). Each object in an array
 (an entity candidate: a JSON-LD ``offers[]`` item) also gets the values its own leaves
 give (:class:`StructuredItem`, reusing Jev's readings, never asking anything new), as do
 the leaves outside every such object (:attr:`StructuredResult.rest`). Once the entity
@@ -59,6 +62,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 from jevex._tasks import gather
 from jevex.generators import GeneratorRegistry, default_registry
 from jevex.jev import (
+    MAX_CHOICE_OPTIONS,
     MAX_STATE_TOKENS,
     ChoiceAnswer,
     JevError,
@@ -69,7 +73,7 @@ from jevex.jev import (
 from jevex.layout import DomLocation
 from jevex.normalise import NormaliseError, normalise
 from jevex.resolve import SINGLE_ENTITY_LABEL
-from jevex.results import FieldMeta, Source
+from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
 from jevex.statements import Statement
 from jevex.store import KeyMapping, StoreError
@@ -101,7 +105,7 @@ MAX_PATHS = 300
 
 MAX_FALLBACK_VALUES = 3
 """Distinct values of a single-value enum/bool field asked of Jev per document when none
-reads directly; the first Jev can read wins."""
+reads directly; each one Jev reads is one of the field's values."""
 
 MAX_LIST_FALLBACK_VALUES = 20
 """Distinct values of a list enum field asked of Jev per document (one request each)."""
@@ -358,10 +362,11 @@ class KeyPathMapper:
         per_blob = await gather(
             self._blob(flat, schemas, mappings[flat.fingerprint], document, jev) for flat in flats
         )
+        by_name = {s.name: s for s in schemas}
         statements: list[Statement] = []
-        fields: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
+        values: dict[str, dict[str, list[_Value]]] = {s.name: {} for s in schemas}
         items: list[StructuredItem] = []
-        rest: dict[str, dict[str, FieldMeta]] = {s.name: {} for s in schemas}
+        rest: dict[str, dict[str, list[_Value]]] = {s.name: {} for s in schemas}
         for flat, found in zip(flats, per_blob, strict=True):
             statements.extend(
                 Statement(
@@ -373,9 +378,9 @@ class KeyPathMapper:
                 )
                 for leaf in flat.leaves
             )
-            for schema_name, metas in found.items():
-                for name, meta in metas.items():
-                    _keep_best(fields[schema_name], name, meta)
+            for schema_name, by_field in found.items():
+                for name, read in by_field.items():
+                    _add(values[schema_name], by_name[schema_name].field(name), read)
             # Read after every blob's values, so Jev's readings of enum and bool values are
             # in the mapper's memory: an item or the rest never asks Jev anything new.
             mapping = mappings[flat.fingerprint]
@@ -384,9 +389,9 @@ class KeyPathMapper:
                 inside = {i for item in flat.items for i in range(item.start, item.end)}
                 loose = [leaf for leaf in flat.leaves if leaf.index not in inside]
                 outside = await self._blob(flat, schemas, mapping, document, jev, loose, ask=False)
-            for schema_name, metas in outside.items():
-                for name, meta in metas.items():
-                    _keep_best(rest[schema_name], name, meta)
+            for schema_name, by_field in outside.items():
+                for name, read in by_field.items():
+                    _add(rest[schema_name], by_name[schema_name].field(name), read)
             for item in flat.items:
                 own = flat.leaves[item.start : item.end]
                 items.append(
@@ -394,12 +399,13 @@ class KeyPathMapper:
                         path=item.path,
                         text="\n".join(_statement_text(leaf) for leaf in own),
                         statement_ids=frozenset(flat.statement_id(leaf) for leaf in own),
-                        fields=await self._blob(
-                            flat, schemas, mapping, document, jev, own, ask=False
+                        fields=_firsts(
+                            await self._blob(flat, schemas, mapping, document, jev, own, ask=False)
                         ),
                     )
                 )
-        return StructuredResult(statements, fields, events, items, rest, failures)
+        fields = await self._settle(schemas, values, jev, events)
+        return StructuredResult(statements, fields, events, items, _firsts(rest), failures)
 
     async def _blob(
         self,
@@ -411,24 +417,99 @@ class KeyPathMapper:
         leaves: Sequence[Leaf] | None = None,
         *,
         ask: bool = True,
-    ) -> dict[str, dict[str, FieldMeta]]:
-        """One blob's values per schema, given its mappings: from ``leaves`` only, if
-        given. With ``ask=False``, Jev is never asked; only its remembered readings are
-        used."""
+    ) -> dict[str, dict[str, list[_Value]]]:
+        """One blob's values per schema and field (:func:`_add`), given its mappings: from
+        ``leaves`` only, if given. With ``ask=False``, Jev is never asked; only its
+        remembered readings are used."""
         shapes = _by_shape(flat.leaves if leaves is None else leaves)
-        found: dict[str, dict[str, FieldMeta]] = {}
+        found: dict[str, dict[str, list[_Value]]] = {}
         for schema in schemas:
             mapping = mappings[schema.name]
             wanted = [(shape, name) for shape, name in mapping.items() if name and shape in shapes]
-            metas = await gather(
-                self._meta(schema.field(name), flat, shapes[shape], document, jev, ask=ask)
+            read = await gather(
+                self._field_values(schema.field(name), flat, shapes[shape], document, jev, ask=ask)
                 for shape, name in wanted
             )
-            mine: dict[str, FieldMeta] = {}
-            for (_, name), meta in zip(wanted, metas, strict=True):
-                _keep_best(mine, name, meta)
+            mine: dict[str, list[_Value]] = {}
+            for (_, name), values in zip(wanted, read, strict=True):
+                _add(mine, schema.field(name), values)
             found[schema.name] = mine
         return found
+
+    async def _settle(
+        self,
+        schemas: list[SchemaSpec],
+        found: dict[str, dict[str, list[_Value]]],
+        jev: JevClient,
+        events: list[tuple[str, str]],
+    ) -> dict[str, dict[str, FieldMeta]]:
+        """Each field's meta: its value, or the one Jev picks when a single-value field is
+        given distinct values.
+
+        Jev is asked the field's own :meth:`~jevex.schema.FieldSpec.select_question` over
+        the values (as their leaves give them, cut to :data:`MAX_VALUE_CHARS`; values
+        that read the same once cut are one option, the first standing for it, and a
+        literal "none" is offered quoted), when there are two options or more, with
+        the leaves of the blobs giving them as the state, cut to fit
+        (:meth:`~jevex.jev.JevClient.fit_state`). Fields whose values come from the same
+        blobs are asked in one request. The picked value is as sure as Jev's answer (or
+        its own reading by Jev, if less sure), and the other values are its
+        alternatives; "none" leaves the field unfound, every value an alternative.
+        """
+        fields = {
+            s.name: {name: values[0].meta for name, values in found[s.name].items()}
+            for s in schemas
+        }
+        # The blobs giving the values → (schema, field, option → value) asked about them.
+        groups: dict[tuple[int, ...], list[tuple[SchemaSpec, str, dict[str, _Value]]]] = {}
+        flats: dict[int, FlatBlob] = {}
+        for schema in schemas:
+            for name, values in found[schema.name].items():
+                if len(values) < 2:
+                    continue
+                options: dict[str, _Value] = {}
+                for value in values:
+                    option = value.raw[:MAX_VALUE_CHARS]
+                    options.setdefault(f'"{option}"' if option == NONE_OPTION else option, value)
+                if len(options) < 2:
+                    continue  # one option leaves Jev nothing to settle
+                if len(options) >= MAX_CHOICE_OPTIONS:
+                    events.append(
+                        (
+                            "structured_values_skipped",
+                            f"{schema.name}.{name}: asked about {MAX_CHOICE_OPTIONS - 1} of "
+                            f"{len(options)} embedded values",
+                        )
+                    )
+                    options = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
+                flats |= {v.flat.index: v.flat for v in options.values()}
+                blobs = tuple(sorted({v.flat.index for v in options.values()}))
+                groups.setdefault(blobs, []).append((schema, name, options))
+
+        async def ask(
+            blobs: tuple[int, ...], asked: list[tuple[SchemaSpec, str, dict[str, _Value]]]
+        ) -> list[FieldMeta]:
+            questions: dict[str, Question] = {
+                f"select{i}": schema.field(name).select_question(list(options))
+                for i, (schema, name, options) in enumerate(asked)
+            }
+            text = "\n\n".join(
+                "\n".join(_statement_text(leaf) for leaf in flats[i].leaves) for i in blobs
+            )
+            answers = await jev.ask(jev.fit_state(text, questions), questions)
+            settled: list[FieldMeta] = []
+            for key, (_, _, options) in zip(questions, asked, strict=True):
+                answer = answers[key]
+                if not isinstance(answer, ChoiceAnswer):
+                    raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+                settled.append(_settled(options, answer))
+            return settled
+
+        results = await gather(ask(blobs, asked) for blobs, asked in groups.items())
+        for asked, metas in zip(groups.values(), results, strict=True):
+            for (schema, name, _), meta in zip(asked, metas, strict=True):
+                fields[schema.name][name] = meta
+        return fields
 
     async def _mappings(
         self,
@@ -659,7 +740,7 @@ class KeyPathMapper:
                 merged.setdefault(schema_name, {}).update(answers)
         return merged
 
-    async def _meta(
+    async def _field_values(
         self,
         spec: FieldSpec,
         flat: FlatBlob,
@@ -668,15 +749,15 @@ class KeyPathMapper:
         jev: JevClient,
         *,
         ask: bool = True,
-    ) -> FieldMeta:
-        """The field's value from its leaves: the first that reads directly (every one, for
-        a list field). An enum or bool value that doesn't read directly ("Plug-in hybrid",
-        "Automatic") is asked of Jev as the field's own question about the key-path
-        statement: once per distinct value (remembered by the mapper), concurrently, and
-        for a single-value field only when no leaf reads directly, for at most
-        :data:`MAX_FALLBACK_VALUES` values (a list enum for at most
-        :data:`MAX_LIST_FALLBACK_VALUES`). With ``ask=False`` only remembered readings are
-        used. When nothing works, the error is kept."""
+    ) -> list[_Value]:
+        """The field's values from its leaves: each distinct one that reads, from the first
+        leaf giving it (for a list field, one value holding every leaf's). An enum or bool
+        value that doesn't read directly ("Plug-in hybrid", "Automatic") is asked of Jev
+        as the field's own question about the key-path statement: once per distinct value
+        (remembered by the mapper), concurrently, and for a single-value field only when no
+        leaf reads directly, for at most :data:`MAX_FALLBACK_VALUES` values (a list enum
+        for at most :data:`MAX_LIST_FALLBACK_VALUES`). With ``ask=False`` only remembered
+        readings are used. When nothing works, one unfound value keeps the errors."""
         direct: dict[int, Any] = {}
         errors: dict[int, str] = {}
         for i, leaf in enumerate(leaves):
@@ -700,41 +781,41 @@ class KeyPathMapper:
             )
             asked = dict(zip(raws, results, strict=True))
 
-        values: list[Any] = []
-        first: Leaf | None = None
-        confidence: float | None = None
+        read: list[tuple[Leaf, Any, float | None]] = []
         for i, leaf in enumerate(leaves):
             if i in direct:
-                value = direct[i]
-            else:
-                answer = asked.get(_text(leaf.value))
-                if answer is None:
-                    continue
-                value, p = answer
-                confidence = p if confidence is None else min(confidence, p)
-            if first is None:
-                first = leaf
-            for item in value if isinstance(value, list) and spec.many else [value]:  # pyright: ignore[reportUnknownVariableType]
-                if item not in values:
-                    values.append(item)
-            if not spec.many:
-                break
-        leaf = first or leaves[0]
-        source = Source(
-            url=document.url,
-            component_id=f"structured.{flat.index}",
-            statement_id=flat.statement_id(leaf),
-            statement=f"{leaf.path}: {_text(leaf.value)}",
-        )
-        if first is None or not values:
-            error = "; ".join(errors.values()) or None
-            return FieldMeta(method="structured", source=source, error=error)
-        return FieldMeta(
-            value=values if spec.many else values[0],
-            confidence=confidence,
-            method="structured",
-            source=source,
-        )
+                read.append((leaf, direct[i], None))
+            elif (answer := asked.get(_text(leaf.value))) is not None:
+                read.append((leaf, *answer))
+        if spec.many and read:
+            merged: list[Any] = []
+            for _, value, _ in read:
+                for item in value if isinstance(value, list) else [value]:  # pyright: ignore[reportUnknownVariableType]
+                    if item not in merged:
+                        merged.append(item)
+            sure = [p for _, _, p in read if p is not None]
+            read = [(read[0][0], merged, min(sure, default=None))]
+
+        def source(leaf: Leaf) -> Source:
+            return Source(
+                url=document.url,
+                component_id=f"structured.{flat.index}",
+                statement_id=flat.statement_id(leaf),
+                statement=_statement_text(leaf),
+            )
+
+        values: list[_Value] = []
+        for leaf, value, p in read:
+            if all(v.meta.value != value for v in values):
+                meta = FieldMeta(
+                    value=value, confidence=p, method="structured", source=source(leaf)
+                )
+                values.append(_Value(meta, _text(leaf.value), flat))
+        if values:
+            return values
+        error = "; ".join(errors.values()) or None
+        meta = FieldMeta(method="structured", source=source(leaves[0]), error=error)
+        return [_Value(meta, _text(leaves[0].value), flat)]
 
     async def _ask_value_cached(
         self, spec: FieldSpec, leaf: Leaf, jev: JevClient, *, ask: bool = True
@@ -843,11 +924,54 @@ class KeyPathMapper:
 _NOWHERE = DomLocation(dom_path="/")
 
 
-def _keep_best(metas: dict[str, FieldMeta], name: str, meta: FieldMeta) -> None:
-    """Keep the first found value; an unfound meta (an error) is kept only until one is."""
-    existing = metas.get(name)
-    if existing is None or (not existing.found and meta.found):
-        metas[name] = meta
+@dataclass(frozen=True)
+class _Value:
+    """One value a field's leaves give (:meth:`KeyPathMapper._field_values`)."""
+
+    meta: FieldMeta
+    raw: str
+    """The leaf's value as text: what Jev is offered when a field's values disagree."""
+    flat: FlatBlob
+
+
+def _add(values: dict[str, list[_Value]], spec: FieldSpec, new: list[_Value]) -> None:
+    """Add another key path's or blob's ``new`` values for ``spec``. A single-value field
+    keeps every distinct value found (for :meth:`KeyPathMapper._settle`), a list field
+    the first found; an unfound value (an error) is kept only until one is found."""
+    existing = values.get(spec.name)
+    if existing is None or (not existing[0].meta.found and new[0].meta.found):
+        values[spec.name] = list(new)
+    elif existing[0].meta.found and not spec.many:
+        existing.extend(
+            v for v in new if v.meta.found and all(e.meta.value != v.meta.value for e in existing)
+        )
+
+
+def _firsts(found: dict[str, dict[str, list[_Value]]]) -> dict[str, dict[str, FieldMeta]]:
+    """Each field's first value: what an object, or the leaves outside every object, gives
+    without asking Jev anything new."""
+    return {
+        schema: {name: values[0].meta for name, values in by_field.items()}
+        for schema, by_field in found.items()
+    }
+
+
+def _settled(options: dict[str, _Value], answer: ChoiceAnswer) -> FieldMeta:
+    """The meta of the value Jev picked from ``options`` (unfound for "none"), the other
+    values its alternatives."""
+    alternatives = [
+        Alternative(value=v.meta.value, raw=v.raw, p=answer.probabilities.get(option, 0.0))
+        for option, v in options.items()
+        if option != answer.choice
+    ]
+    picked = options.get(answer.choice)
+    if picked is None:
+        return FieldMeta(
+            method="structured", confidence=answer.confidence, alternatives=alternatives
+        )
+    own = picked.meta.confidence
+    confidence = answer.confidence if own is None else min(own, answer.confidence)
+    return picked.meta.model_copy(update={"confidence": confidence, "alternatives": alternatives})
 
 
 def _enum_option(spec: FieldSpec, raw: str) -> str:

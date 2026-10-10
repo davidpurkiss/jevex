@@ -34,10 +34,10 @@ from jevex.interfaces import StructuredExtractor
 from jevex.jev import Choice, JevBackendError, JevClient
 from jevex.keypaths import StructuredResult
 from jevex.resolve import SINGLE_ENTITY_LABEL
-from jevex.results import FieldMeta
+from jevex.results import Alternative, FieldMeta
 from jevex.store import KeyMapping, SQLiteStore, Store, StoreError
 from jevex.structured import EmbeddedDataReader, StructuredBlob
-from jevex.testing import FakeJev
+from jevex.testing import FakeCall, FakeJev
 from jevex.testsite import VehicleSpec, generate, render
 
 LOC = DomLocation(dom_path="/html/head/script")
@@ -77,7 +77,7 @@ CAR = {
     "model": "Golf",
     "vehicleEngine": {"engineDisplacement": "1,498 cc"},
     "fuelType": "Petrol",
-    "offers": [{"@type": "Offer", "price": 24995}, {"@type": "Offer", "price": 26995}],
+    "offers": [{"@type": "Offer", "price": 24995}, {"@type": "Offer", "price": 24995}],
     "color": ["Red", "Moonstone Grey"],
     "description": "",
 }
@@ -116,7 +116,7 @@ def test_flatten_gives_key_paths_with_indices_and_collapsed_shapes() -> None:
         ("offers[0].@type", "offers[].@type", "Offer"),
         ("offers[0].price", "offers[].price", 24995),
         ("offers[1].@type", "offers[].@type", "Offer"),
-        ("offers[1].price", "offers[].price", 26995),
+        ("offers[1].price", "offers[].price", 24995),
         ("color[0]", "color[]", "Red"),
         ("color[1]", "color[]", "Moonstone Grey"),
     ]
@@ -149,7 +149,7 @@ async def test_a_miss_asks_one_batched_request_and_maps_the_values() -> None:
     fields = await extract(KeyPathMapper(), fake)
     assert {name: meta.value for name, meta in fields.items()} == {
         "model": "Golf",
-        "price": Decimal("24995"),  # first offer
+        "price": Decimal("24995"),  # both offers' price: one value, so nothing to settle
         "engine_size_cc": 1498,  # "1,498 cc" read like text
         "fuel": "petrol",  # "Petrol", matched ignoring case
         "colours": ["Red", "Moonstone Grey"],  # a list field takes every value
@@ -158,7 +158,7 @@ async def test_a_miss_asks_one_batched_request_and_maps_the_values() -> None:
     assert set(call.questions) == {f"Car:{i}" for i in range(7)}  # one per collapsed path
     state = call.state
     assert isinstance(state, dict)
-    assert "offers[1].price: 26995" in state["data"]
+    assert "offers[1].price: 24995" in state["data"]
     assert state["type"] == "Car"
     question = call.questions["Car:1"]
     assert isinstance(question, Choice)
@@ -986,6 +986,152 @@ async def test_merge_mode_end_to_end_records_the_layout_routes_disagreement() ->
     assert (conflict.value, conflict.method, conflict.confidence) == ("Polo", "generator", 0.8)
 
 
+# --- distinct values for one field ----------------------------------------------------
+
+TWO_PRICES = {**CAR, "offers": [{"price": 24995}, {"price": 26995}]}
+
+SELECT_PRICE = Choice(
+    instructions="Which of these is the price (GBP)?",
+    options={"24995": None, "26995": None, "none": "None of these is the price"},
+)
+
+
+def settle_calls(fake: FakeJev) -> list[FakeCall]:
+    return [c for c in fake.calls if any(k.startswith("select") for k in c.questions)]
+
+
+async def test_distinct_values_for_a_single_value_field_are_settled_by_jev() -> None:
+    fake = mapping_jev().choice(
+        "Which of these is the price", "26995", confidence=0.7, probabilities={"24995": 0.2}
+    )
+    fields = await extract(KeyPathMapper(), fake, TWO_PRICES)
+    meta = fields["price"]
+    assert (meta.value, meta.confidence, meta.method) == (Decimal("26995"), 0.7, "structured")
+    assert meta.source is not None
+    assert meta.source.statement == "offers[1].price: 26995"
+    assert meta.alternatives == [Alternative(value=Decimal("24995"), raw="24995", p=0.2)]
+    [call] = settle_calls(fake)
+    assert call.questions == {"select0": SELECT_PRICE}
+    # The state is the blob's leaves, as the key-path statements read.
+    assert call.state == (
+        "@type: Car\nmodel: Golf\nvehicleEngine.engineDisplacement: 1,498 cc\n"
+        "fuelType: Petrol\noffers[0].price: 24995\noffers[1].price: 26995\n"
+        "color[0]: Red\ncolor[1]: Moonstone Grey"
+    )
+    assert len(fake.calls) == 2  # the mapping, then the price
+
+
+async def test_a_none_answer_leaves_the_field_unfound_not_the_first_value() -> None:
+    fake = mapping_jev().choice(
+        "Which of these is the price", "none", confidence=0.6, probabilities={"24995": 0.3}
+    )
+    fields = await extract(KeyPathMapper(), fake, TWO_PRICES)
+    meta = fields["price"]
+    assert not meta.found
+    assert (meta.confidence, meta.method, meta.source) == (0.6, "structured", None)
+    assert [(a.value, a.raw, a.p) for a in meta.alternatives] == [
+        (Decimal("24995"), "24995", 0.3),
+        (Decimal("26995"), "26995", pytest.approx(0.1)),
+    ]
+    # Through the stage, the record has no price, and the other fields still finish it.
+    async with Extractor([Car], jev=fake.client(), pipeline=Pipeline([StructuredStage()])) as ex:
+        result = await ex.extract(page(TWO_PRICES))
+    values = result.values["Car"]["document"]
+    assert "price" not in values
+    assert values["model"] == "Golf"
+
+
+async def test_values_from_several_blobs_are_settled_over_every_blobs_leaves() -> None:
+    scripts = "".join(
+        f'<script type="application/ld+json">{json.dumps(data)}</script>'
+        for data in [{"@type": "Car", "model": "Golf"}, {"@type": "Product", "name": "Golf GTI"}]
+    )
+    doc = Document.from_bytes(f"<html><head>{scripts}</head></html>".encode())
+    fake = mapping_jev({"model": "model", "name": "model"}).choice(
+        "Which of these is the model name", "Golf GTI", confidence=0.8
+    )
+    result = await KeyPathMapper().extract(doc, [SchemaSpec.from_model(Car)], fake.client())
+    meta = result.fields["Car"]["model"]
+    assert (meta.value, meta.confidence) == ("Golf GTI", 0.8)
+    assert meta.source is not None
+    assert meta.source.component_id == "structured.1"
+    [call] = settle_calls(fake)
+    assert call.state == "@type: Car\nmodel: Golf\n\n@type: Product\nname: Golf GTI"
+    assert call.questions == {
+        "select0": Choice(
+            instructions="Which of these is the model name?",
+            options={"Golf": None, "Golf GTI": None, "none": "None of these is the model name"},
+        )
+    }
+    # The rest (no array objects here) keeps the first value without asking anything.
+    assert result.rest["Car"]["model"].value == "Golf"
+
+
+async def test_fields_disagreeing_in_the_same_blobs_are_settled_in_one_request() -> None:
+    data = {**TWO_PRICES, "name": "Golf GTI"}
+    fake = (
+        mapping_jev({**MAPPING, "name": "model"})
+        .choice("Which of these is the price", "24995")
+        .choice("Which of these is the model name", "Golf")
+    )
+    fields = await extract(KeyPathMapper(), fake, data)
+    assert (fields["model"].value, fields["price"].value) == ("Golf", Decimal("24995"))
+    [call] = settle_calls(fake)
+    assert [q.instructions for q in call.questions.values()] == [
+        "Which of these is the model name?",
+        "Which of these is the price (GBP)?",
+    ]
+
+
+async def test_a_settled_jev_reading_is_only_as_sure_as_the_reading() -> None:
+    data = {"fuelType": "Petrol", "offers": [{"fuelType": "Fully electric"}]}
+    fake = (
+        mapping_jev({"fuelType": "fuel", "offers[].fuelType": "fuel"})
+        .choice(re.compile("(?i)what is the fuel type"), "ev", confidence=0.6)
+        .choice("Which of these is the fuel type?", "Fully electric", confidence=0.9)
+    )
+    fields = await extract(KeyPathMapper(), fake, data)
+    meta = fields["fuel"]
+    assert (meta.value, meta.confidence) == ("ev", 0.6)
+    assert [(a.value, a.raw) for a in meta.alternatives] == [("petrol", "Petrol")]
+
+
+async def test_a_literal_none_value_is_offered_quoted() -> None:
+    paths = {"model": "model", "name": "model", "color[]": "colours", "colour[]": "colours"}
+    data = {"model": "none", "name": "Golf", "color": ["Red"], "colour": ["Blue"]}
+    fake = mapping_jev(paths).choice("Which of these is the model name", "Golf")
+    fields = await extract(KeyPathMapper(), fake, data)
+    assert fields["model"].value == "Golf"
+    assert [(a.value, a.raw) for a in fields["model"].alternatives] == [("none", "none")]
+    assert fields["colours"].value == ["Red"]  # a list field takes the first path's values
+    [call] = settle_calls(fake)
+    [question] = call.questions.values()
+    assert isinstance(question, Choice)
+    assert list(question.options) == ['"none"', "Golf", "none"]
+
+
+async def test_values_cut_to_one_option_ask_nothing() -> None:
+    long = {"model": "A" * 250 + "x", "name": "A" * 250 + "y"}
+    fake = mapping_jev({"model": "model", "name": "model"})
+    fields = await extract(KeyPathMapper(), fake, long)
+    assert fields["model"].value == long["model"]  # the first value stands for the option
+    assert settle_calls(fake) == []
+
+
+async def test_too_many_values_are_capped() -> None:
+    many = {"offers": [{"price": 1000 + i} for i in range(300)]}
+    fake = mapping_jev({"offers[].price": "price"}).choice("Which of these is the price", "1253")
+    result = await KeyPathMapper().extract(page(many), [SchemaSpec.from_model(Car)], fake.client())
+    assert result.fields["Car"]["price"].value == Decimal("1253")
+    [call] = settle_calls(fake)
+    [question] = call.questions.values()
+    assert isinstance(question, Choice)
+    assert list(question.options) == [str(1000 + i) for i in range(254)] + ["none"]
+    assert ("structured_values_skipped", "Car.price: asked about 254 of 300 embedded values") in (
+        result.events
+    )
+
+
 # --- array items, for multi-entity pages ---------------------------------------------
 
 TRIMS = {
@@ -1031,8 +1177,13 @@ def test_an_object_in_a_nested_array_is_an_item_inside_its_outer_one() -> None:
 
 
 async def test_the_mapper_reads_each_item_and_the_rest_on_their_own() -> None:
-    fake = mapping_jev().choice(
-        re.compile("(?i)what is the fuel type"), "ev", confidence=0.8, state="Fully electric"
+    fake = (
+        mapping_jev()
+        .choice(
+            re.compile("(?i)what is the fuel type"), "ev", confidence=0.8, state="Fully electric"
+        )
+        .choice("Which of these is the fuel type?", "Petrol")
+        .choice("Which of these is the price (GBP)?", "26995")
     )
     mapping = {**MAPPING, "offers[].fuelType": "fuel"}
     for path, name in mapping.items():
@@ -1050,7 +1201,7 @@ async def test_the_mapper_reads_each_item_and_the_rest_on_their_own() -> None:
     assert se.statement_ids == {"structured.0.7", "structured.0.8", "structured.0.9"}
     assert {n: m.value for n, m in delivery.fields["Car"].items()} == {"price": 1}
     assert bare.fields["Car"] == {}
-    # The page's value is the first found anywhere; the rest skips every offer.
+    # The page's values are the ones Jev picks from every leaf's; the rest skips every offer.
     page_values = {n: m.value for n, m in result.fields["Car"].items()}
     assert page_values == {"model": "Kestrova", "fuel": "petrol", "price": 26995}
     assert {n: m.value for n, m in result.rest["Car"].items()} == {
