@@ -1063,8 +1063,9 @@ async def test_values_from_several_blobs_are_settled_over_every_blobs_leaves() -
             options={"Golf": None, "Golf GTI": None, "none": "None of these is the model name"},
         )
     }
-    # The rest (no array objects here) keeps the first value without asking anything.
-    assert result.rest["Car"]["model"].value == "Golf"
+    # The rest (no array objects here) offers the same values: Jev's answer is reused.
+    rest = result.rest["Car"]["model"]
+    assert (rest.value, rest.confidence, rest.source) == ("Golf GTI", 0.8, meta.source)
 
 
 async def test_fields_disagreeing_in_the_same_blobs_are_settled_in_one_request() -> None:
@@ -1130,6 +1131,59 @@ async def test_too_many_values_are_capped() -> None:
     assert ("structured_values_skipped", "Car.price: asked about 254 of 300 embedded values") in (
         result.events
     )
+
+
+# Two prices outside the offers (the rest's) and the offer's own.
+RANGE = {"@type": "Car", "price": 19995, "lowPrice": 18995, "offers": [{"price": 26995}]}
+RANGE_PATHS = {"price": "price", "lowPrice": "price", "offers[].price": "price"}
+
+
+async def test_the_rests_own_distinct_values_are_settled_by_their_own_question() -> None:
+    fake = mapping_jev(RANGE_PATHS).choice(
+        "Which of these is the price",
+        lambda q: "26995" if "26995" in q.options else "18995",
+        confidence=0.7,
+        probabilities={"19995": 0.2},
+    )
+    result = await KeyPathMapper().extract(page(RANGE), [SchemaSpec.from_model(Car)], fake.client())
+    assert result.fields["Car"]["price"].value == Decimal("26995")
+    rest = result.rest["Car"]["price"]
+    assert (rest.value, rest.confidence) == (Decimal("18995"), 0.7)
+    assert rest.source is not None
+    assert rest.source.statement == "lowPrice: 18995"
+    assert rest.alternatives == [Alternative(value=Decimal("19995"), raw="19995", p=0.2)]
+    page_call, rest_call = settle_calls(fake)
+    assert page_call.questions == {
+        "select0": Choice(
+            instructions="Which of these is the price (GBP)?",
+            options={
+                "19995": None,
+                "18995": None,
+                "26995": None,
+                "none": "None of these is the price",
+            },
+        )
+    }
+    # Only the rest's values are offered, over the same blob's leaves.
+    assert rest_call.questions == {
+        "select0": Choice(
+            instructions="Which of these is the price (GBP)?",
+            options={"19995": None, "18995": None, "none": "None of these is the price"},
+        )
+    }
+    state = "@type: Car\nprice: 19995\nlowPrice: 18995\noffers[0].price: 26995"
+    assert rest_call.state == page_call.state == state
+
+
+async def test_a_none_for_the_rest_leaves_it_unfound() -> None:
+    fake = mapping_jev(RANGE_PATHS).choice(
+        "Which of these is the price", lambda q: "26995" if "26995" in q.options else "none"
+    )
+    result = await KeyPathMapper().extract(page(RANGE), [SchemaSpec.from_model(Car)], fake.client())
+    assert result.fields["Car"]["price"].value == Decimal("26995")
+    rest = result.rest["Car"]["price"]
+    assert (rest.found, rest.source) == (False, None)
+    assert [a.value for a in rest.alternatives] == [Decimal("19995"), Decimal("18995")]
 
 
 # --- array items, for multi-entity pages ---------------------------------------------
