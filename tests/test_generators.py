@@ -212,17 +212,18 @@ CLIMATE = SchemaSpec.from_model(Climate)
         ("Operating range -5 to -2 °C", "-5 to -2", [-5, -2]),
         ("Operating range between -5 and 5 °C", "between -5 and 5", [-5, 5]),
         ("Operating range between \u22125 and \u22122 °C", "between \u22125 and \u22122", [-5, -2]),
+        ("Operating range \u22125–\u22122 °C", "\u22125–\u22122", [-5, -2]),
         ("Operating range -5--2 °C", "-5--2", [-5, -2]),
         ("Operating range 5 to -2 °C", "5 to -2", [5, -2]),
         ("Operating range (-5–7 °C)", "-5–7", [-5, 7]),
     ],
 )
-def test_ranges_keep_their_signs(text: str, raw: str, value: list[float]) -> None:
+def test_ranges_keep_their_signs(text: str, raw: str, value: list[int]) -> None:
     [cand] = Range().generate(st(text))
     assert cand.raw == raw
     assert normalise(cand.raw, cand.normalise, CLIMATE.field("operating")) == value
     # The unsigned numbers are still proposed, for Jev to choose between.
-    assert "5" in raws(NumberWithUnit(), text)
+    assert raws(NumberWithUnit(), text) == [str(abs(v)) for v in value]
 
 
 def test_signed_ranges_in_the_page_languages_words() -> None:
@@ -251,6 +252,7 @@ def test_a_dash_between_numbers_is_not_a_sign(text: str, raw: str, value: list[f
 
 def test_a_dash_after_a_word_or_number_is_not_a_sign() -> None:
     assert raws(Range(), "Size A-5 to 7") == []
+    assert raws(Range(), "Size A\u22125 to 7") == []
     assert raws(Range(), "Grid 3-1-5 to 7") == []
 
 

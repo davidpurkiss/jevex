@@ -149,7 +149,7 @@ def _range(num: str, units: str, language: str) -> str:
         and_ = f"and|{_words(words.and_)}"
     signed = f"{_SIGN}?(?:{num})"
     return (
-        rf"(?<![\w.,/-])(?P<lo>{signed})(?:\s*(?:[-–—]|to)\s*{to})(?P<hi>{signed})"
+        rf"(?<![\w.,/\u2212-])(?P<lo>{signed})(?:\s*(?:[-–—]|to)\s*{to})(?P<hi>{signed})"
         rf"(?!\w|[.,/–-]\d)(?:\s?(?P<unit>{units})(?![A-Za-z0-9]))?"
         rf"|\b(?i:{between})\s+(?P<lo2>{signed})\s+(?i:{and_})\s+(?P<hi2>{signed})"
     )
