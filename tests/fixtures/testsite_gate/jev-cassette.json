@@ -7615,56 +7615,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "72c8c7eb0f186255": {
-    "request": {
-      "questions": {
-        "Listing.make/choice0": {
-          "instructions": "Which of these is the manufacturer (make) name?",
-          "options": {
-            "Brantis Parhelia": null,
-            "none": "None of these is the manufacturer (make) name"
-          },
-          "type": "choice"
-        },
-        "Listing.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "Brantis Parhelia": null,
-            "none": "None of these is the model name"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1",
-        "statement": "Brantis Parhelia"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing.make/choice0": {
-          "choice": "none",
-          "confidence": 0.34,
-          "probabilities": {
-            "Brantis Parhelia": 0.33,
-            "none": 0.67
-          },
-          "type": "choice"
-        },
-        "Listing.model/choice0": {
-          "choice": "Brantis Parhelia",
-          "confidence": 0.84,
-          "probabilities": {
-            "Brantis Parhelia": 0.92,
-            "none": 0.08
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 398,
-      "model": "jev-1.13.0"
-    }
-  },
   "74a44efd55ffdca7": {
     "request": {
       "questions": {
