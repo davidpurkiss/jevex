@@ -313,12 +313,21 @@ def test_serve_fails_when_the_server_doesnt_start(monkeypatch: pytest.MonkeyPatc
     import uvicorn
 
     async def refused(self: uvicorn.Server, sockets: object = None) -> None:
-        return  # as uvicorn does when it can't bind the port: it logs why and returns
+        sys.exit(3)  # as uvicorn does when it can't bind the port, after logging why
 
     monkeypatch.setattr(uvicorn.Server, "serve", refused)
-    code, _, err = run_cli("serve", "--schema", SCHEMA, "--port", "9002")
+    built = ClosingLLM([])
+
+    def build(_spec: str) -> FakeLLM:
+        return built
+
+    monkeypatch.setattr(cli, "load_llm", build)
+    code, _, err = run_cli(
+        "serve", "--schema", SCHEMA, "--port", "9002", "--llm", "anthropic:claude-sonnet-5-5"
+    )
     assert code == 1
     assert "couldn't serve at http://127.0.0.1:9002 (see the log above)" in err
+    assert built.closed
 
 
 def test_serve_needs_the_server_extra(monkeypatch: pytest.MonkeyPatch, served: Served) -> None:

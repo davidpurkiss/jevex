@@ -925,20 +925,18 @@ def _serve(
 
 
 def _serve_until_stopped(server: uvicorn.Server, owned: LLM | None) -> None:
-    """Run ``server`` until it stops (Ctrl-C included), then close ``owned``, the adapter
-    this command built, on the loop that used it: uvicorn's own ``run`` closes its loop
-    before returning."""
-    factory = server.config.get_loop_factory()
-    loop = factory() if factory is not None else asyncio.new_event_loop()
-    try:
-        with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C is how serving ends
-            loop.run_until_complete(server.serve())
-        close = getattr(owned, "aclose", None)
-        if close is not None:
-            loop.run_until_complete(close())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    """Run ``server`` until it stops, then close ``owned``, the adapter this command built,
+    on the loop that used it (``uvicorn.run`` closes its loop before returning). Ctrl-C is
+    how serving ends; uvicorn exits when it can't start (the port is taken, say), after
+    logging why, which ``server.started`` then says."""
+    with asyncio.Runner(loop_factory=server.config.get_loop_factory()) as runner:
+        try:
+            with contextlib.suppress(KeyboardInterrupt, SystemExit):
+                runner.run(server.serve())
+        finally:
+            close = getattr(owned, "aclose", None)
+            if close is not None:
+                runner.run(close())
 
 
 def _testsite_serve(args: argparse.Namespace, stdout: TextIO) -> None:
