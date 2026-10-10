@@ -581,7 +581,11 @@ class NounPhrase:
     """Word runs between punctuation and stopwords: candidate names, colours, trims.
 
     A light heuristic chunker with no model dependency. "Available in Moonstone Grey
-    metallic" gives "Available" and "Moonstone Grey metallic".
+    metallic" gives "Available" and "Moonstone Grey metallic", then that run's sub-runs:
+    nothing marks where one value ends and the next begins in a name such as "Delmaro
+    Kestrova SE" (a make, a model and a trim), so a run of up to ``MAX_PHRASE_WORDS``
+    words also gives every contiguous part of it, and Jev picks. A longer run is cut
+    into consecutive chunks of that many words, with no sub-runs.
     """
 
     id: str = "noun_phrase"
@@ -594,10 +598,13 @@ class NounPhrase:
         run: list[re.Match[str]] = []
 
         def flush() -> None:
-            # Long runs become consecutive chunks, so no words are dropped.
-            for i in range(0, len(run), MAX_PHRASE_WORDS):
-                words = run[i : i + MAX_PHRASE_WORDS]
-                if not all(w.group().replace(".", "").isdigit() for w in words):
+            n = len(run)
+            if n <= MAX_PHRASE_WORDS:
+                phrases = [run[i:j] for i in range(n) for j in range(i + 1, n + 1)]
+            else:
+                phrases = [run[i : i + MAX_PHRASE_WORDS] for i in range(0, n, MAX_PHRASE_WORDS)]
+            for words in phrases:
+                if not all(w.group().replace(",", "").replace(".", "").isdigit() for w in words):
                     out.append(
                         _candidate(
                             statement, words[0].start(), words[-1].end(), self.id, _step("strip")

@@ -21,9 +21,15 @@ The caller gives you an issue number. Gather context yourself:
 1. **Correctness.** Logic errors, off-by-one errors, wrong conditions, unhandled `None`/empty inputs, async misuse (a missing `await`, blocking calls in async code, shared state across event loops), exceptions swallowed or too broad, and resource leaks.
 2. **Spec and issue fit.** Is every **Done when** item actually met? Anything that departs from the cited spec section must be named in the PR description; flag any that isn't. Flag scope creep beyond the issue.
 3. **Tests.** Do tests exercise the new behaviour, the edge cases and at least one failure path? Would they fail if the code were wrong? (Look for tests that assert too little.) Nothing may touch the network outside `@pytest.mark.live`; use `FakeJev` or a `Cassette`. Generated question text must be asserted exactly.
-4. **Jev usage.** Only `jev.py` may import `typesafe_sdk`. Questions about one state go in one `ask` call. Question text must come from `SchemaSpec`/`FieldSpec` so overrides work. Oversized states must be chunked or handled.
+4. **Jev usage.** Code that guesses what text means (a keyword list, a heuristic picking a field, an entity or what a label refers to, or text that asserts a relationship jevex inferred) where Jev could be asked is a MUST FIX, unless its docstring gives the reason (`CLAUDE.md` › **Ask Jev for judgements, compute structure**). Only `jev.py` may import `typesafe_sdk`. Questions about one state go in one `ask` call. Question text must come from `SchemaSpec`/`FieldSpec` so overrides work. Oversized states must be chunked or handled.
 5. **Conventions.** Types (pyright strict, no needless `Any` or `cast`, and every `pyright: ignore` must be justified), imports (runtime vs `TYPE_CHECKING`), frozen value models, exports in `__init__.py`, docstrings on public API.
-6. **Safety rules.** No secrets, no publishing, no workflow or settings changes unless that's the issue, no network calls in default tests.
+6. **Slop** (`CLAUDE.md` › **No slop code**), always a MUST FIX:
+   - a flag, default, alias or shim whose only purpose is to keep existing tests passing (check each new parameter's callers in `src/`);
+   - a test assertion weakened, skipped or loosened rather than updated to the new behaviour;
+   - code without a real caller, dead or commented-out code;
+   - `type: ignore`, `cast`, `Any`, `noqa` or `getattr` probing where the types could be made right;
+   - a near-copy of an existing helper.
+7. **Safety rules.** No secrets, no publishing, no workflow or settings changes unless that's the issue, no network calls in default tests.
 
 Then run `uv run ruff check`, `uv run ruff format --check`, `uv run pyright` and `uv run pytest -q`, and report any failures.
 

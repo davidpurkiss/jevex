@@ -105,6 +105,13 @@ Import them lazily inside the code that needs them.
   `from __future__ import annotations`.
 - **Async:** anything that does I/O or calls Jev or an LLM is `async`. CPU-only work (parsing,
   splitting, generators, normalisers) is sync.
+- **Ask Jev for judgements, compute structure:** when code has to decide what text
+  *means* (which field, which entity, what a label refers to, whether something is
+  relevant), ask Jev an atomic question, batched into the stage's existing `ask`, instead
+  of hard-coding a heuristic or keyword list. Pass the context Jev needs to judge, rather
+  than baking a conclusion into the text. Structure that code can read for certain
+  (markup, header cells, spans, number syntax) stays in code. A heuristic that guesses
+  meaning needs its reason in its docstring (for example, it runs before Jev can be asked).
 - **Jev:** only `jev.py` imports `typesafe_sdk`. Stages build jevex's own question models.
   Question text comes from `SchemaSpec`/`FieldSpec`, never hard-coded in a stage, so that
   `Questions(...)` overrides keep working.
@@ -116,6 +123,23 @@ Import them lazily inside the code that needs them.
   (or a `Cassette`) and never the network; `pytest-socket` blocks it. Async tests are
   plain `async def` (asyncio auto mode). When a stage generates questions, assert the exact
   question text, because it is user-visible behaviour.
+- **No slop code:** every line must earn its place in a design someone would choose on
+  purpose, not just make the change look done or keep checks green. In particular:
+  - **Change the tests, not the API.** When a deliberate behaviour change breaks
+    existing tests, update them to the new behaviour (after checking the new outputs by
+    hand). Never add an opt-in flag, a default that keeps the old behaviour, an alias or
+    a compatibility shim just so old tests keep passing. jevex is pre-v1: there's no
+    backwards compatibility to preserve.
+  - **No speculative code.** No parameters, options, hooks or abstractions without a real
+    caller. No dead code, commented-out code or "TODO: later" stubs.
+  - **Don't silence the checks.** No `# type: ignore`, `cast`, `Any`, `noqa` or
+    `getattr`/`hasattr` probing to get past pyright or ruff when the types can be made
+    right. No `try`/`except` that hides a failure (see **Errors**). Never weaken, skip or
+    loosen a test's assertion to make it pass.
+  - **Reuse before you write.** Use the helper that already exists rather than writing a
+    near-copy, and fix it at its source rather than working around it at a call site.
+  - **Comments say why.** Don't narrate what the code does, restate a name, or leave
+    notes about the change itself ("now also...", "fixed").
 - **Exports:** add public names to `jevex/__init__.py` and `__all__`.
 
 ## Definition of done

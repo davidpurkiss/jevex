@@ -1,44 +1,58 @@
 {
-  "4dc0fe8376b7c9c8": {
+  "6f623021e1070d94": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "SE",
+      "evidence": "Parhelia",
       "stated": true,
-      "value": "SE"
+      "value": "Parhelia"
     },
-    "prompt": "Read one statement from a document and extract a single field from it.\n\nStatement: Delmaro Kestrova SE\n\nField: trim\nDescription: Trim or variant name, e.g. SE L\nType: text\n\nIf the statement states the trim or variant name, e.g. SE L, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Used cars: page 1\nStatement: Brantis Parhelia\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.002588,
-      "input_tokens": 522,
-      "output_tokens": 25
+      "cost": 0.004644,
+      "input_tokens": 506,
+      "output_tokens": 131
+    }
+  },
+  "7aa9b847336d1e60": {
+    "model": "claude-opus-5-5",
+    "output": {
+      "evidence": "Tamsin",
+      "stated": true,
+      "value": "Tamsin"
+    },
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Used cars: page 1\nStatement: Corvane Tamsin\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "usage": {
+      "cost": 0.005904,
+      "input_tokens": 506,
+      "output_tokens": 194
     }
   },
   "afff0f390433a918": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "Power output \u00b7 GT: 143PS",
+      "evidence": "143PS",
       "stated": true,
       "value": 105.2
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 GT: 143PS\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004596,
+      "cost": 0.004516,
       "input_tokens": 539,
-      "output_tokens": 122
+      "output_tokens": 118
     }
   },
-  "d1e92ba2be3918ff": {
+  "cedb35a59f4705c4": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "Delmaro Kestrova",
+      "evidence": "173 bhp",
       "stated": true,
-      "value": "Delmaro Kestrova"
+      "value": 129.0
     },
-    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications\nStatement: Compare the Delmaro Kestrova range below.\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 Edition: 173 bhp\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.00826,
-      "input_tokens": 520,
-      "output_tokens": 309
+      "cost": 0.004688,
+      "input_tokens": 542,
+      "output_tokens": 126
     }
   },
   "eec3aca60e4fa71c": {

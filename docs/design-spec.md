@@ -237,7 +237,7 @@ Values come from verbatim candidate spans that Jev chooses between. An LLM is us
 | `date`, `year` | Absolute dates, month-year, model years | `March 2024` → 2024-03 |
 | `range` | Numeric ranges | `5–7 seats` → \[5, 7\] |
 | `key_value` | The value side of `label: value` statements | `Colour: Moonstone Grey` |
-| `noun_phrase` | Noun-phrase chunks, for strings | `Moonstone Grey metallic` |
+| `noun_phrase` | Noun-phrase chunks for strings, and each part of a short one | `Moonstone Grey metallic`; `Kestrova` in `Delmaro Kestrova SE` |
 | `regex` | Any declarative regex spec (what the learner produces) | as defined |
 
 ```python
