@@ -15,6 +15,7 @@ import html
 import math
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from jevex.stats.data import CURVE_POINTS, METHODS, curve, shares
@@ -514,6 +515,101 @@ def cost_svg(
             f'<text x="{WIDTH - _RIGHT + 8}" y="{y + 4:.1f}">budget {usd(stats.budget_usd)}</text>'
         )
     parts += frame.markers(stats)
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+@dataclass(frozen=True)
+class CostPoint:
+    """One system on the accuracy-vs-cost chart: its mean cost per document and its
+    accuracy with a confidence interval."""
+
+    label: str
+    cost: float
+    """USD per document."""
+    accuracy: float
+    low: float
+    high: float
+    jevex: bool = False
+    """jevex's own systems are drawn in the accent colour, the baselines in the LLM's."""
+
+
+_SCATTER_HEIGHT = 300
+_SCATTER_RIGHT = 150
+
+
+def accuracy_cost_svg(
+    points: Sequence[CostPoint],
+    title: str = "Accuracy against cost",
+    *,
+    standalone: bool = False,
+    animate: bool = False,
+) -> str:
+    """Each system's accuracy (with its interval as a whisker) against its cost per
+    document on a log scale, labelled by name: up and to the left is better. A system
+    that cost nothing can't sit on a log scale and is left out (its row in the results
+    table still says so)."""
+    shown = [p for p in points if p.cost > 0]
+    if shown:
+        lo = math.floor(math.log10(min(p.cost for p in shown)))
+        hi = max(math.ceil(math.log10(max(p.cost for p in shown))), lo + 1)
+    else:
+        lo, hi = -4, -2
+    floor = min([0.9, *(p.low for p in shown)])
+    y0 = max(0.0, math.floor(floor * 10) / 10)
+    step = 0.1 if 1.0 - y0 <= 0.5 else 0.2
+    y_ticks = [y0 + i * step for i in range(round((1.0 - y0) / step) + 1)]
+    width = WIDTH - _LEFT - _SCATTER_RIGHT
+    height = _SCATTER_HEIGHT - _TOP - _BOTTOM - 12
+
+    def x(cost: float) -> float:
+        return _LEFT + width * (math.log10(cost) - lo) / (hi - lo)
+
+    def y(value: float) -> float:
+        return _TOP + height * (1.0 - (value - y0) / (1.0 - y0))
+
+    parts = _open(
+        "accuracy-cost",
+        title,
+        _SCATTER_HEIGHT,
+        standalone=standalone,
+        animate=animate,
+        label=f"{title}: accuracy over cost per document (USD, log scale) for "
+        + ", ".join(p.label for p in shown),
+    )
+    parts.append(f'<text class="title" x="{_LEFT}" y="14">{_esc(title)}</text>')
+    for t in y_ticks:
+        parts.append(
+            f'<line class="grid" x1="{_LEFT}" x2="{_LEFT + width}" y1="{y(t):.1f}" '
+            f'y2="{y(t):.1f}"/><text x="{_LEFT - 8}" y="{y(t) + 4:.1f}" '
+            f'text-anchor="end">{_esc(pct(t))}</text>'
+        )
+    bottom = _TOP + height
+    parts.append(
+        f'<line class="axis" x1="{_LEFT}" x2="{_LEFT + width}" y1="{bottom:.1f}" '
+        f'y2="{bottom:.1f}"/>'
+    )
+    for power in range(lo, hi + 1):
+        at = x(10.0**power)
+        parts.append(
+            f'<line class="axis" x1="{at:.1f}" x2="{at:.1f}" y1="{bottom:.1f}" '
+            f'y2="{bottom + 4:.1f}"/><text x="{at:.1f}" y="{bottom + 18:.1f}" '
+            f'text-anchor="middle">${Decimal(10) ** power:f}</text>'
+        )
+    parts.append(
+        f'<text class="muted" x="{_LEFT + width / 2:.1f}" y="{bottom + 34:.1f}" '
+        f'text-anchor="middle">Cost per document (USD, log scale)</text>'
+    )
+    for p in shown:
+        px, py = x(p.cost), y(p.accuracy)
+        kind = "dot" if p.jevex else "m-llm"
+        tip = f"{p.label}: {pct(p.accuracy)} ({pct(p.low)}–{pct(p.high)}) at {usd(p.cost)}"
+        parts.append(
+            f'<g class="point late"><title>{_esc(tip)}</title>'
+            f'<line class="axis" x1="{px:.1f}" x2="{px:.1f}" y1="{y(p.low):.1f}" '
+            f'y2="{y(p.high):.1f}"/><circle class="{kind}" cx="{px:.1f}" cy="{py:.1f}" r="5"/>'
+            f'<text x="{px + 9:.1f}" y="{py + 4:.1f}">{_esc(p.label)}</text></g>'
+        )
     parts.append("</svg>")
     return "".join(parts)
 

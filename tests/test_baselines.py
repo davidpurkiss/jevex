@@ -1,5 +1,6 @@
 import json
 import shutil
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -28,6 +29,7 @@ from jevex.baselines import (
     read_results,
     records_model,
     render_text,
+    result_row,
     run_baseline,
     schema_specs,
     schemas_text,
@@ -38,6 +40,7 @@ from jevex.baselines import (
 from jevex.benchmarks import PinnedModel, book_values
 from jevex.clean import html_text_of
 from jevex.document import Document
+from jevex.eval import DocumentRun
 from jevex.examples.books import Book, books_pipeline
 from jevex.extractor import default_pipeline
 from jevex.layout import Component, DomLocation, LayoutStage
@@ -473,6 +476,58 @@ def test_score_results_scores_like_jevex_eval(corpus: Path) -> None:
     assert report.overall().correct == 8
     assert report.summary()["cost_per_document"] == pytest.approx(0.001)
     assert report.summary()["jev_cost_per_document"] == 0
+
+
+def test_jevex_rows_keep_their_own_usage_and_methods(corpus: Path) -> None:
+    first, second = (f"pages/{n}.html" for n in PAGES)
+    values = truth(corpus)[first] | {"price": 51.77}
+    run = DocumentRun(
+        path=(corpus / first).as_posix(),
+        schema="Book",
+        seconds=2.0,
+        jev_requests=3,
+        jev_questions=7,
+        jev_cost=0.001,
+        llm_calls=1,
+        llm_cost=0.01,
+        methods=Counter({"jev": 4, "llm": 1}),
+        fields={},
+        records={"Book": [{"entity": "document", "values": values}]},
+    )
+    row = result_row(run, corpus, learning_cost=0.5)
+    assert row == ResultRow(
+        path=first,
+        records=run.records,
+        seconds=2.0,
+        calls=1,
+        cost=0.01,
+        jev_requests=3,
+        jev_questions=7,
+        jev_cost=0.001,
+        learning_cost=0.5,
+        methods={"jev": 4, "llm": 1},
+    )
+    failed = DocumentRun(
+        path=(corpus / second).as_posix(),
+        schema="Book",
+        seconds=0.5,
+        jev_requests=1,
+        jev_questions=1,
+        jev_cost=0.0001,
+        llm_calls=0,
+        llm_cost=0.0,
+        methods=Counter(),
+        fields={},
+        error="boom",
+    )
+    report = score_results(corpus, [row, result_row(failed, corpus)], BOOK_SPECS)
+    scored, missing = report.documents
+    assert scored.methods == Counter({"jev": 4, "llm": 1})
+    assert (scored.jev_requests, scored.jev_questions, scored.jev_cost) == (3, 7, 0.001)
+    assert scored.records == run.records
+    assert report.overall().correct == 5
+    assert (missing.error, missing.jev_requests, missing.methods) == ("boom", 1, Counter())
+    assert all(s.missing == 1 for s in missing.fields.values())
 
 
 def test_score_results_counts_a_document_without_a_row_as_missing(corpus: Path) -> None:

@@ -406,12 +406,45 @@ class ResultRow(BaseModel):
     """Wall time extracting. Preparing the input is the same for every system and isn't
     timed."""
     calls: int = 0
+    """LLM calls."""
     input_tokens: int = 0
     output_tokens: int = 0
     cost: float = 0.0
-    """USD at the pinned prices. A failed call's cost is in the spend ledger, not here."""
+    """The LLM calls' USD at the pinned prices. A failed call's cost is in the spend
+    ledger, not here."""
     model: str | None = None
     error: str | None = None
+    jev_requests: int = 0
+    """jevex's own rows (:func:`result_row`) carry its Jev usage, the methods its values came
+    from and its learner's spend; a baseline's leave them empty."""
+    jev_questions: int = 0
+    jev_cost: float = 0.0
+    """Jev's USD (its input tokens at Jev's price)."""
+    learning_cost: float = 0.0
+    """What the learner spent learning from this document's examples (Jev and LLM), when
+    it ran one document at a time (:func:`~jevex.replay.replay`)."""
+    methods: dict[str, int] | None = None
+    """How many values each method resolved. ``None`` (a baseline): every value found
+    counts as ``llm``."""
+
+
+def result_row(run: DocumentRun, corpus: str | Path, *, learning_cost: float = 0.0) -> ResultRow:
+    """A jevex run of one corpus document (:func:`~jevex.eval.evaluate`'s or
+    :func:`~jevex.replay.replay`'s :class:`~jevex.eval.DocumentRun`) as a results-file row,
+    so jevex is saved and scored (:func:`score_results`) as the baselines are."""
+    return ResultRow(
+        path=Path(run.path).relative_to(corpus).as_posix(),
+        records=run.records,
+        seconds=run.seconds,
+        calls=run.llm_calls,
+        cost=run.llm_cost,
+        error=run.error,
+        jev_requests=run.jev_requests,
+        jev_questions=run.jev_questions,
+        jev_cost=run.jev_cost,
+        learning_cost=learning_cost,
+        methods=dict(run.methods),
+    )
 
 
 def read_results(path: str | Path) -> list[ResultRow]:
@@ -592,10 +625,10 @@ def score_results(
     field) and per-document metrics.
 
     A document without a row, or whose row has an ``error``, scores as all missing (its
-    ``error`` says which). Every value found counts as method ``llm`` in the resolution
-    mix. Raises :class:`BaselineRunError` for a row naming a document the corpus doesn't
-    list, or two rows for one document, and ``ValueError`` for a corpus labelled in a
-    schema not in ``schemas``.
+    ``error`` says which). A baseline's values count as method ``llm`` in the resolution
+    mix; jevex's rows give their own. Raises :class:`BaselineRunError` for a row naming a
+    document the corpus doesn't list, or two rows for one document, and ``ValueError`` for
+    a corpus labelled in a schema not in ``schemas``.
     """
     root = Path(corpus)
     items = load_corpus(root)
@@ -626,20 +659,24 @@ def _scored(
         methods: Counter[str] = Counter()
     else:
         fields = score_records(item, row.records, tolerances)
-        found = sum(len(r["values"]) for records in row.records.values() for r in records)
-        methods = Counter({"llm": found} if found else {})
+        if row.methods is not None:
+            methods = Counter(row.methods)
+        else:
+            found = sum(len(r["values"]) for records in row.records.values() for r in records)
+            methods = Counter({"llm": found} if found else {})
     return DocumentRun(
         path=item.path.as_posix(),
         schema=item.schema,
         seconds=row.seconds if row else 0.0,
-        jev_requests=0,
-        jev_questions=0,
-        jev_cost=0.0,
+        jev_requests=row.jev_requests if row else 0,
+        jev_questions=row.jev_questions if row else 0,
+        jev_cost=row.jev_cost if row else 0.0,
         llm_calls=row.calls if row else 0,
         llm_cost=row.cost if row else 0.0,
         methods=methods,
         fields=fields,
         error=error,
+        records=row.records if row else {},
     )
 
 
@@ -677,6 +714,7 @@ __all__ = [
     "record_model",
     "records_model",
     "render_text",
+    "result_row",
     "run_baseline",
     "schema_specs",
     "schemas_text",

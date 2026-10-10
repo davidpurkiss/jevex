@@ -3,7 +3,9 @@ import io
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import date
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -465,8 +467,60 @@ async def test_score_result_scores_a_result_the_caller_keeps(tmp_path: Path) -> 
             assert run == replace(await run_document(ex, item, tolerances), seconds=1.5)
     failed, ok = scored[table.path.name], scored[other.path.name]
     assert (failed.status, ok.status) == ("failed", "ok")
+    assert failed.records == {}
     assert "boom" in (failed.error or "")
     assert all(f.correct == f.wrong == f.spurious == 0 for f in failed.fields.values())
+
+
+class Shade(Enum):
+    RED = "red"
+
+
+class Sale(BaseModel):
+    """A sale."""
+
+    price: Decimal
+    sold: date
+    shade: Shade
+    tags: list[str]
+    note: str | None = None
+
+
+@dataclass
+class SetsSale:
+    name: str = "select"
+
+    async def run(self, ctx: Context) -> None:
+        values = {
+            "price": Decimal("18495.50"),
+            "sold": date(2026, 10, 1),
+            "shade": Shade.RED,
+            "tags": ["used", "one owner"],
+        }
+        for run in ctx.active:
+            for name, value in values.items():
+                run.set_field("document", name, FieldMeta(value=value, method="jev"))
+
+
+async def test_a_run_keeps_what_it_found_as_json_types(tmp_path: Path) -> None:
+    (tmp_path / "x.html").write_text("<p>x</p>")
+    truth = {"price": "18495.50", "sold": "2026-10-01", "shade": "red", "tags": ["used"]}
+    pages = [{"path": "x.html", "schema": "Sale", "records": [{"values": truth}]}]
+    (tmp_path / "truth.json").write_text(json.dumps({"pages": pages}))
+    async with Extractor([Sale], jev=FakeJev().client(), pipeline=Pipeline([SetsSale()])) as ex:
+        (run,) = (await evaluate(ex, load_corpus(tmp_path))).documents
+    # A price stays a number (Pydantic's JSON would make it a string), so a numeric label
+    # still matches it; the note was never found, so it isn't there.
+    values = {"price": 18495.5, "sold": "2026-10-01", "shade": "red", "tags": ["used", "one owner"]}
+    assert run.records == {"Sale": [{"entity": "document", "values": values}]}
+    assert json.loads(json.dumps(run.records)) == run.records
+    assert {k: (s.correct, s.spurious) for k, s in run.fields.items()} == {
+        "Sale.price": (1, 0),
+        "Sale.sold": (1, 0),
+        "Sale.shade": (1, 0),
+        "Sale.tags": (1, 1),
+        "Sale.note": (0, 0),
+    }
 
 
 @dataclass

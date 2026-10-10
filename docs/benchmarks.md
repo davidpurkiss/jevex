@@ -105,8 +105,8 @@ jevex corpus check DIR benchmarks/corpora/NAME.lock     # exit 1, listing what d
 
 | System | Configuration |
 | --- | --- |
-| **jevex (cold)** | Empty store; LLM fallback on (`extraction_llm` pinned above); learning `inline` |
-| **jevex (warm)** | The same, after one full pass (generators learned); measured on a second pass or a held-out split |
+| **jevex (cold)** | Empty store; LLM fallback on (`extraction_llm` pinned above); learning `inline`, one document at a time in the corpus's order, so each learns from the ones before it (`jevex eval --replay`) |
+| **jevex (warm)** | The same, after the cold pass (generators learned): a second pass over the corpus with the store the cold pass filled, at the pinned concurrency, with the fallback on and learning off |
 | **jevex (no LLM)** | Jev plus built-in generators only; the floor for accuracy and cost |
 | **LLM-only, fast** | The same schema as structured output, the whole cleaned document per call (Claude Haiku 4.5) |
 | **LLM-only, strong** | The same with Claude Opus 5.5; the accuracy ceiling |
@@ -182,45 +182,62 @@ gives them over time (`ReplayReport`).
 | Metric | How | Where |
 | --- | --- | --- |
 | **Field accuracy** | Exact match for strings and enums (after normalising case and whitespace). Numbers match within the field's tolerance: exact for counts and money, ±0.5% for measured quantities, plus the rounding a page's unit adds. Lists get precision and recall item by item. Accuracy is correct ÷ (correct + wrong + missing + spurious) | `EvalReport.field_scores()`, `overall()` |
-| **Record completeness** | Strict-complete rate: records with every expected field correct | Computed from per-document field scores by #63's report |
+| **Record completeness** | Strict-complete rate: expected records paired (as scoring pairs them) with a found record that has every field right, nothing wrong, missing or spurious | `jevex.bench.score_system` (`SystemScore.complete_records`) |
 | **Cost per document** | Jev: input tokens × the pinned Jev price. LLMs: billed token usage × the pinned prices. Learner spend counts too | `summary()["cost_per_document"]`; replay `learning_*` columns |
 | **Calls** | Jev requests and questions, and LLM calls, per document | `summary()` |
-| **Latency** | Wall time per document at the pinned concurrency, p50 and p95 | `summary()["latency_p50"]`, `["latency_p95"]` |
+| **Latency** | Wall time per document at the pinned concurrency, p50 and p95. jevex (cold) runs one document at a time, as its learning needs | `summary()["latency_p50"]`, `["latency_p95"]` |
 | **Resolution mix** | How many values came from structured data, Jev, generators, the LLM and vision | `summary()["resolution_mix"]` |
 | **LLM-call rate over time** | The replay curves. The x-axis is documents processed; the y-axes are LLM calls per document, cost per document and accuracy, with the test site's waves marked | `ReplayReport.to_csv()`, `to_html()` |
 
 Means are reported with 95% bootstrap confidence intervals over documents:
 `jevex.benchmarks.bootstrap_interval`, with the pinned number of resamples and seed, so the
-same results always give the same intervals. LLM baselines run 3 samples where the API
-allows, to show variance.
+same results always give the same intervals. Accuracy and record completeness are ratios
+(correct over scored values, complete over expected records), so documents are resampled
+and each weighted by what it holds. LLM baselines take one sample per document: three, as
+first planned, would triple the LLM-only spend, which already takes most of the budget.
 
 ## Protocol
 
 1. Load `benchmarks/config.yaml`. Build or locate each corpus and check it against its
-   lock. Stop on any mismatch.
+   lock. Each corpus names the schemas it's labelled in, the pipeline jevex runs on it
+   (`pipeline`, `module:name`) and whether its documents hold several records
+   (`entities: multi`, resolved with `MultiEntity`). A corpus that doesn't match its lock
+   fails its steps, and the run goes on to the next.
 2. For each system and corpus, run and save the raw per-document results to
-   `benchmarks/results/<date>/<system>/<corpus>.jsonl` (for the baselines, the results
-   files `jevex baseline run` and the tool scripts write). Record the pinned models and
-   prices, the jevex commit and the `uv.lock` hash in `manifest.json`. For an `aggregate`
-   corpus, keep only its summary.
-3. `jevex eval` scores every results file against the ground truth (`--results` for a
-   baseline's). `jevex eval --replay`
-   produces the learning curves.
-4. `benchmarks/report.py` builds `docs/benchmarks-results.md` and the charts, using the
-   same animated SVGs the stats UI exports (#59).
+   `benchmarks/results/<date>/<system>/<corpus>.jsonl`: one `ResultRow` per document, the
+   same format for jevex as for the baselines (`jevex.baselines.result_row`; jevex's rows
+   add Jev usage, the methods its values came from and what the learner spent). The
+   baselines read inputs prepared once per corpus with that corpus's pipeline. Record the
+   pinned models and prices, the jevex commit and the `uv.lock` hash in `manifest.json`,
+   with every step's outcome and the run's spend from the ledger. For an `aggregate`
+   corpus, the rows stay in the work directory (`<results>.work/`, never committed) and
+   only its scores are kept.
+3. Each results file is scored as `jevex eval --results` scores it (which rescores any of
+   them, jevex's included) into `<system>/<corpus>.score.json` (`SystemScore`). jevex
+   (cold)'s replay gives the learning curve, `jevex-cold/<corpus>.replay.csv`.
+4. `uv run benchmarks/report.py benchmarks/results/<date>` builds
+   `docs/benchmarks-results.md` and its charts in `docs/benchmark-results/`: the stats
+   UI's animated learning curve and resolution mix (#59), and accuracy against cost per
+   document on a log scale. It reads only the results directory, never the corpora.
 
-One command: `uv run benchmarks/run.py --all` (#63). It stops at the budget cap.
+One command: `uv run benchmarks/run.py --all` (#63; `--system` and `--corpus` choose
+fewer). It stops after the step that reaches a spend cap. A step that fails for any other
+reason is recorded in the manifest and on the page, and the run goes on.
 
 ## Budget, guardrails and cadence
 
 - Hard caps via `JEVEX_JEV_MAX_COST_USD` and `JEVEX_LLM_MAX_COST_USD` (#32 and #72).
   Point `JEVEX_SPEND_LEDGER` at a file to make them cover every process in the run. The
-  first full run is capped at **$25**; LLM-only strong takes most of it.
+  first full run is capped at **$25**; LLM-only strong takes most of it. `run.py` refuses
+  a live run unless both caps and the ledger are set, with the caps adding up to no more
+  than the config's `budget_usd`.
 - The runner passes each `PinnedModel`'s prices to its adapter (`prices=`), keyed by the
   model the API reports as serving the call, so the cap counts every call at the pinned
   price. A dated ID (`<name>-YYYYMMDD`) missing from a price table is costed at its base
   name's price; a model with no price at all would be costed at nothing.
 - Live runs happen only under #72's rules. Results files never contain keys.
-- A dry run with `FakeJev` and a fake LLM checks the whole pipeline for free.
+- A dry run (`run.py --dry-run`: `FakeJev`, fake LLMs and the tools' `--fake`) checks
+  every step for free. It drops the caps and the ledger, so its metered fake answers never
+  count against a real budget, and its page says it's a dry run.
 - **Cadence:** on demand, not on every release. Rerun when a change is expected to move
   the numbers, and before quoting them anywhere new.

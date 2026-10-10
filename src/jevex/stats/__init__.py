@@ -12,7 +12,15 @@ accuracy holds, shown from a store (live) or a replay (``jevex eval --replay``).
 
 from __future__ import annotations
 
-from jevex.stats.charts import CHART_VIEWS, chart_svg, cost_svg, learning_svg, mix_svg
+from jevex.stats.charts import (
+    CHART_VIEWS,
+    CostPoint,
+    accuracy_cost_svg,
+    chart_svg,
+    cost_svg,
+    learning_svg,
+    mix_svg,
+)
 from jevex.stats.data import (
     DRIFT_DOCUMENTS,
     VIEWS,
@@ -39,6 +47,7 @@ __all__ = [
     "CHART_VIEWS",
     "DRIFT_DOCUMENTS",
     "VIEWS",
+    "CostPoint",
     "Event",
     "FieldStat",
     "FieldWindow",
@@ -46,6 +55,7 @@ __all__ = [
     "Point",
     "SpendPoint",
     "Stats",
+    "accuracy_cost_svg",
     "chart_svg",
     "cost_svg",
     "curve",

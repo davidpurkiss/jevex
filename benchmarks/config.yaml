@@ -52,20 +52,30 @@ models:
     output_usd_per_mtok: 3.75
     price_date: 2026-10-01
 
-# Locks are relative to this file.
+# Locks are relative to this file. Each corpus names the schemas it's labelled in and the
+# pipeline jevex runs on it; its documents hold several records unless entities: single.
 corpora:
   - name: testsite
     kind: testsite
     seed: 42
     lock: corpora/testsite.lock
+    schemas: [jevex.testsite.schemas:VehicleSpec, jevex.testsite.schemas:Listing]
+    entities: multi
+  # books.toscrape.com pages, kept with the results rather than committed: fetch them with
+  # jevex corpus books into the directory the env var names.
   - name: books
     kind: books
     seed: 42
     sample: 200
+    env: JEVEX_BENCH_BOOKS
     lock: corpora/books.lock
+    schemas: [jevex.examples.books:Book]
+    pipeline: jevex.examples.books:books_pipeline
   # Real UK manufacturers' price guides and spec pages, never committed: fetch them from
   # their manifest with corpora/fetch.py into the directory the env var names.
   - name: spec-sheets
     kind: directory
     env: JEVEX_BENCH_SPEC_SHEETS
     lock: corpora/spec-sheets.lock
+    schemas: [jevex.testsite.schemas:VehicleSpec]
+    entities: multi
