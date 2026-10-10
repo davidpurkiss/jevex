@@ -13,6 +13,7 @@ The defaults below were set from live eval runs on the synthetic test site (#49)
 | `learn_threshold` | 0.9 | **0.95** | A learned generator repeats its example's mistake; 0.95 had no wrong answers |
 | `category_threshold` | 0.5 | 0.5 | No effect anywhere from 0.3 to 0.7 |
 | `prune_after` | 50 | 50 | Not measured (see below) |
+| `component_gate.DEFAULT_THRESHOLD` | 0.3 | **0.1** | About 4 points of accuracy, precision up too, for about a quarter more LLM calls (0.55 → 0.70 per document; #297, [below](#the-component-gates-threshold-297)) |
 
 ## How it was measured
 
@@ -25,9 +26,11 @@ on. The gate and books recordings were redone on the merged code, and they agree
 direction: against main's gate baseline, accuracy 0.739 → 0.749 and LLM calls per
 document 1.17 → 0.67. One field went down there: `VehicleSpec.price_gbp` 1.0 → 0.6. That's
 not these thresholds. On the gate's spec table, the component gate's price question came
-back at p 0.29 in this recording and 0.30 in main's, against its own 0.3 threshold (#297),
-so price wasn't offered for those cells. A rerun of the sweep would measure the current
-code.
+back at p 0.29 in this recording and 0.30 in main's, against its own 0.3 threshold, so
+price wasn't offered for those cells. #297 found why and swept that threshold too
+([below](#the-component-gates-threshold-297)), on the code after #292 and #294. Since then
+`sweep.py` runs this part of the grid at the gate threshold #297 chose (0.1), so a rerun
+won't reproduce `results-2026-10-10.json`, which was measured at 0.3.
 
 **One live pass, then the grid offline.** One live pass at a permissive setting (category
 0.3, fallback 0.9, verify 0, `ALSO_CATEGORY_P` 0.1) filled a cache of Jev answers (per
@@ -124,3 +127,76 @@ no learning, so that effect is unmeasured.
 - **Values in another unit sit on the categorise boundary** ("173 bhp" for a kW field, p
   around 0.5; see #49's comments). No threshold here is the fix; the field description
   or a unit-aware question would be.
+
+## The component gate's threshold (#297)
+
+Measured the same way, later the same day, on main at `741d217` (#314) with this change.
+Raw results are in `benchmarks/thresholds/results-2026-10-10-gate.json`.
+
+**Why the price row scored 0.3.** On `delmaro-kestrova-table.html` the whole spec table is
+one gate unit, "Price from | 19,000 GBP | £21,495 | ..." row and section heading included,
+so the label wasn't missing. The question was: the test site described
+`VehicleSpec.price_gbp` as "On-the-road price", and Jev reads that literally. Asked live
+about the same unit with only the row's label changed:
+
+| Row label | "...the on-the-road price (GBP)?" | "...the price (GBP)?" |
+| --- | --- | --- |
+| Price from | 0.25–0.33 | 0.99 |
+| Price | 0.42–0.45 | 0.99 |
+| OTR price, On-the-road price | 0.99 | 0.99 |
+| (no price row) | 0.01 | 0.01 |
+
+The kv page's "Price from: 19,000 GBP" gave 0.36–0.42, and the price row alone (no other
+rows, no heading) 0.45–0.48, so no context the gate could add moves it. A page that says
+"Price from" doesn't say the price is on the road, and Jev is right not to be sure. The
+test site's truth counts every price label its phrasing bank uses ("OTR price", "Price
+from", "Price", "On-the-road price"), so the schema now describes the field as "Price".
+Of six descriptions tried ("on-the-road price", "price", "price new", "list price",
+"price, on the road", "retail price"), "price" was the only one at 0.98 or above on every
+label and prose phrasing the test site uses, and it stays at 0.01 on the table without a
+price row.
+
+**The threshold, swept.** A lower gate threshold doesn't only ask more. The categorise
+Choice offers a statement only the fields its component passed for, so its options, and
+with them the question, change with the threshold. The sweep runs one live permissive pass
+per gate threshold (`sweep.py`'s `PERMISSIVE`), and every replayed row had no cache misses.
+At #49's other thresholds (category 0.5, verify 0.7, `ALSO_CATEGORY_P` 0.1), seed 7:
+
+| Gate threshold | 0 | 0.05 | **0.1** | 0.2 | 0.3 | 0.4 | 0.5 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Accuracy | 0.730 | 0.730 | **0.734** | 0.717 | 0.692 | 0.681 | 0.675 |
+| Precision | 0.894 | 0.894 | **0.895** | 0.882 | 0.863 | 0.859 | 0.856 |
+| Recall | 0.782 | 0.782 | **0.787** | 0.777 | 0.760 | 0.747 | 0.740 |
+| LLM calls/doc | 1.05 | 1.05 | **0.70** | 0.55 | 0.55 | 0.60 | 0.60 |
+
+The fallback threshold doesn't change the picture: at 0.5, 0.7 and 0.9 the accuracy for
+each gate threshold from 0.1 to 0.5 is within 0.004 of the row above, with 0.1 best each
+time (0 and 0.05 were replayed at fallback 0.3 only). Jev's
+questions per document hardly move (97.4 at 0.3, 98.3 at 0.1): the test site's pages are
+nearly all relevant, so the gate rarely saves a categorise request here.
+
+The gain is in the identity fields, whose sections Jev rated between 0.1 and 0.3:
+`Listing.make` 0.385 → 0.615, `VehicleSpec.trim` 0.395 → 0.447, `VehicleSpec.model`
+0.087 → 0.167 (and 16 fewer spurious models), `VehicleSpec.power_kw` 0.174 → 0.217.
+Below 0.1 nothing more passes that helps, and the fallback is asked more. Gate 0 is no
+gate at all, and scores the same as 0.05.
+
+**Validation on seed 11** (20 unseen pages, live):
+
+| Gate threshold | Accuracy | Precision | Recall | LLM calls/doc |
+| --- | --- | --- | --- | --- |
+| 0.3 | 0.713 | 0.923 | 0.732 | 0.35 |
+| **0.1** | **0.724** | **0.942** | **0.743** | 0.40 |
+
+So `DEFAULT_THRESHOLD` is 0.1. It costs some LLM calls: 0.55 → 0.70 per document on seed
+7, 0.35 → 0.40 on seed 11, as sections that now pass offer fields the fallback is then
+asked about. On the CI gate's corpus (seed 42), re-recorded with both changes: accuracy
+0.763 → 0.773, LLM calls per document 1.17 → 0.83, `VehicleSpec.price_gbp` stays at 1.0
+with the price question at p 0.99 rather than 0.30. Two fields went down there:
+`Listing.model` 0.462 → 0.385 and `VehicleSpec.model` 0.2 → 0.1. On six pages one
+record moves a field by 0.08–0.1, and model is the make/model/trim routing question
+(#274), which went up on seed 7.
+
+The caveat above applies more here: on real pages, with navigation, footers and
+unrelated sections, a section the gate passes wrongly costs categorise requests, and this
+corpus can't show that cost. Rerun the gate sweep on the real corpora (#212).

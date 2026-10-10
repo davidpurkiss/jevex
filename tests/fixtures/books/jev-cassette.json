@@ -53,53 +53,16 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.82,
+          "confidence": 0.76,
           "probabilities": {
-            "51.77": 0.12,
+            "51.77": 0.16,
             "none": 0.0,
-            "\u00a351.77": 0.88
+            "\u00a351.77": 0.84
           },
           "type": "choice"
         }
       },
       "input_tokens": 357,
-      "model": "jev-1.13.0"
-    }
-  },
-  "0706b593f3a4e4ca": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "A Light in the ..."
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "title",
-          "confidence": 0.84,
-          "probabilities": {
-            "none": 0.12,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.88
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 378,
       "model": "jev-1.13.0"
     }
   },
@@ -127,13 +90,13 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.3,
+          "choice": "price",
+          "confidence": 0.28,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.42,
-            "price": 0.34,
-            "rating": 0.24,
+            "none": 0.39,
+            "price": 0.4,
+            "rating": 0.21,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -207,11 +170,11 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.42,
+          "confidence": 0.41,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.54,
-            "price": 0.46,
+            "none": 0.53,
+            "price": 0.47,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -276,10 +239,10 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "Soumission",
-          "confidence": 0.76,
+          "confidence": 0.7,
           "probabilities": {
-            "Soumission": 0.88,
-            "none": 0.12
+            "Soumission": 0.85,
+            "none": 0.15
           },
           "type": "choice"
         }
@@ -387,6 +350,45 @@
       "model": "jev-1.13.0"
     }
   },
+  "12234829db85589e": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Sharp Objects"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "title",
+          "confidence": 0.96,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.03,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.97
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 392,
+      "model": "jev-1.13.0"
+    }
+  },
   "13406d8166cd63bb": {
     "request": {
       "questions": {
@@ -431,6 +433,45 @@
       "model": "jev-1.13.0"
     }
   },
+  "1491403d4f6bc0c6": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Tipping the Velvet"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "title",
+          "confidence": 0.97,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.02,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.98
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
+      "model": "jev-1.13.0"
+    }
+  },
   "1569e17bace42c8c": {
     "request": {
       "questions": {
@@ -453,11 +494,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 1.0,
+          "confidence": 0.98,
           "probabilities": {
-            "51.77": 0.0,
+            "51.77": 0.01,
             "none": 0.0,
-            "\u00a351.77": 1.0
+            "\u00a351.77": 0.99
           },
           "type": "choice"
         }
@@ -491,13 +532,13 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.56,
+          "confidence": 0.6,
           "probabilities": {
-            "in_stock": 0.37,
+            "in_stock": 0.33,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.63,
+            "stock_count": 0.67,
             "title": 0.0
           },
           "type": "choice"
@@ -571,14 +612,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.94,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.96,
+            "none": 0.95,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.04
+            "title": 0.05
           },
           "type": "choice"
         }
@@ -608,10 +649,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 1.0,
+          "confidence": 0.98,
           "probabilities": {
-            "none": 1.0,
-            "title": 0.0
+            "none": 0.99,
+            "title": 0.01
           },
           "type": "choice"
         }
@@ -747,14 +788,14 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "none",
-          "confidence": 0.74,
+          "confidence": 0.77,
           "probabilities": {
-            "Attic": 0.09999999999999999,
+            "Attic": 0.08,
             "It's": 0.0,
             "It's hard": 0.0,
             "Lemon-faced": 0.0,
             "Lemon-faced adults": 0.0,
-            "Light": 0.15000000000000002,
+            "Light": 0.14,
             "adults": 0.0,
             "fidgety": 0.0,
             "fidgety kids": 0.0,
@@ -770,7 +811,7 @@
             "love th": 0.0,
             "love th It's": 0.0,
             "love th It's hard": 0.0,
-            "none": 0.75,
+            "none": 0.78,
             "read": 0.0,
             "rhythmic": 0.0,
             "rhythmic words": 0.0,
@@ -905,10 +946,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.8,
+          "confidence": 0.7,
           "probabilities": {
-            "none": 0.9,
-            "title": 0.1
+            "none": 0.85,
+            "title": 0.15
           },
           "type": "choice"
         }
@@ -938,10 +979,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.96,
+          "confidence": 0.94,
           "probabilities": {
-            "none": 0.98,
-            "title": 0.02
+            "none": 0.97,
+            "title": 0.03
           },
           "type": "choice"
         }
@@ -1019,56 +1060,19 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.9,
+          "confidence": 0.92,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.92,
+            "none": 0.93,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.08
+            "title": 0.07
           },
           "type": "choice"
         }
       },
       "input_tokens": 398,
-      "model": "jev-1.13.0"
-    }
-  },
-  "1fa283ab5625bed9": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
-        "statement": "In stock"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 1.0,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 380,
       "model": "jev-1.13.0"
     }
   },
@@ -1108,6 +1112,45 @@
         }
       },
       "input_tokens": 396,
+      "model": "jev-1.13.0"
+    }
+  },
+  "236225fd392feaca": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
+        "statement": "Add to basket"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "none",
+          "confidence": 0.97,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.98,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 397,
       "model": "jev-1.13.0"
     }
   },
@@ -1184,7 +1227,7 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.05,
+          "p": 0.06,
           "type": "noul"
         },
         "Book.title": {
@@ -1259,11 +1302,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.74,
+          "confidence": 0.82,
           "probabilities": {
-            "51.77": 0.17,
+            "51.77": 0.12,
             "none": 0.0,
-            "\u00a351.77": 0.83
+            "\u00a351.77": 0.88
           },
           "type": "choice"
         }
@@ -1313,12 +1356,13 @@
       "model": "jev-1.13.0"
     }
   },
-  "2c44778cadfc298e": {
+  "2c244d8c4998d200": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
+            "in_stock": "The book is in stock",
             "none": "None of these details",
             "price": "Price (GBP)",
             "rating": "Star rating out of five",
@@ -1329,24 +1373,50 @@
       },
       "state": {
         "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Rating: Three out of five stars"
+        "statement": "A Light in the Attic"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "rating",
-          "confidence": 1.0,
+          "choice": "title",
+          "confidence": 0.99,
           "probabilities": {
-            "none": 0.0,
+            "in_stock": 0.0,
+            "none": 0.01,
             "price": 0.0,
-            "rating": 1.0,
-            "title": 0.0
+            "rating": 0.0,
+            "title": 0.99
           },
           "type": "choice"
         }
       },
-      "input_tokens": 380,
+      "input_tokens": 396,
+      "model": "jev-1.13.0"
+    }
+  },
+  "2cd4cfd0f958ca12": {
+    "request": {
+      "questions": {
+        "Book.in_stock/bool": {
+          "criteria": null,
+          "instructions": "Does the statement say the book is in stock?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.in_stock/bool": {
+          "p": 0.95,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 312,
       "model": "jev-1.13.0"
     }
   },
@@ -1371,10 +1441,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.4,
+          "confidence": 0.18,
           "probabilities": {
-            "none": 0.7,
-            "title": 0.3
+            "none": 0.59,
+            "title": 0.41
           },
           "type": "choice"
         }
@@ -1478,13 +1548,13 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.71,
+          "confidence": 0.74,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.23,
+            "none": 0.21,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.77
+            "title": 0.79
           },
           "type": "choice"
         }
@@ -1514,10 +1584,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.86,
+          "confidence": 0.9,
           "probabilities": {
-            "none": 0.93,
-            "title": 0.07
+            "none": 0.95,
+            "title": 0.05
           },
           "type": "choice"
         }
@@ -1551,13 +1621,13 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.62,
+          "confidence": 0.58,
           "probabilities": {
-            "in_stock": 0.32,
+            "in_stock": 0.35,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.68,
+            "stock_count": 0.65,
             "title": 0.0
           },
           "type": "choice"
@@ -1628,11 +1698,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.98,
+          "confidence": 0.97,
           "probabilities": {
-            "53.74": 0.01,
+            "53.74": 0.02,
             "none": 0.0,
-            "\u00a353.74": 0.99
+            "\u00a353.74": 0.98
           },
           "type": "choice"
         }
@@ -1665,13 +1735,13 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.76,
+          "confidence": 0.78,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.81,
+            "none": 0.8200000000000001,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.19
+            "title": 0.18
           },
           "type": "choice"
         }
@@ -1722,12 +1792,48 @@
       "model": "jev-1.13.0"
     }
   },
-  "3ce859f8cc34de79": {
+  "3ac7b94921703478": {
+    "request": {
+      "questions": {
+        "Book.price/choice0": {
+          "instructions": "Which of these is the price (GBP)?",
+          "options": {
+            "0.00": null,
+            "none": "None of these is the price",
+            "\u00a30.00": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "A Light in the Attic \u203a Product Information",
+        "statement": "Tax: \u00a30.00"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.price/choice0": {
+          "choice": "\u00a30.00",
+          "confidence": 0.14,
+          "probabilities": {
+            "0.00": 0.16,
+            "none": 0.41,
+            "\u00a30.00": 0.43
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 350,
+      "model": "jev-1.13.0"
+    }
+  },
+  "4223a19444209790": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
+            "in_stock": "The book is in stock",
             "none": "None of these details",
             "price": "Price (GBP)",
             "rating": "Star rating out of five",
@@ -1737,8 +1843,8 @@
         }
       },
       "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
-        "statement": "\u00a351.77"
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
+        "statement": "\u00a353.74"
       }
     },
     "response": {
@@ -1747,6 +1853,7 @@
           "choice": "price",
           "confidence": 1.0,
           "probabilities": {
+            "in_stock": 0.0,
             "none": 0.0,
             "price": 1.0,
             "rating": 0.0,
@@ -1755,7 +1862,7 @@
           "type": "choice"
         }
       },
-      "input_tokens": 385,
+      "input_tokens": 401,
       "model": "jev-1.13.0"
     }
   },
@@ -1780,15 +1887,54 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.54,
+          "confidence": 0.5,
           "probabilities": {
-            "none": 0.77,
-            "title": 0.23
+            "none": 0.75,
+            "title": 0.25
           },
           "type": "choice"
         }
       },
       "input_tokens": 333,
+      "model": "jev-1.13.0"
+    }
+  },
+  "455cd2eec6348998": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "A Light in the ..."
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "title",
+          "confidence": 0.7,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.24,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.76
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
       "model": "jev-1.13.0"
     }
   },
@@ -1822,43 +1968,6 @@
         }
       },
       "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
-  "4a3cb1ff97dbbd15": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
-        "statement": "\u00a353.74"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "price",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 0.0,
-            "price": 1.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 384,
       "model": "jev-1.13.0"
     }
   },
@@ -1925,12 +2034,12 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.59,
+          "confidence": 0.64,
           "probabilities": {
-            "in_stock": 0.33,
+            "in_stock": 0.29,
             "none": 0.0,
             "price": 0.0,
-            "stock_count": 0.67,
+            "stock_count": 0.71,
             "title": 0.0
           },
           "type": "choice"
@@ -1962,46 +2071,11 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "A Light in the",
-          "confidence": 0.33,
+          "confidence": 0.3,
           "probabilities": {
-            "A Light in the": 0.55,
-            "Light": 0.02,
-            "none": 0.43
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 349,
-      "model": "jev-1.13.0"
-    }
-  },
-  "52dec5e3f66bf79a": {
-    "request": {
-      "questions": {
-        "Book.price/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "0.00": null,
-            "none": "None of these is the price",
-            "\u00a30.00": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Tipping the Velvet \u203a Product Information",
-        "statement": "Tax: \u00a30.00"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.price/choice0": {
-          "choice": "\u00a30.00",
-          "confidence": 0.19,
-          "probabilities": {
-            "0.00": 0.24,
-            "none": 0.3,
-            "\u00a30.00": 0.45999999999999996
+            "A Light in the": 0.53,
+            "Light": 0.03,
+            "none": 0.44
           },
           "type": "choice"
         }
@@ -2050,15 +2124,15 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.08,
+          "p": 0.09,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.1,
+          "p": 0.11,
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.05,
+          "p": 0.06,
           "type": "noul"
         },
         "Book.title": {
@@ -2098,16 +2172,16 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "none",
-          "confidence": 0.7,
+          "confidence": 0.63,
           "probabilities": {
             "Attic": 0.03,
             "It's": 0.0,
             "It's hard": 0.0,
-            "It's hard to imagine a world without A Light in the Attic": 0.11,
-            "Light": 0.13,
+            "It's hard to imagine a world without A Light in the Attic": 0.15,
+            "Light": 0.15,
             "hard": 0.0,
             "imagine": 0.0,
-            "none": 0.73,
+            "none": 0.67,
             "world": 0.0
           },
           "type": "choice"
@@ -2158,12 +2232,13 @@
       "model": "jev-1.13.0"
     }
   },
-  "566a3f997790d133": {
+  "5650526f22b41838": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
+            "in_stock": "The book is in stock",
             "none": "None of these details",
             "price": "Price (GBP)",
             "rating": "Star rating out of five",
@@ -2174,24 +2249,25 @@
       },
       "state": {
         "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Tipping the Velvet"
+        "statement": "Rating: Four out of five stars"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "title",
-          "confidence": 0.93,
+          "choice": "rating",
+          "confidence": 1.0,
           "probabilities": {
-            "none": 0.05,
+            "in_stock": 0.0,
+            "none": 0.0,
             "price": 0.0,
-            "rating": 0.0,
-            "title": 0.95
+            "rating": 1.0,
+            "title": 0.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 378,
+      "input_tokens": 397,
       "model": "jev-1.13.0"
     }
   },
@@ -2217,11 +2293,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a354.23",
-          "confidence": 0.76,
+          "confidence": 0.69,
           "probabilities": {
-            "54.23": 0.16,
+            "54.23": 0.21,
             "none": 0.0,
-            "\u00a354.23": 0.84
+            "\u00a354.23": 0.79
           },
           "type": "choice"
         }
@@ -2244,7 +2320,7 @@
     "response": {
       "answers": {
         "Book": {
-          "p": 0.96,
+          "p": 0.95,
           "type": "noul"
         }
       },
@@ -2293,7 +2369,7 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.98,
+          "p": 0.99,
           "type": "noul"
         },
         "Book.rating": {
@@ -2301,11 +2377,11 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.98,
+          "p": 0.97,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.89,
+          "p": 0.87,
           "type": "noul"
         }
       },
@@ -2369,10 +2445,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.6,
+          "confidence": 0.72,
           "probabilities": {
-            "none": 0.8,
-            "title": 0.2
+            "none": 0.86,
+            "title": 0.14
           },
           "type": "choice"
         }
@@ -2453,43 +2529,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5f7f0510a30c9380": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Sharp Objects"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "title",
-          "confidence": 0.95,
-          "probabilities": {
-            "none": 0.04,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.96
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 375,
-      "model": "jev-1.13.0"
-    }
-  },
   "60efa3c16ad74347": {
     "request": {
       "questions": {
@@ -2512,53 +2551,16 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.97,
+          "confidence": 0.98,
           "probabilities": {
-            "53.74": 0.02,
+            "53.74": 0.01,
             "none": 0.0,
-            "\u00a353.74": 0.98
+            "\u00a353.74": 0.99
           },
           "type": "choice"
         }
       },
       "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
-  "6107c48cc1381e57": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
-        "statement": "Add to basket"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 0.95,
-          "probabilities": {
-            "none": 0.96,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.04
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 380,
       "model": "jev-1.13.0"
     }
   },
@@ -2583,10 +2585,10 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.92,
+          "confidence": 0.86,
           "probabilities": {
-            "none": 0.04,
-            "title": 0.96
+            "none": 0.07,
+            "title": 0.93
           },
           "type": "choice"
         }
@@ -2654,10 +2656,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.68,
+          "confidence": 0.66,
           "probabilities": {
-            "none": 0.84,
-            "title": 0.16
+            "none": 0.83,
+            "title": 0.17
           },
           "type": "choice"
         }
@@ -2687,10 +2689,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.66,
+          "confidence": 0.6,
           "probabilities": {
-            "none": 0.83,
-            "title": 0.17
+            "none": 0.8,
+            "title": 0.2
           },
           "type": "choice"
         }
@@ -2762,13 +2764,13 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.59,
+          "confidence": 0.52,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.67,
+            "none": 0.62,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.33
+            "title": 0.38
           },
           "type": "choice"
         }
@@ -2830,48 +2832,11 @@
     "response": {
       "answers": {
         "Book": {
-          "p": 0.94,
+          "p": 0.95,
           "type": "noul"
         }
       },
       "input_tokens": 692,
-      "model": "jev-1.13.0"
-    }
-  },
-  "6bd962b20a0396b4": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
-        "statement": "\u00a347.82"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "price",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 0.0,
-            "price": 1.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 382,
       "model": "jev-1.13.0"
     }
   },
@@ -2943,43 +2908,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "6ddd8231c67977c5": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "A Light in the Attic"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "title",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 0.0,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 1.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 379,
-      "model": "jev-1.13.0"
-    }
-  },
   "6e9127c8db2a3b78": {
     "request": {
       "questions": {
@@ -3036,10 +2964,10 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.62,
+          "confidence": 0.66,
           "probabilities": {
-            "none": 0.19,
-            "title": 0.81
+            "none": 0.17,
+            "title": 0.83
           },
           "type": "choice"
         }
@@ -3069,10 +2997,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.7,
+          "confidence": 0.84,
           "probabilities": {
-            "none": 0.85,
-            "title": 0.15
+            "none": 0.92,
+            "title": 0.08
           },
           "type": "choice"
         }
@@ -3103,11 +3031,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a347.82",
-          "confidence": 0.97,
+          "confidence": 0.98,
           "probabilities": {
-            "47.82": 0.02,
+            "47.82": 0.01,
             "none": 0.0,
-            "\u00a347.82": 0.98
+            "\u00a347.82": 0.99
           },
           "type": "choice"
         }
@@ -3137,10 +3065,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.48,
+          "confidence": 0.46,
           "probabilities": {
-            "none": 0.74,
-            "title": 0.26
+            "none": 0.73,
+            "title": 0.27
           },
           "type": "choice"
         }
@@ -3188,43 +3116,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "7b3b0b60aa39629a": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
-        "statement": "Add to basket"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 0.99,
-          "probabilities": {
-            "none": 0.99,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 382,
-      "model": "jev-1.13.0"
-    }
-  },
   "7c2e812e61b57971": {
     "request": {
       "questions": {
@@ -3247,11 +3138,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a354.23",
-          "confidence": 0.67,
+          "confidence": 0.73,
           "probabilities": {
-            "54.23": 0.22,
+            "54.23": 0.18,
             "none": 0.0,
-            "\u00a354.23": 0.78
+            "\u00a354.23": 0.82
           },
           "type": "choice"
         }
@@ -3260,12 +3151,52 @@
       "model": "jev-1.13.0"
     }
   },
-  "7c4c5e3aa9c78f5d": {
+  "7cc9ee475cda5b17": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
+        "statement": "\u00a351.77"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "price",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.0,
+            "price": 1.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 402,
+      "model": "jev-1.13.0"
+    }
+  },
+  "7ce516a46063880b": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
             "none": "None of these details",
             "price": "Price (GBP)",
             "rating": "Star rating out of five",
@@ -3276,33 +3207,35 @@
       },
       "state": {
         "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
-        "statement": "Add to basket"
+        "statement": "\u00a347.82"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.95,
+          "choice": "price",
+          "confidence": 1.0,
           "probabilities": {
-            "none": 0.96,
-            "price": 0.0,
+            "in_stock": 0.0,
+            "none": 0.0,
+            "price": 1.0,
             "rating": 0.0,
-            "title": 0.04
+            "title": 0.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 379,
+      "input_tokens": 399,
       "model": "jev-1.13.0"
     }
   },
-  "7da196eb50a4161f": {
+  "7d74acb73bee05cc": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
+            "in_stock": "The book is in stock",
             "none": "None of these details",
             "price": "Price (GBP)",
             "rating": "Star rating out of five",
@@ -3312,25 +3245,26 @@
         }
       },
       "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Rating: Four out of five stars"
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
+        "statement": "In stock"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "rating",
+          "choice": "in_stock",
           "confidence": 1.0,
           "probabilities": {
+            "in_stock": 1.0,
             "none": 0.0,
             "price": 0.0,
-            "rating": 1.0,
+            "rating": 0.0,
             "title": 0.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 380,
+      "input_tokens": 396,
       "model": "jev-1.13.0"
     }
   },
@@ -3358,12 +3292,12 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.69,
+          "confidence": 0.7,
           "probabilities": {
-            "in_stock": 0.25,
+            "in_stock": 0.24,
             "none": 0.0,
             "price": 0.0,
-            "stock_count": 0.75,
+            "stock_count": 0.76,
             "title": 0.0
           },
           "type": "choice"
@@ -3396,12 +3330,12 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
-          "confidence": 0.45,
+          "choice": "price",
+          "confidence": 0.37,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.56,
-            "price": 0.44,
+            "none": 0.5,
+            "price": 0.5,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -3409,43 +3343,6 @@
         }
       },
       "input_tokens": 390,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7e30ceb66e3d201d": {
-    "request": {
-      "questions": {
-        "Book.title/choice0": {
-          "instructions": "Which of these is the title of the book?",
-          "options": {
-            "Information": null,
-            "Product": null,
-            "Product Information": null,
-            "none": "None of these is the title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind",
-        "statement": "Product Information"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.title/choice0": {
-          "choice": "none",
-          "confidence": 0.92,
-          "probabilities": {
-            "Information": 0.0,
-            "Product": 0.0,
-            "Product Information": 0.06,
-            "none": 0.9400000000000001
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 351,
       "model": "jev-1.13.0"
     }
   },
@@ -3487,6 +3384,45 @@
         }
       },
       "input_tokens": 403,
+      "model": "jev-1.13.0"
+    }
+  },
+  "7eb8cee80cea69cf": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Soumission"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "title",
+          "confidence": 0.57,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.34,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.66
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 393,
       "model": "jev-1.13.0"
     }
   },
@@ -3538,15 +3474,56 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.06,
+          "p": 0.05,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.95,
+          "p": 0.96,
           "type": "noul"
         }
       },
       "input_tokens": 364,
+      "model": "jev-1.13.0"
+    }
+  },
+  "80800ccac9e1878f": {
+    "request": {
+      "questions": {
+        "Book.rating/enum": {
+          "instructions": "What is the star rating out of five?",
+          "options": {
+            "Five": null,
+            "Four": null,
+            "One": null,
+            "Three": null,
+            "Two": null,
+            "not stated": "The statement does not state the star rating out of five"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "A Light in the Attic",
+        "statement": "Prices and ratings here were randomly assigned and have no real meaning."
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.rating/enum": {
+          "choice": "not stated",
+          "confidence": 0.99,
+          "probabilities": {
+            "Five": 0.01,
+            "Four": 0.0,
+            "One": 0.0,
+            "Three": 0.0,
+            "Two": 0.0,
+            "not stated": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 370,
       "model": "jev-1.13.0"
     }
   },
@@ -3608,6 +3585,45 @@
         }
       },
       "input_tokens": 761,
+      "model": "jev-1.13.0"
+    }
+  },
+  "827fe2ed5fe10fd4": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "in_stock",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 1.0,
+            "none": 0.0,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 397,
       "model": "jev-1.13.0"
     }
   },
@@ -3673,10 +3689,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.88,
           "probabilities": {
-            "none": 0.97,
-            "title": 0.03
+            "none": 0.94,
+            "title": 0.06
           },
           "type": "choice"
         }
@@ -3726,43 +3742,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "8591d70c02b3b11c": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
-        "statement": "In stock"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 1.0,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 378,
-      "model": "jev-1.13.0"
-    }
-  },
   "85e4dbb354241ac0": {
     "request": {
       "questions": {
@@ -3785,11 +3764,11 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "none",
-          "confidence": 0.49,
+          "confidence": 0.52,
           "probabilities": {
-            "A Light in the": 0.32,
+            "A Light in the": 0.3,
             "Light": 0.02,
-            "none": 0.66
+            "none": 0.68
           },
           "type": "choice"
         }
@@ -3820,11 +3799,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.7,
+          "confidence": 0.62,
           "probabilities": {
-            "53.74": 0.2,
+            "53.74": 0.25,
             "none": 0.0,
-            "\u00a353.74": 0.8
+            "\u00a353.74": 0.75
           },
           "type": "choice"
         }
@@ -3957,43 +3936,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "8cee1b356427464a": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Soumission"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "title",
-          "confidence": 0.45,
-          "probabilities": {
-            "none": 0.41,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.59
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 376,
-      "model": "jev-1.13.0"
-    }
-  },
   "8f95100b8a9adada": {
     "request": {
       "questions": {
@@ -4018,13 +3960,13 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.92,
+          "confidence": 0.9,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.94,
+            "none": 0.92,
             "price": 0.0,
             "rating": 0.0,
-            "title": 0.06
+            "title": 0.08
           },
           "type": "choice"
         }
@@ -4058,14 +4000,14 @@
       "answers": {
         "Book": {
           "choice": "price",
-          "confidence": 0.35,
+          "confidence": 0.32,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.29,
-            "price": 0.45999999999999996,
-            "rating": 0.23,
+            "none": 0.3,
+            "price": 0.43,
+            "rating": 0.26,
             "stock_count": 0.0,
-            "title": 0.02
+            "title": 0.01
           },
           "type": "choice"
         }
@@ -4115,15 +4057,15 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.98,
+          "p": 0.99,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.02,
+          "p": 0.03,
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.97,
+          "p": 0.98,
           "type": "noul"
         },
         "Book.title": {
@@ -4165,6 +4107,45 @@
         }
       },
       "input_tokens": 358,
+      "model": "jev-1.13.0"
+    }
+  },
+  "97773dda246d44d8": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
+        "statement": "\u00a350.10"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "price",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.0,
+            "price": 1.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 400,
       "model": "jev-1.13.0"
     }
   },
@@ -4228,52 +4209,15 @@
       "answers": {
         "Book": {
           "choice": "title",
-          "confidence": 0.16,
+          "confidence": 0.1,
           "probabilities": {
-            "none": 0.42,
-            "title": 0.58
+            "none": 0.45,
+            "title": 0.55
           },
           "type": "choice"
         }
       },
       "input_tokens": 320,
-      "model": "jev-1.13.0"
-    }
-  },
-  "9aac4a47a6633ae8": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
-        "statement": "Add to basket"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 0.93,
-          "probabilities": {
-            "none": 0.95,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.05
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 381,
       "model": "jev-1.13.0"
     }
   },
@@ -4317,11 +4261,11 @@
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.06,
+          "p": 0.05,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.11,
+          "p": 0.12,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -4329,7 +4273,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.92,
+          "p": 0.93,
           "type": "noul"
         }
       },
@@ -4358,10 +4302,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.98,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.99,
-            "title": 0.01
+            "none": 0.98,
+            "title": 0.02
           },
           "type": "choice"
         }
@@ -4541,56 +4485,15 @@
           "type": "noul"
         },
         "Book.stock_count": {
-          "p": 0.97,
+          "p": 0.98,
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.86,
+          "p": 0.8,
           "type": "noul"
         }
       },
       "input_tokens": 442,
-      "model": "jev-1.13.0"
-    }
-  },
-  "a3f24cbad98147d6": {
-    "request": {
-      "questions": {
-        "Book.rating/enum": {
-          "instructions": "What is the star rating out of five?",
-          "options": {
-            "Five": null,
-            "Four": null,
-            "One": null,
-            "Three": null,
-            "Two": null,
-            "not stated": "The statement does not state the star rating out of five"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind",
-        "statement": "Prices and ratings here were randomly assigned and have no real meaning."
-      }
-    },
-    "response": {
-      "answers": {
-        "Book.rating/enum": {
-          "choice": "not stated",
-          "confidence": 1.0,
-          "probabilities": {
-            "Five": 0.0,
-            "Four": 0.0,
-            "One": 0.0,
-            "Three": 0.0,
-            "Two": 0.0,
-            "not stated": 1.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 375,
       "model": "jev-1.13.0"
     }
   },
@@ -4676,14 +4579,13 @@
       "model": "jev-1.13.0"
     }
   },
-  "a6846268367cb370": {
+  "a799440760a06879": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
             "none": "None of these details",
-            "price": "Price (GBP)",
             "rating": "Star rating out of five",
             "title": "Title of the book"
           },
@@ -4691,25 +4593,23 @@
         }
       },
       "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
-        "statement": "In stock"
+        "statement": "Sapiens: A Brief History of Humankind"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "none",
+          "choice": "title",
           "confidence": 1.0,
           "probabilities": {
-            "none": 1.0,
-            "price": 0.0,
+            "none": 0.0,
             "rating": 0.0,
-            "title": 0.0
+            "title": 1.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 379,
+      "input_tokens": 346,
       "model": "jev-1.13.0"
     }
   },
@@ -4774,11 +4674,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a353.74",
-          "confidence": 0.73,
+          "confidence": 0.79,
           "probabilities": {
-            "53.74": 0.18,
+            "53.74": 0.14,
             "none": 0.0,
-            "\u00a353.74": 0.82
+            "\u00a353.74": 0.86
           },
           "type": "choice"
         }
@@ -4848,10 +4748,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.34,
+          "confidence": 0.28,
           "probabilities": {
-            "none": 0.67,
-            "title": 0.33
+            "none": 0.64,
+            "title": 0.36
           },
           "type": "choice"
         }
@@ -4938,15 +4838,15 @@
     "response": {
       "answers": {
         "Book.in_stock": {
-          "p": 0.15,
+          "p": 0.19,
           "type": "noul"
         },
         "Book.price": {
-          "p": 0.45,
+          "p": 0.48,
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.73,
+          "p": 0.79,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -4954,11 +4854,36 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.7,
+          "p": 0.67,
           "type": "noul"
         }
       },
       "input_tokens": 499,
+      "model": "jev-1.13.0"
+    }
+  },
+  "b2d6263e77736dcf": {
+    "request": {
+      "questions": {
+        "Book.in_stock/bool": {
+          "criteria": null,
+          "instructions": "Does the statement say the book is in stock?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.in_stock/bool": {
+          "p": 0.98,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 313,
       "model": "jev-1.13.0"
     }
   },
@@ -5097,6 +5022,45 @@
       "model": "jev-1.13.0"
     }
   },
+  "b8e31f288ed6df2e": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
+        "statement": "Add to basket"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "none",
+          "confidence": 0.97,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.98,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 396,
+      "model": "jev-1.13.0"
+    }
+  },
   "b90f3b5e9037e358": {
     "request": {
       "questions": {
@@ -5161,14 +5125,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.92,
+          "confidence": 0.9,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.93,
+            "none": 0.92,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.07
+            "title": 0.08
           },
           "type": "choice"
         }
@@ -5210,6 +5174,84 @@
       "model": "jev-1.13.0"
     }
   },
+  "bbaee021f34ec8c1": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind",
+        "statement": "Products you recently viewed"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "none",
+          "confidence": 0.87,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.9,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.1
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 389,
+      "model": "jev-1.13.0"
+    }
+  },
+  "bbcd1beebb834bde": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "in_stock",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 1.0,
+            "none": 0.0,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 398,
+      "model": "jev-1.13.0"
+    }
+  },
   "bcd1a23652f9be3c": {
     "request": {
       "questions": {
@@ -5233,14 +5275,14 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "title",
-          "confidence": 0.41,
+          "choice": "none",
+          "confidence": 0.42,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.47,
+            "none": 0.54,
             "price": 0.0,
             "stock_count": 0.0,
-            "title": 0.53
+            "title": 0.46
           },
           "type": "choice"
         }
@@ -5290,6 +5332,45 @@
         }
       },
       "input_tokens": 378,
+      "model": "jev-1.13.0"
+    }
+  },
+  "bfc1b1ecdb151376": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "in_stock",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 1.0,
+            "none": 0.0,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
       "model": "jev-1.13.0"
     }
   },
@@ -5360,7 +5441,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.02,
+          "p": 0.03,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -5368,7 +5449,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.82,
+          "p": 0.77,
           "type": "noul"
         }
       },
@@ -5540,14 +5621,13 @@
       "model": "jev-1.13.0"
     }
   },
-  "cbe1b83673ccfcd2": {
+  "cc1d1cae8edf0332": {
     "request": {
       "questions": {
         "Book": {
           "instructions": "Which detail does this statement state?",
           "options": {
             "none": "None of these details",
-            "price": "Price (GBP)",
             "rating": "Star rating out of five",
             "title": "Title of the book"
           },
@@ -5555,25 +5635,23 @@
         }
       },
       "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
-        "statement": "Rating: One out of five stars"
+        "statement": "A Light in the Attic"
       }
     },
     "response": {
       "answers": {
         "Book": {
-          "choice": "rating",
+          "choice": "title",
           "confidence": 1.0,
           "probabilities": {
             "none": 0.0,
-            "price": 0.0,
-            "rating": 1.0,
-            "title": 0.0
+            "rating": 0.0,
+            "title": 1.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 380,
+      "input_tokens": 341,
       "model": "jev-1.13.0"
     }
   },
@@ -5674,10 +5752,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.96,
           "probabilities": {
-            "none": 0.97,
-            "title": 0.03
+            "none": 0.98,
+            "title": 0.02
           },
           "type": "choice"
         }
@@ -5812,13 +5890,13 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "price",
+          "choice": "none",
           "confidence": 0.29,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.38,
-            "price": 0.41000000000000003,
-            "rating": 0.21,
+            "none": 0.41000000000000003,
+            "price": 0.35,
+            "rating": 0.24,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -5922,11 +6000,11 @@
       "answers": {
         "Book.price/choice0": {
           "choice": "\u00a351.77",
-          "confidence": 0.97,
+          "confidence": 0.98,
           "probabilities": {
-            "51.77": 0.02,
+            "51.77": 0.01,
             "none": 0.0,
-            "\u00a351.77": 0.98
+            "\u00a351.77": 0.99
           },
           "type": "choice"
         }
@@ -5968,6 +6046,45 @@
       "model": "jev-1.13.0"
     }
   },
+  "d4c628d0df065cfc": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
+        "statement": "Add to basket"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "none",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 1.0,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 399,
+      "model": "jev-1.13.0"
+    }
+  },
   "d55da004718a78b6": {
     "request": {
       "questions": {
@@ -5991,12 +6108,12 @@
     "response": {
       "answers": {
         "Book": {
-          "choice": "price",
-          "confidence": 0.46,
+          "choice": "none",
+          "confidence": 0.39,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.43,
-            "price": 0.5700000000000001,
+            "none": 0.51,
+            "price": 0.49,
             "stock_count": 0.0,
             "title": 0.0
           },
@@ -6004,43 +6121,6 @@
         }
       },
       "input_tokens": 389,
-      "model": "jev-1.13.0"
-    }
-  },
-  "dac538eb0463b557": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind",
-        "statement": "Products you recently viewed"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 0.64,
-          "probabilities": {
-            "none": 0.73,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.27
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 372,
       "model": "jev-1.13.0"
     }
   },
@@ -6105,15 +6185,15 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "Sapiens",
-          "confidence": 0.45,
+          "confidence": 0.43,
           "probabilities": {
-            "A Brief History of Humankind": 0.38,
+            "A Brief History of Humankind": 0.41,
             "Brief": 0.0,
             "Brief History": 0.0,
             "History": 0.0,
             "Humankind": 0.0,
-            "Sapiens": 0.53,
-            "none": 0.09
+            "Sapiens": 0.51,
+            "none": 0.08
           },
           "type": "choice"
         }
@@ -6145,54 +6225,17 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "Sharp Objects",
-          "confidence": 0.97,
+          "confidence": 0.99,
           "probabilities": {
             "Objects": 0.0,
             "Sharp": 0.0,
-            "Sharp Objects": 0.98,
-            "none": 0.02
+            "Sharp Objects": 0.99,
+            "none": 0.01
           },
           "type": "choice"
         }
       },
       "input_tokens": 356,
-      "model": "jev-1.13.0"
-    }
-  },
-  "dc1520846b62e845": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a A Light in the ...",
-        "statement": "In stock"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "none",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 1.0,
-            "price": 0.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 381,
       "model": "jev-1.13.0"
     }
   },
@@ -6259,10 +6302,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.6,
+          "confidence": 0.5,
           "probabilities": {
-            "none": 0.8,
-            "title": 0.2
+            "none": 0.75,
+            "title": 0.25
           },
           "type": "choice"
         }
@@ -6292,10 +6335,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.4,
+          "confidence": 0.34,
           "probabilities": {
-            "none": 0.7,
-            "title": 0.3
+            "none": 0.67,
+            "title": 0.33
           },
           "type": "choice"
         }
@@ -6337,6 +6380,134 @@
       "model": "jev-1.13.0"
     }
   },
+  "dde1154a14110b8e": {
+    "request": {
+      "questions": {
+        "Book.in_stock/bool": {
+          "criteria": null,
+          "instructions": "Does the statement say the book is in stock?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Sharp Objects",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.in_stock/bool": {
+          "p": 0.97,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 310,
+      "model": "jev-1.13.0"
+    }
+  },
+  "ddfcfdd5d20b62c6": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Rating: Three out of five stars"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "rating",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.0,
+            "price": 0.0,
+            "rating": 1.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 397,
+      "model": "jev-1.13.0"
+    }
+  },
+  "de8ca04dc4ce84cc": {
+    "request": {
+      "questions": {
+        "Book.in_stock/bool": {
+          "criteria": null,
+          "instructions": "Does the statement say the book is in stock?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
+        "statement": "In stock"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book.in_stock/bool": {
+          "p": 0.97,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 311,
+      "model": "jev-1.13.0"
+    }
+  },
+  "dea3b984ad61f76d": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed",
+        "statement": "Rating: One out of five stars"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "rating",
+          "confidence": 1.0,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.0,
+            "price": 0.0,
+            "rating": 1.0,
+            "title": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 397,
+      "model": "jev-1.13.0"
+    }
+  },
   "dee36a3802acb13d": {
     "request": {
       "questions": {
@@ -6358,10 +6529,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.12,
+          "confidence": 0.28,
           "probabilities": {
-            "none": 0.56,
-            "title": 0.44
+            "none": 0.64,
+            "title": 0.36
           },
           "type": "choice"
         }
@@ -6395,14 +6566,14 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.94,
+          "confidence": 0.95,
           "probabilities": {
             "in_stock": 0.0,
-            "none": 0.95,
+            "none": 0.96,
             "price": 0.0,
             "rating": 0.0,
             "stock_count": 0.0,
-            "title": 0.05
+            "title": 0.04
           },
           "type": "choice"
         }
@@ -6436,13 +6607,13 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.6,
+          "confidence": 0.57,
           "probabilities": {
-            "in_stock": 0.33,
+            "in_stock": 0.36,
             "none": 0.0,
             "price": 0.0,
             "rating": 0.0,
-            "stock_count": 0.67,
+            "stock_count": 0.64,
             "title": 0.0
           },
           "type": "choice"
@@ -6489,7 +6660,7 @@
     "response": {
       "answers": {
         "Book.in_stock": {
-          "p": 0.89,
+          "p": 0.88,
           "type": "noul"
         },
         "Book.price": {
@@ -6497,7 +6668,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.92,
+          "p": 0.93,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -6630,43 +6801,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "f10eb37d78fadfeb": {
-    "request": {
-      "questions": {
-        "Book": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "none": "None of these details",
-            "price": "Price (GBP)",
-            "rating": "Star rating out of five",
-            "title": "Title of the book"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Soumission",
-        "statement": "\u00a350.10"
-      }
-    },
-    "response": {
-      "answers": {
-        "Book": {
-          "choice": "price",
-          "confidence": 1.0,
-          "probabilities": {
-            "none": 0.0,
-            "price": 1.0,
-            "rating": 0.0,
-            "title": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 383,
-      "model": "jev-1.13.0"
-    }
-  },
   "f17ca700dc32ef12": {
     "request": {
       "questions": {
@@ -6688,10 +6822,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.88,
+          "confidence": 0.92,
           "probabilities": {
-            "none": 0.94,
-            "title": 0.06
+            "none": 0.96,
+            "title": 0.04
           },
           "type": "choice"
         }
@@ -6777,7 +6911,7 @@
           "type": "noul"
         },
         "Book.rating": {
-          "p": 0.09,
+          "p": 0.08,
           "type": "noul"
         },
         "Book.stock_count": {
@@ -6785,7 +6919,7 @@
           "type": "noul"
         },
         "Book.title": {
-          "p": 0.94,
+          "p": 0.95,
           "type": "noul"
         }
       },
@@ -6813,10 +6947,10 @@
       "answers": {
         "Book": {
           "choice": "none",
-          "confidence": 0.18,
+          "confidence": 0.26,
           "probabilities": {
-            "none": 0.59,
-            "title": 0.41
+            "none": 0.63,
+            "title": 0.37
           },
           "type": "choice"
         }
@@ -6854,6 +6988,45 @@
         }
       },
       "input_tokens": 319,
+      "model": "jev-1.13.0"
+    }
+  },
+  "f862ce7d9411f06e": {
+    "request": {
+      "questions": {
+        "Book": {
+          "instructions": "Which detail does this statement state?",
+          "options": {
+            "in_stock": "The book is in stock",
+            "none": "None of these details",
+            "price": "Price (GBP)",
+            "rating": "Star rating out of five",
+            "title": "Title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Sapiens: A Brief History of Humankind \u203a Products you recently viewed \u203a Tipping the Velvet",
+        "statement": "Add to basket"
+      }
+    },
+    "response": {
+      "answers": {
+        "Book": {
+          "choice": "none",
+          "confidence": 0.97,
+          "probabilities": {
+            "in_stock": 0.0,
+            "none": 0.98,
+            "price": 0.0,
+            "rating": 0.0,
+            "title": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 398,
       "model": "jev-1.13.0"
     }
   },
@@ -6921,12 +7094,12 @@
       "answers": {
         "Book.title/choice0": {
           "choice": "A Light in the Attic",
-          "confidence": 0.99,
+          "confidence": 0.97,
           "probabilities": {
-            "A Light in the Attic": 0.99,
+            "A Light in the Attic": 0.98,
             "Attic": 0.0,
             "Light": 0.0,
-            "none": 0.01
+            "none": 0.02
           },
           "type": "choice"
         }
@@ -7000,12 +7173,12 @@
       "answers": {
         "Book": {
           "choice": "stock_count",
-          "confidence": 0.66,
+          "confidence": 0.64,
           "probabilities": {
-            "in_stock": 0.27,
+            "in_stock": 0.29,
             "none": 0.0,
             "price": 0.0,
-            "stock_count": 0.73,
+            "stock_count": 0.71,
             "title": 0.0
           },
           "type": "choice"

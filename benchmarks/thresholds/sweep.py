@@ -1,29 +1,33 @@
-"""Sweep the extraction thresholds over the synthetic test site (#49).
+"""Sweep the extraction thresholds over the synthetic test site (#49, #297).
 
 Live and billed: run only with keys, under spend caps. Live passes ask Jev and the
-fallback LLM everything the grid's most permissive setting for each ``ALSO_CATEGORY_P``
-would ask (:data:`PERMISSIVE`), and cache every answer per question (Jev) and per prompt
-(LLM). For a given ``ALSO_CATEGORY_P``, a lower category threshold and a higher fallback
-threshold only ask more, so every grid setting should ask a subset of what's cached. Across
-``ALSO_CATEGORY_P`` that doesn't hold (a field another route already found confidently
-isn't asked about), hence one live pass per value. The grid then replays offline from the
-cache, end to end through the default pipeline with ``MultiEntity``, scored with
+fallback LLM everything the grid's most permissive setting for each ``ALSO_CATEGORY_P`` and
+each component gate threshold would ask (:data:`PERMISSIVE`), and cache every answer per
+question (Jev) and per prompt (LLM). For a given ``ALSO_CATEGORY_P`` and gate threshold, a
+lower category threshold and a higher fallback threshold only ask more, so every grid
+setting should ask a subset of what's cached. Across ``ALSO_CATEGORY_P`` that doesn't hold
+(a field another route already found confidently isn't asked about), nor across gate
+thresholds (the categorise Choice offers only the fields the gate passed, so its options
+change), hence one live pass per value. The grid then replays offline from the cache, end
+to end through the default pipeline with ``MultiEntity``, scored with
 :func:`jevex.score_result`. Every row reports its cache misses: a Jev miss fails a stage,
 and an LLM miss is caught by the fallback and scored as no answer, so a row is only valid
 with none::
 
-    # live: fill the cache, one pass per ALSO_CATEGORY_P (the first, over 20 pages, cost
-    # about $0.02 Jev and $0.50 LLM; later passes reuse cached answers and cost far less)
+    # live: fill the cache, one pass per ALSO_CATEGORY_P and gate threshold (the first, over
+    # 20 pages, cost about $0.02 Jev and $0.57 LLM; later passes reuse cached answers and
+    # cost far less, about $0.03 LLM each)
     (set -a; . .env; set +a; ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_FOR_TESTS" \\
         JEVEX_JEV_MAX_COST_USD=0.50 JEVEX_LLM_MAX_COST_USD=2 \\
         uv run python benchmarks/thresholds/sweep.py --live --cache /tmp/sweep-7 --seed 7)
     # offline: the grid, from the cache
     uv run python benchmarks/thresholds/sweep.py --cache /tmp/sweep-7 --seed 7 --out grid.json
     # live, a few settings only (a validation seed)
-    ... sweep.py --live --cache /tmp/sweep-11 --seed 11 --only 0.5,0.5,0.8,0.3 --only ...
+    ... sweep.py --live --cache /tmp/sweep-11 --seed 11 --only 0.5,0.5,0.8,0.3,0.3 --only ...
 
 Swept: the fallback's ``category_threshold``, ``fallback_threshold`` and
-``verify_threshold``, and ``jevex.select.ALSO_CATEGORY_P`` (a statement's second fields).
+``verify_threshold``, ``jevex.select.ALSO_CATEGORY_P`` (a statement's second fields), and
+the component gate's ``threshold``.
 ``learn_threshold`` is read off the same runs: how often the fallback's verified values
 are right, by verification probability. A Jev answer is assumed not to depend on the other
 questions sent with it, which #6 measured (``docs/jev-limits.md``).
@@ -47,11 +51,13 @@ from pydantic import BaseModel, TypeAdapter
 
 import jevex.select
 from jevex import (
+    ComponentGateStage,
     EntityStage,
     EvalReport,
     Extractor,
     FallbackStage,
     MultiEntity,
+    NoulComponentGate,
     load_corpus,
     score_result,
 )
@@ -84,14 +90,24 @@ CATEGORY = (0.3, 0.4, 0.5, 0.6, 0.7)
 FALLBACK = (0.3, 0.5, 0.7, 0.9)
 VERIFY = (0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
 ALSO = (0.1, 0.2, 0.3, 0.4, 0.5)
-PERMISSIVE = [(min(CATEGORY), max(FALLBACK), 0.0, also) for also in ALSO]
-"""(category, fallback, verify, also): for each ``ALSO_CATEGORY_P``, the setting that asks
-a superset of the others' questions. A verify threshold of 0 keeps every verified LLM
-value, so the calibration sees them all."""
-OLD_DEFAULTS = (0.5, 0.5, 0.8, 0.3)
+GATE = (0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5)
+
+type Setting = tuple[float, float, float, float, float]
+"""(category, fallback, verify, also, gate)."""
+
+OLD_DEFAULTS: Setting = (0.5, 0.5, 0.8, 0.3, 0.3)
 """The defaults before #49."""
-CHOSEN = (0.5, 0.3, 0.7, 0.1)
-"""The defaults #49 chose (``docs/thresholds.md``)."""
+CHOSEN: Setting = (0.5, 0.3, 0.7, 0.1, 0.1)
+"""The defaults #49 and #297 chose (``docs/thresholds.md``)."""
+PERMISSIVE: list[Setting] = list(
+    dict.fromkeys(
+        [(min(CATEGORY), max(FALLBACK), 0.0, also, CHOSEN[4]) for also in ALSO]
+        + [(min(CATEGORY), max(FALLBACK), 0.0, CHOSEN[3], gate) for gate in GATE]
+    )
+)
+"""For each ``ALSO_CATEGORY_P`` at the chosen gate threshold, and each gate threshold at the
+chosen ``ALSO_CATEGORY_P``, the setting that asks a superset of the others' questions. A
+verify threshold of 0 keeps every verified LLM value, so the calibration sees them all."""
 
 _ANSWER: TypeAdapter[Answer] = TypeAdapter(Answer)
 _QUESTION: TypeAdapter[Question] = TypeAdapter(Question)
@@ -232,12 +248,13 @@ async def run_setting(
     items: list[CorpusItem],
     jev: QuestionCache,
     llm: PromptCache,
-    setting: tuple[float, float, float, float],
+    setting: Setting,
 ) -> dict[str, Any]:
-    category, fallback, verify, also = setting
+    category, fallback, verify, also, gate = setting
     jev.misses = llm.misses = 0
     pipeline = (
         default_pipeline()
+        .replace("component_gate", ComponentGateStage(NoulComponentGate(threshold=gate)))
         .replace("entities", EntityStage(MultiEntity()))
         .replace(
             "fallback",
@@ -282,6 +299,7 @@ async def run_setting(
         "fallback_threshold": fallback,
         "verify_threshold": verify,
         "also_category_p": also,
+        "component_gate_threshold": gate,
         "summary": summary,
         "fields": {k: v.to_dict() for k, v in report.field_scores().items()},
         "calibration": [
@@ -295,22 +313,26 @@ async def run_setting(
     }
 
 
-def grid() -> list[tuple[float, float, float, float]]:
+def grid() -> list[Setting]:
     """The fallback's three thresholds against each other at the old and the chosen
     ``ALSO_CATEGORY_P``, then ``ALSO_CATEGORY_P`` alone at the old and the chosen other
-    thresholds."""
-    out = [
-        (c, f, v, a)
+    thresholds, all at the chosen gate threshold; then the gate's threshold against the
+    fallback threshold at the chosen others: a field the gate drops can still reach the
+    fallback."""
+    gate = CHOSEN[4]
+    out: list[Setting] = [
+        (c, f, v, a, gate)
         for a in (OLD_DEFAULTS[3], CHOSEN[3])
         for c, f, v in itertools.product(CATEGORY, FALLBACK, VERIFY)
     ]
-    out += [(*base[:3], a) for base in (OLD_DEFAULTS, CHOSEN) for a in ALSO]
+    out += [(*base[:3], a, gate) for base in (OLD_DEFAULTS, CHOSEN) for a in ALSO]
+    out += [(CHOSEN[0], f, CHOSEN[2], CHOSEN[3], g) for f in FALLBACK for g in GATE]
     return list(dict.fromkeys(out))
 
 
-def _setting(text: str) -> tuple[float, float, float, float]:
-    c, f, v, a = (float(x) for x in text.split(","))
-    return c, f, v, a
+def _setting(text: str) -> Setting:
+    c, f, v, a, g = (float(x) for x in text.split(","))
+    return c, f, v, a, g
 
 
 async def main(argv: list[str]) -> int:
@@ -324,7 +346,7 @@ async def main(argv: list[str]) -> int:
         "--only",
         type=_setting,
         action="append",
-        help="category,fallback,verify,also: run just these settings (repeatable)",
+        help="category,fallback,verify,also,gate: run just these settings (repeatable)",
     )
     args = parser.parse_args(argv)
 

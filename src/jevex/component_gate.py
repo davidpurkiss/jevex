@@ -48,9 +48,12 @@ if TYPE_CHECKING:
     from jevex.schema import SchemaSpec
     from jevex.tables import HeaderShape
 
-DEFAULT_THRESHOLD = 0.3
+DEFAULT_THRESHOLD = 0.1
 """Lower than the document gate's: a wrongly passed section costs a few statements, a
-wrongly failed one loses its values. Tuned from eval runs in #49."""
+wrongly failed one loses its values. Swept from 0 to 0.5 on the test site (#297,
+``docs/thresholds.md``): 0.1 beat 0.3 by about 4 points of accuracy, with precision up
+too, mostly the make, model and trim of sections Jev rated 0.1-0.3, for about a quarter
+more LLM fallback calls; lower bought nothing."""
 
 DEFAULT_MAX_CHARS = 2000
 

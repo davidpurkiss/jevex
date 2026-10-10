@@ -237,7 +237,7 @@ async def test_html_to_values_through_the_default_pipeline() -> None:
     fake = (
         FakeJev(strict=True)
         .noul("Does this document include", p=0.95)
-        .noul("Does this section contain", p=0.1)
+        .noul("Does this section contain", p=0.05)
         .noul("contain the price", p=0.9, state="24,995")
         .noul("engine power", p=0.9, state="Power: 150 PS")
         .choice("Which detail", "none")

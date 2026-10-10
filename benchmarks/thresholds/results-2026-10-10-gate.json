@@ -1,0 +1,2130 @@
+{
+ "code": "main at 741d217 (#314) plus #297's change (VehicleSpec.price_gbp described as \"Price\")",
+ "note": "Assembled from several runs of sweep.py (not one run's output): seed-7 live permissive passes, one per component gate threshold (the categorise Choice offers only the fields the gate passed, so a gate threshold's questions aren't a subset of a lower one's), the offline replay of the gate x fallback grid from their cache, and the seed-11 live validation run. Grid rows omit per-field scores to keep the file small, except the two docs/thresholds.md cites (gate 0.1 and 0.3 at the chosen other thresholds). Gates 0 and 0.05 were replayed at fallback 0.3 only.",
+ "date": "2026-10-10",
+ "llm": "claude-opus-5-5 (jevex's Anthropic default)",
+ "jev": "Jev 1.13",
+ "tuning": {
+  "seed": 7,
+  "pages": [
+   "site/specs/galvor-tamsin-table.html",
+   "site/specs/galvor-tamsin-details.html",
+   "site/specs/galvor-tamsin-s.html",
+   "site/used/page-1.html",
+   "site/used/1.html",
+   "site/specs/halden-quorra-table.html",
+   "site/specs/halden-quorra-details.html",
+   "site/specs/galvor-tamsin-gt.html",
+   "site/used/page-2.html",
+   "site/used/2.html",
+   "site/specs/corvane-kestrova-table.html",
+   "site/specs/corvane-kestrova-details.html",
+   "site/specs/halden-quorra-se.html",
+   "site/used/page-3.html",
+   "site/used/3.html",
+   "site/specs/esquel-wrenna-table.html",
+   "site/specs/esquel-wrenna-details.html",
+   "site/specs/halden-quorra-gt.html",
+   "site/used/page-4.html",
+   "site/used/4.html"
+  ],
+  "permissive_live": [
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.0,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8983957219251337,
+     "recall": 0.802547770700637,
+     "accuracy": 0.7477744807121661,
+     "cost_per_document": 0.030654999999999998,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.030654999999999998,
+     "seconds_per_document": 0.6854665687395027,
+     "latency_p50": 0.4978847920137923,
+     "latency_p95": 1.8463743062020512,
+     "jev_requests_per_document": 68.05,
+     "jev_questions_per_document": 104.65,
+     "llm_calls_per_document": 7.0,
+     "resolution_mix": {
+      "generator": 333,
+      "jev": 88,
+      "llm": 128,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.05,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8983957219251337,
+     "recall": 0.802547770700637,
+     "accuracy": 0.7477744807121661,
+     "cost_per_document": 0.0308364778,
+     "jev_cost_per_document": 0.00018147779999999999,
+     "llm_cost_per_document": 0.030654999999999998,
+     "seconds_per_document": 1.8369322187994839,
+     "latency_p50": 1.3265242294874042,
+     "latency_p95": 4.400776674997179,
+     "jev_requests_per_document": 68.05,
+     "jev_questions_per_document": 104.65,
+     "llm_calls_per_document": 7.0,
+     "resolution_mix": {
+      "generator": 333,
+      "jev": 88,
+      "llm": 128,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.9028776978417267,
+     "recall": 0.7993630573248408,
+     "accuracy": 0.7459138187221397,
+     "cost_per_document": 0.0297953205,
+     "jev_cost_per_document": 0.0011993205,
+     "llm_cost_per_document": 0.028596,
+     "seconds_per_document": 4.9871453832834955,
+     "latency_p50": 4.480915354011813,
+     "latency_p95": 9.27999977498548,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 103.9,
+     "llm_calls_per_document": 6.6,
+     "resolution_mix": {
+      "generator": 331,
+      "jev": 88,
+      "llm": 125,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8864864864864865,
+     "recall": 0.7834394904458599,
+     "accuracy": 0.7224669603524229,
+     "cost_per_document": 0.0273292521,
+     "jev_cost_per_document": 5.9852099999999996e-05,
+     "llm_cost_per_document": 0.0272694,
+     "seconds_per_document": 0.364943804036011,
+     "latency_p50": 0.4779932289675344,
+     "latency_p95": 0.6493261809577234,
+     "jev_requests_per_document": 66.9,
+     "jev_questions_per_document": 103.05,
+     "llm_calls_per_document": 6.25,
+     "resolution_mix": {
+      "generator": 331,
+      "jev": 88,
+      "llm": 124,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8666666666666667,
+     "recall": 0.7659235668789809,
+     "accuracy": 0.6981132075471698,
+     "cost_per_document": 0.025917159099999997,
+     "jev_cost_per_document": 0.0003069591,
+     "llm_cost_per_document": 0.025610199999999993,
+     "seconds_per_document": 1.4889211707981302,
+     "latency_p50": 0.5964729164843448,
+     "latency_p95": 4.6109788485424374,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 102.4,
+     "llm_calls_per_document": 5.9,
+     "resolution_mix": {
+      "generator": 327,
+      "jev": 88,
+      "llm": 128,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8686131386861314,
+     "recall": 0.7579617834394905,
+     "accuracy": 0.690856313497823,
+     "cost_per_document": 0.024308127,
+     "jev_cost_per_document": 0.000134127,
+     "llm_cost_per_document": 0.024173999999999998,
+     "seconds_per_document": 0.9523902457964141,
+     "latency_p50": 0.3216734584711958,
+     "latency_p95": 4.104248193115928,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 101.75,
+     "llm_calls_per_document": 5.7,
+     "resolution_mix": {
+      "generator": 316,
+      "jev": 88,
+      "llm": 132,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8678899082568807,
+     "recall": 0.7531847133757962,
+     "accuracy": 0.6865021770682148,
+     "cost_per_document": 0.0236682199,
+     "jev_cost_per_document": 0.00012141990000000002,
+     "llm_cost_per_document": 0.0235468,
+     "seconds_per_document": 0.7899962979921838,
+     "latency_p50": 0.3953743339807261,
+     "latency_p95": 4.492965439529508,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 101.45,
+     "llm_calls_per_document": 5.55,
+     "resolution_mix": {
+      "generator": 316,
+      "jev": 88,
+      "llm": 129,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   }
+  ],
+  "grid": [
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.9028776978417267,
+     "recall": 0.7993630573248408,
+     "accuracy": 0.7459138187221397,
+     "cost_per_document": 0.028798,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.028798,
+     "seconds_per_document": 0.5766502666141605,
+     "latency_p50": 0.4022898750263266,
+     "latency_p95": 1.5709902208764106,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 103.85,
+     "llm_calls_per_document": 6.6,
+     "resolution_mix": {
+      "generator": 332,
+      "jev": 88,
+      "llm": 124,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8864864864864865,
+     "recall": 0.7834394904458599,
+     "accuracy": 0.7224669603524229,
+     "cost_per_document": 0.0272694,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0272694,
+     "seconds_per_document": 0.5898992373549845,
+     "latency_p50": 0.4106662290287204,
+     "latency_p95": 1.6306234270567075,
+     "jev_requests_per_document": 66.9,
+     "jev_questions_per_document": 103.05,
+     "llm_calls_per_document": 6.25,
+     "resolution_mix": {
+      "generator": 331,
+      "jev": 88,
+      "llm": 124,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8666666666666667,
+     "recall": 0.7659235668789809,
+     "accuracy": 0.6981132075471698,
+     "cost_per_document": 0.0256102,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0256102,
+     "seconds_per_document": 0.6062510563555407,
+     "latency_p50": 0.42023729198263027,
+     "latency_p95": 1.6395141336863162,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 102.4,
+     "llm_calls_per_document": 5.9,
+     "resolution_mix": {
+      "generator": 327,
+      "jev": 88,
+      "llm": 128,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8686131386861314,
+     "recall": 0.7579617834394905,
+     "accuracy": 0.690856313497823,
+     "cost_per_document": 0.024173999999999998,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.024173999999999998,
+     "seconds_per_document": 0.6251972292055143,
+     "latency_p50": 0.4306599789997563,
+     "latency_p95": 1.7162277985684342,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 101.75,
+     "llm_calls_per_document": 5.7,
+     "resolution_mix": {
+      "generator": 316,
+      "jev": 88,
+      "llm": 132,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.3,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.0,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8678899082568807,
+     "recall": 0.7531847133757962,
+     "accuracy": 0.6865021770682148,
+     "cost_per_document": 0.0235468,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0235468,
+     "seconds_per_document": 0.6415136563038686,
+     "latency_p50": 0.4394686250016093,
+     "latency_p95": 1.7553999958647182,
+     "jev_requests_per_document": 67.2,
+     "jev_questions_per_document": 101.45,
+     "llm_calls_per_document": 5.55,
+     "resolution_mix": {
+      "generator": 316,
+      "jev": 88,
+      "llm": 129,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.0,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8943533697632058,
+     "recall": 0.7818471337579618,
+     "accuracy": 0.7295690936106983,
+     "cost_per_document": 0.004813400000000001,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.004813400000000001,
+     "seconds_per_document": 0.6631759771000361,
+     "latency_p50": 0.4940839165064972,
+     "latency_p95": 1.7563725753541803,
+     "jev_requests_per_document": 63.75,
+     "jev_questions_per_document": 99.1,
+     "llm_calls_per_document": 1.05,
+     "resolution_mix": {
+      "generator": 445,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.05,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8943533697632058,
+     "recall": 0.7818471337579618,
+     "accuracy": 0.7295690936106983,
+     "cost_per_document": 0.004813400000000001,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.004813400000000001,
+     "seconds_per_document": 0.6525796770962188,
+     "latency_p50": 0.49132620851742104,
+     "latency_p95": 1.7189255913603119,
+     "jev_requests_per_document": 63.75,
+     "jev_questions_per_document": 99.1,
+     "llm_calls_per_document": 1.05,
+     "resolution_mix": {
+      "generator": 445,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.894927536231884,
+     "recall": 0.7866242038216561,
+     "accuracy": 0.7340267459138187,
+     "cost_per_document": 0.0031584,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0031584,
+     "seconds_per_document": 0.2551461354451021,
+     "latency_p50": 0.18591887500951998,
+     "latency_p95": 0.6729126937454567,
+     "jev_requests_per_document": 62.95,
+     "jev_questions_per_document": 98.35,
+     "llm_calls_per_document": 0.7,
+     "resolution_mix": {
+      "generator": 445,
+      "jev": 88,
+      "llm": 7,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {},
+    "fields": {
+     "Listing.colour": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.fuel_type": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.make": {
+      "correct": 32,
+      "wrong": 0,
+      "missing": 20,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 0.6153846153846154,
+      "accuracy": 0.6153846153846154
+     },
+     "Listing.mileage_miles": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.model": {
+      "correct": 34,
+      "wrong": 2,
+      "missing": 16,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 0.9444444444444444,
+      "recall": 0.6538461538461539,
+      "accuracy": 0.6538461538461539
+     },
+     "Listing.price_gbp": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.year": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "VehicleSpec.automatic": {
+      "correct": 14,
+      "wrong": 0,
+      "missing": 8,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8235294117647058,
+      "recall": 0.6363636363636364,
+      "accuracy": 0.56
+     },
+     "VehicleSpec.co2_g_km": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.engine_size_cc": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.fuel_type": {
+      "correct": 21,
+      "wrong": 0,
+      "missing": 1,
+      "spurious": 0,
+      "empty": 23,
+      "precision": 1.0,
+      "recall": 0.9545454545454546,
+      "accuracy": 0.9545454545454546
+     },
+     "VehicleSpec.make": {
+      "correct": 4,
+      "wrong": 0,
+      "missing": 18,
+      "spurious": 0,
+      "empty": 23,
+      "precision": 1.0,
+      "recall": 0.18181818181818182,
+      "accuracy": 0.18181818181818182
+     },
+     "VehicleSpec.model": {
+      "correct": 5,
+      "wrong": 8,
+      "missing": 9,
+      "spurious": 8,
+      "empty": 15,
+      "precision": 0.23809523809523808,
+      "recall": 0.22727272727272727,
+      "accuracy": 0.16666666666666666
+     },
+     "VehicleSpec.power_kw": {
+      "correct": 5,
+      "wrong": 0,
+      "missing": 17,
+      "spurious": 1,
+      "empty": 22,
+      "precision": 0.8333333333333334,
+      "recall": 0.22727272727272727,
+      "accuracy": 0.21739130434782608
+     },
+     "VehicleSpec.price_gbp": {
+      "correct": 17,
+      "wrong": 1,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8095238095238095,
+      "recall": 0.7727272727272727,
+      "accuracy": 0.68
+     },
+     "VehicleSpec.seats": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.top_speed_mph": {
+      "correct": 13,
+      "wrong": 0,
+      "missing": 9,
+      "spurious": 2,
+      "empty": 21,
+      "precision": 0.8666666666666667,
+      "recall": 0.5909090909090909,
+      "accuracy": 0.5416666666666666
+     },
+     "VehicleSpec.trim": {
+      "correct": 17,
+      "wrong": 2,
+      "missing": 3,
+      "spurious": 16,
+      "empty": 7,
+      "precision": 0.4857142857142857,
+      "recall": 0.7727272727272727,
+      "accuracy": 0.4473684210526316
+     },
+     "VehicleSpec.zero_to_62_s": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 20,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     }
+    }
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8824593128390597,
+     "recall": 0.7770700636942676,
+     "accuracy": 0.7165932452276065,
+     "cost_per_document": 0.0025166,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0025166,
+     "seconds_per_document": 0.2692396355472738,
+     "latency_p50": 0.19152170850429684,
+     "latency_p95": 0.7204671892832266,
+     "jev_requests_per_document": 62.65,
+     "jev_questions_per_document": 97.75,
+     "llm_calls_per_document": 0.55,
+     "resolution_mix": {
+      "generator": 449,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8625678119349005,
+     "recall": 0.7595541401273885,
+     "accuracy": 0.6923076923076923,
+     "cost_per_document": 0.0025166,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0025166,
+     "seconds_per_document": 0.28289363539952317,
+     "latency_p50": 0.20131062500877306,
+     "latency_p95": 0.7448458747094264,
+     "jev_requests_per_document": 62.8,
+     "jev_questions_per_document": 97.4,
+     "llm_calls_per_document": 0.55,
+     "resolution_mix": {
+      "generator": 449,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {},
+    "fields": {
+     "Listing.colour": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.fuel_type": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.make": {
+      "correct": 20,
+      "wrong": 0,
+      "missing": 32,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 0.38461538461538464,
+      "accuracy": 0.38461538461538464
+     },
+     "Listing.mileage_miles": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.model": {
+      "correct": 34,
+      "wrong": 2,
+      "missing": 16,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 0.9444444444444444,
+      "recall": 0.6538461538461539,
+      "accuracy": 0.6538461538461539
+     },
+     "Listing.price_gbp": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "Listing.year": {
+      "correct": 52,
+      "wrong": 0,
+      "missing": 0,
+      "spurious": 0,
+      "empty": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "accuracy": 1.0
+     },
+     "VehicleSpec.automatic": {
+      "correct": 14,
+      "wrong": 0,
+      "missing": 8,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8235294117647058,
+      "recall": 0.6363636363636364,
+      "accuracy": 0.56
+     },
+     "VehicleSpec.co2_g_km": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.engine_size_cc": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.fuel_type": {
+      "correct": 21,
+      "wrong": 0,
+      "missing": 1,
+      "spurious": 0,
+      "empty": 24,
+      "precision": 1.0,
+      "recall": 0.9545454545454546,
+      "accuracy": 0.9545454545454546
+     },
+     "VehicleSpec.make": {
+      "correct": 3,
+      "wrong": 0,
+      "missing": 19,
+      "spurious": 0,
+      "empty": 24,
+      "precision": 1.0,
+      "recall": 0.13636363636363635,
+      "accuracy": 0.13636363636363635
+     },
+     "VehicleSpec.model": {
+      "correct": 4,
+      "wrong": 10,
+      "missing": 8,
+      "spurious": 24,
+      "empty": 0,
+      "precision": 0.10526315789473684,
+      "recall": 0.18181818181818182,
+      "accuracy": 0.08695652173913043
+     },
+     "VehicleSpec.power_kw": {
+      "correct": 4,
+      "wrong": 0,
+      "missing": 18,
+      "spurious": 1,
+      "empty": 23,
+      "precision": 0.8,
+      "recall": 0.18181818181818182,
+      "accuracy": 0.17391304347826086
+     },
+     "VehicleSpec.price_gbp": {
+      "correct": 17,
+      "wrong": 1,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8095238095238095,
+      "recall": 0.7727272727272727,
+      "accuracy": 0.68
+     },
+     "VehicleSpec.seats": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     },
+     "VehicleSpec.top_speed_mph": {
+      "correct": 13,
+      "wrong": 0,
+      "missing": 9,
+      "spurious": 2,
+      "empty": 22,
+      "precision": 0.8666666666666667,
+      "recall": 0.5909090909090909,
+      "accuracy": 0.5416666666666666
+     },
+     "VehicleSpec.trim": {
+      "correct": 15,
+      "wrong": 2,
+      "missing": 5,
+      "spurious": 16,
+      "empty": 8,
+      "precision": 0.45454545454545453,
+      "recall": 0.6818181818181818,
+      "accuracy": 0.39473684210526316
+     },
+     "VehicleSpec.zero_to_62_s": {
+      "correct": 18,
+      "wrong": 0,
+      "missing": 4,
+      "spurious": 3,
+      "empty": 21,
+      "precision": 0.8571428571428571,
+      "recall": 0.8181818181818182,
+      "accuracy": 0.72
+     }
+    }
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8589743589743589,
+     "recall": 0.7468152866242038,
+     "accuracy": 0.6806966618287373,
+     "cost_per_document": 0.00253,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.00253,
+     "seconds_per_document": 0.2966389145993162,
+     "latency_p50": 0.2085273544944357,
+     "latency_p95": 0.7986865378014045,
+     "jev_requests_per_document": 62.7,
+     "jev_questions_per_document": 96.95,
+     "llm_calls_per_document": 0.6,
+     "resolution_mix": {
+      "generator": 442,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.3,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.856353591160221,
+     "recall": 0.7404458598726115,
+     "accuracy": 0.6748911465892597,
+     "cost_per_document": 0.00253,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.00253,
+     "seconds_per_document": 0.3105435248959111,
+     "latency_p50": 0.21469702097238041,
+     "latency_p95": 0.837267310693278,
+     "jev_requests_per_document": 62.7,
+     "jev_questions_per_document": 96.8,
+     "llm_calls_per_document": 0.6,
+     "resolution_mix": {
+      "generator": 439,
+      "jev": 88,
+      "llm": 4,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.5,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.894927536231884,
+     "recall": 0.7866242038216561,
+     "accuracy": 0.7340267459138187,
+     "cost_per_document": 0.0115946,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0115946,
+     "seconds_per_document": 0.33151392910222055,
+     "latency_p50": 0.2306133954843972,
+     "latency_p95": 0.9023665768443607,
+     "jev_requests_per_document": 64.55,
+     "jev_questions_per_document": 99.95,
+     "llm_calls_per_document": 2.35,
+     "resolution_mix": {
+      "generator": 421,
+      "jev": 88,
+      "llm": 31,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.5,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8788426763110307,
+     "recall": 0.7738853503184714,
+     "accuracy": 0.7136563876651982,
+     "cost_per_document": 0.01045,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.01045,
+     "seconds_per_document": 0.3442367603449384,
+     "latency_p50": 0.24183679150883108,
+     "latency_p95": 0.9453442205121974,
+     "jev_requests_per_document": 64.15,
+     "jev_questions_per_document": 99.25,
+     "llm_calls_per_document": 2.1,
+     "resolution_mix": {
+      "generator": 415,
+      "jev": 88,
+      "llm": 38,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.5,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8589511754068716,
+     "recall": 0.7563694267515924,
+     "accuracy": 0.6894049346879536,
+     "cost_per_document": 0.0099432,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0099432,
+     "seconds_per_document": 0.35853934385231695,
+     "latency_p50": 0.2502495209919289,
+     "latency_p95": 0.9713452458934626,
+     "jev_requests_per_document": 64.2,
+     "jev_questions_per_document": 98.8,
+     "llm_calls_per_document": 2.0,
+     "resolution_mix": {
+      "generator": 415,
+      "jev": 88,
+      "llm": 38,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.5,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8553113553113553,
+     "recall": 0.7436305732484076,
+     "accuracy": 0.6777939042089985,
+     "cost_per_document": 0.009837799999999999,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.009837799999999999,
+     "seconds_per_document": 0.37480509794841055,
+     "latency_p50": 0.2584997914964333,
+     "latency_p95": 1.0211111982411238,
+     "jev_requests_per_document": 64.1,
+     "jev_questions_per_document": 98.35,
+     "llm_calls_per_document": 2.05,
+     "resolution_mix": {
+      "generator": 407,
+      "jev": 88,
+      "llm": 39,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.5,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.85451197053407,
+     "recall": 0.7388535031847133,
+     "accuracy": 0.6734397677793904,
+     "cost_per_document": 0.0097072,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0097072,
+     "seconds_per_document": 0.38634059800533577,
+     "latency_p50": 0.2661553125071805,
+     "latency_p95": 1.0538238035456744,
+     "jev_requests_per_document": 64.05,
+     "jev_questions_per_document": 98.15,
+     "llm_calls_per_document": 2.0,
+     "resolution_mix": {
+      "generator": 403,
+      "jev": 88,
+      "llm": 40,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.7,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.894927536231884,
+     "recall": 0.7866242038216561,
+     "accuracy": 0.7340267459138187,
+     "cost_per_document": 0.0179532,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0179532,
+     "seconds_per_document": 0.4092022874538088,
+     "latency_p50": 0.28921418750542216,
+     "latency_p95": 1.1108996357012075,
+     "jev_requests_per_document": 64.95,
+     "jev_questions_per_document": 100.8,
+     "llm_calls_per_document": 3.5,
+     "resolution_mix": {
+      "generator": 408,
+      "jev": 88,
+      "llm": 44,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.7,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8788426763110307,
+     "recall": 0.7738853503184714,
+     "accuracy": 0.7136563876651982,
+     "cost_per_document": 0.0170208,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0170208,
+     "seconds_per_document": 0.4186271707527339,
+     "latency_p50": 0.29804054100532085,
+     "latency_p95": 1.1263066705549136,
+     "jev_requests_per_document": 64.65,
+     "jev_questions_per_document": 100.15,
+     "llm_calls_per_document": 3.3,
+     "resolution_mix": {
+      "generator": 401,
+      "jev": 88,
+      "llm": 52,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.7,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8589511754068716,
+     "recall": 0.7563694267515924,
+     "accuracy": 0.6894049346879536,
+     "cost_per_document": 0.016206599999999998,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.016206599999999998,
+     "seconds_per_document": 0.44149042285280304,
+     "latency_p50": 0.3091772079933435,
+     "latency_p95": 1.1956837538920808,
+     "jev_requests_per_document": 64.85,
+     "jev_questions_per_document": 99.7,
+     "llm_calls_per_document": 3.15,
+     "resolution_mix": {
+      "generator": 399,
+      "jev": 88,
+      "llm": 54,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.7,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8553113553113553,
+     "recall": 0.7436305732484076,
+     "accuracy": 0.6777939042089985,
+     "cost_per_document": 0.0155392,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0155392,
+     "seconds_per_document": 0.45965555619623044,
+     "latency_p50": 0.3186771670007147,
+     "latency_p95": 1.2463391517987474,
+     "jev_requests_per_document": 64.85,
+     "jev_questions_per_document": 99.2,
+     "llm_calls_per_document": 3.1,
+     "resolution_mix": {
+      "generator": 391,
+      "jev": 88,
+      "llm": 55,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.7,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.85451197053407,
+     "recall": 0.7388535031847133,
+     "accuracy": 0.6734397677793904,
+     "cost_per_document": 0.0151326,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.0151326,
+     "seconds_per_document": 0.47451087909867057,
+     "latency_p50": 0.33659387499210425,
+     "latency_p95": 1.2918470603850438,
+     "jev_requests_per_document": 64.85,
+     "jev_questions_per_document": 98.95,
+     "llm_calls_per_document": 3.0,
+     "resolution_mix": {
+      "generator": 387,
+      "jev": 88,
+      "llm": 56,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.1,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.9003623188405797,
+     "recall": 0.7914012738853503,
+     "accuracy": 0.7384843982169391,
+     "cost_per_document": 0.028566199999999996,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.028566199999999996,
+     "seconds_per_document": 0.5089448000944685,
+     "latency_p50": 0.3544332294841297,
+     "latency_p95": 1.3921953934332123,
+     "jev_requests_per_document": 67.15,
+     "jev_questions_per_document": 103.8,
+     "llm_calls_per_document": 6.55,
+     "resolution_mix": {
+      "generator": 363,
+      "jev": 88,
+      "llm": 89,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.2,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8842676311030742,
+     "recall": 0.7786624203821656,
+     "accuracy": 0.7180616740088106,
+     "cost_per_document": 0.027037600000000002,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.027037600000000002,
+     "seconds_per_document": 0.5206467936543049,
+     "latency_p50": 0.36595108348410577,
+     "latency_p95": 1.4245166121923831,
+     "jev_requests_per_document": 66.85,
+     "jev_questions_per_document": 103.0,
+     "llm_calls_per_document": 6.2,
+     "resolution_mix": {
+      "generator": 357,
+      "jev": 88,
+      "llm": 96,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.3,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.864376130198915,
+     "recall": 0.7611464968152867,
+     "accuracy": 0.6937590711175616,
+     "cost_per_document": 0.025378399999999995,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.025378399999999995,
+     "seconds_per_document": 0.5435921644995687,
+     "latency_p50": 0.37469552049878985,
+     "latency_p95": 1.4807267768279417,
+     "jev_requests_per_document": 67.15,
+     "jev_questions_per_document": 102.35,
+     "llm_calls_per_document": 5.85,
+     "resolution_mix": {
+      "generator": 345,
+      "jev": 88,
+      "llm": 108,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.4,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.8608058608058609,
+     "recall": 0.7484076433121019,
+     "accuracy": 0.6821480406386067,
+     "cost_per_document": 0.023942199999999997,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.023942199999999997,
+     "seconds_per_document": 0.5674932000954869,
+     "latency_p50": 0.3850719165056944,
+     "latency_p95": 1.578747365155141,
+     "jev_requests_per_document": 67.15,
+     "jev_questions_per_document": 101.7,
+     "llm_calls_per_document": 5.65,
+     "resolution_mix": {
+      "generator": 337,
+      "jev": 88,
+      "llm": 109,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   },
+   {
+    "category_threshold": 0.5,
+    "fallback_threshold": 0.9,
+    "verify_threshold": 0.7,
+    "also_category_p": 0.1,
+    "component_gate_threshold": 0.5,
+    "summary": {
+     "documents": 20,
+     "errors": 0,
+     "partial": 0,
+     "precision": 0.860036832412523,
+     "recall": 0.7436305732484076,
+     "accuracy": 0.6777939042089985,
+     "cost_per_document": 0.023315,
+     "jev_cost_per_document": 0.0,
+     "llm_cost_per_document": 0.023315,
+     "seconds_per_document": 0.5738925061916234,
+     "latency_p50": 0.39222704200074077,
+     "latency_p95": 1.5859021735057468,
+     "jev_requests_per_document": 67.15,
+     "jev_questions_per_document": 101.4,
+     "llm_calls_per_document": 5.5,
+     "resolution_mix": {
+      "generator": 333,
+      "jev": 88,
+      "llm": 110,
+      "structured": 12
+     }
+    },
+    "cache_misses": {
+     "jev": 0,
+     "llm": 0
+    },
+    "failed": {},
+    "partial": {}
+   }
+  ]
+ },
+ "validation": {
+  "seed": 11,
+  "pages": [
+   "site/specs/brantis-orbisa-table.html",
+   "site/specs/brantis-orbisa-details.html",
+   "site/specs/brantis-orbisa-s.html",
+   "site/used/page-1.html",
+   "site/used/1.html",
+   "site/specs/aurel-wrenna-table.html",
+   "site/specs/aurel-wrenna-details.html",
+   "site/specs/brantis-orbisa-se-l.html",
+   "site/used/page-2.html",
+   "site/used/2.html",
+   "site/specs/corvane-quill-table.html",
+   "site/specs/corvane-quill-details.html",
+   "site/specs/brantis-orbisa-gt.html",
+   "site/used/page-3.html",
+   "site/used/3.html",
+   "site/specs/farlan-kestrova-table.html",
+   "site/specs/farlan-kestrova-details.html",
+   "site/specs/aurel-wrenna-se.html",
+   "site/used/page-4.html",
+   "site/used/4.html"
+  ],
+  "old_gate": {
+   "category_threshold": 0.5,
+   "fallback_threshold": 0.3,
+   "verify_threshold": 0.7,
+   "also_category_p": 0.1,
+   "component_gate_threshold": 0.3,
+   "summary": {
+    "documents": 20,
+    "errors": 0,
+    "partial": 0,
+    "precision": 0.9233390119250426,
+    "recall": 0.7324324324324324,
+    "accuracy": 0.7131578947368421,
+    "cost_per_document": 0.0028402796,
+    "jev_cost_per_document": 0.0012920796,
+    "llm_cost_per_document": 0.0015482,
+    "seconds_per_document": 3.779193483298877,
+    "latency_p50": 3.55909677100135,
+    "latency_p95": 6.665731896125363,
+    "jev_requests_per_document": 71.8,
+    "jev_questions_per_document": 109.2,
+    "llm_calls_per_document": 0.35,
+    "resolution_mix": {
+     "generator": 465,
+     "jev": 108,
+     "llm": 2,
+     "structured": 12
+    }
+   },
+   "cache_misses": {
+    "jev": 0,
+    "llm": 0
+   },
+   "failed": {},
+   "partial": {},
+   "fields": {
+    "Listing.colour": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.fuel_type": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.make": {
+     "correct": 15,
+     "wrong": 0,
+     "missing": 37,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 0.28846153846153844,
+     "accuracy": 0.28846153846153844
+    },
+    "Listing.mileage_miles": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.model": {
+     "correct": 22,
+     "wrong": 1,
+     "missing": 29,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 0.9565217391304348,
+     "recall": 0.4230769230769231,
+     "accuracy": 0.4230769230769231
+    },
+    "Listing.price_gbp": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.year": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "VehicleSpec.automatic": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.co2_g_km": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.engine_size_cc": {
+     "correct": 21,
+     "wrong": 0,
+     "missing": 3,
+     "spurious": 0,
+     "empty": 15,
+     "precision": 1.0,
+     "recall": 0.875,
+     "accuracy": 0.875
+    },
+    "VehicleSpec.fuel_type": {
+     "correct": 29,
+     "wrong": 0,
+     "missing": 3,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.90625,
+     "accuracy": 0.90625
+    },
+    "VehicleSpec.make": {
+     "correct": 2,
+     "wrong": 0,
+     "missing": 30,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.0625,
+     "accuracy": 0.0625
+    },
+    "VehicleSpec.model": {
+     "correct": 5,
+     "wrong": 16,
+     "missing": 11,
+     "spurious": 7,
+     "empty": 0,
+     "precision": 0.17857142857142858,
+     "recall": 0.15625,
+     "accuracy": 0.1282051282051282
+    },
+    "VehicleSpec.power_kw": {
+     "correct": 6,
+     "wrong": 0,
+     "missing": 26,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.1875,
+     "accuracy": 0.1875
+    },
+    "VehicleSpec.price_gbp": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.seats": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.top_speed_mph": {
+     "correct": 20,
+     "wrong": 1,
+     "missing": 11,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9090909090909091,
+     "recall": 0.625,
+     "accuracy": 0.6060606060606061
+    },
+    "VehicleSpec.trim": {
+     "correct": 22,
+     "wrong": 7,
+     "missing": 3,
+     "spurious": 7,
+     "empty": 0,
+     "precision": 0.6111111111111112,
+     "recall": 0.6875,
+     "accuracy": 0.5641025641025641
+    },
+    "VehicleSpec.zero_to_62_s": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    }
+   }
+  },
+  "chosen": {
+   "category_threshold": 0.5,
+   "fallback_threshold": 0.3,
+   "verify_threshold": 0.7,
+   "also_category_p": 0.1,
+   "component_gate_threshold": 0.1,
+   "summary": {
+    "documents": 20,
+    "errors": 0,
+    "partial": 0,
+    "precision": 0.9417808219178082,
+    "recall": 0.7432432432432432,
+    "accuracy": 0.7236842105263158,
+    "cost_per_document": 0.0024458318,
+    "jev_cost_per_document": 0.00036783180000000005,
+    "llm_cost_per_document": 0.002078,
+    "seconds_per_document": 1.727046343794791,
+    "latency_p50": 1.2810994375031441,
+    "latency_p95": 4.220913114224096,
+    "jev_requests_per_document": 72.05,
+    "jev_questions_per_document": 109.75,
+    "llm_calls_per_document": 0.4,
+    "resolution_mix": {
+     "generator": 462,
+     "jev": 108,
+     "llm": 2,
+     "structured": 12
+    }
+   },
+   "cache_misses": {
+    "jev": 0,
+    "llm": 0
+   },
+   "failed": {},
+   "partial": {},
+   "fields": {
+    "Listing.colour": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.fuel_type": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.make": {
+     "correct": 20,
+     "wrong": 0,
+     "missing": 32,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 0.38461538461538464,
+     "accuracy": 0.38461538461538464
+    },
+    "Listing.mileage_miles": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.model": {
+     "correct": 20,
+     "wrong": 1,
+     "missing": 31,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 0.9523809523809523,
+     "recall": 0.38461538461538464,
+     "accuracy": 0.38461538461538464
+    },
+    "Listing.price_gbp": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "Listing.year": {
+     "correct": 52,
+     "wrong": 0,
+     "missing": 0,
+     "spurious": 0,
+     "empty": 0,
+     "precision": 1.0,
+     "recall": 1.0,
+     "accuracy": 1.0
+    },
+    "VehicleSpec.automatic": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.co2_g_km": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.engine_size_cc": {
+     "correct": 21,
+     "wrong": 0,
+     "missing": 3,
+     "spurious": 0,
+     "empty": 15,
+     "precision": 1.0,
+     "recall": 0.875,
+     "accuracy": 0.875
+    },
+    "VehicleSpec.fuel_type": {
+     "correct": 29,
+     "wrong": 0,
+     "missing": 3,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.90625,
+     "accuracy": 0.90625
+    },
+    "VehicleSpec.make": {
+     "correct": 2,
+     "wrong": 0,
+     "missing": 30,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.0625,
+     "accuracy": 0.0625
+    },
+    "VehicleSpec.model": {
+     "correct": 5,
+     "wrong": 9,
+     "missing": 18,
+     "spurious": 7,
+     "empty": 0,
+     "precision": 0.23809523809523808,
+     "recall": 0.15625,
+     "accuracy": 0.1282051282051282
+    },
+    "VehicleSpec.power_kw": {
+     "correct": 7,
+     "wrong": 0,
+     "missing": 25,
+     "spurious": 0,
+     "empty": 7,
+     "precision": 1.0,
+     "recall": 0.21875,
+     "accuracy": 0.21875
+    },
+    "VehicleSpec.price_gbp": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.seats": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    },
+    "VehicleSpec.top_speed_mph": {
+     "correct": 20,
+     "wrong": 1,
+     "missing": 11,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9090909090909091,
+     "recall": 0.625,
+     "accuracy": 0.6060606060606061
+    },
+    "VehicleSpec.trim": {
+     "correct": 26,
+     "wrong": 3,
+     "missing": 3,
+     "spurious": 7,
+     "empty": 0,
+     "precision": 0.7222222222222222,
+     "recall": 0.8125,
+     "accuracy": 0.6666666666666666
+    },
+    "VehicleSpec.zero_to_62_s": {
+     "correct": 28,
+     "wrong": 0,
+     "missing": 4,
+     "spurious": 1,
+     "empty": 6,
+     "precision": 0.9655172413793104,
+     "recall": 0.875,
+     "accuracy": 0.8484848484848485
+    }
+   }
+  },
+  "note": "One live run of two settings: the old gate threshold (0.3), then the chosen one (0.1), at #49's other thresholds. The second reused the first's cached answers, so both read the same answer to every question they share."
+ },
+ "spend_usd": {
+  "jev": 0.0733,
+  "llm": 0.724
+ }
+}

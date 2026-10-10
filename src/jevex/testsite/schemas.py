@@ -24,7 +24,9 @@ class VehicleSpec(BaseModel):
     zero_to_62_s: float = Field(description="0-62 mph acceleration time", unit="s")
     top_speed_mph: int = Field(description="Top speed", unit="mph")
     co2_g_km: int | None = Field(description="CO2 emissions", unit="g/km")
-    price_gbp: Decimal = Field(description="On-the-road price", unit="GBP")
+    # Not "On-the-road price": Jev reads that literally, and a "Price from" or "Price" row,
+    # which the truth counts, passed the component gate at p 0.25-0.48 (#297).
+    price_gbp: Decimal = Field(description="Price", unit="GBP")
     seats: int = Field(description="Number of seats")
     automatic: bool = Field(description="has an automatic gearbox")
 
