@@ -18,7 +18,7 @@ class VehicleSpec(BaseModel):
     # Named after what one record is. As "vehicle spec" (the class name), MultiEntity's
     # boundary Noul read a spec table's row labels and a price list's equipment headings as
     # specs of their own: on the spec-sheets corpus it accepted 1,355 labels naming no
-    # variant, against 257 as "vehicle variant" (#322).
+    # labelled trim, against 257 as "vehicle variant" (#322).
     __jevex__ = SchemaConfig(entity_name="vehicle variant")
 
     make: str = Field(description="Manufacturer (make) name")

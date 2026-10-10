@@ -77,7 +77,8 @@ class SchemaConfig(BaseModel):
     name in words ("VehicleSpec" → "vehicle spec"). Used by ``MultiEntity``'s questions.
     Set it when the model's name could also mean a part of a record: asked whether a
     label names a separate "vehicle spec", Jev accepts spec rows and equipment headings
-    ("Number of seats", "WHEELS AND TYRES"), which "vehicle variant" rules out (#322)."""
+    ("Number of seats", "WHEELS AND TYRES"), far fewer of which it accepts as a "vehicle
+    variant" (#322)."""
     boundary_question: str | None = None
     """Template for ``MultiEntity``'s boundary Noul, with ``{label}`` and ``{entity}``."""
     entity_question: str | None = None
