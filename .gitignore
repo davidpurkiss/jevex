@@ -7,3 +7,5 @@ testsite/build/
 
 # Real documents kept for local testing only (never committed; see #55, #61)
 benchmarks/corpora/local/
+# A benchmark run's unpublished files: built corpora, prepared inputs (#63)
+benchmarks/results/*.work/

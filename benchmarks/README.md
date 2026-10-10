@@ -4,7 +4,9 @@ The methodology is in [`docs/benchmarks.md`](../docs/benchmarks.md).
 
 | File | What it holds |
 | --- | --- |
-| `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora (`jevex.benchmarks.BenchmarkConfig`) |
+| `config.yaml` | The pinned setup: seeds, model versions and prices, concurrency, the budget, and the corpora with their schemas and pipelines (`jevex.benchmarks.BenchmarkConfig`) |
+| `run.py` | The one-command runner: every system over every corpus into `results/<date>/` (`jevex.bench.run_benchmarks`) |
+| `report.py` | Builds `docs/benchmarks-results.md` and its charts from a results directory (`jevex.bench_report`) |
 | `corpora/<name>.lock` | A corpus's lock: hashes of its `truth.json` and of every document (`jevex corpus lock`, `jevex corpus check`) |
 | `corpora/spec-sheets/` | The real spec-sheet corpus as the repo holds it: `manifest.json` (each document's URL and sha256), the labels (`truth.json`, labelled by `LABELLING.md`'s rules) and the labelling's checking scripts |
 | `corpora/fetch.py` | Fetches a corpus from its `manifest.json`: a uv script (`fetch.py.lock`) |
@@ -44,6 +46,36 @@ jevex corpus check /tmp/spec-sheets benchmarks/corpora/spec-sheets.lock
 
 A dead link, a robots.txt refusal or a changed document fails the fetch, naming the
 document, and nothing already in the directory is overwritten.
+
+## Running everything
+
+`run.py` runs every system (`jevex.bench.SYSTEMS`) over every corpus in `config.yaml`. It
+builds the test site, finds the kept corpora in the directories their `env` names
+(`JEVEX_BENCH_BOOKS`, `JEVEX_BENCH_SPEC_SHEETS`), checks each against its lock, prepares
+the baselines' inputs, and saves and scores each system's results:
+
+```sh
+uv sync --all-extras
+JEVEX_BENCH_BOOKS=/data/books JEVEX_BENCH_SPEC_SHEETS=/data/spec-sheets \
+JEVEX_SPEND_LEDGER=/tmp/bench.ledger JEVEX_JEV_MAX_COST_USD=2 JEVEX_LLM_MAX_COST_USD=23 \
+    uv run benchmarks/run.py --all
+uv run benchmarks/report.py benchmarks/results/<date>
+```
+
+It needs `TYPESAFE_API_KEY`, `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`, and refuses to
+start a live run without both caps and the ledger, or with caps adding up to more than the
+config's `budget_usd`. `--system` and `--corpus` (repeatable) run fewer; `--dry-run` runs
+every step with fake answers, for free. A results directory holds:
+
+| File | What it holds |
+| --- | --- |
+| `manifest.json` | The pinned config, the jevex commit, the `uv.lock` hash, every step's outcome and the run's spend |
+| `<system>/<corpus>.jsonl` | One result per document, the same format for every system: `jevex eval --results` rescores it |
+| `<system>/<corpus>.score.json` | The numbers the page reports, with their bootstrap intervals |
+| `jevex-cold/<corpus>.replay.csv` | jevex's learning curve from an empty store |
+
+The built test site and the prepared inputs go to `<results>.work/`, which is never
+committed (nor are a corpus's rows when the config publishes only its aggregate).
 
 ## Baselines
 

@@ -497,10 +497,20 @@ class CorpusSpec(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     kind: Literal["testsite", "books", "directory"]
     """``testsite``: rebuilt from ``seed`` and ``waves``. ``books``: fetched once with
-    :func:`books_corpus` (``seed``, ``sample``) and kept. ``directory``: a corpus kept as
-    files, at ``path`` (relative to the config) or in the directory ``env`` names."""
+    :func:`books_corpus` (``seed``, ``sample``) and kept. Kept corpora (``books`` and
+    ``directory``) are at ``path`` (relative to the config) or in the directory ``env``
+    names."""
     lock: str
     """The lock file, relative to the config file."""
+    schemas: tuple[str, ...] = Field(min_length=1)
+    """The schemas the corpus is labelled in, as ``module:Class``: every system extracts
+    all of them."""
+    pipeline: str | None = None
+    """The pipeline jevex runs (and prepares the baselines' inputs with), as
+    ``module:name`` (``jevex --pipeline``); jevex's default if unset."""
+    entities: Literal["single", "multi"] = "single"
+    """``multi``: entities are resolved with :class:`~jevex.resolve.MultiEntity`, for
+    documents holding several records (a spec sheet's trims, a grid of listings)."""
     publish: Publish = "full"
     seed: int | None = None
     waves: str | None = None
@@ -520,10 +530,10 @@ class CorpusSpec(BaseModel):
         missing = [f for f in needs[self.kind] if getattr(self, f) is None]
         if missing:
             raise ValueError(f"a {self.kind} corpus needs {', '.join(missing)}")
-        if self.kind == "directory" and (self.path is None) == (self.env is None):
-            raise ValueError("a directory corpus needs exactly one of path and env")
-        if self.kind != "directory" and (self.path is not None or self.env is not None):
-            raise ValueError("path and env are only for directory corpora")
+        if self.kind == "testsite" and (self.path is not None or self.env is not None):
+            raise ValueError("a testsite corpus is rebuilt, so it has no path or env")
+        if self.kind != "testsite" and (self.path is None) == (self.env is None):
+            raise ValueError(f"a {self.kind} corpus needs exactly one of path and env")
         if self.waves is not None and self.kind != "testsite":
             raise ValueError("waves is only for testsite corpora")
         return self
@@ -598,6 +608,7 @@ class Interval:
 def bootstrap_interval(
     values: Sequence[float],
     *,
+    weights: Sequence[float] | None = None,
     samples: int = 1000,
     confidence: float = 0.95,
     seed: int = 42,
@@ -606,25 +617,43 @@ def bootstrap_interval(
     bootstrap interval: ``samples`` resamples with replacement, drawn from
     ``random.Random(seed)``, so the same inputs always give the same interval.
 
-    Raises ``ValueError`` for no values, fewer than one resample, or a confidence outside
-    (0, 1).
+    With ``weights`` the mean is weighted: per-document accuracies weighted by the values
+    each scored give the corpus's accuracy (correct over scored, as
+    :meth:`~jevex.eval.EvalReport.overall` counts it), resampled by document. Values of
+    weight 0 add nothing to any resample's mean and are left out.
+
+    Raises ``ValueError`` for no values (or no positive weight), weights that don't match
+    the values or are negative, fewer than one resample, or a confidence outside (0, 1).
     """
-    if not values:
+    if weights is not None and len(weights) != len(values):
+        raise ValueError(f"{len(weights)} weights for {len(values)} values")
+    if weights is not None and any(w < 0 for w in weights):
+        raise ValueError("weights can't be negative")
+    pairs = [
+        (float(v), float(w))
+        for v, w in zip(
+            values, weights if weights is not None else [1.0] * len(values), strict=True
+        )
+        if w > 0
+    ]
+    if not pairs:
         raise ValueError("no values to bootstrap")
     if samples < 1:
         raise ValueError(f"samples must be at least 1, not {samples}")
     if not 0.0 < confidence < 1.0:
         raise ValueError(f"confidence must be between 0 and 1, not {confidence}")
-    data = [float(v) for v in values]
-    n = len(data)
     rng = random.Random(seed)
-    means = sorted(math.fsum(rng.choices(data, k=n)) / n for _ in range(samples))
+    means = sorted(_weighted_mean(rng.choices(pairs, k=len(pairs))) for _ in range(samples))
     tail = (1.0 - confidence) / 2
     return Interval(
-        mean=math.fsum(data) / n,
+        mean=_weighted_mean(pairs),
         low=_quantile(means, tail),
         high=_quantile(means, 1.0 - tail),
     )
+
+
+def _weighted_mean(pairs: Sequence[tuple[float, float]]) -> float:
+    return math.fsum(v * w for v, w in pairs) / math.fsum(w for _, w in pairs)
 
 
 def _quantile(sorted_values: list[float], q: float) -> float:

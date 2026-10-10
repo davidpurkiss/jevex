@@ -609,6 +609,18 @@ uv run --script benchmarks/baselines/crawl4ai_baseline.py books \
 jevex eval books --schema jevex.examples.books:Book --results fast.jsonl
 ```
 
+One command runs every system over every corpus, and another builds the results page
+(`docs/benchmarks-results.md`: the cost comparison, accuracy against cost, learning curves)
+from what it saved. A live run makes real, billed calls, so it refuses to start without
+spend caps that add up to no more than the config's budget, and a ledger they share.
+`--dry-run` checks every step with fake answers, for free:
+
+```sh
+JEVEX_SPEND_LEDGER=bench.ledger JEVEX_JEV_MAX_COST_USD=2 JEVEX_LLM_MAX_COST_USD=23 \
+    uv run benchmarks/run.py --all            # writes benchmarks/results/<date>/
+uv run benchmarks/report.py benchmarks/results/<date>
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 

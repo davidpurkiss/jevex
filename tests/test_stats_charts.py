@@ -12,6 +12,8 @@ from jevex.stats.charts import (
     CHART_CSS,
     DARK,
     LIGHT,
+    CostPoint,
+    accuracy_cost_svg,
     learning_svg,
     mix_svg,
     nice_ticks,
@@ -377,3 +379,62 @@ def test_the_learning_curve_is_drawn_in_the_accent() -> None:
     assert "svg.chart .line { fill: none; stroke: var(--accent);" in svg
     assert "svg.chart .dot { fill: var(--accent);" in svg
     assert "--accent: #7c3aed;" in svg
+
+
+# --- accuracy against cost -------------------------------------------------------------
+
+
+def scatter() -> list[CostPoint]:
+    return [
+        CostPoint("jevex (warm)", 0.0004, 0.93, 0.9, 0.95, jevex=True),
+        CostPoint("LLM-only, strong", 0.05, 0.96, 0.94, 0.98),
+        CostPoint("free", 0.0, 0.5, 0.4, 0.6),
+    ]
+
+
+@pytest.mark.parametrize("animate", [False, True])
+def test_accuracy_against_cost_is_a_standalone_svg(animate: bool) -> None:
+    svg = accuracy_cost_svg(
+        scatter(), "Accuracy against cost: books", standalone=True, animate=animate
+    )
+    root = parse(svg)
+    assert root.attrib["data-view"] == "accuracy-cost"
+    assert ("animate" in root.attrib["class"].split()) is animate
+    assert "prefers-color-scheme: dark" in svg
+    assert root.attrib["aria-label"] == (
+        "Accuracy against cost: books: accuracy over cost per document (USD, log scale) for "
+        "jevex (warm), LLM-only, strong"
+    )
+
+
+def test_accuracy_against_cost_puts_cheaper_systems_left_on_a_log_scale() -> None:
+    ns = "{http://www.w3.org/2000/svg}"
+    root = parse(accuracy_cost_svg(scatter(), standalone=True))
+    points: dict[str, ET.Element] = {}
+    for g in root.iter(f"{ns}g"):
+        label = g.find(f"{ns}text")
+        assert label is not None
+        assert label.text is not None
+        points[label.text] = g
+    assert set(points) == {"jevex (warm)", "LLM-only, strong"}  # nothing free on a log scale
+    cheap = points["jevex (warm)"].find(f"{ns}circle")
+    dear = points["LLM-only, strong"].find(f"{ns}circle")
+    assert cheap is not None
+    assert dear is not None
+    assert float(cheap.attrib["cx"]) < float(dear.attrib["cx"])
+    assert float(cheap.attrib["cy"]) > float(dear.attrib["cy"])  # less accurate: lower
+    assert (cheap.attrib["class"], dear.attrib["class"]) == ("dot", "m-llm")
+    # Decades from $0.0001 to $0.1 under the axis; accuracy from 90% up.
+    texts = [t.text or "" for t in root.iter(f"{ns}text")]
+    assert [t for t in texts if t.startswith("$")] == ["$0.0001", "$0.001", "$0.01", "$0.1"]
+    assert "90.0%" in texts
+    assert "100.0%" in texts
+    assert "80.0%" not in texts
+    title = points["jevex (warm)"].find(f"{ns}title")
+    assert title is not None
+    assert title.text == "jevex (warm): 93.0% (90.0%–95.0%) at $0.0004"
+
+
+def test_accuracy_against_cost_draws_with_nothing_to_show() -> None:
+    root = parse(accuracy_cost_svg([], standalone=True))
+    assert not [g for g in root.iter("{http://www.w3.org/2000/svg}g")]

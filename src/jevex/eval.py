@@ -45,8 +45,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union, cast, get_args, get_origin
+
+from pydantic import BaseModel
 
 from jevex.document import LOCALE_TAG, Document
 from jevex.errors import ExtractionError
@@ -422,6 +425,12 @@ class DocumentRun:
     """The result's ``status``: ``ok``, ``partial`` or ``failed``."""
     warnings: list[str] = field(default_factory=list[str])
     """A ``partial`` document's errors: the parts that failed and were skipped."""
+    records: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict[str, list[dict[str, Any]]]
+    )
+    """What was found, as :func:`score_records` takes it and a results file holds it
+    (:class:`~jevex.baselines.ResultRow`): per schema, ``{"entity": ..., "values": {...}}``
+    with only the values found, as JSON types."""
 
     @property
     def cost(self) -> float:
@@ -521,11 +530,30 @@ def _percentile(sorted_values: list[float], q: float) -> float | None:
 
 
 def _found_records(result: ExtractionResult) -> dict[str, list[dict[str, Any]]]:
+    """A result's records as :func:`score_records` takes them: per schema, ``{"entity":
+    ..., "values": {...}}`` holding only the values found, as JSON types."""
     out: dict[str, list[dict[str, Any]]] = {}
     for r in result.records:
-        values = {n: getattr(r.record, n) for n in r.record.model_fields_set}
+        values = {n: _json_value(getattr(r.record, n)) for n in r.record.model_fields_set}
         out.setdefault(r.schema_name, []).append({"entity": r.entity, "values": values})
     return out
+
+
+def _json_value(value: Any) -> Any:
+    """A found value as JSON types that score as the value does: a ``Decimal`` becomes a
+    number (Pydantic's JSON string wouldn't match a numeric label), a date its ISO form, an
+    enum its value, a model its set fields."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return _json_value(value.value)
+    if isinstance(value, BaseModel):
+        return {n: _json_value(getattr(value, n)) for n in sorted(value.model_fields_set)}
+    if isinstance(value, list | tuple):
+        return [_json_value(v) for v in cast("list[Any] | tuple[Any, ...]", value)]
+    return value
 
 
 def score_document(
@@ -639,6 +667,7 @@ def score_result(
         for m in r.meta.values()
         if m.found and not m.filtered and m.method
     )
+    found = {} if failed else _found_records(result)
     return DocumentRun(
         path=item.path.as_posix(),
         schema=item.schema,
@@ -652,11 +681,12 @@ def score_result(
         fields=(
             all_missing(item, tolerances[item.schema])
             if failed
-            else score_document(item, result, tolerances)
+            else score_records(item, found, tolerances)
         ),
         error="; ".join(e.describe() for e in result.errors if e.fatal) if failed else None,
         status=result.status,
         warnings=[] if failed else [e.describe() for e in result.errors],
+        records=found,
     )
 
 

@@ -682,6 +682,9 @@ def test_the_committed_config_pins_everything() -> None:
         "books",
         "spec-sheets",
     ]
+    assert config.corpus("books").pipeline == "jevex.examples.books:books_pipeline"
+    assert [c.entities for c in config.corpora] == ["multi", "single", "multi"]
+    assert config.corpus("spec-sheets").schemas == ("jevex.testsite.schemas:VehicleSpec",)
     with pytest.raises(KeyError):
         config.corpus("nope")
 
@@ -709,7 +712,15 @@ def config(**overrides: Any) -> dict[str, Any]:
             "baseline_fast": llm,
             "baseline_strong": llm,
         },
-        "corpora": [{"name": "testsite", "kind": "testsite", "seed": 42, "lock": "t.lock"}],
+        "corpora": [
+            {
+                "name": "testsite",
+                "kind": "testsite",
+                "seed": 42,
+                "lock": "t.lock",
+                "schemas": ["m:S"],
+            }
+        ],
     } | overrides
 
 
@@ -753,18 +764,21 @@ def test_bad_configs_are_refused(tmp_path: Path, overrides: dict[str, Any], mess
     ("corpus", "message"),
     [
         ({"kind": "testsite"}, "a testsite corpus needs seed"),
-        ({"kind": "books", "seed": 1}, "a books corpus needs sample"),
-        ({"kind": "directory"}, "exactly one of path and env"),
+        ({"kind": "books", "seed": 1, "env": "X"}, "a books corpus needs sample"),
+        ({"kind": "directory"}, "a directory corpus needs exactly one of path and env"),
         ({"kind": "directory", "path": "x", "env": "X"}, "exactly one of path and env"),
-        ({"kind": "testsite", "seed": 1, "path": "x"}, "only for directory corpora"),
-        ({"kind": "books", "seed": 1, "sample": 2, "waves": "table"}, "only for testsite"),
-        ({"kind": "books", "seed": 1, "sample": 0}, "greater than or equal to 1"),
+        ({"kind": "books", "seed": 1, "sample": 2}, "a books corpus needs exactly one of path"),
+        ({"kind": "testsite", "seed": 1, "path": "x"}, "is rebuilt, so it has no path or env"),
+        ({"kind": "books", "seed": 1, "sample": 2, "env": "X", "waves": "t"}, "only for testsite"),
+        ({"kind": "books", "seed": 1, "sample": 0, "env": "X"}, "greater than or equal to 1"),
         ({"kind": "directory", "path": "x", "name": "Bad Name"}, "should match pattern"),
+        ({"kind": "directory", "path": "x", "schemas": []}, "at least 1 item"),
+        ({"kind": "directory", "path": "x", "entities": "many"}, "'single' or 'multi'"),
     ],
 )
 def test_corpus_specs_must_fit_their_kind(corpus: dict[str, Any], message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        CorpusSpec.model_validate({"name": "c", "lock": "c.lock"} | corpus)
+        CorpusSpec.model_validate({"name": "c", "lock": "c.lock", "schemas": ["m:S"]} | corpus)
 
 
 def test_configs_that_cannot_be_read(tmp_path: Path) -> None:
@@ -791,6 +805,16 @@ def test_bootstrap_intervals_are_seeded() -> None:
     assert bootstrap_interval(spread, seed=1) != bootstrap_interval(spread, seed=2)
 
 
+def test_weights_give_a_ratio_resampled_by_document() -> None:
+    # Per-document accuracies weighted by the values each scored: 9 of 10, 1 of 2, 0 of 0.
+    interval = bootstrap_interval([0.9, 0.5, 0.0], weights=[10, 2, 0], samples=200)
+    assert interval.mean == pytest.approx(10 / 12)  # micro-averaged, the empty one left out
+    assert 0.5 <= interval.low <= interval.mean <= interval.high <= 0.9
+    unweighted = bootstrap_interval([0.9, 0.5], samples=200)
+    assert unweighted.mean == pytest.approx(0.7)
+    assert bootstrap_interval([0.9, 0.5], weights=[1, 1], samples=200) == unweighted
+
+
 def test_a_constant_has_no_spread() -> None:
     interval = bootstrap_interval([2.0, 2.0, 2.0], samples=10)
     assert (interval.mean, interval.low, interval.high) == (2.0, 2.0, 2.0)
@@ -800,6 +824,9 @@ def test_a_constant_has_no_spread() -> None:
     ("values", "kwargs", "message"),
     [
         ([], {}, "no values to bootstrap"),
+        ([1.0], {"weights": [0.0]}, "no values to bootstrap"),
+        ([1.0], {"weights": [1.0, 2.0]}, "2 weights for 1 values"),
+        ([1.0], {"weights": [-1.0]}, "weights can't be negative"),
         ([1.0], {"samples": 0}, "samples must be at least 1"),
         ([1.0], {"confidence": 1.0}, "confidence must be between 0 and 1"),
     ],
