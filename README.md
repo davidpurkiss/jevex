@@ -93,7 +93,8 @@ the field's `alternatives`. Your own vision model plugs in as another `ImageProc
 
 ## Locales
 
-Generators read numbers, amounts and dates the way the page's locale writes them. Each
+Generators read numbers, amounts and dates the way the page's locale writes them ("$" on
+an `en-AU` page is AUD, "¥" on a `zh-CN` one CNY). Each
 document's locale comes from, in order: the caller (`Document.from_bytes(..., locale="de-DE")`),
 the page's `<html lang>` (or a `<meta http-equiv="Content-Language">`), and the HTTP
 `Content-Language` header (`Document(content_language=...)`; `SimpleFetcher` and the Scrapy

@@ -58,6 +58,27 @@ def test_swiss_decimal_points_come_with_apostrophe_grouping(locale: str) -> None
     assert conventions.thousands == ",'’"
 
 
+@pytest.mark.parametrize(
+    ("locale", "dollar", "yen"),
+    [
+        (None, "USD", "JPY"),
+        ("en", "USD", "JPY"),
+        ("en-GB", "USD", "JPY"),
+        ("en-US", "USD", "JPY"),
+        ("en-AU", "AUD", "JPY"),
+        ("fr-CA", "CAD", "JPY"),
+        ("es-MX", "MXN", "JPY"),
+        ("zh-CN", "USD", "CNY"),
+        ("zh", "USD", "JPY"),
+        ("ja-JP", "USD", "JPY"),
+    ],
+)
+def test_dollar_and_yen_by_region(locale: str | None, dollar: str, yen: str) -> None:
+    conventions = locale_conventions(locale)
+    assert (conventions.currency("$"), conventions.currency("¥")) == (dollar, yen)
+    assert (conventions.currency("£"), conventions.currency("€")) == ("GBP", "EUR")
+
+
 @pytest.mark.parametrize("locale", [None, "en-GB", "de-DE", "fr-CH", "es-MX", "en-US"])
 def test_other_locales_group_without_apostrophes(locale: str | None) -> None:
     assert not locale_conventions(locale).apostrophe_groups

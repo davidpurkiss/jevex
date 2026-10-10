@@ -247,7 +247,7 @@ class LearnedGenerators:
 # --- synthesis -------------------------------------------------------------------------
 
 NORMALISERS = """\
-  - strip: trim whitespace and surrounding punctuation (text values)
+  - strip: trim whitespace and trailing punctuation (text values)
   - parse_number: the first number in the text ("1,395" -> 1395); {decimal: ","} when the
     text writes a decimal comma ("1.395,5" -> 1395.5; parse_range and parse_money take it too)
   - parse_range: a range of numbers ("5-7" -> [5, 7])
@@ -266,8 +266,7 @@ Type: {type}
 
 Example statement: {statement}
 {section}Its value: {value}
-The words that state it: {evidence}
-
+{evidence}
 The pattern will run on other statements phrased like this one, from documents of the
 same kind. Aim for recall: it should find this kind of value wherever a statement like
 this states it, not only in this statement. It may match other spans too; a later step
@@ -280,7 +279,8 @@ chooses between them.
 {normalisers}"""
 """The default synthesis prompt. Placeholders: ``name``, ``description``, ``type`` (with
 the unit, if any), ``statement``, ``section`` (``"Section: ...\\n"`` or empty), ``value``,
-``evidence``, ``max_length`` and ``normalisers`` (:data:`NORMALISERS`)."""
+``evidence`` (``"The words that state it: ...\\n"``, or empty for an example without an
+evidence span, such as a human one), ``max_length`` and ``normalisers`` (:data:`NORMALISERS`)."""
 
 
 class GeneratorDraft(BaseModel):
@@ -633,7 +633,7 @@ class GeneratorLearner:
     ) -> GeneratorDraft:
         section = section_text(statement.heading_trail)
         value = json.dumps(example.value, default=str, ensure_ascii=False)
-        evidence = example.evidence
+        span = example.evidence
         prompt = self.prompt.format(
             name=spec.name,
             description=spec.description,
@@ -641,7 +641,9 @@ class GeneratorLearner:
             statement=statement.text,
             section=f"Section: {section}\n" if section else "",
             value=value,
-            evidence=statement.text[evidence[0] : evidence[1]] if evidence else value,
+            evidence=f"The words that state it: {statement.text[span[0] : span[1]]}\n"
+            if span
+            else "",
             max_length=MAX_PATTERN_LENGTH,
             normalisers=NORMALISERS,
         )

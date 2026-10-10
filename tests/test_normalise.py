@@ -91,6 +91,18 @@ def test_strip() -> None:
 @pytest.mark.parametrize(
     ("raw", "value"),
     [
+        (".NET ", ".NET"),
+        ("...And Justice for All.", "...And Justice for All"),
+        ("Grey ; .", "Grey"),
+    ],
+)
+def test_strip_keeps_leading_punctuation(raw: str, value: str) -> None:
+    assert strip(raw) == value
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
         ("£18,495", Decimal(18495)),
         ("£1.5m", Decimal(1_500_000)),
         ("£1.5 million", Decimal(1_500_000)),
@@ -140,7 +152,22 @@ def test_parse_date_rejects(raw: str) -> None:
 
 @pytest.mark.parametrize(
     ("raw", "value"),
-    [("5–7", [5, 7]), ("380 to 1,237 litres", [380, 1237]), ("between 4 and 5", [4, 5])],
+    [
+        ("5–7", [5, 7]),
+        ("380 to 1,237 litres", [380, 1237]),
+        ("between 4 and 5", [4, 5]),
+        ("-5 to -2", [-5, -2]),
+        ("\u221210 to +5", [-10, 5]),
+        ("between -5 and 5", [-5, 5]),
+        ("-5–-2 °C", [-5, -2]),
+        ("-5 to-2", [-5, -2]),
+        ("(-5 to 5)", [-5, 5]),
+        ("Range:-5 to 5", [-5, 5]),
+        ("-5--2", [-5, -2]),
+        ("5%-7%", [5, 7]),
+        ("5-7", [5, 7]),
+        ("5kg-7kg", [5, 7]),
+    ],
 )
 def test_parse_range(raw: str, value: list[int]) -> None:
     assert parse_range(raw) == value
@@ -202,6 +229,7 @@ def test_parse_money_with_a_decimal_comma(raw: str, value: Decimal) -> None:
         ("1.200 bis 1.500 kg", [1200, 1500]),
         ("5-7", [5, 7]),
         ("zwischen 4 und 5", [4, 5]),
+        ("-1,5 bis -0,5", [-1.5, -0.5]),
         ("de 4 à 5", [4, 5]),
     ],
 )

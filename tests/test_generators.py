@@ -756,6 +756,36 @@ def test_round_amounts_with_a_dash(locale: str, text: str, raw: str) -> None:
     assert values_in(locale, text, "preis")[raw] == Decimal(18495)
 
 
+class Preis(BaseModel):
+    price: Decimal = Field(description="Price", unit="AUD")
+
+
+@pytest.mark.parametrize(
+    ("locale", "text", "currency"),
+    [
+        ("en-AU", "Price $32,000 drive away", "AUD"),
+        ("en-CA", "Price $32,000", "CAD"),
+        ("fr-CA", "Prix 32.000 $", "CAD"),
+        ("en-US", "Price $32,000", "USD"),
+        ("en", "Price $32,000", "USD"),
+        ("zh-CN", "Price ¥32,000", "CNY"),
+        ("ja-JP", "Price ¥32,000", "JPY"),
+    ],
+)
+def test_dollars_and_yen_are_the_regions_own(locale: str, text: str, currency: str) -> None:
+    [cand] = Money().generate_in(st(text), ANGEBOT.field("preis"), locale)
+    assert cand.normalise[0].model_dump()["parse_money"]["currency"] == currency
+
+
+def test_an_aud_field_takes_dollars_on_an_australian_page_only() -> None:
+    spec = SchemaSpec.from_model(Preis).field("price")
+    [cand] = Money().generate_in(st("Price $32,000"), spec, "en-AU")
+    assert normalise(cand.raw, cand.normalise, spec) == Decimal(32000)
+    [cand] = Money().generate_in(st("Price $32,000"), spec, "en-US")
+    with pytest.raises(NormaliseError, match="amount is in USD, the field wants AUD"):
+        normalise(cand.raw, cand.normalise, spec)
+
+
 def test_swiss_round_amounts_and_apostrophe_grouping() -> None:
     [cand] = Money().generate_in(st("CHF 1’250.– inkl."), ANGEBOT.field("preis"), "de-CH")
     assert cand.raw == "CHF 1’250.–"

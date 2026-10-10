@@ -63,7 +63,6 @@ def _step(name: str, **args: object) -> NormaliserStep:
     return NormaliserStep(name=name, args=dict(args))
 
 
-_CURRENCY_SYMBOLS = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY"}
 _CODES = "GBP|USD|EUR|JPY|CHF|AUD|CAD"
 # "£25k", "£1.5m", "€2bn", and spelled or spaced: "£1.5 million", "EUR 3 bn", "£2 m".
 _ENGLISH = "million|billion|thousand|mn|bn|m"
@@ -207,11 +206,11 @@ def _for_locale(locale: str | None) -> _Patterns:
 _EN_GB = _patterns(EN_GB)
 
 
-def _currency(m: re.Match[str]) -> str:
+def _currency(m: re.Match[str], conventions: LocaleConventions) -> str:
     if m.group("sym"):
-        return _CURRENCY_SYMBOLS[m.group("sym")]
+        return conventions.currency(m.group("sym"))
     if "sym2" in m.re.groupindex and m.group("sym2"):
-        return _CURRENCY_SYMBOLS[m.group("sym2")]
+        return conventions.currency(m.group("sym2"))
     return m.group("c2") or m.group("c3")
 
 
@@ -268,7 +267,7 @@ class Money:
                 m.start(),
                 m.end(),
                 self.id,
-                *patterns.steps(_step("parse_money", currency=_currency(m))),
+                *patterns.steps(_step("parse_money", currency=_currency(m, patterns.conventions))),
             )
             for m in patterns.money.finditer(statement.text)
         ]
@@ -369,7 +368,13 @@ def _number_chain(value: str, patterns: _Patterns) -> list[NormaliserStep] | Non
     if m := patterns.range.search(value):
         found.append((m.start(), 0, _range_steps(m, patterns)))
     if m := patterns.money.search(value):
-        found.append((m.start(), 1, patterns.steps(_step("parse_money", currency=_currency(m)))))
+        found.append(
+            (
+                m.start(),
+                1,
+                patterns.steps(_step("parse_money", currency=_currency(m, patterns.conventions))),
+            )
+        )
     if m := patterns.number_with_unit.search(value):
         unit = canonical(m.group("unit"))
         steps = patterns.steps(_step("parse_number"), _step("unit", **{"from": unit}))

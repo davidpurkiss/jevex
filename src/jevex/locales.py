@@ -75,6 +75,8 @@ class LocaleConventions:
     may put the symbol after the number ("18.495 €"). ``language`` picks the month names,
     multipliers and range words matched on top of English ones. ``apostrophe_groups``:
     thousands may also be grouped with an apostrophe, as in Switzerland ("1’250.50").
+    ``dollar`` and ``yen`` are the currencies "$" and "¥" stand for ("AUD" in Australia,
+    "CNY" in China).
     """
 
     decimal: DecimalMark = "."
@@ -83,6 +85,12 @@ class LocaleConventions:
     currency_after: bool = False
     language: str = "en"
     apostrophe_groups: bool = False
+    dollar: str = "USD"
+    yen: str = "JPY"
+
+    def currency(self, symbol: str) -> str:
+        """The currency code a symbol (£, $, € or ¥) stands for in this locale."""
+        return {"£": "GBP", "$": self.dollar, "€": "EUR", "¥": self.yen}[symbol]
 
     @property
     def thousands(self) -> str:
@@ -142,6 +150,10 @@ _POINT_DECIMAL_REGIONS = {
 """Regions where a decimal-comma language writes a decimal point (de-CH: "1.25 kg")."""
 _APOSTROPHE_REGIONS = frozenset({"CH", "LI"})
 """Regions that group a decimal-point number's thousands with an apostrophe ("1’250.50")."""
+_DOLLARS = {"AU": "AUD", "CA": "CAD", "NZ": "NZD", "HK": "HKD", "SG": "SGD", "MX": "MXN"}
+"""Regions whose own currency "$" stands for; elsewhere it's USD."""
+_YENS = {"CN": "CNY"}
+"""Regions whose own currency "¥" stands for; elsewhere it's JPY."""
 
 MONTH_NAMES: dict[str, dict[str, int]] = {
     "en": {
@@ -413,17 +425,28 @@ def locale_conventions(locale: str | None) -> LocaleConventions:
     a decimal point (``de-CH``, ``es-MX``). A US region (``en-US``, ``es-US``) means a
     decimal point, month-first dates and US gallons. A decimal point in Switzerland or
     Liechtenstein (``de-CH``, ``it-CH``) comes with apostrophe grouping ("1’250.50").
+    "$" and "¥" are the region's own dollar or yen (``en-AU``: AUD, ``zh-CN``: CNY), else
+    USD and JPY.
     """
     if not locale:
         return EN_GB
     language, region = _subtags(locale)
+    dollar = _DOLLARS.get(region, "USD") if region else "USD"
+    yen = _YENS.get(region, "JPY") if region else "JPY"
     if region in _US_REGIONS:
         return LocaleConventions(date_order="mdy", gallon="us", language=language)
     if language in _DECIMAL_COMMA_LANGUAGES and region not in _POINT_DECIMAL_REGIONS.get(
         language, frozenset()
     ):
-        return LocaleConventions(decimal=",", currency_after=True, language=language)
-    return LocaleConventions(language=language, apostrophe_groups=region in _APOSTROPHE_REGIONS)
+        return LocaleConventions(
+            decimal=",", currency_after=True, language=language, dollar=dollar, yen=yen
+        )
+    return LocaleConventions(
+        language=language,
+        apostrophe_groups=region in _APOSTROPHE_REGIONS,
+        dollar=dollar,
+        yen=yen,
+    )
 
 
 _DECIMAL_STEPS = frozenset({"parse_number", "parse_range", "parse_money"})
