@@ -17,8 +17,8 @@ After categorising, each statement is assigned to a field (or none). Then:
   - fields with a unit: for each bare-number candidate (no ``unit`` step) in a statement
     that names another unit of the field's dimension ("Power (kW) · SE: 110" for a field
     in PS), a Choice asking which unit it's in, the field's own unit first. The answer
-    becomes the candidate's ``{unit: {from: ...}}`` step. A statement naming no other
-    unit asks nothing more.
+    becomes the candidate's ``{unit: {from: ...}}`` step, and its confidence caps the
+    selection's. A statement naming no other unit asks nothing more.
 
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
@@ -153,7 +153,7 @@ def _unit_questions(
 
 
 def _in_units(
-    candidates: list[Candidate], units: Mapping[str, str], conventions: LocaleConventions
+    candidates: list[Candidate], units: Mapping[str, ChoiceAnswer], conventions: LocaleConventions
 ) -> list[Candidate]:
     """The candidates, each bare one whose span has an answer in ``units`` with that unit
     as its chain's last step (localised, so mpg is read in the locale's gallons)."""
@@ -161,7 +161,7 @@ def _in_units(
     for cand in candidates:
         unit = units.get(cand.raw)
         if unit is not None and _bare(cand):
-            step = NormaliserStep(name="unit", args={"from": unit})
+            step = NormaliserStep(name="unit", args={"from": unit.choice})
             chain = [*cand.normalise, *localise_steps([step], conventions)]
             cand = cand.model_copy(update={"normalise": chain})
         out.append(cand)
@@ -288,6 +288,15 @@ class CandidateStage:
                             )
 
 
+def candidate_locale(ctx: Context) -> str | None:
+    """The locale the pipeline's candidate stage is configured with, if any: what a
+    document without a locale of its own is read in."""
+    if ctx.pipeline is None:
+        return None
+    stage = next((s for s in ctx.pipeline if s.name == "candidates"), None)
+    return stage.locale if isinstance(stage, CandidateStage) else None
+
+
 @dataclass
 class _Ask:
     """One (schema, field) about one statement: its questions and who wants the answer."""
@@ -331,7 +340,7 @@ class SelectStage:
 
     async def run(self, ctx: Context) -> None:
         plans = self._plan(ctx)
-        conventions = locale_conventions(ctx.locale)
+        conventions = locale_conventions(ctx.locale or candidate_locale(ctx))
         replies = await gather(
             ctx.jev.ask(statement_state(statement), _merged(asks))
             for statement, asks in plans.values()
@@ -346,7 +355,7 @@ class SelectStage:
                     if key.startswith(ask.prefix)
                 }
                 units = {
-                    raw: answer.choice
+                    raw: answer
                     for i, raw in enumerate(ask.units)
                     if isinstance(answer := answers.get(f"{ask.unit_prefix}{i}"), ChoiceAnswer)
                 }
@@ -395,7 +404,7 @@ class SelectStage:
         ask: _Ask,
         statement: Statement,
         answers: dict[str, Answer],
-        units: dict[str, str],
+        units: dict[str, ChoiceAnswer],
         conventions: LocaleConventions,
         order: int,
         outcomes: dict[tuple[str, str, str], list[_Outcome]],
@@ -407,6 +416,10 @@ class SelectStage:
             if units:
                 candidates = run.candidates[key] = _in_units(candidates, units, conventions)
             selection = self.selector.selection(spec, candidates, answers)
+            if selection.candidate and (unit := units.get(selection.candidate.raw)):
+                # The value is only as sure as the unit it's read in.
+                confidence = min(selection.confidence, unit.confidence)
+                selection = selection.model_copy(update={"confidence": confidence})
             for scope in ask.scopes:
                 run.selections[(scope, spec.name, statement.id)] = selection
             return

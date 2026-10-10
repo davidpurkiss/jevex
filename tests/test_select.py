@@ -21,11 +21,11 @@ from jevex.entities import EntityScope
 from jevex.errors import PartError
 from jevex.generators import GeneratorRegistry, GeneratorSpec, RegexGenerator
 from jevex.interfaces import CandidateSelector, ParsedDocument, Scope
-from jevex.jev import Choice, ChoiceAnswer, JevResponse, Noul, Question
+from jevex.jev import Choice, ChoiceAnswer, JevResponse, JSONContent, Noul, Question
 from jevex.layout import MAX_SECTION_CHARS, Component
 from jevex.learn import GeneratorSnapshot
 from jevex.normalise import NormaliseStage
-from jevex.pipeline import VisionValue
+from jevex.pipeline import Pipeline, VisionValue
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
     CandidateStage,
@@ -676,7 +676,7 @@ async def test_a_bare_number_is_read_in_the_unit_jev_picks(unit: str, value: flo
     fake = (
         FakeJev()
         .choice("Which of these is the power", "110", confidence=0.9)
-        .choice('Which unit is "110" in?', unit)
+        .choice('Which unit is "110" in?', unit, confidence=0.95)
     )
     meta = await extract_engine(fake, "Power (kW) · SE: 110", "power_ps")
     assert only_call_questions(fake) == {
@@ -692,31 +692,50 @@ async def test_a_bare_number_is_read_in_the_unit_jev_picks(unit: str, value: flo
     assert meta.confidence == 0.9
 
 
-async def test_every_bare_span_gets_its_own_unit_question() -> None:
+async def test_a_value_is_only_as_confident_as_its_unit() -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the power", "110", confidence=0.9)
+        .choice('Which unit is "110" in?', "kW", confidence=0.55)
+    )
+    meta = await extract_engine(fake, "Power (kW) · SE: 110", "power_ps")
+    assert meta.value == pytest.approx(149.558, abs=0.001)
+    assert meta.confidence == 0.55
+
+
+async def test_each_bare_span_gets_its_own_unit_question() -> None:
     fake = (
         FakeJev()
         .choice("Which of these is the power", "150", confidence=0.9)
-        .choice('Which unit is "150" in?', "PS")
         .choice('Which unit is "110" in?', "kW")
+        .choice('Which unit is "150" in?', "PS")
     )
     ctx = context(
-        fake, [st("s1", "Power: 150 / 110 kW, 250 Nm")], {"s1": "power_ps"}, models=(Engine,)
+        fake,
+        [st("s1", "Power (kW): 110 / 150 / 184 hp, 250 Nm")],
+        {"s1": "power_ps"},
+        models=(Engine,),
     )
     await run_both(ctx)
-    questions = only_call_questions(fake)
-    assert {k: q.instructions for k, q in questions.items() if "#unit" in k} == {
-        "Engine.power_ps#unit0": 'Which unit is "150" in?',
+    units = {k: q for k, q in only_call_questions(fake).items() if "#unit" in k}
+    # "184 hp" says its unit already; Nm is torque, so it isn't offered.
+    options: dict[str, JSONContent | None] = {"PS": None, "kW": None, "hp": None}
+    assert units == {
+        "Engine.power_ps#unit0": Choice(instructions='Which unit is "110" in?', options=options),
+        "Engine.power_ps#unit1": Choice(instructions='Which unit is "150" in?', options=options),
     }
-    run = ctx.schemas["Engine"]
-    chains = {c.raw: c.normalise for c in run.candidates[("s1", "power_ps")]}
-    # "110 kW" says its unit already; "250 Nm" is torque, not power.
+    chains = {c.raw: c.normalise for c in ctx.schemas["Engine"].candidates[("s1", "power_ps")]}
+    assert chains["110"] == [
+        NormaliserStep(name="parse_number"),
+        NormaliserStep(name="unit", args={"from": "kW"}),
+    ]
     assert chains["150"] == [
         NormaliserStep(name="parse_number"),
         NormaliserStep(name="unit", args={"from": "PS"}),
     ]
-    assert chains["110 kW"] == [
+    assert chains["184 hp"] == [
         NormaliserStep(name="parse_number"),
-        NormaliserStep(name="unit", args={"from": "kW"}),
+        NormaliserStep(name="unit", args={"from": "hp"}),
     ]
 
 
@@ -761,6 +780,23 @@ async def test_mpg_is_read_in_the_pages_gallons() -> None:
     )
     us = Document.from_bytes(b"<p/>", url="https://example.com", locale="en-US")
     meta = await extract_engine(fake, "Economy (mpg) · Combined: 40", "economy", document=us)
+    assert meta.value == pytest.approx(235.214583 / 40)
+
+
+async def test_mpg_is_read_in_the_candidate_stages_gallons_without_a_page_locale() -> None:
+    fake = (
+        FakeJev()
+        .choice("Which of these is the fuel economy", "40", confidence=0.9)
+        .choice('Which unit is "40" in?', "mpg")
+    )
+    ctx = context(
+        fake, [st("s1", "Economy (mpg) · Combined: 40")], {"s1": "economy"}, models=(Engine,)
+    )
+    candidates = CandidateStage(locale="en-US")
+    ctx.pipeline = Pipeline([candidates, SelectStage(), NormaliseStage()])
+    for stage in ctx.pipeline:
+        await stage.run(ctx)
+    meta = ctx.schemas["Engine"].fields["doc"]["economy"]
     assert meta.value == pytest.approx(235.214583 / 40)
 
 
