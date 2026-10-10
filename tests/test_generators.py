@@ -21,6 +21,7 @@ from jevex.generators import (
     Year,
     default_registry,
 )
+from jevex.generators.builtin import MAX_PHRASE_WORDS
 from jevex.generators.regex import MAX_PATTERN_LENGTH
 from jevex.interfaces import (
     CandidateGenerator,
@@ -324,26 +325,64 @@ def test_key_value_money_in_another_currency_fails_validation() -> None:
 def test_noun_phrases_split_on_stopwords_and_punctuation() -> None:
     assert raws(NounPhrase(), "Available in Moonstone Grey metallic and Pure White") == [
         "Available",
+        "Moonstone",
+        "Moonstone Grey",
         "Moonstone Grey metallic",
+        "Grey",
+        "Grey metallic",
+        "metallic",
+        "Pure",
         "Pure White",
+        "White",
+    ]
+
+
+def test_noun_phrases_propose_every_part_of_a_name_run() -> None:
+    """Nothing marks where the make ends and the model starts, so Jev gets each part."""
+    assert raws(NounPhrase(), "Delmaro Kestrova SE") == [
+        "Delmaro",
+        "Delmaro Kestrova",
+        "Delmaro Kestrova SE",
+        "Kestrova",
+        "Kestrova SE",
+        "SE",
     ]
 
 
 def test_noun_phrases_keep_numbers_with_thousands_separators_whole() -> None:
     assert raws(NounPhrase(), "Price £18,495, or 25k GBP on finance") == [
+        "Price",
         "Price £18,495",
+        "18,495",
+        "25k",
         "25k GBP",
+        "GBP",
         "finance",
     ]
 
 
 def test_noun_phrases_skip_pure_numbers_and_chunk_long_runs() -> None:
     assert raws(NounPhrase(), "42, 7.5") == []
+    assert raws(NounPhrase(), "Kestrova 2.0 SE") == [
+        "Kestrova",
+        "Kestrova 2.0",
+        "Kestrova 2.0 SE",
+        "2.0 SE",
+        "SE",
+    ]
     long = " ".join(f"Word{i}" for i in range(12))
     assert raws(NounPhrase(), long) == [
         " ".join(f"Word{i}" for i in range(8)),
         " ".join(f"Word{i}" for i in range(8, 12)),
     ]
+
+
+def test_a_run_of_max_phrase_words_still_gives_every_sub_run() -> None:
+    n = MAX_PHRASE_WORDS
+    words = [f"Word{i}" for i in range(n)]
+    found = raws(NounPhrase(), " ".join(words))
+    assert found == [" ".join(words[i:j]) for i in range(n) for j in range(i + 1, n + 1)]
+    assert len(found) == n * (n + 1) // 2
 
 
 # --- declarative regex generators ------------------------------------------------------
