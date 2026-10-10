@@ -719,7 +719,7 @@ async def test_extractor_lays_out_only_the_pdf_pages_the_gate_passed() -> None:
         doc.add_text(DocItemLabel.TEXT, "Performance", prov=prov(1))
         return doc
 
-    question = "Does this document describe a car brochure page?"
+    question = "Does this document include a car brochure page? It may include several."
     fake = (
         FakeJev(strict=True)
         .noul(question, p=0.9, state="Skoda Octavia Estate")

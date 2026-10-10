@@ -1,4 +1,5 @@
 import io
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -39,10 +40,13 @@ from jevex.jev import (
     UnexpectedAnswerError,
     estimate_tokens,
 )
-from jevex.testing import FakeJev
+from jevex.testing import RECORD_ENV, CassetteMissError, FakeJev, cassette, stale_recording
+from jevex.testsite import generate, render
+from jevex.testsite.schemas import VehicleSpec
 
-CAR_Q = "Does this document describe a car's technical specification?"
+CAR_Q = "Does this document include a car's technical specification? It may include several."
 BOOK_Q = "Does this document list books for sale?"
+BROCHURE_Q = "Does this document include a car brochure page? It may include several."
 
 
 class Car(BaseModel):
@@ -277,11 +281,7 @@ async def test_page_unit_asks_each_page_and_keeps_page_scores() -> None:
 
     # The blank third page isn't asked, and every page's questions go in one request.
     assert [call.state for call in fake.calls] == ["Welcome", "Technical data", "Prices"]
-    assert all(
-        call.questions
-        == {"Brochure": Noul(instructions="Does this document describe a car brochure page?")}
-        for call in fake.calls
-    )
+    assert all(call.questions == {"Brochure": Noul(instructions=BROCHURE_Q)} for call in fake.calls)
     assert decisions == {
         "Brochure": GateDecision(
             p=0.8, passed=True, pages={1: 0.1, 2: 0.8, 4: 0.3}, passed_pages=[2]
@@ -476,7 +476,7 @@ def test_pdf_reader_raises_on_a_pdf_it_cannot_open() -> None:
 
 
 async def test_default_gate_asks_about_each_pdf_page() -> None:
-    brochure_q = "Does this document describe a car brochure page?"
+    brochure_q = "Does this document include a car brochure page? It may include several."
     fake = (
         FakeJev(strict=True)
         .noul(CAR_Q, p=0.9, state=f"{SPEC_PAGE_1}\n\n{SPEC_PAGE_2}")
@@ -550,3 +550,39 @@ async def test_a_page_without_a_working_charset_reads_as_windows_1252() -> None:
     assert call.state == "café £20"
     assert isinstance(call.state, str)
     call.state.encode("utf-8")  # raises on lone surrogates
+
+
+# --- the default question against real Jev, replayed from a recording ------------------
+
+GATE_CASSETTE = Path(__file__).parent / "fixtures" / "gate" / "jev-cassette.json"
+
+
+async def test_the_default_question_passes_pages_holding_several_records() -> None:
+    """#242: a docstring describes one record ("...for one vehicle variant"), and asked
+    whether a four-trim page describes that, real Jev said no (p = 0.15). The question now
+    allows several. Recorded with ``JEVEX_RECORD=1 TYPESAFE_API_KEY=... uv run pytest
+    tests/test_gate.py -k several``; HTML pages only, so the requests match everywhere."""
+    if not GATE_CASSETTE.exists() and os.environ.get(RECORD_ENV) != "1":
+        pytest.skip("no recording yet; record with JEVEX_RECORD=1 TYPESAFE_API_KEY=...")
+    pages = {p.path: p for p in render(generate(42))}
+    books = Path(__file__).parent / "fixtures" / "books" / "a-light-in-the-attic_1000.html"
+    docs = {
+        path: Document.from_bytes(pages[path].content, content_type="text/html")
+        for path in ("specs/delmaro-kestrova-table.html", "specs/delmaro-kestrova-details.html")
+    }
+    assert {len(pages[path].records) for path in docs} == {4}
+    docs["books"] = Document.from_bytes(books.read_bytes(), content_type="text/html")
+    jev = JevClient(cassette(GATE_CASSETTE))
+    spec = [SchemaSpec.from_model(VehicleSpec)]
+    try:
+        decisions = {
+            path: (await NoulDocumentGate().gate(d, spec, jev)) for path, d in docs.items()
+        }
+    except CassetteMissError as exc:
+        stale_recording(str(exc))
+    passed = {path: d["VehicleSpec"].passed for path, d in decisions.items()}
+    assert passed == {
+        "specs/delmaro-kestrova-table.html": True,
+        "specs/delmaro-kestrova-details.html": True,
+        "books": False,
+    }

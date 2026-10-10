@@ -335,7 +335,7 @@ async def test_extractor_lays_out_the_cleaned_document() -> None:
             assert ctx.parsed is not None
             seen.append(ctx.parsed.root)
 
-    fake = FakeJev().noul("Does this document describe a car?", p=0.9)
+    fake = FakeJev().noul("Does this document include a car? It may include several.", p=0.9)
     pipeline: Pipeline = default_pipeline().append(Capture())
     async with Extractor([Car], jev=fake.client(), pipeline=pipeline) as ex:
         await ex.extract(html("<nav>Menu</nav><p>Golf</p>"))

@@ -63,6 +63,8 @@ class SchemaConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     document_question: str | None = None
+    """The document gate's question, replacing "Does this document include {description}?
+    It may include several." """
     categorise_question: str | None = None
     key_path_question: str | None = None
     """Template for the structured-data question, with ``{path}`` and ``{example}``."""
@@ -296,9 +298,14 @@ class SchemaSpec:
         return {k: tuple(v) for k, v in out.items()}
 
     def document_gate_question(self) -> Noul:
+        """The document gate's Noul: ``document_question``, else the docstring's first
+        sentence. A docstring describes one record, so the question says a document may hold
+        several: asked whether a four-trim spec page "describes ... one vehicle variant",
+        Jev rightly says no (#242)."""
+        description = _lower_first(_first_sentence(self.description))
         return Noul(
             instructions=self.config.document_question
-            or f"Does this document describe {_lower_first(_first_sentence(self.description))}?"
+            or f"Does this document include {description}? It may include several."
         )
 
     def component_gate_questions(self) -> dict[str, Noul]:

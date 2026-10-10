@@ -54,7 +54,7 @@ Most documents only take the left-hand path. The right-hand column runs when sel
 | --- | --- | --- | --- | --- |
 | 1 | Fetch (optional) | `Fetcher` | `SimpleFetcher` (httpx, honours robots.txt) | none |
 | 2 | Clean | `Cleaner` | Boilerplate stripper (nav, footer, cookie banners, scripts) | none |
-| 3 | Document gate | `DocumentGate` | One Noul per registered schema, per document or per PDF page | "Does this document describe {schema description}?" |
+| 3 | Document gate | `DocumentGate` | One Noul per registered schema, per document or per PDF page | "Does this document include {schema description}? It may include several." |
 | 4 | Structured data | `StructuredExtractor` | JSON-LD, microdata, embedded app JSON | Choice: which field does this key path hold? |
 | 5 | Layout | `LayoutParser` | HTML DOM segmenter; Docling for PDF | none |
 | 6 | Images | `ImageProcessor` | OCR; vision models as plugins | none |
@@ -115,7 +115,7 @@ class VehicleSpec(BaseModel):
 
 **Generated questions**
 
-- Document gate: the schema docstring, or `document_question` if given. It runs once per document by default, or per page for long PDFs (gate\_unit="page"), so a 40-page brochure only processes its spec pages.
+- Document gate: the schema docstring, or `document_question` if given. A docstring describes one record, so the question adds "It may include several": without it, Jev rules out a page listing four variants of "one vehicle variant" (#242; wordings compared in `benchmarks/gate_wording/`). It runs once per document by default, or per page for long PDFs (gate\_unit="page"), so a 40-page brochure only processes its spec pages.
 - Component gate: one Noul per field group (fields sharing a `group`, or one group per field by default).
 - Categorise: one Choice per statement, options = field descriptions + "none of these".
 - Select: "Which of these is the {description}?", options = candidates + "none".
