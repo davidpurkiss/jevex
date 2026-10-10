@@ -191,6 +191,27 @@ async def test_no_candidates_falls_back_and_a_verified_answer_is_used() -> None:
     assert example.document_source == "example.com"  # for the learner's generator scoping
 
 
+async def test_a_table_header_never_falls_back() -> None:
+    # "0-62 mph (s)" heading a row: Jev categorises it as the field, and it holds no value.
+    header = Statement(
+        id="h1", text="0-62 mph (s)", kind="table_header", component_id="c1", location=LOC
+    )
+    cell = Statement(
+        id="r1", text="0-62 mph (s) · SE: 9.1", kind="table_cell", component_id="c1", location=LOC
+    )
+    fake = FakeJev(strict=True).noul("The statement states", p=0.95)
+    ctx = context(fake, [header, cell], {"h1": "zero_to_62_s", "r1": "zero_to_62_s"})
+    run = ctx.schemas["Car"]
+    stage = FallbackStage()
+    spec = SPEC.field("zero_to_62_s")
+    # Neither has a candidate; only the cell asks the LLM.
+    assert stage.trigger(run, "doc", header, spec) is None
+    assert stage.trigger(run, "doc", cell, spec) == "no_candidates"
+    ctx.extraction_llm = model = llm(value=9.1, evidence="9.1")
+    await stage.run(ctx)
+    assert [c.prompt.count("Statement: 0-62 mph (s) · SE: 9.1") for c in model.calls] == [1]
+
+
 @pytest.mark.parametrize(
     ("content", "locale"), [(b'<html lang="de-DE"><p/></html>', "de-DE"), (b"<p/>", None)]
 )

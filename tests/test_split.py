@@ -370,7 +370,7 @@ def test_every_piece_of_a_cut_table_cell_keeps_its_headers() -> None:
         ],
         location=DomLocation(dom_path="/html/body/table"),
     )
-    [cell] = table_statements(table)
+    [cell] = [s for s in table_statements(table) if s.kind == "table_cell"]
     pieces = cut_statement(cell, 60)
     assert len(pieces) == 5
     assert all(re.match(r"Notes · SE: (lorem|ipsum)", p.text) and len(p.text) <= 60 for p in pieces)
