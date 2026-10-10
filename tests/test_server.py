@@ -721,9 +721,7 @@ async def test_a_hung_store_leaves_metrics_without_run_headroom(
 ) -> None:
     import jevex.server as server
     from jevex import Budgets, RunBudget
-    from jevex.llm import reset_process_llm_cost
 
-    reset_process_llm_cost()  # other tests' calls
     monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
 
     class Hangs(SQLiteStore):
@@ -769,10 +767,8 @@ async def test_metrics_report_budget_headroom(
     stage: FindValues, fake_jev: FakeJev, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from jevex import Budgets, RunBudget
-    from jevex.llm import reset_process_llm_cost
     from jevex.store import SpendEntry
 
-    reset_process_llm_cost()  # other tests' calls
     monkeypatch.setenv("JEVEX_LLM_MAX_COST_USD", "2")
     store = SQLiteStore(":memory:")
     budgets = Budgets(run=RunBudget(max_spend=5.0, period="week", max_jev_spend=1.0))
@@ -809,9 +805,6 @@ async def test_a_misconfigured_process_cap_keeps_the_other_headroom(
     bad_ledger_file: bool,
     logged: str,
 ) -> None:
-    from jevex.llm import reset_process_llm_cost
-
-    reset_process_llm_cost()  # other tests' calls
     monkeypatch.setenv("JEVEX_JEV_MAX_COST_USD", jev_cap)
     if bad_ledger_file:  # the LLM cap reads the same file, so it's left out too
         ledger_file = tmp_path / "ledger"

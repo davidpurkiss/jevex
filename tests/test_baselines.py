@@ -1,6 +1,6 @@
 import json
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -47,8 +47,6 @@ from jevex.llm import (
     LLMImage,
     LLMResponse,
     LLMUsage,
-    process_llm_cost,
-    reset_process_llm_cost,
 )
 from jevex.locales import document_locale
 from jevex.schema import Field
@@ -339,17 +337,13 @@ def test_pinned_llm_builds_the_providers_adapter_at_the_pinned_prices(
 
 
 def test_charge_records_a_tools_usage_at_the_pinned_prices(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
 ) -> None:
     ledger = tmp_path / "ledger"
     monkeypatch.setenv("JEVEX_SPEND_LEDGER", str(ledger))
-    reset_process_llm_cost()
-    try:
-        assert charge_usage(HAIKU, 1_000_000, 100_000) == pytest.approx(1.5)
-        assert process_llm_cost() == pytest.approx(1.5)
-        assert ledger.read_text() == "llm 1.500000000\n"
-    finally:
-        reset_process_llm_cost()
+    assert charge_usage(HAIKU, 1_000_000, 100_000) == pytest.approx(1.5)
+    assert llm_spent() == pytest.approx(1.5)
+    assert ledger.read_text() == "llm 1.500000000\n"
 
 
 # --- running ---------------------------------------------------------------------------
@@ -785,16 +779,14 @@ def crawl4ai(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setitem(sys.modules, "crawl4ai", module)
     monkeypatch.setitem(sys.modules, "crawl4ai.async_crawler_strategy", strategies)
     monkeypatch.setattr(_Crawl4AI, "fail", None)
-    reset_process_llm_cost()
-    yield _script("crawl4ai_baseline")
-    reset_process_llm_cost()
+    return _script("crawl4ai_baseline")
 
 
 HTML_INPUT = BaselineInput(Document.from_bytes(b"<html><h1>Dune</h1></html>"), "# Dune")
 
 
 async def test_crawl4ai_merges_blocks_and_charges_every_call(
-    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch
+    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
 ) -> None:
     monkeypatch.setattr(
         _Crawl4AI,
@@ -816,7 +808,7 @@ async def test_crawl4ai_merges_blocks_and_charges_every_call(
     }
     assert (output.calls, output.input_tokens, output.output_tokens) == (2, 1500, 150)
     assert output.cost == pytest.approx(HAIKU.cost(1500, 150))
-    assert process_llm_cost() == pytest.approx(HAIKU.cost(1500, 150))
+    assert llm_spent() == pytest.approx(HAIKU.cost(1500, 150))
 
 
 async def test_crawl4ai_fails_a_document_only_when_every_chunk_failed(
@@ -831,14 +823,14 @@ async def test_crawl4ai_fails_a_document_only_when_every_chunk_failed(
 
 
 async def test_crawl4ai_charges_calls_made_before_the_crawl_failed(
-    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch
+    crawl4ai: Any, monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
 ) -> None:
     monkeypatch.setattr(_Crawl4AI, "usages", [_TokenUsage(1000, 100)])
     monkeypatch.setattr(_Crawl4AI, "fail", RuntimeError("connection reset"))
     system = crawl4ai.Crawl4AIBaseline(BaselineSetup(BOOK_SPECS, "Extract books.", HAIKU))
     with pytest.raises(RuntimeError, match="connection reset"):
         await system.extract(HTML_INPUT)
-    assert process_llm_cost() == pytest.approx(HAIKU.cost(1000, 100))
+    assert llm_spent() == pytest.approx(HAIKU.cost(1000, 100))
 
 
 class _ScrapeGraph:
@@ -891,13 +883,11 @@ def scrapegraphai(monkeypatch: pytest.MonkeyPatch) -> Any:
             setattr(module, attr, value)
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(_ScrapeGraph, "seen", [])
-    reset_process_llm_cost()
-    yield _script("scrapegraphai_baseline")
-    reset_process_llm_cost()
+    return _script("scrapegraphai_baseline")
 
 
 async def test_scrapegraphai_counts_and_charges_each_response(
-    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch
+    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
 ) -> None:
     monkeypatch.setattr(_ScrapeGraph, "answer", {"Book": [{"title": "Dune", "rating": "NA"}]})
     monkeypatch.setattr(
@@ -908,7 +898,7 @@ async def test_scrapegraphai_counts_and_charges_each_response(
     assert output.records == {"Book": [{"entity": "1", "values": {"title": "Dune"}}]}
     assert (output.calls, output.input_tokens, output.output_tokens) == (2, 1000, 100)
     assert output.cost == pytest.approx(HAIKU.cost(1000, 100))
-    assert process_llm_cost() == pytest.approx(HAIKU.cost(1000, 100))
+    assert llm_spent() == pytest.approx(HAIKU.cost(1000, 100))
     (call,) = _ScrapeGraph.seen
     assert call["prompt"] == "Extract."
     assert call["source"] == "<html><h1>Dune</h1></html>"
@@ -918,14 +908,14 @@ async def test_scrapegraphai_counts_and_charges_each_response(
 
 
 async def test_scrapegraphai_fails_a_document_it_returns_an_error_for(
-    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch
+    scrapegraphai: Any, monkeypatch: pytest.MonkeyPatch, llm_spent: Callable[[], float]
 ) -> None:
     monkeypatch.setattr(_ScrapeGraph, "answer", {"error": "timed out", "raw_response": ""})
     monkeypatch.setattr(_ScrapeGraph, "responses", [{"input_tokens": 10, "output_tokens": 0}])
     system = scrapegraphai.ScrapeGraphAIBaseline(BaselineSetup(BOOK_SPECS, "Extract.", HAIKU))
     with pytest.raises(scrapegraphai.ToolError, match="timed out"):
         await system.extract(HTML_INPUT)
-    assert process_llm_cost() == pytest.approx(HAIKU.cost(10, 0))
+    assert llm_spent() == pytest.approx(HAIKU.cost(10, 0))
     monkeypatch.setattr(_ScrapeGraph, "answer", ["not", "an", "object"])
     with pytest.raises(scrapegraphai.ToolError, match="expected an object, got list"):
         await system.extract(HTML_INPUT)

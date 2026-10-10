@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -25,11 +25,35 @@ def _offline_tests_ignore_live_spend(
 ) -> None:
     """Agent runs set a spend ledger and caps for real calls. Fake and replayed calls must
     neither be charged to the ledger nor fail because the week's budget is spent, so only
-    live tests and cassette recording keep them. Tests that need a cap set their own."""
+    live tests and cassette recording keep them. Tests that need a cap set their own.
+
+    Offline tests also start with this process's Jev and LLM spend counters at zero, put
+    back afterwards: a test asserting spend sees only its own, and spend from before it
+    still counts against the caps."""
     if "live" in request.keywords or os.environ.get("JEVEX_RECORD") == "1":
         return
     for name in SPEND_ENV:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("jevex.jev._process_cost", 0.0)
+    monkeypatch.setattr("jevex.llm._process_cost", 0.0)
+
+
+@pytest.fixture
+def jev_spent() -> Callable[[], float]:
+    """Reads this process's estimated Jev spend, the counter ``JEVEX_JEV_MAX_COST_USD``
+    is checked against."""
+    from jevex import jev
+
+    return lambda: jev._process_cost  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.fixture
+def llm_spent() -> Callable[[], float]:
+    """Reads this process's LLM spend, the counter ``JEVEX_LLM_MAX_COST_USD`` is checked
+    against."""
+    from jevex import llm
+
+    return lambda: llm._process_cost  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.fixture
