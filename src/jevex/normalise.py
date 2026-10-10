@@ -347,7 +347,10 @@ def _month_nearest_year(parts: list[str]) -> str:
 
 
 def _four_digit_year(yy: int) -> int:
-    """Two-digit years pivot at 70: 00–69 → 2000s, 70–99 → 1900s."""
+    """Two-digit years pivot at 70: 00–69 → 2000s, 70–99 → 1900s.
+
+    Jev picks the span but never sees how it's read, and "03/04/71" doesn't say its
+    century, so a fixed pivot decides."""
     return 2000 + yy if yy < 70 else 1900 + yy
 
 

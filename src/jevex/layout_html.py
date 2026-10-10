@@ -753,7 +753,10 @@ def _heading_level(node: _Node) -> int:
 
 def _is_layout_table(table: _Node) -> bool:
     """Whether a table arranges the page rather than holding data: it has a nested table,
-    or headings in its data cells (a heading in a ``th`` is just a header)."""
+    or headings in its data cells (a heading in a ``th`` is just a header).
+
+    The nesting and headings are a guess at the author's intent, made in code because the
+    component tree has to exist before Jev can be asked about any of it."""
     if table.attrs.get("role", "").strip().lower() in ("presentation", "none"):
         return True
     pending = [(child, False) for child in table.elements()]

@@ -585,8 +585,12 @@ def text_components(
     below the one before, left-aligned, the same height) join into a paragraph; a
     ``Label: value`` line stays a paragraph of its own. A short line at least
     :data:`HEADING_SCALE` times the median line height is a heading, opening a section
-    that holds the lines after it, up to the next heading. With a piece lacking a box,
-    there's no layout to read, and each piece is a paragraph, in the order given.
+    that holds the lines after it, up to the next heading. That a tall line titles the
+    ones below is a guess, made in code because an image's statements and their heading
+    trails have to exist before Jev can be asked about them; a heading proposed as an
+    entity's label is still checked by :class:`~jevex.resolve.MultiEntity`'s Noul (unless
+    ``confirm=False``). With a piece lacking a box, there's no layout to read, and each
+    piece is a paragraph, in the order given.
 
     Ids are ``<image id>-t<n>`` from ``n = start``, in reading order.
     """

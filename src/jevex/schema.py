@@ -510,7 +510,11 @@ _LEADING_VERBS = frozenset(
 
 def _claim(field: FieldSpec) -> tuple[Literal["clause", "noun"], str]:
     """How a bool's description reads: as a claim ("the book is in stock", "it has an
-    automatic gearbox") or as a thing ("sunroof")."""
+    automatic gearbox") or as a thing ("sunroof").
+
+    A word-list guess, made in code because it reads the schema author's description,
+    not a document: it words the questions before any is asked, and a wrong reading is
+    fixed with ``Questions(select=..., verify=..., component_gate=...)``."""
     phrase = field.phrase
     words = [w.lower() for w in phrase.split()]
     if words and words[0] in _LEADING_VERBS:

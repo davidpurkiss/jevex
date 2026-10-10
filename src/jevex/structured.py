@@ -63,7 +63,13 @@ DATA_ATTRIBUTE_NOISE = re.compile(
 )
 """``data-*`` attribute names (without ``data-``) that carry no record data: test ids,
 framework bookkeeping, Bootstrap/Stimulus hooks, analytics tags and lazy-loading. Matched
-against the whole name."""
+against the whole name.
+
+The generic words among them (``event.*``, ``component.*``, ``target``) are a guess that
+a name is plumbing. It's made in code because reading comes before Jev is asked: a page
+can carry hundreds of these blobs, and each one kept costs key-path questions and a place
+in :data:`~jevex.keypaths.MAX_BLOBS`. Give :class:`EmbeddedDataReader` another
+``data_attribute_noise`` (or ``None``) to keep them."""
 
 _JSON_TYPE = re.compile(r"application/(?:[-\w.]+\+)?json", re.IGNORECASE)
 _JS_TYPES = frozenset({"", "module", "text/javascript", "application/javascript"})

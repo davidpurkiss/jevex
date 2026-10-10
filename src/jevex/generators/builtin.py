@@ -152,7 +152,11 @@ def _round(conventions: LocaleConventions) -> str:
 
 
 def _range(num: str, units: str, language: str) -> str:
-    """Ranges with a dash or "to", or "between … and", plus the language's own words."""
+    """Ranges with a dash or "to", or "between … and", plus the language's own words.
+
+    A dash between numbers can also be a name or a score ("0-62 mph", "3-1"), and
+    Spanish and Italian "a" join much else: the range is only proposed, and Jev's Choice
+    tells the readings apart."""
     to, between, and_ = "", "between", "and"
     if words := RANGE_WORDS.get(language):
         to = rf"|\s+(?i:{_words(words.to)})\s+"
@@ -324,7 +328,12 @@ _YEAR = re.compile(r"(?:(?<=MY)|(?<![\w.,]))(?:19|20)\d{2}(?![\w]|[.,]\d)")
 
 @dataclass(frozen=True)
 class Year:
-    """Four-digit years 1900–2099, including model years ("2024 model year")."""
+    """Four-digit years 1900–2099, including model years ("2024 model year").
+
+    Earlier four-digit numbers aren't proposed: in a statement they are far more often
+    quantities ("1498 cc", "1600 kg") than years, and each would be one more option for
+    Jev to rule out.
+    """
 
     id: str = "year"
     scope: Scope = field(default_factory=lambda: Scope(kinds=frozenset({"date", "number"})))
@@ -586,6 +595,15 @@ class NounPhrase:
     Kestrova SE" (a make, a model and a trim), so a run of up to ``MAX_PHRASE_WORDS``
     words also gives every contiguous part of it, and Jev picks. A longer run is cut
     into consecutive chunks of that many words, with no sub-runs.
+
+    Where runs break is a guess about where values end, made in code because Jev can
+    only pick spans, not propose them. Each sub-run is an option in select's Choice, and
+    their number grows with the square of a run's length, so runs break wherever a value
+    rarely goes on: at punctuation, at a full stop followed by a space ("St. Ives" breaks
+    too), and at :data:`STOPWORDS` (English function words, on every page). A name that
+    holds one ("Lord of the Rings") comes whole only from another generator
+    (:class:`KeyValue` for a ``Label: value`` pair or a table cell under its headers,
+    :class:`WholeStatement` for a short statement) or the LLM fallback.
     """
 
     id: str = "noun_phrase"
