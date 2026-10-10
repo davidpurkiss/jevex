@@ -29,8 +29,11 @@ class VehicleSpec(BaseModel):
     automatic: bool = Field(description="has an automatic gearbox")
 
 
+# The docstring is the document gate's question, so it names what a listing has and a spec
+# page that quotes a price doesn't: "A used car offered for sale." gave the kv and prose spec
+# pages p up to 0.83 (#261, benchmarks/gate_wording/listing_docstring.py).
 class Listing(BaseModel):
-    """A used car offered for sale."""
+    """A used car advertised for sale, with its mileage and year of registration."""
 
     make: str = Field(description="Manufacturer (make) name")
     model: str = Field(description="Model name")

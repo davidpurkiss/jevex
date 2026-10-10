@@ -1,0 +1,286 @@
+{
+ "wording": "Does this document include {d}? It may include several.",
+ "docstrings": {
+  "offered": "a used car offered for sale",
+  "seller_mileage": "a specific used car advertised for sale by a seller, with its mileage",
+  "advert_mileage_price": "a seller's advert for one used car, giving its mileage and asking price",
+  "mileage_year": "a used car advertised for sale, with its mileage and year of registration",
+  "miles_done": "a second-hand car a seller is advertising, with how many miles it has done",
+  "advert_mileage": "an advert for a particular used car for sale, stating its mileage"
+ },
+ "rows": [
+  {
+   "group": "table",
+   "page": "specs/delmaro-kestrova-table.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.19,
+    "seller_mileage": 0.03,
+    "advert_mileage_price": 0.04,
+    "mileage_year": 0.03,
+    "miles_done": 0.05,
+    "advert_mileage": 0.03
+   }
+  },
+  {
+   "group": "table",
+   "page": "specs/esquel-wrenna-table.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.1,
+    "seller_mileage": 0.03,
+    "advert_mileage_price": 0.03,
+    "mileage_year": 0.03,
+    "miles_done": 0.04,
+    "advert_mileage": 0.03
+   }
+  },
+  {
+   "group": "kv",
+   "page": "specs/delmaro-kestrova-details.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.46,
+    "seller_mileage": 0.04,
+    "advert_mileage_price": 0.07,
+    "mileage_year": 0.04,
+    "miles_done": 0.05,
+    "advert_mileage": 0.03
+   }
+  },
+  {
+   "group": "kv",
+   "page": "specs/esquel-wrenna-details.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.48,
+    "seller_mileage": 0.04,
+    "advert_mileage_price": 0.08,
+    "mileage_year": 0.04,
+    "miles_done": 0.05,
+    "advert_mileage": 0.04
+   }
+  },
+  {
+   "group": "prose",
+   "page": "specs/delmaro-kestrova-se.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.8,
+    "seller_mileage": 0.07,
+    "advert_mileage_price": 0.17,
+    "mileage_year": 0.05,
+    "miles_done": 0.09,
+    "advert_mileage": 0.06
+   }
+  },
+  {
+   "group": "prose",
+   "page": "specs/delmaro-kestrova-sport.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.24,
+    "seller_mileage": 0.03,
+    "advert_mileage_price": 0.07,
+    "mileage_year": 0.04,
+    "miles_done": 0.06,
+    "advert_mileage": 0.04
+   }
+  },
+  {
+   "group": "pdf",
+   "page": "brochures/delmaro-kestrova-spec-sheet.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.03,
+    "seller_mileage": 0.02,
+    "advert_mileage_price": 0.02,
+    "mileage_year": 0.01,
+    "miles_done": 0.02,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "pdf",
+   "page": "brochures/esquel-wrenna-spec-sheet.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "offered": 0.04,
+    "seller_mileage": 0.02,
+    "advert_mileage_price": 0.02,
+    "mileage_year": 0.02,
+    "miles_done": 0.02,
+    "advert_mileage": 0.02
+   }
+  },
+  {
+   "group": "grid",
+   "page": "used/page-1.html",
+   "expected": "Listing",
+   "p": {
+    "offered": 0.99,
+    "seller_mileage": 0.97,
+    "advert_mileage_price": 0.98,
+    "mileage_year": 0.99,
+    "miles_done": 0.98,
+    "advert_mileage": 0.99
+   }
+  },
+  {
+   "group": "grid",
+   "page": "used/page-2.html",
+   "expected": "Listing",
+   "p": {
+    "offered": 0.99,
+    "seller_mileage": 0.98,
+    "advert_mileage_price": 0.98,
+    "mileage_year": 0.99,
+    "miles_done": 0.99,
+    "advert_mileage": 0.99
+   }
+  },
+  {
+   "group": "listing",
+   "page": "used/1.html",
+   "expected": "Listing",
+   "p": {
+    "offered": 0.93,
+    "seller_mileage": 0.95,
+    "advert_mileage_price": 0.88,
+    "mileage_year": 0.95,
+    "miles_done": 0.87,
+    "advert_mileage": 0.93
+   }
+  },
+  {
+   "group": "listing",
+   "page": "used/2.html",
+   "expected": "Listing",
+   "p": {
+    "offered": 0.98,
+    "seller_mileage": 0.97,
+    "advert_mileage_price": 0.95,
+    "mileage_year": 0.98,
+    "miles_done": 0.96,
+    "advert_mileage": 0.96
+   }
+  },
+  {
+   "group": "books",
+   "page": "a-light-in-the-attic_1000.html",
+   "expected": "Book",
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.01,
+    "miles_done": 0.01,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "books",
+   "page": "sapiens-a-brief-history-of-humankind_996.html",
+   "expected": "Book",
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.01,
+    "miles_done": 0.01,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "books",
+   "page": "tipping-the-velvet_999.html",
+   "expected": "Book",
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.01,
+    "miles_done": 0.01,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "review",
+   "page": "review",
+   "expected": null,
+   "p": {
+    "offered": 0.03,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.02,
+    "mileage_year": 0.01,
+    "miles_done": 0.02,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "dealer_contact",
+   "page": "dealer_contact",
+   "expected": null,
+   "p": {
+    "offered": 0.14,
+    "seller_mileage": 0.03,
+    "advert_mileage_price": 0.03,
+    "mileage_year": 0.03,
+    "miles_done": 0.04,
+    "advert_mileage": 0.03
+   }
+  },
+  {
+   "group": "news",
+   "page": "news",
+   "expected": null,
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.01,
+    "miles_done": 0.01,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "recipe",
+   "page": "recipe",
+   "expected": null,
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.0,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.0,
+    "miles_done": 0.0,
+    "advert_mileage": 0.0
+   }
+  },
+  {
+   "group": "insurance_faq",
+   "page": "insurance_faq",
+   "expected": null,
+   "p": {
+    "offered": 0.01,
+    "seller_mileage": 0.01,
+    "advert_mileage_price": 0.01,
+    "mileage_year": 0.01,
+    "miles_done": 0.01,
+    "advert_mileage": 0.01
+   }
+  },
+  {
+   "group": "model_range",
+   "page": "model_range",
+   "expected": null,
+   "p": {
+    "offered": 0.06,
+    "seller_mileage": 0.02,
+    "advert_mileage_price": 0.03,
+    "mileage_year": 0.02,
+    "miles_done": 0.03,
+    "advert_mileage": 0.02
+   }
+  }
+ ]
+}
