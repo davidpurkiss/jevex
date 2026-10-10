@@ -7,6 +7,7 @@ match exactly ("PS", "L"); the rest ignore case.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -51,3 +52,35 @@ def spellings() -> list[tuple[str, str, bool]]:
         for spelling in unit.spellings:
             out.append((spelling, unit.canonical, spelling in unit.case_sensitive))
     return sorted(out, key=lambda item: len(item[0]), reverse=True)
+
+
+def alternation() -> str:
+    """A regex alternation of every spelling, longest first; a space in one matches any
+    whitespace or none, and only case-sensitive spellings match case."""
+    parts: list[str] = []
+    for spelling, _canonical, case_sensitive in spellings():
+        escaped = re.escape(spelling).replace(r"\ ", r"\s?")
+        parts.append(escaped if case_sensitive else f"(?i:{escaped})")
+    return "|".join(parts)
+
+
+_TO_CANONICAL = {
+    (spelling if case_sensitive else spelling.lower()): canonical
+    for spelling, canonical, case_sensitive in spellings()
+}
+
+
+def canonical(found: str) -> str:
+    """The canonical unit of a spelling :func:`alternation` matched ("secs" → "s"); an
+    unknown one comes back as it is."""
+    compact = re.sub(r"\s+", " ", found)
+    return _TO_CANONICAL.get(compact) or _TO_CANONICAL.get(compact.lower(), compact)
+
+
+_MENTION = re.compile(rf"(?<![A-Za-z])(?:{alternation()})(?![A-Za-z0-9])")
+
+
+def mentioned(text: str) -> list[str]:
+    """The canonical units ``text`` spells out anywhere, not only after a number ("Power
+    (kW)"), in order of first mention."""
+    return list(dict.fromkeys(canonical(m.group()) for m in _MENTION.finditer(text)))

@@ -171,6 +171,20 @@ def canonical_unit(unit: str) -> str:
         raise NormaliseError(f"unknown unit {unit!r}") from None
 
 
+def dimension(unit: str) -> str | None:
+    """What ``unit`` measures ("power"; "economy" for mpg and l/100km): units of one
+    dimension convert into each other. ``None`` for a unit jevex can't convert (a currency,
+    one outside the lexicon)."""
+    try:
+        found = canonical_unit(unit)
+    except NormaliseError:
+        return None
+    if found in _ECONOMY:
+        return "economy"
+    known = _UNIT_FACTORS.get(found)
+    return known[0] if known else None
+
+
 def convert(value: float, from_unit: str, to_unit: str, *, gallon: str = "uk") -> float:
     """Convert between units of the same dimension. Raises for incompatible units."""
     src, dst = canonical_unit(from_unit), canonical_unit(to_unit)
@@ -454,7 +468,8 @@ def normalise(
     validated as ``list[T]``. Numbers bound for an ``int`` field are rounded to the
     nearest integer when a unit conversion made them fractional (1.4 l → 1400 cc).
     If the field has a unit but the chain never says what unit the text was in (a bare
-    number), the number is taken as already being in the field's unit.
+    number), the number is taken as already being in the field's unit; the select stage
+    adds a ``unit`` step when the statement names another unit it could be in.
     """
     chain = list(steps)
     value = run_chain(raw, chain, field, registry=registry)

@@ -46,6 +46,8 @@ class Questions(BaseModel):
     - ``verify``: Noul checking an LLM answer; ``{value}`` is replaced by the value.
     - ``member``: for ``list[...]`` fields, the Noul asking whether one value (``{value}``)
       is stated as one of them.
+    - ``unit``: for fields with a unit, the Choice asking which unit a bare number
+      (``{value}``) is in.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -55,6 +57,7 @@ class Questions(BaseModel):
     select: str | None = None
     verify: str | None = None
     member: str | None = None
+    unit: str | None = None
 
 
 class SchemaConfig(BaseModel):
@@ -206,6 +209,15 @@ class FieldSpec:
         else:
             description = self.label
         return Noul(instructions=template.format(description=description, value=value))
+
+    def unit_question(self, value: str, units: Sequence[str]) -> Choice:
+        """Which of ``units`` a bare number ``value`` is in. A custom template (``unit``)
+        gets ``{value}`` and the description as written, ``{description}``."""
+        template = self.questions.unit or 'Which unit is "{value}" in?'
+        options: dict[str, JSONContent | None] = dict.fromkeys(units)
+        return Choice(
+            instructions=template.format(description=self.label, value=value), options=options
+        )
 
     def verify_question(self, value: object) -> Noul:
         """Checks an LLM or vision answer against the statement."""

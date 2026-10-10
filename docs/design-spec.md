@@ -218,6 +218,7 @@ Values come from verbatim candidate spans that Jev chooses between. An LLM is us
 1. Enum or bool field: Jev answers directly (Choice or Noul). Done.
 2. Run the generators in scope for the field (by type, field, schema, locale and source) to get candidate spans with character offsets.
 3. Jev Choice: "Which of these is the {description}?", with options = candidates + "none".
+   In the same request, a bare number (no unit beside it) in a statement that names another unit of the field's dimension ("Power (kW) · SE: 110" for a field in PS) gets a Choice: 'Which unit is "{span}" in?', with the field's unit and the others named as options. The answer becomes the candidate's `unit` step, and its confidence caps the selection's.
 4. Normalise the chosen span through its generator's normaliser chain, then validate it against the field type.
 5. Fall back to the LLM if any of these hold:
    - no candidates were generated

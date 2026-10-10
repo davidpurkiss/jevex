@@ -28,6 +28,7 @@ from jevex.normalise import (
     NormaliseStage,
     canonical_unit,
     convert,
+    dimension,
     normalise,
     parse_date,
     parse_money,
@@ -380,6 +381,22 @@ def test_canonical_unit() -> None:
     assert canonical_unit("kw") == "kW"
     with pytest.raises(NormaliseError, match="unknown unit"):
         canonical_unit("furlongs")
+
+
+@pytest.mark.parametrize(
+    ("unit", "measures"),
+    [
+        ("PS", "power"),
+        ("kw", "power"),
+        ("litres", "volume"),
+        ("mpg", "economy"),
+        ("l/100km", "economy"),
+        ("GBP", None),
+        ("furlongs", None),
+    ],
+)
+def test_dimension(unit: str, measures: str | None) -> None:
+    assert dimension(unit) == measures
 
 
 # --- chains and validation -------------------------------------------------------------

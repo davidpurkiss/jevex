@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from jevex.interfaces import LocaleAwareSplitter
 from jevex.layout import DomLocation, ImageLocation
 from jevex.locales import locale_conventions
-from jevex.select import CandidateStage
+from jevex.select import candidate_locale
 from jevex.statements import Statement
 from jevex.tables import header_prefix, table_statements
 
@@ -389,14 +389,6 @@ def cut_statement(statement: Statement, max_chars: int = MAX_STATEMENT_CHARS) ->
     ]
 
 
-def _candidate_locale(ctx: Context) -> str | None:
-    """The locale the pipeline's candidate stage is configured with, if any."""
-    if ctx.pipeline is None:
-        return None
-    stage = next((s for s in ctx.pipeline if s.name == "candidates"), None)
-    return stage.locale if isinstance(stage, CandidateStage) else None
-
-
 class DuplicateStatementError(ValueError):
     """Two statements on one document share an id (a splitter or earlier stage bug)."""
 
@@ -443,7 +435,7 @@ class StatementStage:
             else:
                 statements[statement.id] = statement
         cut: dict[str, int] = {}
-        split = self._split_for(ctx.locale or self.locale or _candidate_locale(ctx))
+        split = self._split_for(ctx.locale or self.locale or candidate_locale(ctx))
         for component in parsed.root.walk():
             if component.id in existing:
                 statements.update((s.id, s) for s in existing[component.id])
