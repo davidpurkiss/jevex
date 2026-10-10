@@ -3,7 +3,8 @@
 CI's regression gate (`test_the_test_site_passes_the_eval_gate` in
 `tests/test_baseline.py`) runs a small test-site corpus through the default pipeline:
 the first page of each HTML family of seed 42 (`table`, `kv`, `prose`, `grid`,
-`listing`), plus its first page with JSON-LD if none of those has any. Jev and the
+`listing`), plus its first page with JSON-LD if none of those has any. Entities are
+resolved with `MultiEntity`, since most of these pages hold several records. Jev and the
 fallback LLM are replayed from recordings, and the run is checked against a baseline
 with `jevex.baseline.check_baseline`.
 
