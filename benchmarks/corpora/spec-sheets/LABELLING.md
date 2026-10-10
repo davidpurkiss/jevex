@@ -69,7 +69,7 @@ the figure from the variant's own specification or price row, and note the confl
 variant's name ("mild hybrid 140" in a row whose power column says 130). If the figures
 still disagree and neither rule settles it, leave the field out and note why.
 
-This is one of the corpus's own records (`truth.json` gives `evidence` for every value).
+This is an abridged record from the corpus: its notes and evidence are shortened (`truth.json` gives `evidence` for every value).
 `entity` is a readable label for the variant; eval uses it only to break ties. `evidence`
 says where each value came from: a page (for PDFs) and the words it's read from. It's for
 checking, not scoring.

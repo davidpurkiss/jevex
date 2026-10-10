@@ -1,5 +1,5 @@
 {
-  "digest": "1b106104036972d53fdcd63b308f8795cc28eb8d5812f7bc2de4d9a453e280a1",
+  "digest": "a7a6f9c2c48203ea7ddb7b729241391daa66a7c1ba43cd116c3bdf3eb9ed5852",
   "documents": {
     "cupra-born-pricelist-2026.pdf": "6ebb460bcd6d1015a47e945107c9839559b945a7db666ebbb456a79e2dd1991e",
     "dacia-price-guide-2026.pdf": "9a049670c88677f3c730e6674adbbdb205b88dbc1c2f5d681650245bb8cad59b",
@@ -33,6 +33,6 @@
     "corpus": "spec-sheets",
     "labelling": "LABELLING.md (#212)"
   },
-  "truth": "fa083eee9d0d1f3610bcb913d61d51da5bf2c3ce2737428a14e354bbe0155400",
+  "truth": "2d9f2e8ac31d1ed3e95931d1f83fa7f0d1c7681c0519ab5a76db77afa8b2088d",
   "version": 1
 }
