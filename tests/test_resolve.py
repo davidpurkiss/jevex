@@ -1594,9 +1594,15 @@ async def test_json_ld_on_a_comparison_table_page_fills_the_trims_not_a_document
     # SE's shared price (the delivery offer's) lost to its own table cell.
     assert (se.meta.price.method, se.meta.price.shared) == ("generator", False)
     assert se.meta.price.conflicts == []
-    # Only SE's price was still wanted from the table.
+    # Jev settled the page's price between the offers' (picking SE L's), and then only
+    # SE's price was still wanted from the table.
     prices = [c.state for c in fake.calls if "Which of these is the price" in str(c.questions)]
-    assert prices == [{"statement": "Price · SE: £24,995", "section": "Kestrova"}]
+    assert prices == [
+        "@type: Car\nmodel: Kestrova\n"
+        "offers[0].@type: Offer\noffers[0].name: Kestrova SE L\noffers[0].price: 26995\n"
+        "offers[1].@type: Offer\noffers[1].name: Delivery\noffers[1].price: 750",
+        {"statement": "Price · SE: £24,995", "section": "Kestrova"},
+    ]
     # Jev placed each offer: the one naming SE L on it, the delivery on every trim.
     asked = [c.state for c in fake.calls if "apply to" in str(c.questions)]
     offers = [state for state in asked if isinstance(state, str)]
