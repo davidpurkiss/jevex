@@ -1,0 +1,38 @@
+{
+  "digest": "984a46abf291115ae5facf1408cf6b1d776ef0ea00ed643ae5fba39bf8a01390",
+  "documents": {
+    "cupra-born-pricelist-2026.pdf": "6ebb460bcd6d1015a47e945107c9839559b945a7db666ebbb456a79e2dd1991e",
+    "dacia-price-guide-2026.pdf": "9a049670c88677f3c730e6674adbbdb205b88dbc1c2f5d681650245bb8cad59b",
+    "ford-focus-pricelist-2026.pdf": "70de96d945cab9adebefe7edb01a0c5685128fc5e1967bd1849aa6a6c9efb052",
+    "ford-kuga-pricelist.pdf": "699748c7b279be3b203720cfcc4bc4d52dc19b42dab66710cf8746b2d97697ea",
+    "ford-puma-pricelist.pdf": "b1ca3748fccf9ec58a38961fd6c1b7a6a053fc4cedb894308ba5f9adec8d51e0",
+    "honda-hrv-sport-pricing.html": "5fb8fd069eff3120b693eff618e509fad7aae9b1f22fe64b47d60e80f86e21ab",
+    "honda-jazz-specifications.html": "4df4ebcf07398cdb8073fb49d091b4efeae29e25c962cc2fb76cdc31226eeca0",
+    "hyundai-i10-techspec-pricing.pdf": "c2bb696865802859219e458b70341e8d952d8271310f7073eaec632494a95f2a",
+    "hyundai-i20-techspec-pricing.pdf": "dfec186a9d879b88cc18390832ff4886678dbd1e2f11c4e0b67fe1c37d440067",
+    "hyundai-kona-techspec-pricing.pdf": "81ce3fe216d33e97c3b61573c6e50317c85788329f66f906c2a9761f9d959b1c",
+    "kia-picanto-pricing.html": "ad389d9a7e0f0db32780aef8ccbec2c67e1bb88c1381f5b31b2f30a4b3830e76",
+    "kia-sportage-pricing.html": "11ab3943419da8516b73ad40f94d3c132dbd250351ffccd82b9eb54b477321f6",
+    "peugeot-3008-price-spec.pdf": "fc5e20d3911e90835bc534ec53dd7159173c28a76a019235b30573f1b796737e",
+    "peugeot-e3008-e5008-long-range.html": "5ae2871c2e84a820363987d787ec0a492081f52fa60eda457de202efb2e1e4cb",
+    "renault-range-price-guide-2026.pdf": "1b60e654a2d2cccaa9b01069b6116ef158f758708201555b7b76f1b13b3ad47c",
+    "skoda-fabia-pricing.html": "d9d73f237e4423c4f02543394d4d5b6fc244d2384eb8e061c5673c2f37b4c237",
+    "skoda-octavia-uk-pricing.html": "a5109c73669916e2ce31ce95ab37abdabc5ea6ef9de3e3e2e4822f8a9701d9c9",
+    "skoda-octavia-vrs-uk-pricing.html": "97b30683bd8ea70c289b4425df76671aa53982b2149b744408b4498d5a0d8976",
+    "skoda-scala-kamiq-pricing.html": "b86c0e751c3423cf2ae8f81d7fb29e27a25b913abca4305c5623282478e7d2b6",
+    "toyota-chr-plus-pricing.html": "f14d55abed540fdc101a21c56a92e53b238bcf1e32329075c9aeb6abdd7c9db6",
+    "toyota-corolla-prices-2026.pdf": "b5e9b6a50d042e1bcdb3d8eebfe91ca8849a6e2ae7a7f17a6f6c205c482dc8fa",
+    "toyota-rav4-pricing.html": "b2f48022084fbb07cebfaf5e311eb78fe11bae1b801380d3f39b9e198ed9f50a",
+    "toyota-yaris-prices-2026.pdf": "ca7d84e8147f69696da88aa82907880e229fdf09769a72059b707fe4a7a8a361",
+    "vauxhall-corsa-press-pricing.html": "5305a5413c36c2413f98797feb333bce5e9cdecec732dd5ae3220d9cd5ee8fd3",
+    "vauxhall-corsa-psg-2026.pdf": "219e6158644bec793e5bb15fdf7d5b932bf78a581a5dae5a4fab5f0daf362417"
+  },
+  "name": "spec-sheets",
+  "publish": "full",
+  "settings": {
+    "corpus": "spec-sheets",
+    "labelling": "LABELLING.md (#212)"
+  },
+  "truth": "8795a6fb9f3a2abe56706030e4ade90ec2b3e3639573920456c80757730dd597",
+  "version": 1
+}
