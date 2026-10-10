@@ -37,6 +37,7 @@ from jevex.layout import section_text
 from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
+from jevex.tables import axis_text
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -96,13 +97,14 @@ def field_statements(
 def statement_state(statement: Statement) -> JSONContent:
     """What Jev sees for one statement: its text plus the headings above it, capped by
     :func:`~jevex.layout.section_text`, and a table header's corner cell
-    (``table_corner``) and the labels on its axis (``table_headers``)."""
+    (``table_corner``, shortened as a heading is) and the labels on its axis
+    (``table_headers``, capped by :func:`~jevex.tables.axis_text`)."""
     state: dict[str, Any] = {"statement": statement.text}
     if (ref := statement.table) is not None:
         if ref.corner:
-            state["table_corner"] = ref.corner
+            state["table_corner"] = section_text([ref.corner])
         if ref.axis_labels:
-            state["table_headers"] = ", ".join(ref.axis_labels)
+            state["table_headers"] = axis_text(ref.axis_labels, statement.text)
     if section := section_text(statement.heading_trail):
         state["section"] = section
     return state

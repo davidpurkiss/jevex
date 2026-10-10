@@ -56,9 +56,16 @@ from typing import TYPE_CHECKING, Literal
 from jevex.statements import Statement, TableCellRef
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from jevex.layout import Component, TableCell
 
 _WHITESPACE = re.compile(r"[ \t\n\r\f\v]+")  # a no-break space stays: it can group thousands
+
+MAX_AXIS_CHARS = 500
+"""The most a header's fellow labels (``table_headers``) take up in a Jev state. Every
+header of a table carries them, so a long axis would grow each state with the table."""
+_ELLIPSIS = "…"
 
 RowRole = Literal["header", "band", "body"]
 """A table row's part in reading the table (:func:`row_roles`)."""
@@ -364,6 +371,44 @@ def _is_band(row: list[TableCell], width: int) -> bool:
     spanning the table or not. A lone cell further right is a column header instead (a
     one-trim table's repeated header row, after its empty corner cell)."""
     return len(row) == 1 and row[0].header and row[0].col == 0 and width > 1
+
+
+def axis_text(labels: Sequence[str], own: str, max_chars: int = MAX_AXIS_CHARS) -> str:
+    """``labels`` as Jev sees them beside the header ``own``: joined with ", ", at most
+    ``max_chars`` long.
+
+    A longer axis keeps the run of labels nearest ``own`` (always included), adding one
+    after it and one before in turn while they fit, with "…" for the labels left out on
+    either side. An ``own``
+    longer than ``max_chars`` alone is cut, ending "…"."""
+    if max_chars < 1:
+        raise ValueError(f"max_chars must be positive, got {max_chars}")
+    joined = ", ".join(labels)
+    if len(joined) <= max_chars:
+        return joined
+    if own not in labels or len(own) + 2 * len(", …") > max_chars:
+        return own if len(own) <= max_chars else own[: max_chars - 1] + _ELLIPSIS
+    lo = labels.index(own)
+    hi = lo + 1
+
+    def length(lo: int, hi: int) -> int:
+        marks = (lo > 0) + (hi < len(labels))
+        return len(", ".join(labels[lo:hi])) + marks * len(", …")
+
+    grew = True
+    while grew:
+        grew = False
+        if hi < len(labels) and length(lo, hi + 1) <= max_chars:
+            hi, grew = hi + 1, True
+        if lo > 0 and length(lo - 1, hi) <= max_chars:
+            lo, grew = lo - 1, True
+    return ", ".join(
+        [
+            *([_ELLIPSIS] if lo > 0 else []),
+            *labels[lo:hi],
+            *([_ELLIPSIS] if hi < len(labels) else []),
+        ]
+    )
 
 
 def header_prefix(ref: TableCellRef) -> str:

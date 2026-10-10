@@ -59,7 +59,7 @@ Most documents only take the left-hand path. The right-hand column runs when sel
 | 5 | Layout | `LayoutParser` | HTML DOM segmenter; Docling for PDF | none |
 | 6 | Images | `ImageProcessor` | OCR; vision models as plugins | none |
 | 7 | Component gate | `ComponentGate` | One Noul per component × field group | "Does this section contain the {field description}?" |
-| 8 | Statements | `StatementSplitter` | Sentences, list items, key/value pairs, table cells | none |
+| 8 | Statements | `StatementSplitter` | Sentences, list items, key/value pairs, table cells and headers | none |
 | 9 | Entities | `EntityResolver` | Single, multi or parent/child | Choice: which entity does this statement apply to? |
 | 10 | Categorise | `StatementClassifier` | One Choice per statement over the schema's fields + "none" | "Which detail does this statement state?" |
 | 11 | Candidates | `CandidateGenerator` registry | Built-in plus learned generators | none |

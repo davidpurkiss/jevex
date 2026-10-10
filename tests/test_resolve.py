@@ -514,9 +514,43 @@ async def test_headers_of_a_table_whose_axes_are_rejected_are_asked_about() -> N
         .choice(WHICH, ALL_OPTION)
     )
     se, _ = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    asked = [c.state["statement"] for c in fake.calls if "entity" in c.questions]
-    assert {"2022", "2023", "Price"} <= set(asked)
-    assert texts(parsed, se.shared_statement_ids)[:3] == ["2022", "2023", "Price"]
+    assert [c.state for c in fake.calls if "entity" in c.questions] == [
+        {"statement": "2022", "table_headers": "2022, 2023"},
+        {"statement": "2023", "table_headers": "2022, 2023"},
+        {"statement": "Price", "table_headers": "Price"},
+        {"statement": "Price · 2022: £20,000"},
+        {"statement": "Price · 2023: £21,000"},
+    ]
+    assert texts(parsed, se.shared_statement_ids) == [
+        "2022",
+        "2023",
+        "Price",
+        "Price · 2022: £20,000",
+        "Price · 2023: £21,000",
+    ]
+
+
+async def test_a_header_on_the_entities_axis_that_jev_rejected_is_asked_about() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th>SE</th><th>SE L</th><th>Notes</th></tr>"
+        "<tr><th>Power</th><td>150PS</td><td>180PS</td><td>est.</td></tr></table>"
+    )
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .noul('"Notes"', p=0.1)
+        .noul('"Power"', p=0.1)
+        .choice(WHICH, ALL_OPTION)
+    )
+    se, _ = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # "Power" heads every entity's column: shared without a question. "Notes" sits among
+    # the entities but isn't one, so Jev is asked about it like its cell.
+    asked = [c.state for c in fake.calls if "entity" in c.questions]
+    assert asked == [
+        {"statement": "Notes", "table_headers": "SE, SE L, Notes"},
+        {"statement": "Power · Notes: est."},
+    ]
+    assert texts(parsed, se.shared_statement_ids) == ["Notes", "Power", "Power · Notes: est."]
 
 
 async def test_multi_entity_with_one_entity_is_a_single_entity() -> None:

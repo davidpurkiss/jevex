@@ -12,7 +12,15 @@ from jevex.generators import default_registry
 from jevex.layout import TableCell
 from jevex.layout_html import HtmlLayoutParser
 from jevex.select import statement_state
-from jevex.tables import blank_rows, header_prefix, infer_headers, row_roles, table_statements
+from jevex.tables import (
+    MAX_AXIS_CHARS,
+    axis_text,
+    blank_rows,
+    header_prefix,
+    infer_headers,
+    row_roles,
+    table_statements,
+)
 from jevex.testsite import VehicleSpec, generate, render
 
 
@@ -802,3 +810,28 @@ def test_a_row_label_repeated_under_another_outer_header_is_stated_again() -> No
     )
     headers = [s.text for s in table_statements(banded) if s.kind == "table_header"]
     assert headers == ["SE", "Power"]
+
+
+def test_axis_text_keeps_the_labels_nearest_the_header_within_the_cap() -> None:
+    labels = [f"Trim {i}" for i in range(10)]  # "Trim 0" ... "Trim 9", 6 characters each
+    assert axis_text(labels, "Trim 4") == ", ".join(labels)  # fits whole
+    # One after, one before, in turn, while they fit (with room for the "…" marks).
+    assert axis_text(labels, "Trim 4", max_chars=40) == "…, Trim 3, Trim 4, Trim 5, Trim 6, …"
+    assert axis_text(labels, "Trim 0", max_chars=30) == "Trim 0, Trim 1, Trim 2, …"
+    assert axis_text(labels, "Trim 9", max_chars=30) == "…, Trim 7, Trim 8, Trim 9"
+    # A header longer than the cap alone is cut.
+    assert axis_text(["x" * 50, "y"], "x" * 50, max_chars=10) == "x" * 9 + "…"
+
+
+def test_a_long_axis_is_capped_in_what_jev_sees() -> None:
+    t = html_table(
+        "<tr><th></th><th>Power</th></tr>"
+        + "".join(f"<tr><th>Trim {i:04d}</th><td>{i} PS</td></tr>" for i in range(2000))
+    )
+    header = next(s for s in table_statements(t) if s.text == "Trim 1000")
+    capped = axis_text([f"Trim {i:04d}" for i in range(2000)], "Trim 1000")
+    assert statement_state(header) == {"statement": "Trim 1000", "table_headers": capped}
+    assert len(capped) <= MAX_AXIS_CHARS
+    assert capped.startswith("…, Trim 09")
+    assert "Trim 1000" in capped
+    assert capped.endswith(", …")

@@ -170,10 +170,9 @@ class MultiEntity:
         labels = list(dict.fromkeys(label for s in statements for label in owners.get(s.id, [])))
         if len(labels) < 2:
             return await SingleEntity(label=self.label).resolve(parsed, schema, jev)
-        # Tables one of whose axes are entities: a header there no entity claimed heads the
-        # other axis.
-        entity_tables = {
-            parsed.statements[sid].component_id
+        # (table, axis) for each table axis whose labels are entities: 0 columns, 1 rows.
+        entity_axes = {
+            (parsed.statements[sid].component_id, group.axis)
             for group, _, ids in accepted
             if group.rule == 0
             for sid in ids
@@ -184,7 +183,7 @@ class MultiEntity:
             owners,
             schema,
             jev,
-            entity_tables,
+            entity_axes,
         )
         return _scopes(statements, labels, owners, shared)
 
@@ -219,18 +218,17 @@ class MultiEntity:
         owners: dict[str, list[str]],
         schema: SchemaSpec,
         jev: JevClient,
-        entity_tables: set[str],
+        entity_axes: set[tuple[str, int]],
     ) -> set[str]:
         """Ask which entity each unclaimed statement applies to. Fills ``owners``; returns
         the ids of statements that apply to all of them.
 
-        An unclaimed header of a table whose other axis is the entities (``entity_tables``)
-        isn't asked about: it heads that whole axis (a row label, "Power", over every
-        trim's column), so it applies to all of them. Other tables' headers are asked like
-        any statement."""
-        shared = {
-            s.id for s in ambiguous if s.kind == "table_header" and s.component_id in entity_tables
-        }
+        A header on the axis across a table's entities (``entity_axes``) isn't asked
+        about: it heads every entity's column or row (a row label, "Power", over every
+        trim's column), so it applies to all of them. Any other unclaimed header (one on the
+        entities' own axis that Jev didn't accept, or in a table with no entity axis) is
+        asked like any statement."""
+        shared = {s.id for s in ambiguous if _across_entities(s, entity_axes)}
         ambiguous = [s for s in ambiguous if s.id not in shared]
         if len(labels) >= MAX_CHOICE_OPTIONS:
             return shared
@@ -515,6 +513,16 @@ def _scopes(
         )
         for label, ids in by_label.items()
     ]
+
+
+def _across_entities(statement: Statement, entity_axes: set[tuple[str, int]]) -> bool:
+    """Whether ``statement`` is a header on the axis across its table's entities: a row
+    header when the columns are entities, a column header when the rows are."""
+    ref = statement.table
+    if statement.kind != "table_header" or ref is None:
+        return False
+    across = 0 if ref.row_headers else 1
+    return (statement.component_id, across) in entity_axes
 
 
 def _drop_bare_headings(parsed: ParsedDocument, owners: dict[str, list[str]]) -> None:
