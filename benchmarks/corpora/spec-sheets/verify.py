@@ -6,10 +6,13 @@ prints, per document, how many values are verified, verified only through a colu
 header's unit, not found, and unchecked, then each value not found with its evidence.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import sys
 from pathlib import Path
+from typing import Literal
 
 CONVERT = {"ps": 0.7355, "bhp": 0.7457, "hp": 0.7457, "cv": 0.7355}
 
@@ -49,27 +52,33 @@ def header_unit_power(text: str, kw: float) -> bool:
     return False
 
 
-def check(field: str, value: object, text: str, low: str) -> bool | str | None:
-    """True if the text supports the value, False if not, None if it can't be checked."""
+Result = Literal["ok", "header", "bad"]
+
+
+def _found(found: bool) -> Result:
+    return "ok" if found else "bad"
+
+
+def check(field: str, value: object, text: str, low: str) -> Result | None:
+    """Whether the text supports the value: "ok", "header" (only through a column header's
+    unit), "bad", or None if it can't be checked."""
     if field in ("fuel_type", "automatic"):
         return None
     if field in ("make", "model", "trim"):
-        return norm(str(value)) in low
+        return _found(norm(str(value)) in low)
     if field == "price_gbp":
-        return any(form in text for form in price_forms(str(value)))
+        return _found(any(form in text for form in price_forms(str(value))))
     if field == "power_kw":
         kw = float(str(value))
         if any(abs(v - kw) < 0.06 for v, _ in numbers_with_unit(text, "kW")):
-            return True
+            return "ok"
         # "hp" is metric when it's DIN hp, imperial otherwise: accept either reading.
         if any(
             abs(round(v * factor, 1) - kw) < 0.06
             for v, u in numbers_with_unit(text, "PS|bhp|hp|cv")
             for factor in ({CONVERT[u], CONVERT["ps"]} if u == "hp" else {CONVERT[u]})
         ):
-            return True
-        # A "PS/kW" table header leaves bare pairs ("63 / 46"): accept a kW figure paired
-        # with a PS figure that converts to it.
+            return "ok"
         # "PS/kW" headers leave bare pairs ("63 / 46"), "kW/PS" ones "170 (231)": accept
         # a kW figure paired with a PS figure that converts to it.
         pairs = [(ps, k) for ps, k in re.findall(r"(\d{2,3})\s*/\s*(\d{2,3}(?:\.\d)?)\b", text)] + [
@@ -81,17 +90,17 @@ def check(field: str, value: object, text: str, low: str) -> bool | str | None:
             abs(float(ps) * CONVERT["ps"] - float(k)) < 1.0 and abs(float(k) - kw) < 0.06
             for ps, k in pairs
         ):
-            return True
-        return "header" if header_unit_power(text, kw) else False
+            return "ok"
+        return "header" if header_unit_power(text, kw) else "bad"
     if field in ("engine_size_cc", "co2_g_km", "top_speed_mph", "seats", "zero_to_62_s"):
-        return has_number(text, float(str(value)))
+        return _found(has_number(text, float(str(value))))
     return None
 
 
 def main() -> None:
     labels = json.loads(Path(sys.argv[1]).read_text())
     texts = Path(sys.argv[2])
-    pages = labels.get("pages", [labels])
+    pages = labels["pages"]
     total = {"ok": 0, "header": 0, "bad": 0, "unchecked": 0}
     for page in pages:
         text = (texts / (page["path"] + ".txt")).read_text()
@@ -101,17 +110,8 @@ def main() -> None:
         for rec in page["records"]:
             for field, value in rec["values"].items():
                 result = check(field, value, text, low)
-                key = (
-                    "unchecked"
-                    if result is None
-                    else "header"
-                    if result == "header"
-                    else "ok"
-                    if result
-                    else "bad"
-                )
-                counts[key] += 1
-                if result is False:
+                counts[result or "unchecked"] += 1
+                if result == "bad":
                     ev = rec.get("evidence", {}).get(field, "")
                     bad.append(f"  {rec.get('entity', '?')}: {field}={value!r}  [{ev}]")
         for k in total:

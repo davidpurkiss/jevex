@@ -7,6 +7,8 @@ PDFs give their text layer with ``=== page N ===`` markers (``jevex.PdfTextReade
 HTML pages their text (``jevex.HtmlTextReader``).
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

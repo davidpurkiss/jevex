@@ -51,14 +51,15 @@ One entry per document in `truth.json`'s `pages`:
 
 ```json
 {"path": "ford-focus-pricelist-2026.pdf", "schema": "VehicleSpec", "locale": "en-GB",
- "notes": "Prices are OTR. Power given in PS.",
+ "notes": "Prices are the p3 OTR column. Power is kW as stated (p8, p9).",
  "records": [
-   {"entity": "Titanium 1.0 EcoBoost 125PS Manual",
-    "values": {"make": "Ford", "model": "Focus", "trim": "Titanium", "fuel_type": "petrol",
-               "engine_size_cc": 999, "power_kw": 91.9, "co2_g_km": 119,
-               "price_gbp": "27495", "automatic": false},
-    "evidence": {"price_gbp": "p4: Titanium 1.0 EcoBoost 125PS Manual … £27,495",
-                 "power_kw": "p4: 125PS"}}
+   {"entity": "ST-Line 5 door 1.0L EcoBoost 125PS mHEV 6 Speed Manual",
+    "values": {"make": "Ford", "model": "Focus", "trim": "ST-Line", "fuel_type": "petrol",
+               "power_kw": 92, "zero_to_62_s": 10.2, "top_speed_mph": 124,
+               "co2_g_km": 119, "price_gbp": "29575", "automatic": false},
+    "evidence": {"power_kw": "p8: 125PS (92kW)",
+                 "price_gbp": "p3: ST-Line 5 door 1.0L EcoBoost 125PS mHEV … £29,575.00",
+                 "automatic": "p3 Transmission: 6 Speed Manual"}}
  ]}
 ```
 
@@ -68,6 +69,7 @@ the figure from the variant's own specification or price row, and note the confl
 variant's name ("mild hybrid 140" in a row whose power column says 130). If the figures
 still disagree and neither rule settles it, leave the field out and note why.
 
+This is one of the corpus's own records (`truth.json` gives `evidence` for every value).
 `entity` is a readable label for the variant; eval uses it only to break ties. `evidence`
 says where each value came from: a page (for PDFs) and the words it's read from. It's for
 checking, not scoring.

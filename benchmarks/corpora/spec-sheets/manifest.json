@@ -27,104 +27,91 @@
       "url": "https://www.ford.co.uk/content/dam/guxeu/uk/documents/price-list/cars/PL-All_New_Kuga.pdf",
       "captured": "2026-10-10",
       "sha256": "699748c7b279be3b203720cfcc4bc4d52dc19b42dab66710cf8746b2d97697ea",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "ford-puma-pricelist.pdf",
       "url": "https://www.ford.co.uk/content/dam/guxeu/uk/documents/price-list/cars/PL-New_Puma.pdf",
       "captured": "2026-10-10",
       "sha256": "b1ca3748fccf9ec58a38961fd6c1b7a6a053fc4cedb894308ba5f9adec8d51e0",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "honda-hrv-sport-pricing.html",
       "url": "https://hondanews.eu/gb/en/cars/media/pressreleases/161964/honda-announces-uk-pricing-and-specification-for-new-hr-v-sport",
       "captured": "2026-10-10",
       "sha256": "5fb8fd069eff3120b693eff618e509fad7aae9b1f22fe64b47d60e80f86e21ab",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "honda-jazz-specifications.html",
       "url": "https://www.honda.co.uk/cars/new/jazz-hybrid/specifications.html",
       "captured": "2026-10-10",
       "sha256": "4df4ebcf07398cdb8073fb49d091b4efeae29e25c962cc2fb76cdc31226eeca0",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "hyundai-i10-techspec-pricing.pdf",
       "url": "https://www.hyundai.news/newsroom/dam/uk/press-kits/hyundai-uk-i10-tech-spec-pricing-model-year-2025-0424.pdf",
       "captured": "2026-10-10",
       "sha256": "c2bb696865802859219e458b70341e8d952d8271310f7073eaec632494a95f2a",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "hyundai-i20-techspec-pricing.pdf",
       "url": "https://www.hyundai.news/newsroom/dam/uk/press-kits/hyundai-uk-i20-tech-spec-pricing-model-year-2025-0424.pdf",
       "captured": "2026-10-10",
       "sha256": "dfec186a9d879b88cc18390832ff4886678dbd1e2f11c4e0b67fe1c37d440067",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "hyundai-kona-techspec-pricing.pdf",
       "url": "https://www.hyundai.news/newsroom/dam/uk/press-kits/hyundai-uk-kona-tech-spec-pricing-model-year-2025-0624.pdf",
       "captured": "2026-10-10",
       "sha256": "81ce3fe216d33e97c3b61573c6e50317c85788329f66f906c2a9761f9d959b1c",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "kia-picanto-pricing.html",
       "url": "https://www.kia.com/uk/new-cars/picanto/pricing/",
       "captured": "2026-10-10",
       "sha256": "ad389d9a7e0f0db32780aef8ccbec2c67e1bb88c1381f5b31b2f30a4b3830e76",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "kia-sportage-pricing.html",
       "url": "https://www.kia.com/uk/new-cars/sportage/pricing/",
       "captured": "2026-10-10",
       "sha256": "11ab3943419da8516b73ad40f94d3c132dbd250351ffccd82b9eb54b477321f6",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "peugeot-3008-price-spec.pdf",
       "url": "https://www.media.stellantis.com/uploads/uk/model-pricelist/peugeot3008pricespecapr23-6455a65377d74.pdf",
       "captured": "2026-10-10",
       "sha256": "fc5e20d3911e90835bc534ec53dd7159173c28a76a019235b30573f1b796737e",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "peugeot-e3008-e5008-long-range.html",
       "url": "https://www.media.stellantis.com/uk-en/peugeot/press/peugeot-reveals-uk-pricing-specification-for-the-new-e-3008-e-5008-long-range",
       "captured": "2026-10-10",
       "sha256": "5ae2871c2e84a820363987d787ec0a492081f52fa60eda457de202efb2e1e4cb",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "renault-range-price-guide-2026.pdf",
       "url": "https://cdn.group.renault.com/ren/gb/transversal-assets/brochures/car-ebrochures/RENAULT-Car-Price-eGuide.pdf.asset.pdf/c35efec47c.pdf",
       "captured": "2026-10-10",
       "sha256": "1b60e654a2d2cccaa9b01069b6116ef158f758708201555b7b76f1b13b3ad47c",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "skoda-fabia-pricing.html",
       "url": "https://www.skoda.co.uk/news/details/skoda-announces-uk-prices-specifications-for-new-fourth-generation-fabia",
       "captured": "2026-10-10",
       "sha256": "d9d73f237e4423c4f02543394d4d5b6fc244d2384eb8e061c5673c2f37b4c237",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "skoda-octavia-uk-pricing.html",
@@ -145,40 +132,35 @@
       "url": "https://www.skoda.co.uk/news/details/skoda-confirms-uk-pricing-and-specification-for-new-scala-and-kamiq-models",
       "captured": "2026-10-10",
       "sha256": "b86c0e751c3423cf2ae8f81d7fb29e27a25b913abca4305c5623282478e7d2b6",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "toyota-chr-plus-pricing.html",
       "url": "https://media.toyota.co.uk/pricing-announced-and-model-line-up-confirmed-for-the-all-new-toyota-c-hr-electric-suv/",
       "captured": "2026-10-10",
       "sha256": "f14d55abed540fdc101a21c56a92e53b238bcf1e32329075c9aeb6abdd7c9db6",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "toyota-corolla-prices-2026.pdf",
       "url": "https://media.toyota.co.uk/wp-content/uploads/sites/5/pdf/Corolla-prices-September-2026.pdf",
       "captured": "2026-10-10",
       "sha256": "b5e9b6a50d042e1bcdb3d8eebfe91ca8849a6e2ae7a7f17a6f6c205c482dc8fa",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "toyota-rav4-pricing.html",
       "url": "https://media.toyota.co.uk/toyota-announces-all-new-rav4-model-range-and-pricing/",
       "captured": "2026-10-10",
       "sha256": "b2f48022084fbb07cebfaf5e311eb78fe11bae1b801380d3f39b9e198ed9f50a",
-      "kind": "html",
-      "content_type": "text/html"
+      "kind": "html"
     },
     {
       "file": "toyota-yaris-prices-2026.pdf",
       "url": "https://media.toyota.co.uk/wp-content/uploads/sites/5/pdf/Yaris-prices-September-2026.pdf",
       "captured": "2026-10-10",
       "sha256": "ca7d84e8147f69696da88aa82907880e229fdf09769a72059b707fe4a7a8a361",
-      "kind": "pdf",
-      "content_type": "application/pdf"
+      "kind": "pdf"
     },
     {
       "file": "vauxhall-corsa-press-pricing.html",
