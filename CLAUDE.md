@@ -116,11 +116,23 @@ Import them lazily inside the code that needs them.
   (or a `Cassette`) and never the network; `pytest-socket` blocks it. Async tests are
   plain `async def` (asyncio auto mode). When a stage generates questions, assert the exact
   question text, because it is user-visible behaviour.
-- **Change the tests, not the API:** when a deliberate behaviour change breaks existing
-  tests, update those tests to the new behaviour. Never add an opt-in flag, a default that
-  keeps the old behaviour, an alias or a compatibility shim just so old tests keep passing.
-  jevex is pre-v1, so there's no backwards compatibility to preserve. Configuration has
-  to be justified by real callers, not by tests.
+- **No slop code:** every line must earn its place in a design someone would choose on
+  purpose, not just make the change look done or keep checks green. In particular:
+  - **Change the tests, not the API.** When a deliberate behaviour change breaks
+    existing tests, update them to the new behaviour (after checking the new outputs by
+    hand). Never add an opt-in flag, a default that keeps the old behaviour, an alias or
+    a compatibility shim just so old tests keep passing. jevex is pre-v1: there's no
+    backwards compatibility to preserve.
+  - **No speculative code.** No parameters, options, hooks or abstractions without a real
+    caller. No dead code, commented-out code or "TODO: later" stubs.
+  - **Don't silence the checks.** No `# type: ignore`, `cast`, `Any`, `noqa` or
+    `getattr`/`hasattr` probing to get past pyright or ruff when the types can be made
+    right. No `try`/`except` that hides a failure (see **Errors**). Never weaken, skip or
+    loosen a test's assertion to make it pass.
+  - **Reuse before you write.** Use the helper that already exists rather than writing a
+    near-copy, and fix it at its source rather than working around it at a call site.
+  - **Comments say why.** Don't narrate what the code does, restate a name, or leave
+    notes about the change itself ("now also...", "fixed").
 - **Exports:** add public names to `jevex/__init__.py` and `__all__`.
 
 ## Definition of done
