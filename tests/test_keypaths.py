@@ -1096,20 +1096,26 @@ async def test_a_settled_jev_reading_is_only_as_sure_as_the_reading() -> None:
     assert [(a.value, a.raw) for a in meta.alternatives] == [("petrol", "Petrol")]
 
 
-async def test_one_option_left_asks_nothing() -> None:
-    # A literal "none" can't be offered, and values cut to the same text are one option:
-    # either way one option is left, so the first value stands without a request.
+async def test_a_literal_none_value_is_offered_quoted() -> None:
     paths = {"model": "model", "name": "model", "color[]": "colours", "colour[]": "colours"}
     data = {"model": "none", "name": "Golf", "color": ["Red"], "colour": ["Blue"]}
-    fake = mapping_jev(paths)
+    fake = mapping_jev(paths).choice("Which of these is the model name", "Golf")
     fields = await extract(KeyPathMapper(), fake, data)
-    assert fields["model"].value == "none"
+    assert fields["model"].value == "Golf"
+    assert [(a.value, a.raw) for a in fields["model"].alternatives] == [("none", "none")]
     assert fields["colours"].value == ["Red"]  # a list field takes the first path's values
+    [call] = settle_calls(fake)
+    [question] = call.questions.values()
+    assert isinstance(question, Choice)
+    assert list(question.options) == ['"none"', "Golf", "none"]
+
+
+async def test_values_cut_to_one_option_ask_nothing() -> None:
     long = {"model": "A" * 250 + "x", "name": "A" * 250 + "y"}
-    fake2 = mapping_jev(paths)
-    fields = await extract(KeyPathMapper(), fake2, long)
-    assert fields["model"].value == long["model"]
-    assert settle_calls(fake) == settle_calls(fake2) == []
+    fake = mapping_jev({"model": "model", "name": "model"})
+    fields = await extract(KeyPathMapper(), fake, long)
+    assert fields["model"].value == long["model"]  # the first value stands for the option
+    assert settle_calls(fake) == []
 
 
 async def test_too_many_values_are_capped() -> None:
