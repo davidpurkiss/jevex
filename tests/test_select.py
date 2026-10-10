@@ -443,6 +443,28 @@ async def test_literal_none_spans_and_duplicate_spans_become_one_option_each() -
     assert list(question.options) == ["Model", "Model: none", "none"]
 
 
+async def test_a_name_run_offers_each_of_its_parts() -> None:
+    fake = FakeJev().choice("Which of these is the model name?", "Kestrova")
+    ctx = context(fake, [st("s1", "Delmaro Kestrova SE")], {"s1": "model"})
+    await run_both(ctx)
+    question = only_call_questions(fake)["Car.model/choice0"]
+    assert question == Choice(
+        instructions="Which of these is the model name?",
+        options={
+            "Delmaro": None,
+            "Delmaro Kestrova": None,
+            "Delmaro Kestrova SE": None,
+            "Kestrova": None,
+            "Kestrova SE": None,
+            "SE": None,
+            "none": "None of these is the model name",
+        },
+    )
+    sel = ctx.schemas["Car"].selections[("doc", "model", "s1")]
+    assert sel.candidate is not None
+    assert (sel.candidate.raw, sel.candidate.generator_id) == ("Kestrova", "noun_phrase")
+
+
 async def test_more_than_254_candidates_are_split_across_choices() -> None:
     text = " ".join(str(i) for i in range(300))
     fake = FakeJev().choice("Which of these", lambda q: "299" if "299" in q.options else "none")
