@@ -1,6 +1,8 @@
+import hashlib
 import json
 import math
 import re
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -424,6 +426,227 @@ def test_the_committed_books_lock_is_the_configured_sample() -> None:
     assert all(re.fullmatch(r"pages/[\w.-]+\.html", path) for path in lock.documents)
 
 
+def test_the_committed_spec_sheets_lock_is_its_manifest_and_labels() -> None:
+    """The spec sheets aren't in the repo either: what fetch.py downloads (the manifest's
+    hashes) and the labels it copies must be what the lock checks."""
+    spec = BenchmarkConfig.load(CONFIG).corpus("spec-sheets")
+    lock = CorpusLock.load(CONFIG.parent / spec.lock)
+    manifest = fetch_script().Manifest.model_validate_json(
+        (SPEC_SHEETS / "manifest.json").read_bytes()
+    )
+    assert lock.name == "spec-sheets"
+    assert lock.publish == spec.publish == "full"
+    assert lock.documents == {d.file: d.sha256 for d in manifest.documents}
+    truth = (SPEC_SHEETS / "truth.json").read_bytes()
+    assert lock.truth == hashlib.sha256(truth).hexdigest()
+    assert [p["path"] for p in json.loads(truth)["pages"]] == [d.file for d in manifest.documents]
+
+
+# --- fetching a corpus from its manifest (benchmarks/corpora/fetch.py) -----------------
+
+SPEC_SHEETS = ROOT / "benchmarks" / "corpora" / "spec-sheets"
+PDF = b"%PDF-1.4\nprice list\n"
+HTML = b"<html><body><h1>Spec</h1></body></html>"
+
+
+def fetch_script() -> Any:
+    """The fetch script as a module (it isn't part of the package)."""
+    import importlib.util
+
+    path = ROOT / "benchmarks" / "corpora" / "fetch.py"
+    spec = importlib.util.spec_from_file_location("_bench_fetch", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclass looks itself up there
+    spec.loader.exec_module(module)
+    return module
+
+
+def manifest_entry(file: str, path: str, content: bytes, kind: str = "pdf") -> dict[str, str]:
+    return {
+        "file": file,
+        "url": f"https://maker.example{path}",
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "captured": "2026-10-10",
+        "kind": kind,
+    }
+
+
+def write_manifest(root: Path, *documents: dict[str, str], truth: str | None = "{}") -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = root / "manifest.json"
+    manifest.write_text(json.dumps({"purpose": "test", "documents": list(documents)}))
+    if truth is not None:
+        (root / "truth.json").write_text(truth)
+    return manifest
+
+
+def maker_site(
+    seen: list[str] | None = None, robots: str = "User-agent: *\nDisallow: /private/\n"
+) -> SimpleFetcher:
+    files = {"/a.pdf": PDF, "/b.html": HTML, "/private/c.pdf": PDF}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if seen is not None:
+            seen.append(path)
+        if path == "/robots.txt":
+            return httpx2.Response(200, text=robots)
+        if path in files:
+            return httpx2.Response(200, content=files[path])
+        return httpx2.Response(404)
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    return SimpleFetcher(client=client, sleep=no_wait)
+
+
+def statuses(outcomes: list[Any]) -> dict[str, str]:
+    return {o.file: o.status for o in outcomes}
+
+
+async def test_fetch_downloads_each_document_and_copies_the_labels(tmp_path: Path) -> None:
+    manifest = write_manifest(
+        tmp_path / "src",
+        manifest_entry("a.pdf", "/a.pdf", PDF),
+        manifest_entry("b.html", "/b.html", HTML, kind="html"),
+        truth='{"pages": []}',
+    )
+    out = tmp_path / "corpus"
+    outcomes = await fetch_script().fetch_corpus(manifest, out, maker_site())
+    assert statuses(outcomes) == {"a.pdf": "fetched", "b.html": "fetched", "truth.json": "copied"}
+    assert (out / "a.pdf").read_bytes() == PDF
+    assert (out / "b.html").read_bytes() == HTML
+    assert (out / "truth.json").read_text() == '{"pages": []}'
+    assert sorted(p.name for p in out.iterdir()) == ["a.pdf", "b.html", "truth.json"]
+
+
+async def test_fetch_reports_each_failure_and_writes_nothing_for_it(tmp_path: Path) -> None:
+    manifest = write_manifest(
+        tmp_path / "src",
+        manifest_entry("a.pdf", "/a.pdf", PDF),
+        manifest_entry("changed.pdf", "/a.pdf", b"%PDF-1.4\nlast year's prices\n"),
+        manifest_entry("dead.pdf", "/gone.pdf", PDF),
+        manifest_entry("private.pdf", "/private/c.pdf", PDF),
+    )
+    out = tmp_path / "corpus"
+    outcomes = await fetch_script().fetch_corpus(manifest, out, maker_site())
+    assert statuses(outcomes) == {
+        "a.pdf": "fetched",
+        "changed.pdf": "failed",
+        "dead.pdf": "failed",
+        "private.pdf": "failed",
+        "truth.json": "copied",
+    }
+    details = {o.file: o.describe() for o in outcomes}
+    found = hashlib.sha256(PDF).hexdigest()
+    assert details["changed.pdf"].startswith(
+        f"failed   changed.pdf: https://maker.example/a.pdf has sha256 {found}, not "
+    )
+    assert details["changed.pdf"].endswith("; not written")
+    assert details["dead.pdf"] == (
+        "failed   dead.pdf: GET https://maker.example/gone.pdf returned HTTP 404"
+    )
+    assert details["private.pdf"] == (
+        "failed   private.pdf: robots.txt disallows https://maker.example/private/c.pdf for "
+        "'jevex (+https://github.com/davidpurkiss/jevex)'"
+    )
+    assert sorted(p.name for p in out.iterdir()) == ["a.pdf", "truth.json"]
+
+
+async def test_fetch_keeps_what_is_there_and_never_overwrites(tmp_path: Path) -> None:
+    manifest = write_manifest(
+        tmp_path / "src",
+        manifest_entry("a.pdf", "/a.pdf", PDF),
+        manifest_entry("b.html", "/b.html", HTML, kind="html"),
+        truth='{"pages": [1]}',
+    )
+    out = tmp_path / "corpus"
+    out.mkdir()
+    (out / "a.pdf").write_bytes(PDF)
+    (out / "b.html").write_bytes(b"<html>edited</html>")
+    (out / "truth.json").write_text('{"pages": []}')
+    seen: list[str] = []
+    outcomes = await fetch_script().fetch_corpus(manifest, out, maker_site(seen))
+    assert statuses(outcomes) == {"a.pdf": "present", "b.html": "failed", "truth.json": "failed"}
+    assert seen == []  # neither document was fetched again
+    details = [o.describe() for o in outcomes]
+    edited = hashlib.sha256(b"<html>edited</html>").hexdigest()
+    assert details[1] == f"failed   b.html: already in {out} with sha256 {edited}; not overwritten"
+    assert details[2] == (
+        f"failed   truth.json: {out / 'truth.json'} differs from "
+        f"{tmp_path / 'src' / 'truth.json'}; not overwritten"
+    )
+    assert (out / "b.html").read_bytes() == b"<html>edited</html>"
+    assert (out / "truth.json").read_text() == '{"pages": []}'
+
+    (out / "truth.json").write_text('{"pages": [1]}')
+    rerun = await fetch_script().fetch_corpus(manifest, out, maker_site())
+    assert statuses(rerun)["truth.json"] == "present"
+
+
+async def test_fetch_works_before_the_labels_exist(tmp_path: Path) -> None:
+    manifest = write_manifest(tmp_path / "src", manifest_entry("a.pdf", "/a.pdf", PDF), truth=None)
+    out = tmp_path / "corpus"
+    outcomes = await fetch_script().fetch_corpus(manifest, out, maker_site())
+    assert statuses(outcomes) == {"a.pdf": "fetched", "truth.json": "missing"}
+    truth = tmp_path / "src" / "truth.json"
+    assert outcomes[1].describe() == (
+        f"missing  truth.json: no labels next to the manifest yet ({truth})"
+    )
+
+
+def test_fetch_main_runs_an_empty_manifest_without_a_request(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = write_manifest(tmp_path / "src")
+    out = tmp_path / "corpus"
+    assert fetch_script().main([str(manifest), "--out", str(out)]) == 0
+    assert capsys.readouterr().out == "copied   truth.json\n1 copied\n"
+    assert (out / "truth.json").read_text() == "{}"
+
+
+def test_fetch_main_fails_when_a_document_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = write_manifest(tmp_path / "src", manifest_entry("a.pdf", "/a.pdf", PDF))
+    out = tmp_path / "corpus"
+    out.mkdir()
+    (out / "a.pdf").write_bytes(b"something else")
+    assert fetch_script().main([str(manifest), "--out", str(out)]) == 1
+    assert capsys.readouterr().out.splitlines()[-1] == "1 copied, 1 failed"
+
+
+@pytest.mark.parametrize(
+    ("documents", "message"),
+    [
+        ([manifest_entry("../a.pdf", "/a.pdf", PDF)], "String should match pattern"),
+        ([manifest_entry("truth.json", "/a.pdf", PDF)], "used twice or for the labels: truth"),
+        (
+            [manifest_entry("a.pdf", "/a.pdf", PDF), manifest_entry("a.pdf", "/b.pdf", PDF)],
+            r"used twice or for the labels: a\.pdf",
+        ),
+        ([manifest_entry("a.pdf", "/a.pdf", PDF, kind="docx")], "Input should be 'pdf' or"),
+    ],
+)
+def test_fetch_main_refuses_a_bad_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    documents: list[dict[str, str]],
+    message: str,
+) -> None:
+    manifest = write_manifest(tmp_path / "src", *documents)
+    out = tmp_path / "corpus"
+    assert fetch_script().main([str(manifest), "--out", str(out)]) == 1
+    error = capsys.readouterr().err
+    assert error.startswith(f"can't fetch {manifest}: ")
+    assert re.search(message, error)
+    assert not out.exists()
+
+
 # --- the pinned config -----------------------------------------------------------------
 
 
@@ -443,10 +666,8 @@ def test_the_committed_config_pins_everything() -> None:
     assert [c.name for c in config.corpora] == [
         "testsite",
         "books",
-        "spec-sheets-local",
-        "spec-sheets-press",
+        "spec-sheets",
     ]
-    assert config.corpus("spec-sheets-local").publish == "aggregate"
     with pytest.raises(KeyError):
         config.corpus("nope")
 
