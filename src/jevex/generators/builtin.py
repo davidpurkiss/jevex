@@ -602,8 +602,8 @@ class NounPhrase:
     rarely goes on: at punctuation, at a full stop followed by a space ("St. Ives" breaks
     too), and at :data:`STOPWORDS` (English function words, on every page). A name that
     holds one ("Lord of the Rings") comes whole only from another generator
-    (:class:`KeyValue` for a ``Label: value`` pair or a table cell, :class:`WholeStatement`
-    for a short statement) or the LLM fallback.
+    (:class:`KeyValue` for a ``Label: value`` pair or a table cell under its headers,
+    :class:`WholeStatement` for a short statement) or the LLM fallback.
     """
 
     id: str = "noun_phrase"
