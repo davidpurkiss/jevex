@@ -573,6 +573,39 @@ async def test_extract_before_start_raises(fake_jev: FakeJev) -> None:
         service.extractor(["Nope"])
 
 
+class ClosingJev(FakeJev):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+async def test_the_service_closes_only_the_jev_client_it_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made = ClosingJev()
+
+    def api_backend(model: str | None = None) -> ClosingJev:
+        return made
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    given = ClosingJev()
+    service = Service([Book, Author], jev=JevClient(given))
+    await service.start()
+    service.extractor(["Book"])
+    await service.aclose()
+    assert given.closed == 0  # its maker closes it
+
+    service = Service([Book, Author])
+    await service.start()
+    service.extractor(["Book"])
+    service.extractor(["Author"])
+    await service.aclose()
+    assert made.closed == 1  # once, by the service: its extractors were given it
+
+
 class ClosingLLM(FakeLLM):
     def __init__(self) -> None:
         super().__init__([])

@@ -556,6 +556,9 @@ class JevClient:
     A request that fails transiently (:class:`JevTransientError`) is sent again by
     ``retry`` (default :class:`RetryPolicy()`: two retries with backoff), and each retry
     is counted in ``usage.retries``. What still fails after the retries raises.
+
+    :meth:`aclose` closes only the backend :meth:`from_env` made; a backend passed in is
+    closed by whoever made it.
     """
 
     def __init__(
@@ -578,11 +581,23 @@ class JevClient:
         self._request_budget = request_token_budget
         self._state_budget = state_token_budget
         self._limiter = _limiter or _Limiter(max_concurrency)
+        self._own_backend: TypeSafeBackend | None = None
 
     @classmethod
     def from_env(cls, *, model: str | None = None, max_concurrency: int = 16) -> JevClient:
-        """A client for the real API, configured from ``TYPESAFE_*`` environment variables."""
-        return cls(TypeSafeBackend(model=model), max_concurrency=max_concurrency)
+        """A client for the real API, configured from ``TYPESAFE_*`` environment variables.
+        Its :meth:`aclose` closes the backend made for it."""
+        backend = TypeSafeBackend(model=model)
+        client = cls(backend, max_concurrency=max_concurrency)
+        client._own_backend = backend
+        return client
+
+    async def aclose(self) -> None:
+        """Close the backend :meth:`from_env` made for this client (clients from
+        :meth:`metered` share it and leave it open)."""
+        backend, self._own_backend = self._own_backend, None
+        if backend is not None:
+            await backend.aclose()
 
     def metered(
         self,

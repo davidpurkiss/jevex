@@ -551,7 +551,8 @@ class Extractor:
 
     The Jev client is created from ``TYPESAFE_*`` environment variables on first use
     unless one is passed in. Use as an async context manager (or call ``aclose``) to
-    release its connections.
+    release what the extractor made itself: that Jev client and a store it opened. A Jev
+    client, store, ledger or LLM passed in is left open, for its maker to close.
     """
 
     def __init__(
@@ -701,6 +702,7 @@ class Extractor:
         if unknown:
             raise ValueError(f"review_thresholds for unknown fields: {unknown}")
         self._jev = jev
+        self._owns_jev = False
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self.budgets = budgets or Budgets()
         self.run_id = run_id or uuid.uuid4().hex[:12]
@@ -749,6 +751,7 @@ class Extractor:
     def jev(self) -> JevClient:
         if self._jev is None:
             self._jev = JevClient.from_env()
+            self._owns_jev = True
         return self._jev
 
     async def store(self) -> Store | None:
@@ -1199,7 +1202,8 @@ class Extractor:
 
     async def aclose(self) -> None:
         """Stop the learner (examples still queued stay in the store, unlearned; call
-        :meth:`wait_for_learning` first to finish them), then close Jev and the store."""
+        :meth:`wait_for_learning` first to finish them), then close the Jev client and the
+        store if the extractor made them. A later document makes them again."""
         learner, self._learner, self._learned, self._learn_lock = self._learner, None, None, None
         self._packs_lock = None
         self._housekeeper = None
@@ -1207,10 +1211,12 @@ class Extractor:
             if learner is not None:
                 await learner.aclose()
         finally:
-            close = getattr(self._jev.backend, "aclose", None) if self._jev else None
+            jev, owned_jev = self._jev, self._owns_jev
+            if owned_jev:
+                self._jev, self._owns_jev = None, False
             try:
-                if close is not None:
-                    await close()
+                if owned_jev and jev is not None:
+                    await jev.aclose()
             finally:
                 store, owned = self._store, self._owns_store
                 if owned:
@@ -1221,7 +1227,7 @@ class Extractor:
                     await store.aclose()
 
     def close(self) -> None:
-        """Close the Jev client and the private loop used by ``extract_sync``."""
+        """:meth:`aclose`, then close the private loop used by ``extract_sync``."""
         loop = self._sync_loop
         if loop is not None and not loop.is_closed():
             loop.run_until_complete(self.aclose())

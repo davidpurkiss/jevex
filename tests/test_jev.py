@@ -835,3 +835,33 @@ def test_the_backend_turns_the_sdks_own_retries_off(monkeypatch: pytest.MonkeyPa
     TypeSafeBackend()
     TypeSafeBackend(sdk_retry=RetryPolicy(max_retries=4))
     assert [m["retry"].max_retries for m in made] == [0, 4]
+
+
+class ClosingBackend(RecordingBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
+async def test_a_client_closes_only_the_backend_from_env_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made = ClosingBackend()
+
+    def api_backend(model: str | None = None) -> ClosingBackend:
+        return made
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    client = JevClient.from_env()
+    await client.metered().aclose()
+    assert made.closed == 0  # shared with the client that made it
+    await client.aclose()
+    await client.aclose()
+    assert made.closed == 1
+
+    given = ClosingBackend()
+    await JevClient(given).aclose()
+    assert given.closed == 0  # its maker closes it

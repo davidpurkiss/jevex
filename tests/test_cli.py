@@ -460,24 +460,47 @@ def test_non_ascii_is_printed_as_is(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert "Café — 東京" in out
 
 
+class Closing(FakeJev):
+    """A Jev backend that notes when it's closed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def aclose(self) -> None:
+        self.closed += 1
+
+
 @pytest.mark.usefixtures("pipeline")
-def test_the_jev_client_is_closed(page: Path) -> None:
+def test_the_jev_client_made_for_the_command_is_closed(
+    page: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = Closing()
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+
+    def api_backend(model: str | None = None) -> Closing:
+        return backend
+
+    monkeypatch.setattr("jevex.jev.TypeSafeBackend", api_backend)
+    err = io.StringIO()
+    code = main(["extract", str(page), "--schema", SCHEMA], out=io.StringIO(), err=err)
+    assert (code, err.getvalue()) == (0, "")
+    assert backend.closed == 1
+
+
+@pytest.mark.usefixtures("pipeline")
+def test_a_jev_client_passed_in_is_left_open(page: Path) -> None:
     from jevex.jev import JevClient
 
-    closed: list[bool] = []
-
-    class Closing(FakeJev):
-        async def aclose(self) -> None:
-            closed.append(True)
-
+    backend = Closing()
     code = main(
         ["extract", str(page), "--schema", SCHEMA],
-        jev=JevClient(Closing()),
+        jev=JevClient(backend),
         out=io.StringIO(),
         err=io.StringIO(),
     )
     assert code == 0
-    assert closed == [True]
+    assert backend.closed == 0  # its maker closes it
 
 
 # --- jevex learn ---------------------------------------------------------------------------

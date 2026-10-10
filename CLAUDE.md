@@ -117,6 +117,8 @@ Import them lazily inside the code that needs them.
   `Questions(...)` overrides keep working.
 - **Errors:** raise specific exceptions (subclass `JevError` or add your own). Never swallow
   exceptions. Record expected, recoverable conditions as `ctx.event(...)` instead of raising.
+- **Resources:** whoever creates a client, store or connection closes it; a component never
+  closes one it was given.
 - **Style:** ruff with line length 100. Docstrings explain why or give the contract, not
   a restatement of the code. Match the surrounding code's comment density.
 - **Tests:** one test module per source module (`tests/test_<module>.py`). Use `FakeJev`

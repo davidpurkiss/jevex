@@ -160,9 +160,8 @@ class PromptCache:
     """An LLM answered from a per-prompt cache; misses go to ``inner`` (or raise). A cached
     answer reports its original usage, so offline runs still price each setting.
 
-    Neither cache has an ``aclose``: an :class:`~jevex.Extractor` closes its Jev backend
-    when it closes, and each setting's extractor would close the live client the next
-    setting still needs. :func:`main` closes both live clients once."""
+    Every setting's extractor shares the live clients, so :func:`main`, which made them,
+    closes them once at the end."""
 
     def __init__(self, path: Path, inner: LLM | None) -> None:
         self.path = path
