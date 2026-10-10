@@ -28,12 +28,12 @@ The corner, the header-row text over the row headers ("Trim", "Specification"), 
 :attr:`TableCellRef.corner <jevex.statements.TableCellRef.corner>`, and Jev sees it as
 context: whether it names the row headers ("Trim" over SE, SE L), the column headers, or
 neither is Jev's to judge. So are the other labels on the header's axis
-(:attr:`~jevex.statements.TableCellRef.axis_labels`): "Sport" alone needn't read as a trim,
-but among "SE, Sport, GT" it does. Each label gives one statement however many columns or rows
-repeat it. Headers
-that are only field labels ("Fuel") are categorised like any statement, and Jev finds
-no value in them. Key/value tables and tables with column headers alone give none: their
-headers label the values, and every cell's text already holds them.
+(:attr:`~jevex.statements.TableCellRef.axis`, capped by :func:`axis_text`): "Sport" alone
+needn't read as a trim, but among "SE, Sport, GT" it does. Each label gives one statement
+however many columns or rows repeat it. Headers that are only field labels ("Fuel") are
+categorised like any statement, and Jev finds no value in them. Key/value tables and
+tables with column headers alone give none: their headers label the values, and every
+cell's text already holds them.
 
 The text is ``[group › ][row headers · ][column headers: ]value``, with a header's
 trailing colon dropped. A table without any header (or made only of headers) gives one
@@ -180,6 +180,9 @@ def table_statements(table: Component) -> list[Statement]:
                     axis = row_axes.setdefault(c.col, [])
                     if label not in axis:
                         axis.append(label)
+    row_positions = {
+        col: {label: i for i, label in enumerate(labels)} for col, labels in row_axes.items()
+    }
     seen_cols: set[str] = set()
     # A row header repeated under another outer header ("SE" under "Kestrova" and under
     # "Delmaro") names another entity, so it's a statement again.
@@ -213,7 +216,7 @@ def table_statements(table: Component) -> list[Statement]:
                         row_headers=[label],
                         row_labels=row_labels,
                         corner=" ".join(col_headers.get(c.col, [])) or None,
-                        axis_labels=row_axes[c.col],
+                        axis=axis_text(row_axes[c.col], row_positions[c.col][label]),
                     )
                     out.append(_statement(table, f"h{r}c{c.col}", label, ref, "table_header"))
                 continue
@@ -373,41 +376,37 @@ def _is_band(row: list[TableCell], width: int) -> bool:
     return len(row) == 1 and row[0].header and row[0].col == 0 and width > 1
 
 
-def axis_text(labels: Sequence[str], own: str, max_chars: int = MAX_AXIS_CHARS) -> str:
-    """``labels`` as Jev sees them beside the header ``own``: joined with ", ", at most
-    ``max_chars`` long.
+def axis_text(labels: Sequence[str], at: int, max_chars: int = MAX_AXIS_CHARS) -> str:
+    """A header's axis as Jev sees it beside ``labels[at]``, the header's own label: the
+    labels joined with ", ", at most ``max_chars`` long.
 
-    A longer axis keeps the run of labels nearest ``own`` (always included), adding one
-    after it and one before in turn while they fit, with "…" for the labels left out on
-    either side. An ``own``
-    longer than ``max_chars`` alone is cut, ending "…"."""
+    A longer axis keeps the run of labels nearest the header's own (always included),
+    adding one after it and one before in turn while they fit, with "…" for the labels
+    left out on either side. If even its own label doesn't fit with the marks, that label
+    alone is given, cut to ``max_chars`` (ending "…") when longer. The work grows with
+    what is kept, not with the axis: every header of a long table calls it."""
     if max_chars < 1:
         raise ValueError(f"max_chars must be positive, got {max_chars}")
-    joined = ", ".join(labels)
-    if len(joined) <= max_chars:
-        return joined
-    if own not in labels or len(own) + 2 * len(", …") > max_chars:
+    if not 0 <= at < len(labels):
+        raise IndexError(f"no label {at} on an axis of {len(labels)}")
+    own, n = labels[at], len(labels)
+    mark = len(", " + _ELLIPSIS)
+
+    def fits(lo: int, hi: int, size: int) -> bool:
+        return size + ((lo > 0) + (hi < n)) * mark <= max_chars
+
+    lo, hi, size = at, at + 1, len(own)
+    if not fits(lo, hi, size):
         return own if len(own) <= max_chars else own[: max_chars - 1] + _ELLIPSIS
-    lo = labels.index(own)
-    hi = lo + 1
-
-    def length(lo: int, hi: int) -> int:
-        marks = (lo > 0) + (hi < len(labels))
-        return len(", ".join(labels[lo:hi])) + marks * len(", …")
-
     grew = True
     while grew:
         grew = False
-        if hi < len(labels) and length(lo, hi + 1) <= max_chars:
-            hi, grew = hi + 1, True
-        if lo > 0 and length(lo - 1, hi) <= max_chars:
-            lo, grew = lo - 1, True
+        if hi < n and fits(lo, hi + 1, wider := size + 2 + len(labels[hi])):
+            hi, size, grew = hi + 1, wider, True
+        if lo > 0 and fits(lo - 1, hi, wider := size + 2 + len(labels[lo - 1])):
+            lo, size, grew = lo - 1, wider, True
     return ", ".join(
-        [
-            *([_ELLIPSIS] if lo > 0 else []),
-            *labels[lo:hi],
-            *([_ELLIPSIS] if hi < len(labels) else []),
-        ]
+        [*([_ELLIPSIS] if lo > 0 else []), *labels[lo:hi], *([_ELLIPSIS] if hi < n else [])]
     )
 
 
@@ -444,13 +443,18 @@ def _column_header_statements(
         if col in data_cols and (label := " ".join(col_headers[col]))
     }
     axis = list(dict.fromkeys(labels.values()))
+    position = {label: i for i, label in enumerate(axis)}
     out: list[Statement] = []
     for col, label in labels.items():
         if label in seen:
             continue
         seen.add(label)
         ref = TableCellRef(
-            row=row, col=col, col_headers=[label], corner=corner.strip() or None, axis_labels=axis
+            row=row,
+            col=col,
+            col_headers=[label],
+            corner=corner.strip() or None,
+            axis=axis_text(axis, position[label]),
         )
         out.append(_statement(table, f"h{row}c{col}", label, ref, "table_header"))
     return out

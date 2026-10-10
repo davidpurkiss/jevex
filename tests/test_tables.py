@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from jevex import (
     BoilerplateCleaner,
     Component,
@@ -90,7 +92,7 @@ def test_header_statements_name_their_own_axis() -> None:
         ([], ["Power"], ["Power"], "Specification"),
     ]
     # So are the labels on its axis: "GT" alone needn't read as a trim.
-    assert [r.axis_labels for r in refs] == [["SE", "GT"], ["SE", "GT"], ["Power"]]
+    assert [r.axis for r in refs] == ["SE, GT", "SE, GT", "Power"]
     assert statement_state(headers[1]) == {
         "statement": "GT",
         "table_corner": "Specification",
@@ -353,18 +355,16 @@ def test_a_header_row_repeated_mid_table_gives_its_own_axis_labels() -> None:
         "<tr><th>Torque</th><td>250 Nm</td><td>320 Nm</td></tr>"
     )
     axes = {
-        s.text: s.table.axis_labels
-        for s in table_statements(t)
-        if s.kind == "table_header" and s.table
+        s.text: s.table.axis for s in table_statements(t) if s.kind == "table_header" and s.table
     }
     assert axes == {
-        "SE": ["SE", "GT"],
-        "GT": ["SE", "GT"],
-        "SE L": ["SE L", "R"],
-        "R": ["SE L", "R"],
+        "SE": "SE, GT",
+        "GT": "SE, GT",
+        "SE L": "SE L, R",
+        "R": "SE L, R",
         # Row labels over data only: not "Towing".
-        "Power": ["Power", "Torque"],
-        "Torque": ["Power", "Torque"],
+        "Power": "Power, Torque",
+        "Torque": "Power, Torque",
     }
 
 
@@ -787,13 +787,13 @@ def test_a_row_label_repeated_under_another_outer_header_is_stated_again() -> No
         "<tr><th>GT</th><td>210 PS</td></tr>"
     )
     rows = [
-        (s.text, s.table.row_labels, s.table.corner, s.table.axis_labels)
+        (s.text, s.table.row_labels, s.table.corner, s.table.axis)
         for s in table_statements(t)
         if s.kind == "table_header" and s.table and s.table.row_headers
     ]
     # Each trim names a different entity under each model, and each column of row
     # headers is its own axis: models with models, trims with trims.
-    models, trims = ["Kestrova", "Delmaro"], ["SE", "GT"]
+    models, trims = "Kestrova, Delmaro", "SE, GT"
     assert rows == [
         ("Kestrova", ["Kestrova SE", "Kestrova GT"], "Model", models),
         ("SE", ["Kestrova SE"], "Trim", trims),
@@ -814,13 +814,18 @@ def test_a_row_label_repeated_under_another_outer_header_is_stated_again() -> No
 
 def test_axis_text_keeps_the_labels_nearest_the_header_within_the_cap() -> None:
     labels = [f"Trim {i}" for i in range(10)]  # "Trim 0" ... "Trim 9", 6 characters each
-    assert axis_text(labels, "Trim 4") == ", ".join(labels)  # fits whole
+    assert axis_text(labels, 4) == ", ".join(labels)  # fits whole
     # One after, one before, in turn, while they fit (with room for the "…" marks).
-    assert axis_text(labels, "Trim 4", max_chars=40) == "…, Trim 3, Trim 4, Trim 5, Trim 6, …"
-    assert axis_text(labels, "Trim 0", max_chars=30) == "Trim 0, Trim 1, Trim 2, …"
-    assert axis_text(labels, "Trim 9", max_chars=30) == "…, Trim 7, Trim 8, Trim 9"
-    # A header longer than the cap alone is cut.
-    assert axis_text(["x" * 50, "y"], "x" * 50, max_chars=10) == "x" * 9 + "…"
+    assert axis_text(labels, 4, max_chars=40) == "…, Trim 3, Trim 4, Trim 5, Trim 6, …"
+    assert axis_text(labels, 0, max_chars=30) == "Trim 0, Trim 1, Trim 2, …"
+    assert axis_text(labels, 9, max_chars=30) == "…, Trim 7, Trim 8, Trim 9"
+    # Its own label alone when the marks don't fit beside it, cut when it's too long.
+    assert axis_text(labels, 4, max_chars=8) == "Trim 4"
+    assert axis_text(["x" * 50, "y"], 0, max_chars=10) == "x" * 9 + "…"
+    with pytest.raises(ValueError, match="max_chars"):
+        axis_text(labels, 0, max_chars=0)
+    with pytest.raises(IndexError):
+        axis_text(labels, 10)
 
 
 def test_a_long_axis_is_capped_in_what_jev_sees() -> None:
@@ -828,10 +833,12 @@ def test_a_long_axis_is_capped_in_what_jev_sees() -> None:
         "<tr><th></th><th>Power</th></tr>"
         + "".join(f"<tr><th>Trim {i:04d}</th><td>{i} PS</td></tr>" for i in range(2000))
     )
-    header = next(s for s in table_statements(t) if s.text == "Trim 1000")
-    capped = axis_text([f"Trim {i:04d}" for i in range(2000)], "Trim 1000")
-    assert statement_state(header) == {"statement": "Trim 1000", "table_headers": capped}
-    assert len(capped) <= MAX_AXIS_CHARS
-    assert capped.startswith("…, Trim 09")
-    assert "Trim 1000" in capped
-    assert capped.endswith(", …")
+    statements = table_statements(t)
+    header = next(s for s in statements if s.text == "Trim 1000")
+    # 22 labels after it and 22 before (11 characters each with ", ") fit in 500.
+    kept = ", ".join(f"Trim {i:04d}" for i in range(978, 1023))
+    assert statement_state(header) == {"statement": "Trim 1000", "table_headers": f"…, {kept}, …"}
+    # What each header stores is capped too, not just what Jev sees.
+    headers = [s.table.axis for s in statements if s.kind == "table_header" and s.table]
+    assert len(headers) == 2001  # "Power" and the 2000 trims
+    assert all(axis and len(axis) <= MAX_AXIS_CHARS for axis in headers)

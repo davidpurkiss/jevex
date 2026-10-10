@@ -37,7 +37,6 @@ from jevex.layout import section_text
 from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
 from jevex.schema import NONE_OPTION, NOT_STATED_OPTION
-from jevex.tables import axis_text
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -103,8 +102,8 @@ def statement_state(statement: Statement) -> JSONContent:
     if (ref := statement.table) is not None:
         if ref.corner:
             state["table_corner"] = section_text([ref.corner])
-        if ref.axis_labels:
-            state["table_headers"] = axis_text(ref.axis_labels, statement.text)
+        if ref.axis:
+            state["table_headers"] = ref.axis
     if section := section_text(statement.heading_trail):
         state["section"] = section
     return state
