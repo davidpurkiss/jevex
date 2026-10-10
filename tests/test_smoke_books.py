@@ -15,18 +15,29 @@ pages with Jev answering by pattern (any price is "the price") rather than from 
 expected record. See ``fixtures/books/README.md`` for where the pages came from.
 """
 
+import json
 import os
 import re
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from jevex import Document, Extractor
+from jevex import Document, ExtractionResult, Extractor
 from jevex.examples.books import Book, StarRatingCleaner, books_pipeline
-from jevex.jev import Choice, JevClient
+from jevex.jev import Choice, JevClient, JevResponse, JSONContent, Question
 from jevex.layout_html import HtmlLayoutParser
-from jevex.testing import RECORD_ENV, CassetteMissError, FakeJev, cassette, stale_recording
+from jevex.testing import (
+    RECORD_ENV,
+    STALE_OK_ENV,
+    Cassette,
+    CassetteMissError,
+    FakeJev,
+    cassette,
+    request_key,
+    stale_recording,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "books"
 CASSETTE = FIXTURES / "jev-cassette.json"
@@ -76,15 +87,77 @@ def recorded_jev() -> JevClient:
     return JevClient(cassette(CASSETTE))
 
 
+async def extract_recorded(name: str, jev: JevClient) -> ExtractionResult:
+    """The page through the books pipeline, ended by ``stale_recording`` when it asks Jev
+    something the recording doesn't have.
+
+    ``extract`` doesn't raise the cassette's miss: it fails the document and reports the
+    miss among the result's errors, so that's where to look.
+    """
+    async with Extractor([Book], jev=jev, pipeline=books_pipeline()) as ex:
+        result = await ex.extract(page(name))
+    missed = [e for e in result.errors if e.type == CassetteMissError.__name__]
+    if missed:
+        stale_recording(missed[0].message)
+    return result
+
+
 @pytest.mark.parametrize("name", list(PAGES))
 async def test_books_page_with_recorded_jev(name: str, recorded_jev: JevClient) -> None:
-    async with Extractor([Book], jev=recorded_jev, pipeline=books_pipeline()) as ex:
-        try:
-            result = await ex.extract(page(name))
-        except CassetteMissError as exc:
-            stale_recording(str(exc))
+    result = await extract_recorded(name, recorded_jev)
     found = result.one(Book).record.model_dump(exclude_unset=True)
     assert found == PAGES[name].model_dump()
+
+
+class KeyLog:
+    """Replays a cassette and notes each request's key."""
+
+    def __init__(self, inner: Cassette) -> None:
+        self.inner = inner
+        self.keys: list[str] = []
+
+    async def system_one(
+        self, state: JSONContent, questions: Mapping[str, Question]
+    ) -> JevResponse:
+        self.keys.append(request_key(state, questions))
+        return await self.inner.system_one(state, questions)
+
+
+@pytest.mark.parametrize(
+    ("env", "outcome"),
+    [
+        ({}, pytest.xfail.Exception),
+        ({"CI": "true"}, pytest.fail.Exception),
+        ({"CI": "true", STALE_OK_ENV: "1"}, pytest.xfail.Exception),
+    ],
+    ids=["local", "ci", "ci-stale-ok"],
+)
+async def test_a_request_missing_from_the_recording_is_a_stale_recording(
+    env: dict[str, str],
+    outcome: type[BaseException],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if not CASSETTE.exists():
+        pytest.skip("no Jev recording yet")
+    name = next(iter(PAGES))
+    log = KeyLog(Cassette(CASSETTE))
+    await extract_recorded(name, JevClient(log))
+    # A copy without the page's last request, as if the pipeline now asked it differently.
+    original = CASSETTE.read_bytes()
+    entries = json.loads(original)
+    del entries[log.keys[-1]]
+    stale = tmp_path / "jev-cassette.json"
+    stale.write_text(json.dumps(entries))
+    for var in ("CI", STALE_OK_ENV):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    with pytest.raises(
+        outcome, match=f"the recording is stale: no recording for request {log.keys[-1]}"
+    ):
+        await extract_recorded(name, JevClient(Cassette(stale)))
+    assert CASSETTE.read_bytes() == original
 
 
 # --- the cleaner, and the pipeline with pattern-based answers (always run) ---------
