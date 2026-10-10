@@ -1,13 +1,13 @@
 {
-  "accuracy": 0.7488151658767772,
+  "accuracy": 0.7109004739336493,
   "corpus": "7205cd71b82d698f88d4bd75c182282e715e9ea1af939eda79ffce58a999ee2e",
   "documents": 6,
   "fields": {
     "Listing.colour": 1.0,
     "Listing.fuel_type": 1.0,
-    "Listing.make": 0.38461538461538464,
+    "Listing.make": 0.0,
     "Listing.mileage_miles": 1.0,
-    "Listing.model": 0.46153846153846156,
+    "Listing.model": 0.0,
     "Listing.price_gbp": 1.0,
     "Listing.year": 1.0,
     "VehicleSpec.automatic": 0.2,
@@ -17,13 +17,13 @@
     "VehicleSpec.make": 0.2,
     "VehicleSpec.model": 0.2,
     "VehicleSpec.power_kw": 0.6,
-    "VehicleSpec.price_gbp": 0.6,
+    "VehicleSpec.price_gbp": 1.0,
     "VehicleSpec.seats": 1.0,
     "VehicleSpec.top_speed_mph": 0.6,
-    "VehicleSpec.trim": 0.8,
+    "VehicleSpec.trim": 0.7,
     "VehicleSpec.zero_to_62_s": 1.0
   },
-  "llm_calls_per_document": 0.6666666666666666,
+  "llm_calls_per_document": 0.8333333333333334,
   "locale": null,
   "mode": "eval",
   "tolerances": {

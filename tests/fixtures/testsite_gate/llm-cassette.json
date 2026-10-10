@@ -2,29 +2,43 @@
   "8de44a7c7aa542dc": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "Kestrova SE",
+      "evidence": "Kestrova",
       "stated": true,
-      "value": "Kestrova SE"
+      "value": "Kestrova"
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nStatement: Delmaro Kestrova SE\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.007968,
+      "cost": 0.007088,
       "input_tokens": 497,
-      "output_tokens": 299
+      "output_tokens": 255
     }
   },
   "afff0f390433a918": {
     "model": "claude-opus-5-5",
     "output": {
-      "evidence": "143PS",
+      "evidence": "Power output \u00b7 GT: 143PS",
       "stated": true,
       "value": 105.2
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 GT: 143PS\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004636,
+      "cost": 0.005076,
       "input_tokens": 539,
-      "output_tokens": 124
+      "output_tokens": 146
+    }
+  },
+  "c72a8b2e9771fbc9": {
+    "model": "claude-opus-5-5",
+    "output": {
+      "evidence": "Delmaro",
+      "stated": true,
+      "value": "Delmaro"
+    },
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nStatement: Delmaro Kestrova SE\n\nField: make\nDescription: Manufacturer (make) name\nType: text\n\nIf the statement states the manufacturer (make) name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "usage": {
+      "cost": 0.004564,
+      "input_tokens": 511,
+      "output_tokens": 126
     }
   },
   "cedb35a59f4705c4": {
@@ -36,9 +50,9 @@
     },
     "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications \u203a Specifications\nStatement: Power output \u00b7 Edition: 173 bhp\n\nField: power_kw\nDescription: Maximum power output (kW)\nType: a number\n\nIf the statement states the maximum power output (kW), set \"stated\" to true, give the value in kW, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
     "usage": {
-      "cost": 0.004808,
+      "cost": 0.004828,
       "input_tokens": 542,
-      "output_tokens": 132
+      "output_tokens": 133
     }
   },
   "eec3aca60e4fa71c": {
