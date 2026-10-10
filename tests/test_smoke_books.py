@@ -229,7 +229,7 @@ def pattern_jev(name: str) -> FakeJev:
 
     fake = (
         FakeJev(strict=True)
-        .noul("Does this document describe", p=0.97)
+        .noul("Does this document include", p=0.97)
         .noul("Does this section", p=0.05)
         .noul("Does this section", p=0.9, state=re.compile(r"£|Rating:|In stock"))
         .choice("Which detail", "none")

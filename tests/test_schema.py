@@ -145,8 +145,8 @@ def test_document_gate_from_docstring() -> None:
         x: int
 
     assert SchemaSpec.from_model(Spec).document_gate_question().instructions == (
-        "Does this document describe a manufacturer's technical specification "
-        "for one vehicle variant?"
+        "Does this document include a manufacturer's technical specification "
+        "for one vehicle variant? It may include several."
     )
 
 
@@ -159,11 +159,11 @@ def test_document_gate_keeps_acronyms_and_falls_back_to_class_name() -> None:
     class UsedCarListing(BaseModel):
         x: int
 
-    assert "describe EV charger listing?" in str(
+    assert "include EV charger listing?" in str(
         SchemaSpec.from_model(EVCharger).document_gate_question().instructions
     )
     assert SchemaSpec.from_model(UsedCarListing).document_gate_question().instructions == (
-        "Does this document describe used car listing?"
+        "Does this document include used car listing? It may include several."
     )
 
 

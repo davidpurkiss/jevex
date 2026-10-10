@@ -1,0 +1,68 @@
+{
+  "3faae86fab9f562e": {
+    "request": {
+      "questions": {
+        "VehicleSpec": {
+          "criteria": null,
+          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
+          "type": "noul"
+        }
+      },
+      "state": "Delmaro Kestrova specifications\n\nWe use cookies to improve your experience. Accept all\nHome Models Used cars Contact\nDelmaro Kestrova: specifications\nCompare the Delmaro Kestrova range below.\nSpecifications\nSpecification SE Sport GT Edition\nFuel Diesel Diesel Diesel Diesel\nDisplacement 1395cc 1395 cc 1,395 cc 1,395 cc\nPower output 70 kW 114 bhp 143PS 173 bhp\nAcceleration 0\u201362mph 9.1 8.4 s 7.7 s 6.5 s\nTop speed 128 mph 217 km/h 145 mph 249 km/h\nCO2 (g/km) 127 128 130 132\nPrice from 19,000 GBP \u00a321,495 \u00a323,995 25,995 GBP\nSeating capacity 7 7 7 7\nGearbox Manual Manual Automatic Manual\n\u00a9 2026 Testsite Motors Ltd. All rights reserved. Privacy"
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec": {
+          "p": 0.89,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 543,
+      "model": "jev-1.13.0"
+    }
+  },
+  "e4da4ecd248dbe90": {
+    "request": {
+      "questions": {
+        "VehicleSpec": {
+          "criteria": null,
+          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
+          "type": "noul"
+        }
+      },
+      "state": "A Light in the Attic | Books to Scrape - Sandbox\n\nBooks to Scrape We love being scraped!\nHome\nBooks\nPoetry\nA Light in the Attic\nA Light in the Attic\n\u00a351.77\nIn stock (22 available)\nWarning! This is a demo website for web scraping purposes. Prices and ratings here were randomly assigned and have no real meaning.\nProduct Description\nIt's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings from Shel Silverstein celebrates its 20th anniversary with this special edition. Silverstein's humorous and creative verse can amuse the dowdiest of readers. Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love th It's hard to imagine a world without A Light in the Attic. This now-classic collection of poetry and drawings from Shel Silverstein celebrates its 20th anniversary with this special edition. Silverstein's humorous and creative verse can amuse the dowdiest of readers. Lemon-faced adults and fidgety kids sit still and read these rhythmic words and laugh and smile and love that Silverstein. Need proof of his genius? RockabyeRockabye baby, in the treetopDon't you know a treetopIs no safe place to rock?And who put you up there,And your cradle, too?Baby, I think someone down here'sGot it in for you. Shel, you never sounded so good. ...more\nProduct Information\nUPC a897fe39b1053632\nProduct Type Books\nPrice (excl. tax) \u00a351.77\nPrice (incl. tax) \u00a351.77\nTax \u00a30.00\nAvailability In stock (22 available)\nNumber of reviews 0"
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec": {
+          "p": 0.01,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 692,
+      "model": "jev-1.13.0"
+    }
+  },
+  "fb1a4683d968f3e6": {
+    "request": {
+      "questions": {
+        "VehicleSpec": {
+          "criteria": null,
+          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
+          "type": "noul"
+        }
+      },
+      "state": "Delmaro Kestrova trims\n\nWe use cookies to improve your experience. Accept all\nHome Models Used cars Contact\nDelmaro Kestrova trims\nSE\nFuel type\nDiesel\nEngine size\n1,395 cc\nPower output\n70 kW\n0-62mph\n9.1 s\nMax speed\n128 mph\nCO2\n127\nPrice from\n19,000 GBP\nSeating capacity\n7\nTransmission\nManual\nSport\nFuel type\nDiesel\nDisplacement\n1,395 cc\nPeak power\n114bhp\n0-62mph\n8.4 s\nTop speed\n217 km/h\nCO2 emissions (g/km)\n128\nOTR price\n\u00a321,495\nSeats\n7\nTransmission\nManual\nGT\nFuel type\nDiesel\nDisplacement\n1395cc\nPeak power\n105 kW\n0-62 mph (s)\n7.7 s\nMax speed\n233 km/h\nCO2\n130\nOTR price\n23,995 GBP\nSeating capacity\n7\nTransmission\nAutomatic\nEdition\nPowertrain\nDiesel\nDisplacement\n1,395 cc\nPower output\n129 kW\nAcceleration 0\u201362mph\n6.5 s\nMaximum speed\n155 mph\nCO2\n132\nPrice\n\u00a325,995\nSeating\n7\nGearbox\nManual\n\u00a9 2026 Testsite Motors Ltd. All rights reserved. Privacy"
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec": {
+          "p": 0.88,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 643,
+      "model": "jev-1.13.0"
+    }
+  }
+}

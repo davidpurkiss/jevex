@@ -1,9 +1,10 @@
 """Stage 3, document gate: ask whether a document is worth extracting each schema from.
 
 The default :class:`NoulDocumentGate` asks one Noul per registered schema ("Does this
-document describe {schema description}?", or the schema's ``document_question``) about the
-document's text. Every schema's question goes into one request. A schema whose answer
-falls below the threshold is deactivated, so no later stage spends Jev calls on it.
+document include {schema description}? It may include several.", or the schema's
+``document_question``) about the document's text. Every schema's question goes into one
+request. A schema whose answer falls below the threshold is deactivated, so no later stage
+spends Jev calls on it.
 
 Schemas with ``gate_unit="page"`` are asked once per page instead, so a 40-page brochure
 only goes on to process its spec pages. The per-page probabilities are kept on the

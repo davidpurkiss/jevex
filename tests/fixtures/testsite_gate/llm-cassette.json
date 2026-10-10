@@ -12,5 +12,19 @@
       "input_tokens": 522,
       "output_tokens": 25
     }
+  },
+  "d1e92ba2be3918ff": {
+    "model": "claude-opus-5-5",
+    "output": {
+      "evidence": "",
+      "stated": false,
+      "value": null
+    },
+    "prompt": "Read one statement from a document and extract a single field from it.\n\nSection: Delmaro Kestrova: specifications\nStatement: Compare the Delmaro Kestrova range below.\n\nField: model\nDescription: Model name\nType: text\n\nIf the statement states the model name, set \"stated\" to true, give the value, and copy\nthe words of the statement that state it into \"evidence\", exactly as they appear. If it\ndoesn't state it, set \"stated\" to false and leave the rest empty. Never guess.",
+    "usage": {
+      "cost": 0.00906,
+      "input_tokens": 520,
+      "output_tokens": 349
+    }
   }
 }
