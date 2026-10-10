@@ -476,6 +476,30 @@ async def test_a_name_run_offers_each_of_its_parts() -> None:
     assert (sel.candidate.raw, sel.candidate.generator_id) == ("Kestrova", "noun_phrase")
 
 
+async def test_a_model_named_by_a_number_is_an_option_jev_can_pick() -> None:
+    fake = FakeJev().choice("Which of these is the model name?", "308")
+    ctx = context(fake, [st("s1", "The Peugeot 308 GT, from 2021")], {"s1": "model"})
+    await run_both(ctx)
+    question = only_call_questions(fake)["Car.model/choice0"]
+    assert question == Choice(
+        instructions="Which of these is the model name?",
+        options={
+            "2021": None,
+            "308": None,
+            "308 GT": None,
+            "GT": None,
+            "Peugeot": None,
+            "Peugeot 308": None,
+            "Peugeot 308 GT": None,
+            "The Peugeot 308 GT, from 2021": None,
+            "none": "None of these is the model name",
+        },
+    )
+    sel = ctx.schemas["Car"].selections[("doc", "model", "s1")]
+    assert sel.candidate is not None
+    assert (sel.candidate.raw, sel.candidate.generator_id) == ("308", "noun_phrase")
+
+
 async def test_more_than_254_candidates_are_split_across_choices() -> None:
     text = " ".join(str(i) for i in range(300))
     fake = FakeJev().choice("Which of these", lambda q: "299" if "299" in q.options else "none")

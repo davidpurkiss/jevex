@@ -575,7 +575,9 @@ class NounPhrase:
     nothing marks where one value ends and the next begins in a name such as "Delmaro
     Kestrova SE" (a make, a model and a trim), so a run of up to ``MAX_PHRASE_WORDS``
     words also gives every contiguous part of it, and Jev picks. A longer run is cut
-    into consecutive chunks of that many words, with no sub-runs.
+    into consecutive chunks of that many words, with no sub-runs. Numbers are words like
+    any other ("308" in "Peugeot 308"): whether one is a name or a quantity is select's
+    to judge, and its Choice can answer "none".
 
     Where runs break is a guess about where values end, made in code because Jev can
     only pick spans, not propose them. Each sub-run is an option in select's Choice, and
@@ -602,13 +604,10 @@ class NounPhrase:
                 phrases = [run[i:j] for i in range(n) for j in range(i + 1, n + 1)]
             else:
                 phrases = [run[i : i + MAX_PHRASE_WORDS] for i in range(0, n, MAX_PHRASE_WORDS)]
-            for words in phrases:
-                if not all(w.group().replace(",", "").replace(".", "").isdigit() for w in words):
-                    out.append(
-                        _candidate(
-                            statement, words[0].start(), words[-1].end(), self.id, _step("strip")
-                        )
-                    )
+            out.extend(
+                _candidate(statement, words[0].start(), words[-1].end(), self.id, _step("strip"))
+                for words in phrases
+            )
             run.clear()
 
         last_end = 0
