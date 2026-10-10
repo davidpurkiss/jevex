@@ -30,10 +30,11 @@ pipeline = default_pipeline().replace("structured", StructuredStage(mode="fill_g
 ```
 
 On a page with several entities (a comparison table under `MultiEntity`), embedded values
-don't make a record of their own. A value from an object that names an entity (a JSON-LD
-`offers[]` item called "Kestrova SE L" when a table column is "SE L") goes to that entity.
-The rest (the make, the model) are copied into every entity with `meta.shared` set, and a
-value the layout route finds for the entity itself replaces a shared one.
+don't make a record of their own. Jev is asked which entity each object in an embedded
+array describes (a JSON-LD `offers[]` item called "Kestrova SE L" when a table column is
+"SE L"), and that entity gets the object's values. The rest (the make, the model, an
+object for every entity) are copied into every entity with `meta.shared` set, and a value
+the layout route finds for the entity itself replaces a shared one.
 
 ## PDFs
 

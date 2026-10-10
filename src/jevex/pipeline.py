@@ -167,9 +167,9 @@ class SchemaRun:
     again, and :meth:`offer_field` settles disagreements instead of keeping the first
     value found."""
     structured_items: list[StructuredItem] = field(default_factory=list["StructuredItem"])
-    """Named objects in the embedded data's arrays and the values each gives (set by the
+    """Objects in the embedded data's arrays and the values each gives (set by the
     structured stage), so the entity stage can give an entity the values of the object
-    naming it."""
+    Jev says describes it."""
     structured_rest: dict[str, FieldMeta] = field(default_factory=dict[str, "FieldMeta"])
     """The embedded data's values from outside :attr:`structured_items`."""
 

@@ -26,7 +26,7 @@ from jevex.clean import CleanStage
 from jevex.entities import EntityScope
 from jevex.extractor import DEFAULT_STAGES, STAGE_ORDER, default_pipeline
 from jevex.interfaces import EntityResolver, ParsedDocument
-from jevex.jev import Choice, Noul
+from jevex.jev import Choice, JevClient, Noul
 from jevex.keypaths import StructuredItem, StructuredMode, StructuredStage
 from jevex.layout import LayoutStage
 from jevex.pipeline import Pipeline, SchemaRun
@@ -34,7 +34,6 @@ from jevex.resolve import (
     SINGLE_ENTITY_LABEL,
     EntityStage,
     SingleEntity,
-    match_label,
     place_document_values,
 )
 from jevex.results import FieldMeta, Source
@@ -1334,27 +1333,13 @@ async def test_a_field_holding_one_model_gets_its_first_child() -> None:
 # --- values found for the whole document (embedded data) ------------------------------
 
 
-def test_match_label_prefers_an_exact_name_then_the_longest_label_inside_one() -> None:
-    labels = ["SE", "SE L", "Sport"]
-    assert match_label(["SE"], labels) == "SE"
-    assert match_label(["se-l"], labels) == "SE L"  # case and punctuation are ignored
-    assert match_label(["Kestrova SE L 1.5"], labels) == "SE L"
-    assert match_label(["Kestrova", "SE"], labels) == "SE"  # any of an item's names
-    # A name inside a label isn't enough: "Kestrova" is inside every heading here.
-    assert match_label(["Kestrova"], ["Kestrova SE", "Kestrova SE L"]) is None
-    assert match_label(["SE"], ["Kestrova SE", "Kestrova SE L"]) is None
-    assert match_label(["SE and Sport"], labels) is None  # a tie names nobody
-    assert match_label(["Delivery"], labels) is None
-    assert match_label([], labels) is None
-
-
 def structured(value: object, sid: str) -> FieldMeta:
     return FieldMeta(value=value, method="structured", source=Source(statement_id=sid))
 
 
-def item(path: str, names: tuple[str, ...], sids: set[str], **values: FieldMeta) -> StructuredItem:
+def item(path: str, text: str, sids: set[str], **values: FieldMeta) -> StructuredItem:
     return StructuredItem(
-        path=path, names=names, statement_ids=frozenset(sids), fields={"Car": values}
+        path=path, text=text, statement_ids=frozenset(sids), fields={"Car": values}
     )
 
 
@@ -1370,38 +1355,62 @@ def car_run(*labels: str) -> SchemaRun:
     return run
 
 
-def test_document_values_go_to_the_entity_an_item_names_and_the_rest_are_shared() -> None:
+def places(**owners: str) -> FakeJev:
+    """Jev saying which car an object describes, by a word in its text; "all of them"
+    for the rest."""
+    fake = FakeJev(strict=True).choice("Which car does this statement apply to?", ALL_OPTION)
+    for word, label in owners.items():
+        fake.choice("Which car does this statement apply to?", label, state=word)
+    return fake
+
+
+async def test_jev_places_each_object_on_its_entity_and_the_rest_are_shared() -> None:
     run = car_run("SE", "SE L", "Sport")
     run.fields[SINGLE_ENTITY_LABEL] = {
         "model": structured("Kestrova", "s0"),
-        "price": structured(26995, "s2"),  # the first offer's, which names SE L
+        "price": structured(26995, "s2"),  # the first offer's, which Jev puts on SE L
         "doors": FieldMeta(method="structured", error="no value"),
     }
     run.structured_items = [
-        item("offers[0]", ("Kestrova SE L",), {"s1", "s2"}, price=structured(26995, "s2")),
-        item("offers[1]", ("Delivery",), {"s3", "s4"}, price=structured(750, "s4")),
-        item("offers[2]", ("SE",), {"s5", "s6"}, price=structured(24995, "s6")),
+        item(
+            "offers[0]",
+            "offers[0].name: Kestrova SE L\noffers[0].price: 26995",
+            {"s1", "s2"},
+            price=structured(26995, "s2"),
+        ),
+        item("offers[1]", "offers[1].name: Delivery", {"s3", "s4"}, price=structured(750, "s4")),
+        item("offers[2]", "offers[2].sku: K-SE", {"s5", "s6"}, price=structured(24995, "s6")),
     ]
-    assert place_document_values(run) == (2, 4)
+    fake = places(**{"Kestrova": "SE L", "K-SE": "SE"})
+    assert await place_document_values(run, fake.client()) == (2, 4)
+    question = Choice(
+        instructions="Which car does this statement apply to?",
+        options={"SE": None, "SE L": None, "Sport": None, ALL_OPTION: "It applies to every car"},
+    )
+    assert [(c.state, c.questions) for c in fake.calls] == [
+        ("offers[0].name: Kestrova SE L\noffers[0].price: 26995", {"entity": question}),
+        ("offers[1].name: Delivery", {"entity": question}),
+        ("offers[2].sku: K-SE", {"entity": question}),
+    ]
     assert SINGLE_ENTITY_LABEL not in run.fields
     se, se_l, sport = (run.fields[label] for label in ("SE", "SE L", "Sport"))
     assert (se["price"].value, se["price"].shared) == (24995, False)
     assert (se_l["price"].value, se_l["price"].shared) == (26995, False)
-    # Sport gets no named offer: the price from the one naming no entity, shared.
+    # Sport gets no offer of its own: the price from the one for every car, shared.
     assert (sport["price"].value, sport["price"].shared) == (750, True)
     assert all(f["model"].value == "Kestrova" and f["model"].shared for f in (se, se_l, sport))
     assert all(not f["doors"].found for f in (se, se_l, sport))  # the error goes along
 
 
-def test_a_value_from_outside_every_item_is_shared_before_an_unmatched_items() -> None:
+async def test_a_value_from_outside_every_item_is_shared_before_an_unplaced_items() -> None:
     run = car_run("SE", "SE L")
     run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
     run.structured_items = [
-        item("offers[0]", ("SE",), {"s1"}, price=structured(24995, "s1")),
-        item("offers[1]", ("Delivery",), {"s2"}, price=structured(750, "s2")),
+        item("offers[0]", "offers[0].name: SE", {"s1"}, price=structured(24995, "s1")),
+        item("offers[1]", "offers[1].name: Delivery", {"s2"}, price=structured(750, "s2")),
     ]
     run.structured_rest = {"price": structured(19995, "s9")}
-    place_document_values(run)
+    await place_document_values(run, places(SE="SE").client())
     assert run.fields["SE"]["price"].value == 24995
     assert (run.fields["SE L"]["price"].value, run.fields["SE L"]["price"].shared) == (
         19995,
@@ -1409,36 +1418,96 @@ def test_a_value_from_outside_every_item_is_shared_before_an_unmatched_items() -
     )
 
 
-def test_a_value_only_matched_items_give_isnt_shared() -> None:
+async def test_a_value_only_placed_items_give_isnt_shared_and_valueless_ones_arent_asked() -> None:
     run = car_run("SE", "SE L", "Sport")
     run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
     run.structured_items = [
-        item("trims[0]", ("SE",), {"s1"}, price=structured(24995, "s1")),
-        # Inside a matched item, so not loose, even though it names no entity.
-        item("trims[0].extras[0]", ("Delivery",), {"s1"}, price=structured(24995, "s1")),
-        item("trims[1]", ("SE L",), {"s2"}),  # names SE L but gives no price
+        item("trims[0]", "trims[0].name: SE", {"s0", "s1"}, price=structured(24995, "s1")),
+        # Inside a placed item, so it isn't shared, though it applies to every car.
+        item("trims[0].extras[0]", "extras", {"s1"}, price=structured(24995, "s1")),
+        item("trims[1]", "trims[1].name: SE L", {"s2"}),  # gives no price
+        item("trims[2]", "trims[2].name: Sport", {"s3"}, price=FieldMeta(error="no value")),
     ]
-    assert place_document_values(run) == (1, 0)
+    fake = places(SE="SE")
+    assert await place_document_values(run, fake.client()) == (1, 0)
+    assert [c.state for c in fake.calls] == ["trims[0].name: SE", "extras"]
     assert "price" not in run.fields.get("SE L", {})
     assert "Sport" not in run.fields
 
 
-def test_with_one_entity_the_documents_values_are_its_own() -> None:
+async def test_an_object_holding_placed_objects_isnt_placed_itself() -> None:
+    run = car_run("Sport", "Sport Plus", "GT")
+    run.fields[SINGLE_ENTITY_LABEL] = {
+        "model": structured("Kestrova", "s1"),
+        "price": structured(30000, "s3"),
+    }
+    run.structured_items = [
+        # Jev says the vehicle is the Sport, but it holds the offers for each trim.
+        item(
+            "vehicles[0]",
+            "vehicles[0].name: Kestrova Sport Tourer",
+            {"s0", "s1", "s2", "s3", "s4", "s5"},
+            model=structured("Kestrova", "s1"),
+            price=structured(30000, "s3"),
+        ),
+        item("vehicles[0].offers[0]", "plus", {"s2", "s3"}, price=structured(30000, "s3")),
+        item("vehicles[0].offers[1]", "basic", {"s4", "s5"}, price=structured(25000, "s5")),
+    ]
+    fake = places(Tourer="Sport", plus="Sport Plus", basic="Sport")
+    await place_document_values(run, fake.client())
+    assert run.fields["Sport"]["price"].value == 25000
+    assert run.fields["Sport Plus"]["price"].value == 30000
+    assert "price" not in run.fields["GT"]
+    assert all(run.fields[label]["model"].shared for label in ("Sport", "Sport Plus", "GT"))
+
+
+async def test_with_too_many_entities_to_ask_every_object_is_shared() -> None:
+    labels = [f"Trim {i}" for i in range(255)]
+    run = car_run(*labels)
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
+    run.structured_items = [
+        item("offers[0]", "offers[0].name: Trim 0", {"s1"}, price=structured(24995, "s1"))
+    ]
+    fake = FakeJev(strict=True)
+    assert await place_document_values(run, fake.client()) == (0, 255)
+    assert fake.calls == []
+    assert all(run.fields[label]["price"].shared for label in labels)
+
+
+async def test_a_long_object_is_cut_to_fit_one_request() -> None:
+    run = car_run("SE", "SE L")
+    run.fields[SINGLE_ENTITY_LABEL] = {"price": structured(24995, "s1")}
+    text = "\n".join(f"offers[0].feature[{i}]: heated seats" for i in range(400))
+    run.structured_items = [item("offers[0]", text, {"s1"}, price=structured(24995, "s1"))]
+    fake = places(feature="SE L")
+    await place_document_values(run, JevClient(fake, state_token_budget=500))
+    [call] = fake.calls
+    assert isinstance(call.state, str)
+    assert text.startswith(call.state)
+    assert 0 < len(call.state) < len(text)
+    assert run.fields["SE L"]["price"].value == 24995
+
+
+async def test_with_one_entity_the_documents_values_are_its_own() -> None:
     run = car_run("listing")
     run.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
-    assert place_document_values(run) == (1, 0)
+    run.structured_items = [item("offers[0]", "x", {"s0"}, model=structured("Kestrova", "s0"))]
+    fake = FakeJev(strict=True)
+    assert await place_document_values(run, fake.client()) == (1, 0)
     assert run.fields == {"listing": {"model": structured("Kestrova", "s0")}}
+    assert fake.calls == []
 
 
-def test_nothing_moves_when_the_document_is_a_scope_or_found_nothing() -> None:
+async def test_nothing_moves_when_the_document_is_a_scope_or_found_nothing() -> None:
+    jev = FakeJev(strict=True).client()
     run = car_run(SINGLE_ENTITY_LABEL)
     run.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
-    assert place_document_values(run) is None
+    assert await place_document_values(run, jev) is None
     assert list(run.fields) == [SINGLE_ENTITY_LABEL]
-    assert place_document_values(car_run("SE", "SE L")) is None
+    assert await place_document_values(car_run("SE", "SE L"), jev) is None
     empty = car_run()
     empty.fields[SINGLE_ENTITY_LABEL] = {"model": structured("Kestrova", "s0")}
-    assert place_document_values(empty) is None
+    assert await place_document_values(empty, jev) is None
 
 
 async def test_the_entity_stage_places_document_values_and_reports_it() -> None:
@@ -1491,6 +1560,8 @@ def json_ld_table_jev() -> FakeJev:
         .choice("Which detail does this statement", "power_ps", state="Power")
         .choice("Which detail does this statement", "price", state="Price")
         .choice("Which of these", first_option, confidence=0.9)
+        .choice("apply to", ALL_OPTION, state="offers[")
+        .choice("apply to", "SE L", state="Kestrova SE L")
     )
 
 
@@ -1526,6 +1597,13 @@ async def test_json_ld_on_a_comparison_table_page_fills_the_trims_not_a_document
     # Only SE's price was still wanted from the table.
     prices = [c.state for c in fake.calls if "Which of these is the price" in str(c.questions)]
     assert prices == [{"statement": "Price · SE: £24,995", "section": "Kestrova"}]
+    # Jev placed each offer: the one naming SE L on it, the delivery on every trim.
+    asked = [c.state for c in fake.calls if "apply to" in str(c.questions)]
+    offers = [state for state in asked if isinstance(state, str)]
+    assert offers == [
+        "offers[0].@type: Offer\noffers[0].name: Kestrova SE L\noffers[0].price: 26995",
+        "offers[1].@type: Offer\noffers[1].name: Delivery\noffers[1].price: 750",
+    ]
     [placed] = [e for e in result.meta.events if e.kind == "document_values_placed"]
     assert placed.message == ("TrimSpec: 1 value(s) matched to an entity, 3 shared by every entity")
 
@@ -1540,28 +1618,3 @@ async def test_in_merge_mode_a_trims_own_value_beats_the_shared_one_as_a_conflic
     assert (se_l.meta.price.value, se_l.meta.price.method) == (26995, "structured")
     [conflict] = se_l.meta.price.conflicts
     assert (conflict.value, conflict.method) == (26495, "generator")
-
-
-def test_an_object_holding_matched_objects_isnt_matched_itself() -> None:
-    run = car_run("Sport", "Sport Plus", "GT")
-    run.fields[SINGLE_ENTITY_LABEL] = {
-        "model": structured("Kestrova", "s1"),
-        "price": structured(30000, "s3"),
-    }
-    run.structured_items = [
-        # "Kestrova Sport Tourer" names Sport, but holds the offers that name each trim.
-        item(
-            "vehicles[0]",
-            ("Kestrova Sport Tourer",),
-            {"s0", "s1", "s2", "s3", "s4", "s5"},
-            model=structured("Kestrova", "s1"),
-            price=structured(30000, "s3"),
-        ),
-        item("vehicles[0].offers[0]", ("Sport Plus",), {"s2", "s3"}, price=structured(30000, "s3")),
-        item("vehicles[0].offers[1]", ("Sport",), {"s4", "s5"}, price=structured(25000, "s5")),
-    ]
-    place_document_values(run)
-    assert run.fields["Sport"]["price"].value == 25000
-    assert run.fields["Sport Plus"]["price"].value == 30000
-    assert "price" not in run.fields["GT"]
-    assert all(run.fields[label]["model"].shared for label in ("Sport", "Sport Plus", "GT"))

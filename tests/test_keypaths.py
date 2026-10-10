@@ -986,7 +986,7 @@ async def test_merge_mode_end_to_end_records_the_layout_routes_disagreement() ->
     assert (conflict.value, conflict.method, conflict.confidence) == ("Polo", "generator", 0.8)
 
 
-# --- named items, for multi-entity pages ---------------------------------------------
+# --- array items, for multi-entity pages ---------------------------------------------
 
 TRIMS = {
     "@type": "Car",
@@ -996,34 +996,41 @@ TRIMS = {
         {"@type": "Offer", "name": "Kestrova SE L", "price": 26995, "fuelType": "Fully electric"},
         {"@type": "Offer", "itemOffered": {"vehicleConfiguration": "SE"}, "price": 24995},
         {"@type": "Offer", "price": 1},
+        {"@type": "Offer"},
+        {},
     ],
     "tags": ["a", "b"],
 }
 
 
-def test_flatten_records_the_array_objects_that_name_something() -> None:
+def test_flatten_records_every_array_object_holding_a_leaf() -> None:
     flat = flatten(blob(TRIMS))
-    first, second = flat.items
-    assert (first.path, first.names) == ("offers[0]", ("Kestrova SE L",))
-    # A nested object's name key counts (any case); the unnamed offer isn't an item.
-    assert (second.path, second.names) == ("offers[1]", ("SE",))
+    first, second, third, fourth = flat.items
+    assert [i.path for i in flat.items] == ["offers[0]", "offers[1]", "offers[2]", "offers[3]"]
+    # A nested object's leaves are the item's; an object with no name is an item too, and
+    # one with no leaf ({}, "@type" alone counts) isn't.
     assert [leaf.path for leaf in flat.leaves[second.start : second.end]] == [
         "offers[1].@type",
         "offers[1].itemOffered.vehicleConfiguration",
         "offers[1].price",
     ]
-    assert flatten(blob(CAR)).items == ()  # no names: nothing to match
+    assert [leaf.path for leaf in flat.leaves[third.start : third.end]] == [
+        "offers[2].@type",
+        "offers[2].price",
+    ]
+    assert (first.end, fourth.end - fourth.start) == (second.start, 1)
+    # An array of strings holds no items.
+    assert flatten(blob({"model": "Golf", "color": ["Red", "Grey"]})).items == ()
 
 
-def test_a_name_inside_a_nested_array_names_the_inner_object_only() -> None:
-    data = {"models": [{"name": "Kestrova", "trims": [{"name": "SE", "power": 150}]}]}
+def test_an_object_in_a_nested_array_is_an_item_inside_its_outer_one() -> None:
+    data = {"models": [{"name": "Kestrova", "trims": [{"name": "SE", "power": 150}, 7]}]}
     outer, inner = flatten(blob(data)).items
-    assert (outer.path, outer.names) == ("models[0]", ("Kestrova",))
-    assert (inner.path, inner.names) == ("models[0].trims[0]", ("SE",))
-    assert (outer.start, outer.end, inner.start, inner.end) == (0, 3, 1, 3)
+    assert (outer.path, inner.path) == ("models[0]", "models[0].trims[0]")
+    assert (outer.start, outer.end, inner.start, inner.end) == (0, 4, 1, 3)
 
 
-async def test_the_mapper_reads_each_named_item_and_the_rest_on_their_own() -> None:
+async def test_the_mapper_reads_each_item_and_the_rest_on_their_own() -> None:
     fake = mapping_jev().choice(
         re.compile("(?i)what is the fuel type"), "ev", confidence=0.8, state="Fully electric"
     )
@@ -1031,18 +1038,24 @@ async def test_the_mapper_reads_each_named_item_and_the_rest_on_their_own() -> N
     for path, name in mapping.items():
         fake.choice(f'key path "{path}"', _pick(name), confidence=0.9)
     result = await KeyPathMapper().extract(page(TRIMS), [SchemaSpec.from_model(Car)], fake.client())
-    se_l, se = result.items
-    assert se_l.names == ("Kestrova SE L",)
+    se_l, se, delivery, bare = result.items
+    assert se_l.text == (
+        "offers[0].@type: Offer\n"
+        "offers[0].name: Kestrova SE L\n"
+        "offers[0].price: 26995\n"
+        "offers[0].fuelType: Fully electric"
+    )
     assert {n: m.value for n, m in se_l.fields["Car"].items()} == {"price": 26995, "fuel": "ev"}
     assert {n: m.value for n, m in se.fields["Car"].items()} == {"price": 24995}
     assert se.statement_ids == {"structured.0.7", "structured.0.8", "structured.0.9"}
-    # The page's value is the first found anywhere; the rest skips the named offers.
+    assert {n: m.value for n, m in delivery.fields["Car"].items()} == {"price": 1}
+    assert bare.fields["Car"] == {}
+    # The page's value is the first found anywhere; the rest skips every offer.
     page_values = {n: m.value for n, m in result.fields["Car"].items()}
     assert page_values == {"model": "Kestrova", "fuel": "petrol", "price": 26995}
     assert {n: m.value for n, m in result.rest["Car"].items()} == {
         "model": "Kestrova",
         "fuel": "petrol",
-        "price": 1,
     }
     # "Fully electric" was asked once, for the page; the item reused the answer.
     assert len([c for c in fake.calls if "enum" in c.questions]) == 1
@@ -1068,9 +1081,10 @@ async def test_items_use_only_jevs_remembered_readings() -> None:
     assert se_l.error is not None
 
 
-async def test_without_named_items_the_rest_is_the_pages_values() -> None:
+async def test_without_array_items_the_rest_is_the_pages_values() -> None:
+    data = {k: v for k, v in CAR.items() if k != "offers"}
     result = await KeyPathMapper().extract(
-        page(CAR), [SchemaSpec.from_model(Car)], mapping_jev().client()
+        page(data), [SchemaSpec.from_model(Car)], mapping_jev().client()
     )
     assert result.items == []
     assert result.rest == result.fields
@@ -1080,8 +1094,14 @@ async def test_the_stage_keeps_the_items_and_the_rest_on_each_run() -> None:
     ctx = Context.create(page(TRIMS), [SchemaSpec.from_model(Car)], mapping_jev().client())
     await StructuredStage(mode="fill_gaps").run(ctx)
     run = ctx.schemas["Car"]
-    assert [i.path for i in run.structured_items] == ["offers[0]", "offers[1]"]
-    assert run.structured_rest["price"].value == 1
+    assert [i.path for i in run.structured_items] == [
+        "offers[0]",
+        "offers[1]",
+        "offers[2]",
+        "offers[3]",
+    ]
+    assert run.structured_rest["model"].value == "Kestrova"
+    assert "price" not in run.structured_rest
 
 
 async def test_items_repeating_a_value_reuse_jevs_one_reading_of_it() -> None:

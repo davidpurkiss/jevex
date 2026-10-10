@@ -121,10 +121,10 @@ from jevex.images import (
 from jevex.interfaces import ComponentGateResult, LLMAnswer
 from jevex.jev import JevTransientError, RetryPolicy
 from jevex.keypaths import (
+    ArrayItem,
     FlatBlob,
     KeyPathMapper,
     Leaf,
-    NamedItem,
     StructuredItem,
     StructuredMode,
     StructuredResult,
@@ -217,7 +217,6 @@ from jevex.resolve import (
     MultiEntity,
     ParentChild,
     SingleEntity,
-    match_label,
     place_document_values,
 )
 from jevex.results import Extracted, FieldMeta, Source
@@ -280,6 +279,7 @@ __all__ = [
     "DRIFT_WINDOW",
     "ENTRY_POINT_GROUP",
     "QUARANTINE_AFTER",
+    "ArrayItem",
     "BBox",
     "Baseline",
     "BaselineError",
@@ -394,7 +394,6 @@ __all__ = [
     "MatchSpec",
     "MemoryLedger",
     "MultiEntity",
-    "NamedItem",
     "NormaliseError",
     "NormaliseStage",
     "NormaliserFailedError",
@@ -520,7 +519,6 @@ __all__ = [
     "localise_steps",
     "lock_corpus",
     "log_context",
-    "match_label",
     "normalise",
     "open_store",
     "pack_generators",
