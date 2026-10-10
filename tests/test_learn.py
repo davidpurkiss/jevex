@@ -888,6 +888,17 @@ async def test_a_bare_number_that_isnt_the_value_in_jevs_unit_is_rejected(
     assert lrn.snapshot.version == 0
 
 
+async def test_a_bare_number_the_generators_already_give_is_covered() -> None:
+    # The built-in number generator gives "110" bare; which unit it's in is Jev's call
+    # in the select stage, and a generator giving the same span couldn't change it.
+    llm = FakeLLM([])
+    fake = FakeJev(strict=True)
+    outcome = await learned(fake, llm, power(), schemas=[ENGINE], base=default_registry())
+    assert outcome.status == "covered"
+    assert llm.calls == []
+    assert fake.calls == []
+
+
 async def test_a_bare_number_that_is_the_value_in_no_unit_is_rejected_without_asking_jev() -> None:
     fake = FakeJev(strict=True)
     outcome = await learned(fake, FakeLLM([BARE]), power(value=200.0), schemas=[ENGINE])

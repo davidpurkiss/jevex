@@ -9,7 +9,8 @@ time, in the background:
    human) are queued, and they are stored as verified examples first, so they serve as
    regression tests for later generators even if learning is cut short.
 2. **Covered?** If the generators in use already propose a span that normalises to the
-   value, the miss wasn't one of recall and there's nothing to learn.
+   value (a bare number in any unit the statement names), the miss wasn't one of recall
+   and there's nothing to learn.
 3. **Synthesise.** ``generator_llm`` writes the pattern and normalisers as structured
    output (:class:`GeneratorDraft`), asked for recall, not for the only match. The
    learner fills in the id, field, scope and provenance. An example from a document with
@@ -17,14 +18,13 @@ time, in the background:
    generator scoped to it, its chain written for that locale's conventions.
 4. **Validate.** :meth:`~jevex.generators.GeneratorSpec.parse`: the pattern compiles
    under RE2 within the length cap, and the normalisers are built in.
-5. **Test.** The generator must find the value in the triggering statement (a bare
-   number read in any unit the statement could give it), and Jev must choose it there
-   among every generator's candidates, asked as the select stage asks, which unit a bare
-   number is in included. On up to ``sample_size`` of
-   the field's stored examples (the newest), it must not lower accuracy: wherever it
-   changes the candidates, Jev picks from the old and the new set (one request per
-   example) and the new set must be right at least as often. Each example runs under its
-   own document's locale, as the candidate stage would run it.
+5. **Test.** The generator must find the value in the triggering statement (read the
+   same way), and Jev must choose it there among every generator's candidates, asked as
+   the select stage asks (which unit a bare number is in included). On up to
+   ``sample_size`` of the field's stored examples (the newest), it must not lower
+   accuracy: wherever it changes the candidates, Jev picks from the old and the new set
+   (one request per example) and the new set must be right at least as often. Each
+   example runs under its own document's locale, as the candidate stage would run it.
 6. **Hot-swap.** An accepted spec is put in the store and published as a new
    :class:`GeneratorSnapshot`. A document takes the current snapshot when it starts and
    keeps it to the end; later documents get the new one. Other processes sharing the
@@ -603,7 +603,10 @@ class GeneratorLearner:
         expected = self._expected(example, spec)
         where = self._where(example)
         current = self.snapshot.on(self.base)
-        if self._finds(self._generate(current, statement, spec, schema, where), spec, expected):
+        found = self._generate(current, statement, spec, schema, where)
+        if self._finds(self._readings(statement, spec, found, where[0]), spec, expected):
+            # A bare number only Jev's unit answer gets wrong is beyond a generator's
+            # fixing: the span is the same, and the first generator to give it wins.
             raise _Rejected("covered", "the generators in use already find the value")
         draft = await self._synthesise(example, statement, spec, unrecorded)
         try:
