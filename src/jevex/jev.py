@@ -635,8 +635,8 @@ class JevClient:
         longest of ``questions``, by the same estimate :meth:`ask` plans with.
 
         ``within`` builds the state the text goes into (a dict with a section beside it,
-        say); the cut makes that whole state fit, its other parts and the escaping text
-        gets in JSON included. For a stage that would rather read less of a long text than
+        say); the cut then makes that whole state fit, counting its other parts and the
+        text's JSON escaping. For a stage that would rather read less of a long text than
         split it.
         """
         room = self._state_budget - max(
