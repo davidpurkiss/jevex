@@ -614,7 +614,7 @@ class NormaliseStage:
                 for shared in [run.shared_statements(scope)]
             ]
             settled = await gather(
-                _settle(ctx, run.spec.field(field_name), reading)
+                _settle(ctx, self.name, run.spec.field(field_name), reading)
                 for _, field_name, reading in readings
             )
             for (scope, field_name, reading), answer in zip(readings, settled, strict=True):
@@ -686,7 +686,8 @@ class NormaliseStage:
             if picked is None:  # Jev said none of them is the field's value
                 return (
                     FieldMeta(
-                        confidence=settled.confidence, alternatives=_alternatives(ranked, [])
+                        confidence=settled.confidence,
+                        alternatives=settled.weigh(_alternatives(ranked, [])),
                     ),
                     set(),
                     [],
@@ -745,7 +746,9 @@ class NormaliseStage:
                     ranked,
                     [] if field.many else [best_id],
                     accepted_raws={c.raw for _, _, c, _ in accepted} if field.many else set(),
-                ),
+                )
+                if settled is None
+                else settled.weigh(_alternatives(ranked, [best_id])),
                 shared=from_shared,
             ),
             {c.generator_id for _, _, c, _ in used},
@@ -768,16 +771,30 @@ class _Reading:
 @dataclass(frozen=True)
 class _Settled:
     """Jev's pick among a field's distinct values: the picked raw span (``None`` for
-    "none") and how sure it is."""
+    "none"), how sure it is, and the probability it gave each raw span it was offered."""
 
     raw: str | None
     confidence: float
+    probabilities: dict[str, float]
+
+    def weigh(self, alternatives: list[Alternative]) -> list[Alternative]:
+        """``alternatives`` with the spans Jev weighed at its probabilities, most likely
+        first: each cell's own confidence was judged without seeing the others."""
+        weighed = [
+            a.model_copy(update={"p": self.probabilities[a.raw]})
+            if a.raw in self.probabilities
+            else a
+            for a in alternatives
+        ]
+        return sorted(weighed, key=lambda a: -a.p)
 
 
-async def _settle(ctx: Context, field: FieldSpec, reading: _Reading) -> _Settled | None:
+async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading) -> _Settled | None:
     """Jev's pick when a single-value field's best-ranked statements (the entity's own, or,
     without any, those it shares) give two or more different values (see
-    :class:`NormaliseStage`); ``None`` when there's nothing to settle."""
+    :class:`NormaliseStage`); ``None`` when there's nothing to settle. The statements go in
+    rank order, so a state cut to fit keeps the likeliest; past the most options a Choice
+    takes, the rest aren't offered, and a ``settle_values_skipped`` event says so."""
     if field.many or ctx.parsed is None or not reading.accepted:
         return None
     tier = reading.accepted[0][0] in reading.shared
@@ -792,13 +809,23 @@ async def _settle(ctx: Context, field: FieldSpec, reading: _Reading) -> _Settled
     if len(values) < 2 or len(options) < 2:
         return None
     offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
+    if len(offered) < len(options):
+        ctx.event(
+            stage,
+            "settle_values_skipped",
+            f"{field.name}: asked about {len(offered)} of {len(options)} values",
+        )
     question = field.select_question(list(offered))
     statements = dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted)
     text = ctx.jev.fit_state("\n".join(statements), {"settle": question})
     answer = (await ctx.jev.ask(text, {"settle": question}))["settle"]
     if not isinstance(answer, ChoiceAnswer):
         raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-    return _Settled(offered.get(answer.choice), answer.confidence)
+    return _Settled(
+        offered.get(answer.choice),
+        answer.confidence,
+        {raw: answer.probabilities.get(option, 0.0) for option, raw in offered.items()},
+    )
 
 
 def _picks(

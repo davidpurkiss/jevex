@@ -573,7 +573,12 @@ def price_picks(ctx: Context) -> SchemaRun:
 
 async def test_jev_settles_a_fields_statements_that_give_different_values() -> None:
     # Each cell's price was picked without seeing the others: confidence can't choose.
-    fake = FakeJev(strict=True).choice("Which of these is the price", "£11,990", confidence=0.8)
+    fake = FakeJev(strict=True).choice(
+        "Which of these is the price",
+        "£11,990",
+        confidence=0.8,
+        probabilities={"£9,354.17": 0.05, "£1,870.83": 0.1},
+    )
     ctx = context(*PRICE_ROW, jev=fake)
     run = price_picks(ctx)
     await NormaliseStage().run(ctx)
@@ -582,7 +587,8 @@ async def test_jev_settles_a_fields_statements_that_give_different_values() -> N
     assert meta.confidence == 0.8  # Jev's answer is less sure than the pick (0.91)
     assert meta.source is not None
     assert meta.source.statement == "SE · On the road price: £11,990"
-    assert [a.raw for a in meta.alternatives] == ["£9,354.17", "£1,870.83"]
+    # Weighed as Jev weighed them, not by their own cells' confidence (0.96, 0.9).
+    assert [(a.raw, a.p) for a in meta.alternatives] == [("£1,870.83", 0.1), ("£9,354.17", 0.05)]
     [asked] = fake.calls
     assert asked.state == (
         "SE · Basic price: £9,354.17\nSE · On the road price: £11,990\nSE · VAT 20%: £1,870.83"
@@ -608,6 +614,46 @@ async def test_when_jev_says_none_of_the_values_is_the_field_it_is_left_unfound(
     meta = run.fields["doc"]["price"]
     assert (meta.found, meta.confidence) == (False, 0.7)
     assert [a.raw for a in meta.alternatives] == ["£9,354.17", "£11,990", "£1,870.83"]
+
+
+async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() -> None:
+    own = statement("s1", "SE · 5 doors")
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [EntityScope(label="doc", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("doc", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("doc", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    seats = run.fields["doc"]["seats"]
+    assert (seats.value, seats.shared) == (5, True)
+    [asked] = fake.calls
+    assert asked.state == "The van seats 2\nEvery trim seats 5"
+    assert asked.questions == {
+        "settle": Choice(
+            instructions="Which of these is the seats?",
+            options={"2": None, "5": None, "none": "None of these is the seats"},
+        )
+    }
+
+
+async def test_values_past_the_most_a_choice_offers_are_left_out_and_reported() -> None:
+    rows = [statement(f"s{i}", f"Option {i}: £{1000 + i}") for i in range(300)]
+    fake = FakeJev(strict=True).choice("Which of these is the price", "£1000")
+    ctx = context(*rows, jev=fake)
+    run = ctx.schemas["Car"]
+    money = {"parse_money": {"currency": "GBP"}}
+    for i, row in enumerate(rows):
+        run.selections[("doc", "price", row.id)] = pick(row, f"£{1000 + i}", 0.9, money)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["price"].value == Decimal(1000)
+    [asked] = fake.calls
+    question = asked.questions["settle"]
+    assert isinstance(question, Choice)
+    assert len(question.options) == 255  # 254 values and "none"
+    [skipped] = [e for e in ctx.events if e.kind == "settle_values_skipped"]
+    assert (skipped.stage, skipped.message) == ("normalise", "price: asked about 254 of 300 values")
 
 
 async def test_only_the_entitys_own_values_are_settled_when_it_has_some() -> None:
