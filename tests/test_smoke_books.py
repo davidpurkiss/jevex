@@ -223,10 +223,13 @@ def pattern_jev(name: str) -> FakeJev:
     "Products you recently viewed" block, which lists other books' titles, prices,
     ratings and stock. Any price is categorised as the price, any title as the title, and
     so on, so the pipeline itself has to keep the product's values ahead of the others.
+    Asked to choose between titles, it takes the page's own heading, as a reader would.
     """
     titles = page_titles(name)
 
-    def longest(q: Choice) -> str:
+    def heading_or_longest(q: Choice) -> str:
+        if titles[0] in q.options:
+            return titles[0]
         return max((o for o in q.options if o != "none"), key=len, default="none")
 
     fake = (
@@ -250,7 +253,7 @@ def pattern_jev(name: str) -> FakeJev:
             "title",
             state=re.compile(f'"statement": "(?:{"|".join(map(re.escape, titles))})"'),
         )
-        .choice(re.compile("(?i)which of these is the (title|price|number)"), longest)
+        .choice(re.compile("(?i)which of these is the (title|price|number)"), heading_or_longest)
         .noul(re.compile("(?i)does the statement say the book is in stock"), p=0.95)
     )
     for rating in RATINGS:

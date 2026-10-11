@@ -19,6 +19,7 @@ from jevex import (
 from jevex.entities import EntityScope
 from jevex.errors import PartError
 from jevex.interfaces import ParsedDocument, Selection
+from jevex.jev import Choice
 from jevex.layout import Component
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
@@ -37,7 +38,7 @@ from jevex.normalise import (
     run_chain,
     strip,
 )
-from jevex.pipeline import VisionValue
+from jevex.pipeline import SchemaRun, VisionValue
 from jevex.results import FieldMeta
 from jevex.testing import FakeJev
 
@@ -516,9 +517,11 @@ def pick(st: Statement, raw: str, confidence: float, *chain: object, **alts: flo
     return Selection(candidate=cand, confidence=confidence, alternatives=alts)
 
 
-def context(*statements: Statement) -> Context:
+def context(*statements: Statement, jev: FakeJev | None = None) -> Context:
     ctx = Context.create(
-        Document.from_bytes(b"<p/>", url="https://example.com"), [SPEC], FakeJev().client()
+        Document.from_bytes(b"<p/>", url="https://example.com"),
+        [SPEC],
+        (jev or FakeJev(strict=True)).client(),
     )
     root = Component(id="root", type="section", location=LOC)
     ctx.parsed = ParsedDocument(
@@ -528,13 +531,13 @@ def context(*statements: Statement) -> Context:
 
 
 async def test_stage_picks_the_most_confident_valid_candidate() -> None:
-    a, b = statement("s1", "0-62 mph in 9.1 s"), statement("s2", "0-62: 9.4 seconds")
-    ctx = context(a, b)
+    a, b = statement("s1", "0-62 mph in 9.1 s"), statement("s2", "0-62: 9.1 seconds")
+    ctx = context(a, b)  # the statements agree, so Jev isn't asked
     run = ctx.schemas["Car"]
     run.selections[("doc", "zero_to_62_s", "s1")] = pick(
         a, "9.1 s", 0.9, "parse_number", **{"62 mph": 0.05}
     )
-    run.selections[("doc", "zero_to_62_s", "s2")] = pick(b, "9.4 seconds", 0.6, "parse_number")
+    run.selections[("doc", "zero_to_62_s", "s2")] = pick(b, "9.1 seconds", 0.6, "parse_number")
     await NormaliseStage().run(ctx)
     meta = run.fields["doc"]["zero_to_62_s"]
     assert meta.value == 9.1
@@ -546,9 +549,124 @@ async def test_stage_picks_the_most_confident_valid_candidate() -> None:
     assert meta.source.url == "https://example.com"
     assert meta.source.span == Span(start=12, end=17)
     assert [(alt.raw, alt.p) for alt in meta.alternatives] == [
-        ("9.4 seconds", 0.6),
+        ("9.1 seconds", 0.6),
         ("62 mph", 0.05),
     ]
+
+
+PRICE_ROW = [
+    statement("s1", "SE · Basic price: £9,354.17"),
+    statement("s2", "SE · VAT 20%: £1,870.83"),
+    statement("s3", "SE · On the road price: £11,990"),
+]
+
+
+def price_picks(ctx: Context) -> SchemaRun:
+    run = ctx.schemas["Car"]
+    money = {"parse_money": {"currency": "GBP"}}
+    for st, raw, p in zip(
+        PRICE_ROW, ["£9,354.17", "£1,870.83", "£11,990"], [0.96, 0.9, 0.91], strict=True
+    ):
+        run.selections[("doc", "price", st.id)] = pick(st, raw, p, money)
+    return run
+
+
+async def test_jev_settles_a_fields_statements_that_give_different_values() -> None:
+    # Each cell's price was picked without seeing the others: confidence can't choose.
+    fake = FakeJev(strict=True).choice(
+        "Which of these is the price",
+        "£11,990",
+        confidence=0.8,
+        probabilities={"£9,354.17": 0.05, "£1,870.83": 0.1},
+    )
+    ctx = context(*PRICE_ROW, jev=fake)
+    run = price_picks(ctx)
+    await NormaliseStage().run(ctx)
+    meta = run.fields["doc"]["price"]
+    assert meta.value == Decimal(11990)
+    assert meta.confidence == 0.8  # Jev's answer is less sure than the pick (0.91)
+    assert meta.source is not None
+    assert meta.source.statement == "SE · On the road price: £11,990"
+    # Weighed as Jev weighed them, not by their own cells' confidence (0.96, 0.9).
+    assert [(a.raw, a.p) for a in meta.alternatives] == [("£1,870.83", 0.1), ("£9,354.17", 0.05)]
+    [asked] = fake.calls
+    assert asked.state == (
+        "SE · Basic price: £9,354.17\nSE · On the road price: £11,990\nSE · VAT 20%: £1,870.83"
+    )
+    assert asked.questions == {
+        "settle": Choice(
+            instructions="Which of these is the price (GBP)?",
+            options={
+                "£9,354.17": None,
+                "£11,990": None,
+                "£1,870.83": None,
+                "none": "None of these is the price",
+            },
+        )
+    }
+
+
+async def test_when_jev_says_none_of_the_values_is_the_field_it_is_left_unfound() -> None:
+    fake = FakeJev(strict=True).choice("Which of these is the price", "none", confidence=0.7)
+    ctx = context(*PRICE_ROW, jev=fake)
+    run = price_picks(ctx)
+    await NormaliseStage().run(ctx)
+    meta = run.fields["doc"]["price"]
+    assert (meta.found, meta.confidence) == (False, 0.7)
+    assert [a.raw for a in meta.alternatives] == ["£9,354.17", "£11,990", "£1,870.83"]
+
+
+async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() -> None:
+    own = statement("s1", "SE · 5 doors")
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [EntityScope(label="doc", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("doc", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("doc", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    seats = run.fields["doc"]["seats"]
+    assert (seats.value, seats.shared) == (5, True)
+    [asked] = fake.calls
+    assert asked.state == "The van seats 2\nEvery trim seats 5"
+    assert asked.questions == {
+        "settle": Choice(
+            instructions="Which of these is the seats?",
+            options={"2": None, "5": None, "none": "None of these is the seats"},
+        )
+    }
+
+
+async def test_values_past_the_most_a_choice_offers_are_left_out_and_reported() -> None:
+    rows = [statement(f"s{i}", f"Option {i}: £{1000 + i}") for i in range(300)]
+    fake = FakeJev(strict=True).choice("Which of these is the price", "£1000")
+    ctx = context(*rows, jev=fake)
+    run = ctx.schemas["Car"]
+    money = {"parse_money": {"currency": "GBP"}}
+    for i, row in enumerate(rows):
+        run.selections[("doc", "price", row.id)] = pick(row, f"£{1000 + i}", 0.9, money)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["price"].value == Decimal(1000)
+    [asked] = fake.calls
+    question = asked.questions["settle"]
+    assert isinstance(question, Choice)
+    assert len(question.options) == 255  # 254 values and "none"
+    [skipped] = [e for e in ctx.events if e.kind == "settle_values_skipped"]
+    assert (skipped.stage, skipped.message) == ("normalise", "price: asked about 254 of 300 values")
+
+
+async def test_only_the_entitys_own_values_are_settled_when_it_has_some() -> None:
+    own = statement("s1", "SE · Seats: 4")
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    ctx = context(own, *everyone)  # strict: one own value leaves nothing to ask
+    run = ctx.schemas["Car"]
+    run.scopes = [EntityScope(label="doc", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("doc", "seats", "s1")] = pick(own, "4", 0.6, "parse_number")
+    run.selections[("doc", "seats", "s2")] = pick(everyone[0], "5", 0.95, "parse_number")
+    run.selections[("doc", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["seats"].value == 4
 
 
 def _buggy(value: object, *, field: object = None) -> str:
@@ -937,7 +1055,7 @@ async def test_scalars_and_lists_with_no_vision_values_record_no_picks() -> None
 async def test_values_from_text_statements_need_no_vision_check() -> None:
     a = statement("s1", "0-62 mph in 9.1 s")
     said = statement("s2", "The dial reads 9.4 s").model_copy(update={"kind": "vision"})
-    ctx = context(a, said)
+    ctx = context(a, said, jev=FakeJev(strict=True).choice("Which of these", "9.1 s"))
     run = ctx.schemas["Car"]
     run.selections[("doc", "zero_to_62_s", "s1")] = pick(a, "9.1 s", 0.9, "parse_number")
     run.selections[("doc", "zero_to_62_s", "s2")] = pick(said, "9.4 s", 0.6, "parse_number")

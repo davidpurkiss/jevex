@@ -5263,6 +5263,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "30431f380163c0aa": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "19,000": null,
+            "19,000 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 SE: 19,000 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "19,000 GBP",
+          "confidence": 0.97,
+          "probabilities": {
+            "19,000": 0.02,
+            "19,000 GBP": 0.98,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 365,
+      "model": "jev-1.13.0"
+    }
+  },
   "3196a6502fab4e98": {
     "request": {
       "questions": {
@@ -11751,6 +11786,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "7f35674da593c5cd": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "25,995": null,
+            "25,995 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 Edition: 25,995 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "25,995 GBP",
+          "confidence": 0.98,
+          "probabilities": {
+            "25,995": 0.01,
+            "25,995 GBP": 0.99,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 365,
+      "model": "jev-1.13.0"
+    }
+  },
   "7f94a9a01f9d13be": {
     "request": {
       "questions": {
@@ -11968,6 +12038,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "8309d13ac56f5710": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "19,000": null,
+            "19,000 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a SE",
+        "statement": "Price from: 19,000 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "19,000 GBP",
+          "confidence": 0.91,
+          "probabilities": {
+            "19,000": 0.04,
+            "19,000 GBP": 0.94,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 362,
+      "model": "jev-1.13.0"
+    }
+  },
   "8441165458a7a7b3": {
     "request": {
       "questions": {
@@ -12092,6 +12197,41 @@
         }
       },
       "input_tokens": 352,
+      "model": "jev-1.13.0"
+    }
+  },
+  "867c08edb2666b9f": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "21,495": null,
+            "none": "None of these is the price",
+            "\u00a321,495": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Sport",
+        "statement": "OTR price: \u00a321,495"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a321,495",
+          "confidence": 0.92,
+          "probabilities": {
+            "21,495": 0.03,
+            "none": 0.02,
+            "\u00a321,495": 0.95
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 362,
       "model": "jev-1.13.0"
     }
   },
@@ -12624,6 +12764,41 @@
         }
       },
       "input_tokens": 365,
+      "model": "jev-1.13.0"
+    }
+  },
+  "8e1c16c67f595f47": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "25,995": null,
+            "none": "None of these is the price",
+            "\u00a325,995": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Edition",
+        "statement": "Price: \u00a325,995"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a325,995",
+          "confidence": 0.98,
+          "probabilities": {
+            "25,995": 0.01,
+            "none": 0.0,
+            "\u00a325,995": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 360,
       "model": "jev-1.13.0"
     }
   },
@@ -14660,6 +14835,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "a3bba6d80a1ebf53": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "23,995": null,
+            "none": "None of these is the price",
+            "\u00a323,995": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 GT: \u00a323,995"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a323,995",
+          "confidence": 0.98,
+          "probabilities": {
+            "23,995": 0.01,
+            "none": 0.0,
+            "\u00a323,995": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 364,
+      "model": "jev-1.13.0"
+    }
+  },
   "a4bc13ef124109e6": {
     "request": {
       "questions": {
@@ -15980,6 +16190,75 @@
       "model": "jev-1.13.0"
     }
   },
+  "b3df206c7eedb295": {
+    "request": {
+      "questions": {
+        "VehicleSpec.model/choice0": {
+          "instructions": "Which of these is the model name?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova trims": null,
+            "Kestrova": null,
+            "Kestrova trims": null,
+            "none": "None of these is the model name",
+            "trims": null
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova trims": null,
+            "Kestrova": null,
+            "Kestrova trims": null,
+            "none": "None of these is the trim or variant name, e.g. SE L",
+            "trims": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova trims"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.model/choice0": {
+          "choice": "Kestrova",
+          "confidence": 0.26,
+          "probabilities": {
+            "Delmaro": 0.04,
+            "Delmaro Kestrova": 0.34,
+            "Delmaro Kestrova trims": 0.18,
+            "Kestrova": 0.37,
+            "Kestrova trims": 0.03,
+            "none": 0.01,
+            "trims": 0.03
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.trim/choice0": {
+          "choice": "Kestrova",
+          "confidence": 0.1,
+          "probabilities": {
+            "Delmaro": 0.01,
+            "Delmaro Kestrova": 0.1,
+            "Delmaro Kestrova trims": 0.14,
+            "Kestrova": 0.23,
+            "Kestrova trims": 0.13,
+            "none": 0.21,
+            "trims": 0.18
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 484,
+      "model": "jev-1.13.0"
+    }
+  },
   "b624a5386371c3db": {
     "request": {
       "questions": {
@@ -16055,6 +16334,41 @@
         }
       },
       "input_tokens": 344,
+      "model": "jev-1.13.0"
+    }
+  },
+  "b69e8256d4596f26": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "19,000": null,
+            "none": "None of these is the price",
+            "\u00a319,000": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova SE",
+        "statement": "Expect to pay \u00a319,000 for this version."
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a319,000",
+          "confidence": 0.97,
+          "probabilities": {
+            "19,000": 0.02,
+            "none": 0.0,
+            "\u00a319,000": 0.98
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 363,
       "model": "jev-1.13.0"
     }
   },
@@ -16463,6 +16777,30 @@
         }
       },
       "input_tokens": 378,
+      "model": "jev-1.13.0"
+    }
+  },
+  "babf86d76fd8323b": {
+    "request": {
+      "questions": {
+        "VehicleSpec.model/verify": {
+          "criteria": null,
+          "instructions": "The statement states that the model name is Kestrova.",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova trims"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.model/verify": {
+          "p": 0.75,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 291,
       "model": "jev-1.13.0"
     }
   },
@@ -17115,6 +17453,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "c8bfed032e4bcfca": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "21,495": null,
+            "none": "None of these is the price",
+            "\u00a321,495": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 Sport: \u00a321,495"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a321,495",
+          "confidence": 0.98,
+          "probabilities": {
+            "21,495": 0.01,
+            "none": 0.0,
+            "\u00a321,495": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 364,
+      "model": "jev-1.13.0"
+    }
+  },
   "c8d01a71aca7f903": {
     "request": {
       "questions": {
@@ -17379,6 +17752,41 @@
         }
       },
       "input_tokens": 346,
+      "model": "jev-1.13.0"
+    }
+  },
+  "cecb5f51ee6e2f3d": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "options": {
+            "23,995": null,
+            "23,995 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a GT",
+        "statement": "OTR price: 23,995 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "23,995 GBP",
+          "confidence": 0.94,
+          "probabilities": {
+            "23,995": 0.03,
+            "23,995 GBP": 0.96,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 363,
       "model": "jev-1.13.0"
     }
   },
@@ -19046,6 +19454,39 @@
         }
       },
       "input_tokens": 427,
+      "model": "jev-1.13.0"
+    }
+  },
+  "e5e6a9d317f7e6cd": {
+    "request": {
+      "questions": {
+        "VehicleSpec.make/verify": {
+          "criteria": null,
+          "instructions": "The statement states that the manufacturer (make) name is Delmaro.",
+          "type": "noul"
+        },
+        "VehicleSpec.model/verify": {
+          "criteria": null,
+          "instructions": "The statement states that the model name is Kestrova.",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova SE"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.make/verify": {
+          "p": 0.69,
+          "type": "noul"
+        },
+        "VehicleSpec.model/verify": {
+          "p": 0.72,
+          "type": "noul"
+        }
+      },
+      "input_tokens": 313,
       "model": "jev-1.13.0"
     }
   },
