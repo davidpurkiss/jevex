@@ -1,0 +1,564 @@
+{
+ "wording": "Does this document include {d}? It may include several.",
+ "docstrings": {
+  "technical_spec": "a manufacturer's technical specification for one vehicle variant",
+  "price_and_spec": "a new car variant a manufacturer offers, with its price and specifications",
+  "price_or_spec": "a new car variant a manufacturer offers, with its price or specifications",
+  "price_list_or_spec": "a manufacturer's price list or technical specification for new car variants",
+  "variant_details": "the price or specifications of a new car variant, as its maker publishes them"
+ },
+ "rows": [
+  {
+   "group": "table",
+   "page": "specs/delmaro-kestrova-table.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.9,
+    "price_and_spec": 0.86,
+    "price_or_spec": 0.86,
+    "price_list_or_spec": 0.85,
+    "variant_details": 0.77
+   }
+  },
+  {
+   "group": "table",
+   "page": "specs/esquel-wrenna-table.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.92,
+    "price_and_spec": 0.89,
+    "price_or_spec": 0.91,
+    "price_list_or_spec": 0.9,
+    "variant_details": 0.83
+   }
+  },
+  {
+   "group": "kv",
+   "page": "specs/delmaro-kestrova-details.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.89,
+    "price_and_spec": 0.88,
+    "price_or_spec": 0.9,
+    "price_list_or_spec": 0.79,
+    "variant_details": 0.81
+   }
+  },
+  {
+   "group": "kv",
+   "page": "specs/esquel-wrenna-details.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.9,
+    "price_and_spec": 0.85,
+    "price_or_spec": 0.88,
+    "price_list_or_spec": 0.77,
+    "variant_details": 0.76
+   }
+  },
+  {
+   "group": "prose",
+   "page": "specs/delmaro-kestrova-se.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.9,
+    "price_and_spec": 0.6,
+    "price_or_spec": 0.67,
+    "price_list_or_spec": 0.31,
+    "variant_details": 0.51
+   }
+  },
+  {
+   "group": "prose",
+   "page": "specs/delmaro-kestrova-sport.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.92,
+    "price_and_spec": 0.81,
+    "price_or_spec": 0.86,
+    "price_list_or_spec": 0.52,
+    "variant_details": 0.81
+   }
+  },
+  {
+   "group": "pdf",
+   "page": "brochures/delmaro-kestrova-spec-sheet.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.94,
+    "price_and_spec": 0.94,
+    "price_or_spec": 0.95,
+    "price_list_or_spec": 0.94,
+    "variant_details": 0.91
+   }
+  },
+  {
+   "group": "pdf",
+   "page": "brochures/esquel-wrenna-spec-sheet.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.9,
+    "price_and_spec": 0.93,
+    "price_or_spec": 0.94,
+    "price_list_or_spec": 0.9,
+    "variant_details": 0.88
+   }
+  },
+  {
+   "group": "grid",
+   "page": "used/page-1.html",
+   "expected": "Listing",
+   "p": {
+    "technical_spec": 0.05,
+    "price_and_spec": 0.2,
+    "price_or_spec": 0.18,
+    "price_list_or_spec": 0.02,
+    "variant_details": 0.13
+   }
+  },
+  {
+   "group": "grid",
+   "page": "used/page-2.html",
+   "expected": "Listing",
+   "p": {
+    "technical_spec": 0.06,
+    "price_and_spec": 0.21,
+    "price_or_spec": 0.28,
+    "price_list_or_spec": 0.02,
+    "variant_details": 0.13
+   }
+  },
+  {
+   "group": "listing",
+   "page": "used/1.html",
+   "expected": "Listing",
+   "p": {
+    "technical_spec": 0.11,
+    "price_and_spec": 0.27,
+    "price_or_spec": 0.35,
+    "price_list_or_spec": 0.04,
+    "variant_details": 0.24
+   }
+  },
+  {
+   "group": "listing",
+   "page": "used/2.html",
+   "expected": "Listing",
+   "p": {
+    "technical_spec": 0.12,
+    "price_and_spec": 0.13,
+    "price_or_spec": 0.18,
+    "price_list_or_spec": 0.03,
+    "variant_details": 0.09
+   }
+  },
+  {
+   "group": "books",
+   "page": "a-light-in-the-attic_1000.html",
+   "expected": "Book",
+   "p": {
+    "technical_spec": 0.01,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.01,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.01
+   }
+  },
+  {
+   "group": "books",
+   "page": "sapiens-a-brief-history-of-humankind_996.html",
+   "expected": "Book",
+   "p": {
+    "technical_spec": 0.01,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.01,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.01
+   }
+  },
+  {
+   "group": "books",
+   "page": "tipping-the-velvet_999.html",
+   "expected": "Book",
+   "p": {
+    "technical_spec": 0.01,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.01,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.01
+   }
+  },
+  {
+   "group": "review",
+   "page": "review",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.04,
+    "price_and_spec": 0.04,
+    "price_or_spec": 0.07,
+    "price_list_or_spec": 0.02,
+    "variant_details": 0.05
+   }
+  },
+  {
+   "group": "dealer_contact",
+   "page": "dealer_contact",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.02,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.02,
+    "price_list_or_spec": 0.02,
+    "variant_details": 0.02
+   }
+  },
+  {
+   "group": "news",
+   "page": "news",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.02,
+    "price_and_spec": 0.02,
+    "price_or_spec": 0.02,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.02
+   }
+  },
+  {
+   "group": "recipe",
+   "page": "recipe",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.01,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.0,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.01
+   }
+  },
+  {
+   "group": "insurance_faq",
+   "page": "insurance_faq",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.01,
+    "price_and_spec": 0.01,
+    "price_or_spec": 0.01,
+    "price_list_or_spec": 0.01,
+    "variant_details": 0.01
+   }
+  },
+  {
+   "group": "model_range",
+   "page": "model_range",
+   "expected": null,
+   "p": {
+    "technical_spec": 0.05,
+    "price_and_spec": 0.4,
+    "price_or_spec": 0.88,
+    "price_list_or_spec": 0.65,
+    "variant_details": 0.85
+   }
+  },
+  {
+   "group": "real",
+   "page": "cupra-born-pricelist-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.98,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "dacia-price-guide-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.84,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "ford-focus-pricelist-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.95,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "ford-kuga-pricelist.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.94,
+    "price_and_spec": 0.99,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.99
+   }
+  },
+  {
+   "group": "real",
+   "page": "ford-puma-pricelist.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.95,
+    "price_and_spec": 0.99,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.99
+   }
+  },
+  {
+   "group": "real",
+   "page": "honda-hrv-sport-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.91,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.9,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "honda-jazz-specifications.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.98,
+    "price_and_spec": 0.99,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.97,
+    "variant_details": 0.99
+   }
+  },
+  {
+   "group": "real",
+   "page": "hyundai-i10-techspec-pricing.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.97,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "hyundai-i20-techspec-pricing.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.97,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.97
+   }
+  },
+  {
+   "group": "real",
+   "page": "hyundai-kona-techspec-pricing.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.98,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.97
+   }
+  },
+  {
+   "group": "real",
+   "page": "kia-picanto-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.33,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.95,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "kia-sportage-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.42,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.96,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "peugeot-3008-price-spec.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.98,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "peugeot-e3008-e5008-long-range.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.87,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.97,
+    "variant_details": 0.99
+   }
+  },
+  {
+   "group": "real",
+   "page": "renault-range-price-guide-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.79,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "skoda-fabia-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.66,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.94,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "skoda-octavia-uk-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.54,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.91,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "skoda-octavia-vrs-uk-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.92,
+    "price_and_spec": 0.97,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.84,
+    "variant_details": 0.97
+   }
+  },
+  {
+   "group": "real",
+   "page": "skoda-scala-kamiq-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.54,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.97,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "toyota-chr-plus-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.79,
+    "price_and_spec": 0.98,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.94,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "toyota-corolla-prices-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.7,
+    "price_and_spec": 0.97,
+    "price_or_spec": 0.97,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.95
+   }
+  },
+  {
+   "group": "real",
+   "page": "toyota-rav4-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.23,
+    "price_and_spec": 0.97,
+    "price_or_spec": 0.98,
+    "price_list_or_spec": 0.92,
+    "variant_details": 0.98
+   }
+  },
+  {
+   "group": "real",
+   "page": "toyota-yaris-prices-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.75,
+    "price_and_spec": 0.97,
+    "price_or_spec": 0.97,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.94
+   }
+  },
+  {
+   "group": "real",
+   "page": "vauxhall-corsa-press-pricing.html",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.92,
+    "price_and_spec": 0.99,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.98,
+    "variant_details": 0.99
+   }
+  },
+  {
+   "group": "real",
+   "page": "vauxhall-corsa-psg-2026.pdf",
+   "expected": "VehicleSpec",
+   "p": {
+    "technical_spec": 0.98,
+    "price_and_spec": 0.99,
+    "price_or_spec": 0.99,
+    "price_list_or_spec": 0.99,
+    "variant_details": 0.99
+   }
+  }
+ ]
+}

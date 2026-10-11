@@ -12,8 +12,13 @@ from jevex.schema import Field, Questions, SchemaConfig
 FuelType = Literal["petrol", "diesel", "hybrid", "phev", "ev"]
 
 
+# The docstring is the document gate's question. Real price lists and press releases are
+# as much this record's source as spec sheets, and "a manufacturer's technical
+# specification" rejected them (p 0.23-0.42, #324); this wording passed every real and
+# test-site spec page (p 0.60 and up) and kept listings and off-topic pages below 0.41
+# (benchmarks/gate_wording/vehicle_docstring.py).
 class VehicleSpec(BaseModel):
-    """A manufacturer's technical specification for one vehicle variant."""
+    """A new car variant a manufacturer offers, with its price and specifications."""
 
     # Named after what one record is. As "vehicle spec" (the class name), MultiEntity's
     # boundary Noul read a spec table's row labels and a price list's equipment headings as
