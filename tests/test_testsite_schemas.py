@@ -31,7 +31,7 @@ def test_a_vehicle_spec_price_is_chosen_as_what_a_buyer_pays() -> None:
     )
 
 
-def test_the_document_gate_asks_for_a_manufacturers_car_variant_with_price_or_specs() -> None:
+def test_the_document_gate_asks_for_a_manufacturers_car_variant_with_price_and_specs() -> None:
     assert SchemaSpec.from_model(VehicleSpec).document_gate_question() == Noul(
         instructions=(
             "Does this document include a new car variant a manufacturer offers, with its "

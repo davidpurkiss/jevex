@@ -30,10 +30,8 @@ from jevex.jev import JevClient, Noul, NoulAnswer, TypeSafeBackend
 
 DOCSTRINGS = {
     "technical_spec": "a manufacturer's technical specification for one vehicle variant",
-    "price_and_spec": "a new car variant a manufacturer offers, with its price and "
-    "specifications",
-    "price_or_spec": "a new car variant a manufacturer offers, with its price or "
-    "specifications",
+    "price_and_spec": "a new car variant a manufacturer offers, with its price and specifications",
+    "price_or_spec": "a new car variant a manufacturer offers, with its price or specifications",
     "price_list_or_spec": "a manufacturer's price list or technical specification for new "
     "car variants",
     "variant_details": "the price or specifications of a new car variant, as its maker "
