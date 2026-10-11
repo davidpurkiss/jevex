@@ -10,8 +10,11 @@ A spec table's cell "9.1" means nothing alone; rendered as
   it covers, and a cell spanning columns names each ("SE / SE L").
 - **Row headers** are the header cells in its row (including ones spanning down from
   rows above, ``<th rowspan=2>Performance</th>``); a cell spanning rows takes each row's.
-  A row's headers joined are its label ("Kestrova" over "SE" → "Kestrova SE"), kept per
-  row a cell covers.
+- **Row labels** name each body row for entity resolvers, one per row a cell covers: its
+  headers joined ("Kestrova" over "SE" → "Kestrova SE"), then as many of its data cells
+  as it takes to tell it from the other rows under its band. A price list's rows have no
+  headers ("Icon | £34,495": "Icon"), and a header spanning rows is told apart by the
+  cells beside it ("ALLURE" over four powertrains: "ALLURE HYBRID 136 e-DSC6").
 - **Group headers** are body rows holding only header cells (a band like "Performance"
   across the table; a full-width header row counts as one even at the top). They
   prefix the rows below them until the next band. A header row repeated mid-table
@@ -56,7 +59,7 @@ from typing import TYPE_CHECKING, Literal
 from jevex.statements import Statement, TableCellRef
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
     from jevex.layout import Component, TableCell
 
@@ -74,6 +77,11 @@ HeaderShape = Literal["comparison", "labels"]
 """Where a table without header cells could have its headers (:func:`header_shape`):
 ``"comparison"``, its first row and first column; ``"labels"``, its first column, as the
 label of the value beside it."""
+
+HeaderAxis = Literal["columns", "rows"]
+"""Which headers Jev found in a table without header cells (:func:`infer_headers`):
+``"columns"``, its first row naming its columns; ``"rows"``, its first column naming (or,
+in a labels table, labelling) its rows."""
 
 
 def _clean(text: str) -> str:
@@ -152,12 +160,26 @@ def table_statements(table: Component) -> list[Statement]:
     data_rows = {row for c in data for row in range(c.row, c.row + c.row_span)}
     data_cols = {col for c in data for col in range(c.col, c.col + c.col_span)}
 
-    def headers_per_row(c: TableCell) -> list[list[str]]:
-        """The headers of each row ``c`` covers, in column order."""
-        return [
-            [_label(h.text) for h in sorted(row_header_cells.get(covered, []), key=lambda h: h.col)]
-            for covered in range(c.row, c.row + c.row_span)
-        ]
+    def headers_of_row(r: int) -> list[str]:
+        return [_label(h.text) for h in sorted(row_header_cells.get(r, []), key=lambda h: h.col)]
+
+    # Each body row's band and parts, for its label (_row_keys).
+    parts: dict[int, tuple[str | None, list[str]]] = {}
+    band = group
+    for r in body:
+        row = sorted(rows[r], key=lambda c: c.col)
+        if roles[r] == "band":
+            band = _label(row[0].text)
+        elif roles[r] == "body":
+            headers = headers_of_row(r)
+            data_texts = [_clean(c.text) for c in row if not c.header]
+            parts[r] = (band, ([" ".join(headers)] if headers else []) + data_texts)
+    row_keys = _row_keys(parts)
+
+    def row_labels_of(c: TableCell) -> list[str]:
+        """The label of each body row ``c`` covers (:func:`_row_keys`)."""
+        covered = range(c.row, c.row + c.row_span)
+        return list(dict.fromkeys(row_keys[r] for r in covered if row_keys.get(r)))
 
     def covers_data(c: TableCell) -> bool:
         return any(row in data_rows for row in range(c.row, c.row + c.row_span))
@@ -193,9 +215,7 @@ def table_statements(table: Component) -> list[Statement]:
                     out += _column_header_statements(table, r, col_headers, data_cols, seen_cols)
             continue
         for c in row:
-            # One label per covered row: its headers, joined ("Kestrova SE").
-            per_row = headers_per_row(c)
-            row_labels = list(dict.fromkeys(" ".join(headers) for headers in per_row if headers))
+            row_labels = row_labels_of(c)
             if c.header:
                 label = _label(c.text)
                 key = (label, tuple(row_labels))
@@ -212,7 +232,8 @@ def table_statements(table: Component) -> list[Statement]:
                     out.append(_statement(table, f"h{r}c{c.col}", label, ref, "table_header"))
                 continue
             # A data cell spanning rows takes every covered row's headers.
-            row_headers = list(dict.fromkeys(h for headers in per_row for h in headers))
+            covered = range(c.row, c.row + c.row_span)
+            row_headers = list(dict.fromkeys(h for r in covered for h in headers_of_row(r)))
             # One label per column covered: its stacked headers, joined.
             labels = [
                 " ".join(col_headers[col])
@@ -238,6 +259,41 @@ def table_statements(table: Component) -> list[Statement]:
     return out
 
 
+def _row_keys(parts: dict[int, tuple[str | None, list[str]]]) -> dict[int, str]:
+    """Each row's label, from its band and parts (its headers joined, then its data cells):
+    as many parts as it takes to tell it from the other rows under its band ("ALLURE"
+    heading four rows that differ in their powertrain cell: "ALLURE HYBRID 136 e-DSC6").
+    Rows under different bands are told apart by them ("Power" under "Petrol" and under
+    "Diesel" is one label, as a column's trim is in two tables), and a row identical to
+    another keeps all its parts, so the two share a label.
+
+    Rows are grouped by their first ``n`` parts, ``n`` growing only within groups that
+    still hold several rows, so a long table costs about rows × parts, not rows²."""
+    lengths: dict[int, int] = {}
+    bands: dict[str | None, list[int]] = {}
+    for r, (band, _) in parts.items():
+        bands.setdefault(band, []).append(r)
+    groups = list(bands.values())
+    n = 1
+    while groups:
+        colliding: list[list[int]] = []
+        for group in groups:
+            by_prefix: dict[tuple[str, ...], list[int]] = {}
+            for r in group:
+                by_prefix.setdefault(tuple(parts[r][1][:n]), []).append(r)
+            for rows in by_prefix.values():
+                # A row out of parts is told apart from the longer ones by its length.
+                left = [r for r in rows if len(parts[r][1]) > n]
+                for r in rows:
+                    if len(rows) == 1 or r not in left:
+                        lengths[r] = min(n, len(parts[r][1]))
+                if len(rows) > 1 and len(left) > 0:
+                    colliding.append(left)
+        groups = colliding
+        n += 1
+    return {r: " ".join(own[: lengths[r]]) for r, (_, own) in parts.items()}
+
+
 def header_shape(table: Component) -> HeaderShape | None:
     """Where ``table`` could have headers it doesn't mark, judging by its shape alone, or
     ``None`` when it marks some or has neither shape. Whether it does is Jev's to say: the
@@ -248,9 +304,9 @@ def header_shape(table: Component) -> HeaderShape | None:
     ``Smith | London``).
 
     ``"comparison"``: at least three columns, a first row naming every other column with a
-    name (more letters than digits: ``1.5 TSI`` is one, ``150 PS`` and ``2019`` aren't),
-    every row below starting with a label (some letter: ``0-62 mph``, not ``2019``), and
-    mostly number-like cells below the first row and right of the first column
+    name (no fewer letters than digits: ``1.5 TSI`` and ``P11D`` are ones, ``150 PS`` and
+    ``2019`` aren't), every row below starting with a label (some letter: ``0-62 mph``, not
+    ``2019``), and mostly number-like cells below the first row and right of the first column
     (``Spec | SE | GT`` over ``Power | 150 PS | 200 PS``). A table of plain records
     (``Name | City | Role``) has text in its body just like its first row, and a table whose
     first row is number-like (``Power | 150 PS | 200 PS``) is data from the top, so neither
@@ -290,25 +346,34 @@ def header_shape(table: Component) -> HeaderShape | None:
     return "comparison"
 
 
-def infer_headers(table: Component) -> Component:
-    """``table`` with the headers its :func:`header_shape` allows marked, for a table Jev
-    said has them; ``table`` itself when it has no shape.
+def infer_headers(table: Component, axes: Collection[HeaderAxis]) -> Component:
+    """``table`` with the headers Jev found in it (``axes``) marked, where its
+    :func:`header_shape` allows them; ``table`` itself when it has no shape.
 
-    A comparison table gets its first row and first column marked, and is read like one
-    with ``th`` cells. A labels table gets its first column marked in the rows that have a
-    second cell, so each value reads ``label: value`` and a label whose value cell is empty
-    (``Towing | ``) gives nothing, as a blank row doesn't; a label alone in a row without
-    that cell (``Notes``) stays a statement of its own.
+    A comparison table gets its first row marked for ``"columns"`` and its first column
+    for ``"rows"``, each on its own: a price list's first row names its columns while its
+    first column is the variant each row is about, which Jev may or may not call a name.
+    With both it's read like a table with ``th`` cells. A labels table gets its first
+    column marked for ``"rows"`` in the rows that have a second cell, so each value reads
+    ``label: value`` and a label whose value cell is empty (``Towing | ``) gives nothing,
+    as a blank row doesn't; a label alone in a row without that cell (``Notes``) stays a
+    statement of its own.
     """
     shape = header_shape(table)
-    if shape is None:
+    if shape is None or not axes:
         return table
     if shape == "comparison":
         top = min(c.row for c in table.cells if _clean(c.text))
-        marked = {(c.row, c.col) for c in table.cells if c.row == top or c.col == 0}
-    else:
+        marked = {
+            (c.row, c.col)
+            for c in table.cells
+            if (c.row == top and "columns" in axes) or (c.col == 0 and "rows" in axes)
+        }
+    elif "rows" in axes:
         paired = {c.row for c in table.cells if c.col == 1}
         marked = {(c.row, 0) for c in table.cells if c.col == 0 and c.row in paired}
+    else:
+        return table
     inferred = [
         c.model_copy(update={"header": True}) if (c.row, c.col) in marked else c
         for c in table.cells
@@ -322,7 +387,7 @@ def _digits_and_letters(text: str) -> tuple[int, int]:
 
 def _is_name(text: str) -> bool:
     digits, letters = _digits_and_letters(text)
-    return letters > digits
+    return letters > 0 and letters >= digits
 
 
 def _number_like(text: str) -> bool:
@@ -335,26 +400,42 @@ def row_roles(table: Component) -> dict[int, RowRole]:
 
     ``"band"`` is a group header ("Performance") that prefixes the rows below it until the
     next band. ``"header"`` is a row made only of header cells giving column headers: the
-    leading ones stack, and one repeated after the first body row replaces them.
-    Everything else is ``"body"``, including blank rows (:func:`blank_rows`) and rows a
-    data cell spans into. A table made only of headers, or without any, is all body rows.
+    leading ones stack, and one repeated after the first body row replaces them. In a
+    first row with column headers, a data cell without a letter or digit doesn't count
+    against that: a PDF's layout can split a header's unit into a cell of its own
+    (``Band VED | £`` over ``91 - 100 | £365``), which then heads its column with the
+    rest of the row. Elsewhere such a cell is data (an equipment table's ``●``, even in a
+    first row holding only its label: ``Alloy wheels | ● | ●``). Everything else is ``"body"``,
+    including blank rows (:func:`blank_rows`) and rows a data cell spans into. A table made
+    only of headers, or without any, is all body rows.
     """
     cells = [c for c in table.cells if _clean(c.text)]
     roles: dict[int, RowRole] = {c.row: "body" for c in cells}
     if all(c.header for c in cells) or not any(c.header for c in cells):
         return roles
     width = max(c.col + c.col_span for c in cells)
+    top = min(c.row for c in cells)
+    # Only a row of column headers (beyond the first column) waives its symbol cells:
+    # "Alloy wheels | ● | ●" at the top of an equipment table stays a body row.
+    named = any(c.header and c.row == top and c.col > 0 for c in cells)
     has_data = {
-        covered for c in cells if not c.header for covered in range(c.row, c.row + c.row_span)
+        covered
+        for c in cells
+        if not c.header and (c.row != top or not named or _states_something(c.text))
+        for covered in range(c.row, c.row + c.row_span)
     }
     has_data |= blank_rows(table)
     rows: dict[int, list[TableCell]] = {}
     for c in cells:
         rows.setdefault(c.row, []).append(c)
     for r, row in rows.items():
-        if r not in has_data and all(c.header for c in row):
+        if r not in has_data and any(c.header for c in row):
             roles[r] = "band" if _is_band(row, width) else "header"
     return roles
+
+
+def _states_something(text: str) -> bool:
+    return any(ch.isalnum() for ch in text)
 
 
 def blank_rows(table: Component) -> set[int]:

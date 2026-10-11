@@ -129,12 +129,12 @@ One document can yield one record, many records, or a parent with children. The 
 | Resolver | Use when | How entities are found | Cost |
 | --- | --- | --- | --- |
 | `SingleEntity` | You know the page holds one record (a listing detail page) | The whole document is one entity | Lowest: no entity questions |
-| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, one Choice per table whose rows and columns both have accepted labels (which axis names the entities), then one Choice per ambiguous statement |
+| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, one Choice per table with accepted labels (which axis names the entities, or neither), then one Choice per ambiguous statement |
 | `ParentChild` | You know the shape: a model page with variant children | Caller declares where children live (e.g. "table columns", a component type) | Low: statements go to parent or child |
 
 **MultiEntity boundary detection**, in priority order:
 
-1. Table headers: each column (or row) keyed by a variant label becomes an entity.
+1. Table headers: each column (or row) keyed by a variant label becomes an entity. A price list's rows, with column headers only, are keyed by their own cells (as many as tell them apart). Jev says which axis of each table names the variants, or neither (an engine or options table the variants share).
 2. Repeated sibling structures: components with the same shape and type sequence (listing cards).
 3. Headed sections: a heading per trim or engine, with its subtree.
 4. Anything still ambiguous: Jev Choice "Which vehicle does this statement apply to?", with options = entity labels + "all of them".

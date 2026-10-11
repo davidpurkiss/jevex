@@ -443,8 +443,8 @@ class StatementStage:
             if component.id in existing:
                 statements.update((s.id, s) for s in existing[component.id])
                 continue
-            if component.id in ctx.headed_tables:
-                component = infer_headers(component)
+            if axes := ctx.headed_tables.get(component.id):
+                component = infer_headers(component, axes)
             for whole in split(component):
                 pieces = cut_statement(whole, self.max_chars)
                 if len(pieces) > 1:

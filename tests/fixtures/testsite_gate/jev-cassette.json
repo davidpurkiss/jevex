@@ -7686,6 +7686,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "4b3dd0414c97b214": {
+    "request": {
+      "questions": {
+        "axis": {
+          "instructions": "Which headers of this table each name a separate vehicle variant?",
+          "options": {
+            "columns": "The column headers: SE, Sport, GT, Edition",
+            "none": "Neither"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "table": "Specification | SE | Sport | GT | Edition\nFuel | Diesel | Diesel | Diesel | Diesel\nDisplacement | 1395cc | 1395 cc | 1,395 cc | 1,395 cc\nPower output | 70 kW | 114 bhp | 143PS | 173 bhp\nAcceleration 0\u201362mph | 9.1 | 8.4 s | 7.7 s | 6.5 s\nTop speed | 128 mph | 217 km/h | 145 mph | 249 km/h\nCO2 (g/km) | 127 | 128 | 130 | 132\nPrice from | 19,000 GBP | \u00a321,495 | \u00a323,995 | 25,995 GBP\nSeating capacity | 7 | 7 | 7 | 7\nGearbox | Manual | Manual | Automatic | Manual"
+      }
+    },
+    "response": {
+      "answers": {
+        "axis": {
+          "choice": "columns",
+          "confidence": 0.98,
+          "probabilities": {
+            "columns": 0.99,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 579,
+      "model": "jev-1.13.0"
+    }
+  },
   "4c3caaa4be647640": {
     "request": {
       "questions": {

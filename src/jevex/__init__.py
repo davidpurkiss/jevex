@@ -275,6 +275,7 @@ from jevex.structured import (
     StructuredSource,
 )
 from jevex.tables import (
+    HeaderAxis,
     HeaderShape,
     RowRole,
     axis_text,
@@ -370,6 +371,7 @@ __all__ = [
     "GeneratorSpec",
     "GeneratorStats",
     "GeneratorUse",
+    "HeaderAxis",
     "HeaderShape",
     "Headroom",
     "Housekeeper",

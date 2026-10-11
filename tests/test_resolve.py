@@ -220,6 +220,7 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     fake = (
         FakeJev(strict=True)
         .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "columns")
         .noul(BOUNDARY, p=0.1, state="Warranty")  # the row labels are rejected
         .choice(WHICH, ALL_OPTION)
         .choice(WHICH, "SE L", state="The SE L")
@@ -247,7 +248,7 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     assert se.component_ids == []
     assert se_l.component_ids == [parsed.statements[se_l.statement_ids[0]].component_id]
 
-    columns, rows, *assigned = fake.calls
+    columns, rows, axis, *assigned = fake.calls
     assert columns.state == {"names": ["SE", "SE L"], "section": "Kestrova"}
     assert columns.questions == {
         "label0": Noul(instructions='Does "SE" name a separate vehicle spec?'),
@@ -255,6 +256,13 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
     }
     # The rows could be the entities just as well; Jev decides.
     assert rows.state == {"names": ["Power", "Warranty"], "section": "Kestrova"}
+    # Then whether the accepted columns name the entities, the table as the state.
+    assert axis.questions == {
+        "axis": Choice(
+            instructions=AXIS,
+            options={"columns": "The column headers: SE, SE L", "none": "Neither"},
+        )
+    }
     # Every statement no boundary claimed is asked which entity it's about, except the
     # table's headers.
     assert [c.state for c in assigned] == [
@@ -359,6 +367,7 @@ async def test_multi_entity_gives_nested_groups_to_the_innermost() -> None:
     fake = (
         FakeJev(strict=True)
         .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "columns")
         .noul(BOUNDARY, p=0.1, state='"Engine"')  # topics, not trims
     )
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
@@ -411,7 +420,12 @@ ROW_KEYED = (
 
 async def test_multi_entity_lets_jev_pick_a_tables_rows_as_the_entities() -> None:
     parsed = await parse(ROW_KEYED)
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "rows")
+        .noul(BOUNDARY, p=0.1, state="Power")
+    )
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert (se.label, se_l.label) == ("SE", "SE L")
     assert texts(parsed, se_l.statement_ids) == [
@@ -424,13 +438,77 @@ async def test_multi_entity_lets_jev_pick_a_tables_rows_as_the_entities() -> Non
     assert all("entity" not in c.questions for c in fake.calls)
 
 
+async def test_multi_entity_proposes_a_price_lists_rows_without_row_headers() -> None:
+    parsed = await parse(
+        "<h1>Kestrova prices</h1>"
+        "<table><tr><th>Model</th><th>OTR price</th></tr>"
+        "<tr><td>Icon</td><td>£34,495</td></tr>"
+        "<tr><td>Design</td><td>£36,995</td></tr></table>"
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "rows").choice(WHICH, ALL_OPTION)
+    icon, design = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    rows, axis, heading = fake.calls  # the column headers alone propose nothing
+    assert axis.questions["axis"] == Choice(
+        instructions=AXIS,
+        options={"rows": "The row headers: Icon, Design", "none": "Neither"},
+    )
+    assert rows.state == {"names": ["Icon", "Design"], "section": "Kestrova prices"}
+    assert rows.questions == {
+        "label0": Noul(instructions='Does "Icon" name a separate vehicle spec?'),
+        "label1": Noul(instructions='Does "Design" name a separate vehicle spec?'),
+    }
+    assert (icon.label, design.label) == ("Icon", "Design")
+    assert texts(parsed, design.statement_ids) == ["Model: Design", "OTR price: £36,995"]
+    # Every cell is a row's; only the heading is asked which entity it's about.
+    assert heading.state == {"statement": "Kestrova prices"}
+    assert texts(parsed, design.shared_statement_ids) == ["Kestrova prices"]
+
+
+async def test_multi_entity_tells_rows_under_one_spanning_header_apart_by_their_cells() -> None:
+    parsed = await parse(
+        "<table><tr><th>Trim</th><th>Powertrain</th><th>Price</th></tr>"
+        '<tr><th rowspan="2">Allure</th><td>Hybrid 136</td><td>£35,035</td></tr>'
+        "<tr><td>Electric 210</td><td>£45,950</td></tr></table>"
+    )
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.1)  # the columns, "Powertrain" and "Price"
+        .noul('"Allure', p=0.9)
+        .choice(AXIS, "rows")
+    )
+    hybrid, electric = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # One entity per row, not "Allure" holding both.
+    assert (hybrid.label, electric.label) == ("Allure Hybrid 136", "Allure Electric 210")
+    assert texts(parsed, electric.statement_ids) == [
+        "Allure",  # the header spans both rows, so it's on both
+        "Allure · Powertrain: Electric 210",
+        "Allure · Price: £45,950",
+    ]
+
+
+async def test_multi_entity_leaves_a_price_list_whole_when_jev_rejects_its_rows() -> None:
+    parsed = await parse(
+        "<table><tr><th>Option</th><th>Price</th></tr>"
+        "<tr><td>Metallic paint</td><td>£650</td></tr>"
+        "<tr><td>Tow bar</td><td>£800</td></tr></table>"
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.1)
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert scopes == await SingleEntity().resolve(parsed, VEHICLE, fake.client())
+
+
 async def test_multi_entity_joins_a_rows_stacked_headers_into_one_label() -> None:
     parsed = await parse(
         "<table><tr><th></th><th></th><th>Power</th><th>Price</th></tr>"
         '<tr><th rowspan="2">Kestrova</th><th>SE</th><td>150PS</td><td>£20,000</td></tr>'
         "<tr><th>SE L</th><td>180PS</td><td>£24,000</td></tr></table>"
     )
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "rows")
+        .noul(BOUNDARY, p=0.1, state="Power")
+    )
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     # One label per row, not "Kestrova" holding every row's cells.
     assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
@@ -449,12 +527,17 @@ async def test_multi_entity_gives_a_cell_spanning_rows_to_each_rows_entity() -> 
         '<td rowspan="2">3 years</td></tr>'
         "<tr><th>SE L</th><td>180PS</td></tr></table>"
     )
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "rows")
+        .noul(BOUNDARY, p=0.1, state="Power")
+    )
     se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     # Not a third "Kestrova SE SE L" entity holding the warranty alone.
-    assert [c.state for c in fake.calls if "Kestrova" in str(c.state)] == [
-        {"names": ["Kestrova SE", "Kestrova SE L"]}
-    ]
+    assert [
+        c.state for c in fake.calls if "label0" in c.questions and "Kestrova" in str(c.state)
+    ] == [{"names": ["Kestrova SE", "Kestrova SE L"]}]
     assert (se.label, se_l.label) == ("Kestrova SE", "Kestrova SE L")
     warranty = "Kestrova · SE · SE L · Warranty: 3 years"
     assert texts(parsed, se.statement_ids) == [
@@ -559,11 +642,23 @@ async def test_when_jev_says_neither_axis_names_entities_the_table_proposes_none
     assert scopes == await SingleEntity().resolve(parsed, VEHICLE, fake.client())
 
 
-async def test_a_table_with_labels_accepted_on_one_axis_is_not_asked_about_axes() -> None:
+async def test_a_table_whose_accepted_axis_names_no_entities_proposes_none() -> None:
+    # Each row label alone looks like a variant; the table as a whole can say otherwise
+    # (an engine table whose rows the variants share).
     parsed = await parse(ROW_KEYED)
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
-    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    assert not any("axis" in c.questions for c in fake.calls)
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .noul(BOUNDARY, p=0.1, state="Power")
+        .choice(AXIS, "none")
+    )
+    [scope] = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert scope.label == SINGLE_ENTITY_LABEL
+    [axis] = [c for c in fake.calls if "axis" in c.questions]
+    assert axis.questions["axis"] == Choice(
+        instructions=AXIS,
+        options={"rows": "The row headers: SE, SE L", "none": "Neither"},
+    )
 
 
 async def test_multi_entity_without_confirm_splits_tables_by_column_only() -> None:
@@ -624,6 +719,7 @@ async def test_a_header_on_the_entities_axis_that_jev_rejected_is_asked_about() 
         .noul(BOUNDARY, p=0.9)
         .noul('"Notes"', p=0.1)
         .noul('"Power"', p=0.1)
+        .choice(AXIS, "columns")
         .choice(WHICH, ALL_OPTION)
     )
     se, _ = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
@@ -692,12 +788,13 @@ async def test_multi_entity_uses_the_schemas_entity_questions() -> None:
         .noul("Is SE L", p=0.9)
         .noul("Is Power", p=0.1)
         .noul("Is Warranty", p=0.1)
+        .choice("Which headers of this table each name a separate trim?", "columns")
         .choice("Which trim is this about?", ALL_OPTION)
     )
     scopes = await MultiEntity().resolve(parsed, SchemaSpec.from_model(Trim), fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
     assert fake.calls[0].questions["label1"] == Noul(instructions="Is SE L a trim?")
-    options = fake.calls[2].questions["entity"]
+    options = fake.calls[3].questions["entity"]
     assert isinstance(options, Choice)
     assert options.options[ALL_OPTION] == "It applies to every trim"
 
@@ -708,12 +805,17 @@ async def test_entity_stage_gives_multi_entity_only_what_passed_the_component_ga
     c.parsed = parsed
     table = next(comp.id for comp in parsed.root.walk() if comp.type == "table")
     c.schemas["VehicleSpec"].component_ids = {"power_ps": [parsed.root.id, table]}
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "columns")
+        .noul(BOUNDARY, p=0.1, state="Power")
+    )
     c.jev = fake.client()
     await EntityStage(resolver=MultiEntity()).run(c)
     se, se_l = c.schemas["VehicleSpec"].scopes
     # The paragraphs were gated out, so no entity question is asked about them.
-    assert len(fake.calls) == 2  # the columns and the rows
+    assert len(fake.calls) == 3  # the columns, the rows and the table's axis
     assert texts(parsed, se_l.statement_ids) == [
         "SE L",
         "Power · SE L: 180PS",
@@ -898,6 +1000,27 @@ async def test_parent_child_can_take_a_tables_rows_as_the_children() -> None:
         "SE",
         "SE L",
     ]
+
+
+async def test_parent_child_takes_a_price_lists_rows_without_row_headers() -> None:
+    parsed = await parse(
+        "<h1>Kestrova</h1>"
+        "<table><tr><th>Trim</th><th>Powertrain</th><th>Price</th></tr>"
+        "<tr><td>Icon</td><td>Hybrid 136</td><td>£34,495</td></tr>"
+        "<tr><td>Icon</td><td>Electric 210</td><td>£39,995</td></tr>"
+        "<tr><td>Design</td><td>Hybrid 136</td><td>£36,995</td></tr></table>"
+    )
+    parent, *children = await ParentChild(children="table_rows").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    # Each row is labelled by as many cells as tell it from the others.
+    assert [c.label for c in children] == ["Icon Hybrid 136", "Icon Electric 210", "Design"]
+    assert texts(parsed, children[1].statement_ids) == [
+        "Trim: Icon",
+        "Powertrain: Electric 210",
+        "Price: £39,995",
+    ]
+    assert texts(parsed, parent.statement_ids) == ["Kestrova"]
 
 
 async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> None:
@@ -1713,6 +1836,7 @@ def json_ld_table_jev() -> FakeJev:
         .noul("Does this section", p=0.9)
         .noul("name a separate", p=0.9)
         .noul("name a separate", p=0.1, state="Power")
+        .choice("Which headers of this table", "columns")
         .choice("key path", "none")
         .choice('key path "model"', pick("model"))
         .choice('key path "offers[].price"', pick("price"))

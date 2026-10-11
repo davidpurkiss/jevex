@@ -49,8 +49,9 @@ class TableCellRef(BaseModel):
     (stacked header rows joined: "1.5 TSI SE"); entity resolvers use it to split a
     comparison table by column.
     ``row_headers`` holds every header of the rows the cell covers, as its text shows them,
-    and ``row_labels`` one label per covered row (that row's headers joined: "Kestrova
-    SE"), so a cell spanning two rows can go to each row's entity. A column header's
+    and ``row_labels`` one label per covered row (that row's headers joined, "Kestrova SE",
+    then its cells as far as it takes to tell the row from the others: see
+    :mod:`jevex.tables`), so a cell spanning two rows can go to each row's entity. A column header's
     statement has only ``col_headers`` (its own label), a row header's only
     ``row_headers`` (its own label) and ``row_labels``, and both carry ``corner`` and
     ``axis``."""

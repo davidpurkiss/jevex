@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from jevex.schema import FieldSpec, SchemaSpec
     from jevex.statements import Candidate, Span, Statement
     from jevex.store import Store, VerifiedExample
+    from jevex.tables import HeaderAxis
 
 log = get_logger(__name__)
 
@@ -281,9 +282,12 @@ class Context:
     schemas: dict[str, SchemaRun]
     parsed: ParsedDocument | None = None
     structured: list[Statement] = field(default_factory=list["Statement"])
-    headed_tables: frozenset[str] = frozenset()
+    headed_tables: dict[str, frozenset[HeaderAxis]] = field(
+        default_factory=dict[str, frozenset["HeaderAxis"]]
+    )
     """Tables without header cells that the component gate found headers in, by component
-    id: the statement stage reads them with those marked (:func:`~jevex.tables.infer_headers`)."""
+    id, with the axes they're on: the statement stage reads them with those marked
+    (:func:`~jevex.tables.infer_headers`)."""
     timings: dict[str, float] = field(default_factory=dict[str, float])
     events: list[Event] = field(default_factory=list[Event])
     stopped: bool = False

@@ -498,7 +498,7 @@ async def test_stage_reads_the_tables_the_gate_found_headers_in_with_them() -> N
         )
 
     ctx = context(comp("section", cid="root", children=[kv("yes"), kv("no")]))
-    ctx.headed_tables = frozenset({"yes"})
+    ctx.headed_tables = {"yes": frozenset({"rows"})}
     await StatementStage().run(ctx)
     assert ctx.parsed is not None
     assert [(sid, s.text) for sid, s in ctx.parsed.statements.items()] == [

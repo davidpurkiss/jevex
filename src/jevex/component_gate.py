@@ -11,9 +11,10 @@ across several units (tables by row groups with their headers repeated) rather t
 and headings with nothing after them join the table or section they introduce. Jev is
 asked one Noul per unit × field group ("Does this section contain the price?"), with every
 schema's questions about a unit in one request. A table without header cells whose shape
-allows some (:func:`~jevex.tables.header_shape`) gets one more Noul in the request for the
-first unit holding it: whether its first row and column (or, with two columns, its first
-column) are headers. Before that answer the gate reads it as rows, as it splits it.
+allows some (:func:`~jevex.tables.header_shape`) gets more Nouls in the request for the
+first unit holding it: whether its first row names its columns and whether its first column
+names its rows (with two columns, whether its first column labels the value beside it).
+Before those answers the gate reads it as rows, as it splits it.
 
 A unit that passes for a group passes all its components and their descendants (and
 their ancestors, so the tree stays connected). The result lands on
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
     from jevex.layout import Component, TableCell
     from jevex.pipeline import Context, SchemaRun
     from jevex.schema import SchemaSpec
-    from jevex.tables import HeaderShape
+    from jevex.tables import HeaderAxis, HeaderShape
 
 DEFAULT_THRESHOLD = 0.1
 """Lower than the document gate's: a wrongly passed section costs a few statements, a
@@ -358,11 +359,15 @@ class NoulComponentGate:
 
     A header-less table with a :func:`~jevex.tables.header_shape` is asked about once,
     alongside the groups in the request for the first unit holding it (the piece with its
-    first row), and has headers when ``p >= HEADER_THRESHOLD``. A table is read once for
-    every schema, so the question is the first schema's
-    (:meth:`~jevex.schema.SchemaSpec.table_headers_question`,
-    :meth:`~jevex.schema.SchemaSpec.table_labels_question`). It's only asked in a request
-    the groups make: with no group to ask about, the table is read as rows.
+    first row): a comparison-shaped one whether its first row names its columns and whether
+    its first column names its rows, each axis having headers when ``p >= HEADER_THRESHOLD``
+    (a price list's first row names its columns, while its first column is the variant
+    each row is about), a two-column one whether its first column labels its values. A
+    table is read once for every schema, so the questions are the first schema's
+    (:meth:`~jevex.schema.SchemaSpec.table_column_headers_question`,
+    :meth:`~jevex.schema.SchemaSpec.table_row_headers_question`,
+    :meth:`~jevex.schema.SchemaSpec.table_labels_question`). They're only asked in a
+    request the groups make: with no group to ask about, the table is read as rows.
     """
 
     def __init__(
@@ -394,25 +399,31 @@ class NoulComponentGate:
             for c in parsed.root.walk()
             if c.type == "table" and (shape := header_shape(c)) is not None
         }
-        # unit id -> {question key: table id}. A group's key starts "<schema name>.", and a
-        # schema name (a class name) has no space, so "table <id>" never takes one.
-        tables_in: dict[str, dict[str, str]] = {}
+        # unit id -> {question key: (table id, axis)}. A group's key starts "<schema name>.",
+        # and a schema name (a class name) has no space, so "table <id> <axis>" never takes
+        # one.
+        tables_in: dict[str, dict[str, tuple[str, HeaderAxis]]] = {}
         placed: set[str] = set()
         for unit in units:
             for cid in unit.component_ids:
                 if cid in shapes and cid not in placed:
                     placed.add(cid)
-                    tables_in.setdefault(unit.id, {})[f"table {cid}"] = cid
-        header_questions: dict[HeaderShape, Noul] = {
-            "comparison": schemas[0].table_headers_question(),
-            "labels": schemas[0].table_labels_question(),
+                    axes: list[HeaderAxis] = (
+                        ["columns", "rows"] if shapes[cid] == "comparison" else ["rows"]
+                    )
+                    for axis in axes:
+                        tables_in.setdefault(unit.id, {})[f"table {cid} {axis}"] = (cid, axis)
+        header_questions: dict[tuple[HeaderShape, HeaderAxis], Noul] = {
+            ("comparison", "columns"): schemas[0].table_column_headers_question(),
+            ("comparison", "rows"): schemas[0].table_row_headers_question(),
+            ("labels", "rows"): schemas[0].table_labels_question(),
         }
-        headed: set[str] = set()
+        headed: dict[str, set[HeaderAxis]] = {}
 
         async def ask(unit: GateUnit) -> None:
             tables = tables_in.get(unit.id, {})
             asked = {k: q for k, (_, _, q) in questions.items()}
-            asked |= {key: header_questions[shapes[t]] for key, t in tables.items()}
+            asked |= {key: header_questions[shapes[t], axis] for key, (t, axis) in tables.items()}
             answers = await jev.ask(unit.state(), asked)
             for key, answer in answers.items():
                 if not isinstance(answer, NoulAnswer):
@@ -421,7 +432,8 @@ class NoulComponentGate:
                     )
                 if key in tables:
                     if answer.p >= HEADER_THRESHOLD:
-                        headed.add(tables[key])
+                        table_id, axis = tables[key]
+                        headed.setdefault(table_id, set()).add(axis)
                 elif answer.p >= self.threshold:
                     schema, group, _ = questions[key]
                     out[schema][group].extend(unit.component_ids)
@@ -437,7 +449,9 @@ class NoulComponentGate:
                         passed.add(parent)
                         parent = parents.get(parent)
                 groups[group] = sorted(passed, key=order.__getitem__)
-        return ComponentGateResult(components=out, headed_tables=frozenset(headed))
+        return ComponentGateResult(
+            components=out, headed_tables={t: frozenset(axes) for t, axes in headed.items()}
+        )
 
 
 def _question_key(taken: Mapping[str, object], key: str) -> str:

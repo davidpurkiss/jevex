@@ -734,7 +734,8 @@ async def test_the_default_threshold_passes_a_section_at_p_0_1() -> None:
     assert failed.components["Book"]["title"] == []
 
 
-TABLE_HEADERS = "Does the table's first row name its columns, and its first column name its rows?"
+TABLE_COLUMNS = "Does the table's first row name its columns?"
+TABLE_ROWS = "Does the table's first column name its rows?"
 TABLE_LABELS = "Does the table's first column label the value beside it in each row?"
 
 
@@ -751,18 +752,24 @@ def headers_asked(fake: FakeJev) -> list[tuple[str, JSONContent]]:
 async def test_a_header_less_comparison_table_is_asked_about_its_headers() -> None:
     grid = [("Spec", "SE", "GT"), ("Power", "150 PS", "200 PS"), ("0-62 mph", "9.1", "7.4")]
     root = comp("section", "", "root", comp("paragraph", "From £24,995.", "p"), plain_table(*grid))
-    fake = FakeJev().noul(TABLE_HEADERS, p=0.8)
+    fake = FakeJev().noul(TABLE_COLUMNS, p=0.8).noul(TABLE_ROWS, p=0.3)
     result = await NoulComponentGate().gate(
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
-    assert headers_asked(fake) == [("table t", TABLE_HEADERS)]
+    assert headers_asked(fake) == [("table t columns", TABLE_COLUMNS), ("table t rows", TABLE_ROWS)]
     # In the table's own request, with its groups.
-    [call] = [c for c in fake.calls if "table t" in c.questions]
-    assert set(call.questions) == {"Car.price", "Car.performance", "table t"}
+    [call] = [c for c in fake.calls if "table t columns" in c.questions]
+    assert set(call.questions) == {
+        "Car.price",
+        "Car.performance",
+        "table t columns",
+        "table t rows",
+    }
     assert call.state == {
         "content": "Spec | SE | GT\nPower | 150 PS | 200 PS\n0-62 mph | 9.1 | 7.4"
     }
-    assert result.headed_tables == {"t"}
+    # Each axis on its own answer: here only the first row names columns.
+    assert result.headed_tables == {"t": frozenset({"columns"})}
     # Asking doesn't pass the table for any group.
     assert result.components["Car"] == {"price": [], "performance": []}
 
@@ -771,17 +778,20 @@ async def test_a_no_or_unsure_answer_leaves_the_table_without_headers() -> None:
     grid = [("Gearbox", "Manual", "Auto"), ("Power", "150 PS", "200 PS")]
     root = comp("section", "", "root", plain_table(*grid))
     for p in (0.1, 0.49):
-        fake = FakeJev().noul(TABLE_HEADERS, p=p)
+        fake = FakeJev().noul(TABLE_COLUMNS, p=p).noul(TABLE_ROWS, p=p)
         result = await NoulComponentGate().gate(
             parsed(root), [SchemaSpec.from_model(Car)], fake.client()
         )
-        assert headers_asked(fake) == [("table t", TABLE_HEADERS)]
-        assert result.headed_tables == frozenset()
-    fake = FakeJev().noul(TABLE_HEADERS, p=0.5)
+        assert headers_asked(fake) == [
+            ("table t columns", TABLE_COLUMNS),
+            ("table t rows", TABLE_ROWS),
+        ]
+        assert result.headed_tables == {}
+    fake = FakeJev().noul(TABLE_COLUMNS, p=0.5).noul(TABLE_ROWS, p=0.5)
     result = await NoulComponentGate().gate(
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
-    assert result.headed_tables == {"t"}
+    assert result.headed_tables == {"t": frozenset({"columns", "rows"})}
 
 
 async def test_a_header_less_two_column_table_is_asked_whether_it_holds_labels() -> None:
@@ -798,8 +808,11 @@ async def test_a_header_less_two_column_table_is_asked_whether_it_holds_labels()
     result = await NoulComponentGate().gate(
         parsed(root), [SchemaSpec.from_model(Car)], fake.client()
     )
-    assert headers_asked(fake) == [("table kv", TABLE_LABELS), ("table people", TABLE_LABELS)]
-    assert result.headed_tables == {"kv"}
+    assert headers_asked(fake) == [
+        ("table kv rows", TABLE_LABELS),
+        ("table people rows", TABLE_LABELS),
+    ]
+    assert result.headed_tables == {"kv": frozenset({"rows"})}
 
 
 async def test_tables_with_headers_or_without_a_header_shape_are_not_asked_about() -> None:
@@ -826,19 +839,19 @@ async def test_tables_with_headers_or_without_a_header_shape_are_not_asked_about
     )
     assert len(fake.calls) == 3
     assert headers_asked(fake) == []
-    assert result.headed_tables == frozenset()
+    assert result.headed_tables == {}
 
 
 async def test_an_oversized_header_less_table_is_asked_about_with_its_first_piece() -> None:
     root = comp("section", "", "root", plain_table(*spec_grid(30)))
-    fake = FakeJev().noul(TABLE_HEADERS, p=0.9)
+    fake = FakeJev().noul(TABLE_COLUMNS, p=0.9).noul(TABLE_ROWS, p=0.9)
     gate = NoulComponentGate(max_chars=120)
     result = await gate.gate(parsed(root), [SchemaSpec.from_model(Car)], fake.client())
     units = gate_units(root, max_chars=120)
     assert len(fake.calls) == len(units) > 1
-    [first] = [c for c in fake.calls if "table t" in c.questions]
+    [first] = [c for c in fake.calls if "table t columns" in c.questions]
     assert first.state == units[0].state()
-    assert result.headed_tables == {"t"}
+    assert result.headed_tables == {"t": frozenset({"columns", "rows"})}
 
 
 async def test_the_table_question_is_the_first_schemas_and_can_be_overridden() -> None:
@@ -846,7 +859,8 @@ async def test_the_table_question_is_the_first_schemas_and_can_be_overridden() -
         """A spec sheet."""
 
         __jevex__ = SchemaConfig(
-            table_headers_question="Are the trims across the top and the specs down the side?",
+            table_column_headers_question="Are the trims across the top?",
+            table_row_headers_question="Are the specs down the side?",
             table_labels_question="Is each row a spec and its value?",
         )
 
@@ -863,8 +877,9 @@ async def test_the_table_question_is_the_first_schemas_and_can_be_overridden() -
     specs = [SchemaSpec.from_model(Spec), SchemaSpec.from_model(Car)]
     await NoulComponentGate().gate(parsed(root), specs, fake.client())
     assert headers_asked(fake) == [
-        ("table cmp", "Are the trims across the top and the specs down the side?"),
-        ("table kv", "Is each row a spec and its value?"),
+        ("table cmp columns", "Are the trims across the top?"),
+        ("table cmp rows", "Are the specs down the side?"),
+        ("table kv rows", "Is each row a spec and its value?"),
     ]
 
 
@@ -909,11 +924,12 @@ async def test_the_statements_read_a_header_less_table_as_jev_answered() -> None
         b"</table></body></html>"
     )
     root = await HtmlLayoutParser().parse(Document.from_bytes(html))
-    for p, expected in [
-        (0.9, ["SE", "GT", "Power", "Power · SE: 150 PS", "Power · GT: 200 PS"]),
-        (0.2, ["Spec | SE | GT", "Power | 150 PS | 200 PS"]),
+    for columns, rows, expected in [
+        (0.9, 0.9, ["SE", "GT", "Power", "Power · SE: 150 PS", "Power · GT: 200 PS"]),
+        (0.9, 0.2, ["Spec: Power", "SE: 150 PS", "GT: 200 PS"]),
+        (0.2, 0.2, ["Spec | SE | GT", "Power | 150 PS | 200 PS"]),
     ]:
-        fake = FakeJev().noul(TABLE_HEADERS, p=p)
+        fake = FakeJev().noul(TABLE_COLUMNS, p=columns).noul(TABLE_ROWS, p=rows)
         ctx = context(fake, root)
         await ComponentGateStage().run(ctx)
         await StatementStage().run(ctx)

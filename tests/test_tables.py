@@ -16,6 +16,7 @@ from jevex.layout_html import HtmlLayoutParser
 from jevex.select import statement_state
 from jevex.tables import (
     MAX_AXIS_CHARS,
+    HeaderAxis,
     axis_text,
     blank_rows,
     header_prefix,
@@ -42,13 +43,17 @@ def table(*cells: TableCell, trail: list[str] | None = None) -> Component:
     )
 
 
+BOTH: frozenset[HeaderAxis] = frozenset({"columns", "rows"})
+"""Jev said a header-less table has headers on both axes."""
+
+
 def texts(component: Component) -> list[str]:
     return [s.text for s in table_statements(component)]
 
 
 def headed_texts(component: Component) -> list[str]:
     """The statements of a header-less table Jev said has headers."""
-    return texts(infer_headers(component))
+    return texts(infer_headers(component, BOTH))
 
 
 def test_cells_carry_row_and_column_headers() -> None:
@@ -182,7 +187,7 @@ def test_a_two_column_table_with_inferred_labels_reads_as_labels_and_values() ->
     assert header_shape(t) == "labels"
     # Until Jev says the first column labels the values, it's rows.
     assert texts(t) == ["Engine: | 1.5 TSI", "0-62 mph (s) | 9.1", "a value without its label"]
-    statements = table_statements(infer_headers(t))
+    statements = table_statements(infer_headers(t, BOTH))
     assert [s.text for s in statements] == [
         "Engine: 1.5 TSI",
         "0-62 mph (s): 9.1",
@@ -202,7 +207,7 @@ def test_two_columns_without_labels_or_with_spans_stay_rows() -> None:
     no_labels = table(cell(0, 1, "1.5 TSI"), cell(1, 1, "150 PS"))
     for t in (numbers, spanning, no_values, no_labels):
         assert header_shape(t) is None
-        assert infer_headers(t) is t
+        assert infer_headers(t, BOTH) is t
     assert headed_texts(numbers) == ["2019 | 150 PS", "2021 | 163"]
     assert headed_texts(spanning) == ["Engine | 1.5 TSI", "Note"]
 
@@ -628,7 +633,7 @@ def test_a_label_with_an_empty_value_in_a_label_value_table_gives_nothing() -> N
     )
     assert texts(plain) == ["Engine | 1.5 TSI", "Towing", "Kerb weight", "Power | 150 PS"]
     assert headed_texts(plain) == ["Engine: 1.5 TSI", "Power: 150 PS"]
-    assert [s.id.split(".")[-1] for s in table_statements(infer_headers(plain))] == [
+    assert [s.id.split(".")[-1] for s in table_statements(infer_headers(plain, BOTH))] == [
         "r0c1",
         "r3c1",
     ]
@@ -672,7 +677,7 @@ def test_a_header_less_comparison_table_read_with_its_first_row_and_column_as_he
     )
     assert header_shape(t) == "comparison"
     assert texts(t)[:2] == ["Spec | 1.5 TSI SE | GT", "Power | 150 PS | 200 PS"]
-    statements = table_statements(infer_headers(t))
+    statements = table_statements(infer_headers(t, BOTH))
     assert [s.text for s in statements if s.kind == "table_header"] == [
         "1.5 TSI SE",
         "GT",
@@ -696,7 +701,7 @@ def test_a_header_less_comparison_table_read_with_its_first_row_and_column_as_he
     assert ref is not None
     assert (ref.row, ref.col, ref.row_headers, ref.col_headers) == (1, 2, ["Power"], ["GT"])
     assert [s.table.col_headers for s in statements if s.table] == [["1.5 TSI SE"], ["GT"]] * 4
-    assert blank_rows(infer_headers(t)) == {4}
+    assert blank_rows(infer_headers(t, BOTH)) == {4}
 
 
 def test_an_inferred_comparison_table_keeps_an_empty_corner_and_bands() -> None:
@@ -718,6 +723,43 @@ def test_an_inferred_comparison_table_keeps_an_empty_corner_and_bands() -> None:
     ]
 
 
+def test_an_inferred_comparison_table_marks_only_the_axes_jev_found_headers_on() -> None:
+    # A price list: its first row names its columns, its first column is each row's
+    # variant. "P11D" has as many digits as letters and is still a name.
+    t = html_table(
+        "<tr><td>Range</td><td>CO2</td><td>P11D</td><td>OTR</td></tr>"
+        "<tr><td>Pure 1.6 T-GDi</td><td>158</td><td>£29,930</td><td>£31,395</td></tr>"
+        "<tr><td>GT-Line 1.6 T-GDi</td><td>159</td><td>£32,430</td><td>£33,895</td></tr>"
+    )
+    assert header_shape(t) == "comparison"
+    columns = table_statements(infer_headers(t, {"columns"}))
+    assert [s.text for s in columns][:4] == [
+        "Range: Pure 1.6 T-GDi",
+        "CO2: 158",
+        "P11D: £29,930",
+        "OTR: £31,395",
+    ]
+    ref = columns[1].table
+    assert ref is not None
+    assert (ref.row_headers, ref.col_headers, ref.row_labels) == ([], ["CO2"], ["Pure 1.6 T-GDi"])
+    # With only its first column, the first row is data, labelled like the rest.
+    assert texts(infer_headers(t, {"rows"}))[:4] == [
+        "Range: CO2",
+        "Range: P11D",
+        "Range: OTR",
+        "Pure 1.6 T-GDi: 158",
+    ]
+    assert infer_headers(t, set()) is t
+
+
+def test_a_labels_table_has_headers_only_on_its_rows() -> None:
+    t = table(
+        cell(0, 0, "Engine"), cell(0, 1, "1.5 TSI"), cell(1, 0, "Power"), cell(1, 1, "150 PS")
+    )
+    assert infer_headers(t, {"columns"}) is t
+    assert texts(infer_headers(t, {"rows"})) == ["Engine: 1.5 TSI", "Power: 150 PS"]
+
+
 def test_a_header_less_table_of_plain_records_stays_rows() -> None:
     records = html_table(
         "<tr><td>Name</td><td>City</td><td>Role</td></tr>"
@@ -730,7 +772,7 @@ def test_a_header_less_table_of_plain_records_stays_rows() -> None:
         "Bob | Leeds | Designer",
     ]
     assert header_shape(records) is None
-    assert infer_headers(records) is records
+    assert infer_headers(records, BOTH) is records
 
 
 def test_header_inference_needs_a_comparison_tables_shape() -> None:
@@ -755,12 +797,12 @@ def test_header_inference_needs_a_comparison_tables_shape() -> None:
     ]
     for t in unchanged:
         assert header_shape(t) is None
-        assert infer_headers(t) is t
+        assert infer_headers(t, BOTH) is t
         assert all(s.table and not s.table.col_headers for s in table_statements(t))
     # Tables that already have headers are left as they are.
     headed = table(cell(0, 1, "SE", header=True), cell(1, 0, "Power"), cell(1, 1, "150 PS"))
     assert header_shape(headed) is None
-    assert infer_headers(headed) is headed
+    assert infer_headers(headed, BOTH) is headed
 
 
 def test_row_roles_say_how_the_statements_read_each_row() -> None:
@@ -792,6 +834,50 @@ def test_row_roles_say_how_the_statements_read_each_row() -> None:
         "Power",
         "Performance › Power · SE: 150",
         "Performance › Power · GT: 200",
+    ]
+
+
+def test_a_symbol_cell_in_the_first_row_heads_its_column_but_is_data_further_down() -> None:
+    # A PDF's layout split the "£" off "Band VED £" into a data cell of its own.
+    split = table(
+        cell(0, 0, "Grade", header=True),
+        cell(0, 1, "Band VED", header=True),
+        cell(0, 2, "£"),
+        cell(0, 3, "On the Road", header=True),
+        cell(1, 0, "Icon"),
+        cell(1, 1, "91 - 100"),
+        cell(1, 2, "£365"),
+        cell(1, 3, "£30,845"),
+    )
+    assert row_roles(split) == {0: "header", 1: "body"}
+    assert texts(split) == ["Grade: Icon", "Band VED: 91 - 100", "£: £365", "On the Road: £30,845"]
+    # An equipment table's marks are data: their rows stay body rows.
+    marks = table(
+        cell(0, 1, "SE", header=True),
+        cell(0, 2, "GT", header=True),
+        cell(1, 0, "Alloy wheels", header=True),
+        cell(1, 1, "●"),
+        cell(1, 2, "●"),
+        cell(2, 0, "Heated seats", header=True),
+        cell(2, 1, "–"),
+        cell(2, 2, "●"),
+    )
+    assert row_roles(marks) == {0: "header", 1: "body", 2: "body"}
+    # Nor does one at the top of a table that has no header row.
+    headless = table(
+        cell(0, 0, "Alloy wheels", header=True),
+        cell(0, 1, "●"),
+        cell(0, 2, "●"),
+        cell(1, 0, "Heated seats", header=True),
+        cell(1, 1, "–"),
+        cell(1, 2, "●"),
+    )
+    assert row_roles(headless) == {0: "body", 1: "body"}
+    assert texts(headless) == [
+        "Alloy wheels: ●",
+        "Alloy wheels: ●",
+        "Heated seats: –",
+        "Heated seats: ●",
     ]
 
 
@@ -837,6 +923,38 @@ def test_a_row_label_repeated_under_another_outer_header_is_stated_again() -> No
     )
     headers = [s.text for s in table_statements(banded) if s.kind == "table_header"]
     assert headers == ["SE", "Power"]
+
+
+def test_row_labels_take_a_rows_cells_until_they_tell_it_from_the_others() -> None:
+    def labels(t: Component) -> list[list[str]]:
+        return [s.table.row_labels for s in table_statements(t) if s.table and s.table.row_labels]
+
+    # A price list: no row headers, so each row is named by its first cell.
+    price_list = html_table(
+        "<tr><th>Model</th><th>Price</th></tr>"
+        "<tr><td>Icon</td><td>£34,495</td></tr><tr><td>Design</td><td>£36,995</td></tr>"
+    )
+    assert labels(price_list) == [["Icon"], ["Icon"], ["Design"], ["Design"]]
+    # A header spanning rows names none of them alone: the cells beside it tell them apart.
+    spanned = html_table(
+        "<tr><th>Trim</th><th>Powertrain</th><th>Price</th></tr>"
+        "<tr><th rowspan=2>Allure</th><td>Hybrid 136</td><td>£35,035</td></tr>"
+        "<tr><td>Electric 210</td><td>£45,950</td></tr>"
+    )
+    allure = ["Allure Hybrid 136", "Allure Electric 210"]
+    assert labels(spanned) == [
+        allure,  # the "Allure" header statement, on both rows
+        ["Allure Hybrid 136"],
+        ["Allure Hybrid 136"],
+        ["Allure Electric 210"],
+        ["Allure Electric 210"],
+    ]
+    # Two identical rows share a label: nothing tells them apart.
+    repeated = html_table(
+        "<tr><th>Model</th><th>Price</th></tr>"
+        "<tr><td>Icon</td><td>£34,495</td></tr><tr><td>Icon</td><td>£34,495</td></tr>"
+    )
+    assert {tuple(x) for x in labels(repeated)} == {("Icon £34,495",)}
 
 
 def test_axis_text_keeps_the_labels_nearest_the_header_within_the_cap() -> None:
