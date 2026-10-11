@@ -265,16 +265,33 @@ def _row_keys(parts: dict[int, tuple[str | None, list[str]]]) -> dict[int, str]:
     heading four rows that differ in their powertrain cell: "ALLURE HYBRID 136 e-DSC6").
     Rows under different bands are told apart by them ("Power" under "Petrol" and under
     "Diesel" is one label, as a column's trim is in two tables), and a row identical to
-    another keeps all its parts, so the two share a label."""
-    keys: dict[int, str] = {}
-    for r, (band, own) in parts.items():
-        others = [p for o, (b, p) in parts.items() if o != r and b == band]
-        n = next(
-            (n for n in range(1, len(own)) if all(p[:n] != own[:n] for p in others)),
-            len(own),
-        )
-        keys[r] = " ".join(own[:n])
-    return keys
+    another keeps all its parts, so the two share a label.
+
+    Rows are grouped by their first ``n`` parts, ``n`` growing only within groups that
+    still hold several rows, so a long table costs about rows × parts, not rows²."""
+    lengths: dict[int, int] = {}
+    bands: dict[str | None, list[int]] = {}
+    for r, (band, _) in parts.items():
+        bands.setdefault(band, []).append(r)
+    groups = list(bands.values())
+    n = 1
+    while groups:
+        colliding: list[list[int]] = []
+        for group in groups:
+            by_prefix: dict[tuple[str, ...], list[int]] = {}
+            for r in group:
+                by_prefix.setdefault(tuple(parts[r][1][:n]), []).append(r)
+            for rows in by_prefix.values():
+                # A row out of parts is told apart from the longer ones by its length.
+                left = [r for r in rows if len(parts[r][1]) > n]
+                for r in rows:
+                    if len(rows) == 1 or r not in left:
+                        lengths[r] = min(n, len(parts[r][1]))
+                if len(rows) > 1 and len(left) > 0:
+                    colliding.append(left)
+        groups = colliding
+        n += 1
+    return {r: " ".join(own[: lengths[r]]) for r, (_, own) in parts.items()}
 
 
 def header_shape(table: Component) -> HeaderShape | None:
@@ -383,11 +400,12 @@ def row_roles(table: Component) -> dict[int, RowRole]:
 
     ``"band"`` is a group header ("Performance") that prefixes the rows below it until the
     next band. ``"header"`` is a row made only of header cells giving column headers: the
-    leading ones stack, and one repeated after the first body row replaces them. In the
-    first row, a data cell without a letter or digit doesn't count against that: a PDF's
-    layout can split a header's unit into a cell of its own (``Band VED | £`` over
-    ``91 - 100 | £365``), which then heads its column with the rest of the row. Further
-    down such a cell is data (an equipment table's ``●``). Everything else is ``"body"``,
+    leading ones stack, and one repeated after the first body row replaces them. In a
+    first row with column headers, a data cell without a letter or digit doesn't count
+    against that: a PDF's layout can split a header's unit into a cell of its own
+    (``Band VED | £`` over ``91 - 100 | £365``), which then heads its column with the
+    rest of the row. Elsewhere such a cell is data (an equipment table's ``●``, even in a
+    first row holding only its label: ``Alloy wheels | ● | ●``). Everything else is ``"body"``,
     including blank rows (:func:`blank_rows`) and rows a data cell spans into. A table made
     only of headers, or without any, is all body rows.
     """
@@ -397,10 +415,13 @@ def row_roles(table: Component) -> dict[int, RowRole]:
         return roles
     width = max(c.col + c.col_span for c in cells)
     top = min(c.row for c in cells)
+    # Only a row of column headers (beyond the first column) waives its symbol cells:
+    # "Alloy wheels | ● | ●" at the top of an equipment table stays a body row.
+    named = any(c.header and c.row == top and c.col > 0 for c in cells)
     has_data = {
         covered
         for c in cells
-        if not c.header and (c.row != top or _states_something(c.text))
+        if not c.header and (c.row != top or not named or _states_something(c.text))
         for covered in range(c.row, c.row + c.row_span)
     }
     has_data |= blank_rows(table)

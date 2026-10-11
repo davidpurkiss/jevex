@@ -1002,6 +1002,27 @@ async def test_parent_child_can_take_a_tables_rows_as_the_children() -> None:
     ]
 
 
+async def test_parent_child_takes_a_price_lists_rows_without_row_headers() -> None:
+    parsed = await parse(
+        "<h1>Kestrova</h1>"
+        "<table><tr><th>Trim</th><th>Powertrain</th><th>Price</th></tr>"
+        "<tr><td>Icon</td><td>Hybrid 136</td><td>£34,495</td></tr>"
+        "<tr><td>Icon</td><td>Electric 210</td><td>£39,995</td></tr>"
+        "<tr><td>Design</td><td>Hybrid 136</td><td>£36,995</td></tr></table>"
+    )
+    parent, *children = await ParentChild(children="table_rows").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    # Each row is labelled by as many cells as tell it from the others.
+    assert [c.label for c in children] == ["Icon Hybrid 136", "Icon Electric 210", "Design"]
+    assert texts(parsed, children[1].statement_ids) == [
+        "Trim: Icon",
+        "Powertrain: Electric 210",
+        "Price: £39,995",
+    ]
+    assert texts(parsed, parent.statement_ids) == ["Kestrova"]
+
+
 async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> None:
     parsed = await parse(
         "<table><tr><th></th><th>Warranty</th></tr>"

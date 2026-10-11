@@ -863,6 +863,22 @@ def test_a_symbol_cell_in_the_first_row_heads_its_column_but_is_data_further_dow
         cell(2, 2, "●"),
     )
     assert row_roles(marks) == {0: "header", 1: "body", 2: "body"}
+    # Nor does one at the top of a table that has no header row.
+    headless = table(
+        cell(0, 0, "Alloy wheels", header=True),
+        cell(0, 1, "●"),
+        cell(0, 2, "●"),
+        cell(1, 0, "Heated seats", header=True),
+        cell(1, 1, "–"),
+        cell(1, 2, "●"),
+    )
+    assert row_roles(headless) == {0: "body", 1: "body"}
+    assert texts(headless) == [
+        "Alloy wheels: ●",
+        "Alloy wheels: ●",
+        "Heated seats: –",
+        "Heated seats: ●",
+    ]
 
 
 def test_row_roles_of_tables_with_only_headers_or_none_are_all_body() -> None:
