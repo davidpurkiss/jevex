@@ -129,7 +129,7 @@ One document can yield one record, many records, or a parent with children. The 
 | Resolver | Use when | How entities are found | Cost |
 | --- | --- | --- | --- |
 | `SingleEntity` | You know the page holds one record (a listing detail page) | The whole document is one entity | Lowest: no entity questions |
-| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, then one Choice per ambiguous statement |
+| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, one Choice per table whose rows and columns both have accepted labels (which axis names the entities), then one Choice per ambiguous statement |
 | `ParentChild` | You know the shape: a model page with variant children | Caller declares where children live (e.g. "table columns", a component type) | Low: statements go to parent or child |
 
 **MultiEntity boundary detection**, in priority order:

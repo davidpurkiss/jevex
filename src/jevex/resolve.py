@@ -120,7 +120,11 @@ class MultiEntity:
     look just like "SE" and "SE L" ones, and a table's rows are as likely to be trims as
     its columns), so each proposed label is checked with one Noul
     (:meth:`~jevex.schema.SchemaSpec.boundary_question`), a group's labels in one
-    request. Labels at ``boundary_p`` or above are entities; the same label in two places
+    request. Labels at ``boundary_p`` or above are entities. Each axis of a table is
+    judged without the other, so where labels on both were accepted (trims across the
+    top, paint colours down the side), one Choice per table
+    (:meth:`~jevex.schema.SchemaSpec.axis_question`) keeps the columns, the rows or
+    neither. The same label in two places
     (the "SE" column of two tables) is one entity: a page that splits one comparison over
     several tables repeats its headers in each (two cards or sections with the same label
     in one run are numbered instead, "Golf (2)"). With ``confirm=False`` nothing is
@@ -130,8 +134,8 @@ class MultiEntity:
 
     When accepted groups overlap, a statement goes to the innermost (listing cards under
     a trim heading are each an entity; a table's columns beat the section around it),
-    then to the higher priority above (a table's columns beat its rows). A label left
-    with nothing but its own heading or header is dropped.
+    then to the higher priority above (a table beats headed sections). A label left with
+    nothing but its own heading or header is dropped.
 
     With two or more entities, every statement no boundary claimed is asked one Choice
     (:meth:`~jevex.schema.SchemaSpec.entity_question`): which entity it applies to, or
@@ -242,10 +246,13 @@ class MultiEntity:
             question = schema.axis_question(both[table_id][0], both[table_id][1])
             table = parsed.root.find(table_id)
             assert table is not None  # a group's table is in the tree it was found in
-            state: dict[str, JSONContent] = {"table": jev.fit_state(table.text, {"axis": question})}
-            if section := section_text(table.heading_trail):
-                state["section"] = section
-            answer = (await jev.ask(state, {"axis": question}))["axis"]
+            section = section_text(table.heading_trail)
+
+            def state(text: str) -> JSONContent:
+                return {"table": text, "section": section} if section else {"table": text}
+
+            text = jev.fit_state(table.text, {"axis": question}, within=state)
+            answer = (await jev.ask(state(text), {"axis": question}))["axis"]
             if not isinstance(answer, ChoiceAnswer):
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
             kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())

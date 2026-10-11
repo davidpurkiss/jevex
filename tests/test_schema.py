@@ -10,7 +10,6 @@ from jevex import Field, Questions, SchemaConfig, SchemaSpec
 from jevex.jev import Choice, Noul
 from jevex.schema import (
     ALL_OPTION,
-    MAX_AXIS_LABELS_CHARS,
     ReservedFieldNameError,
     UnsupportedFieldError,
 )
@@ -487,10 +486,9 @@ def test_the_axis_question_lists_each_axiss_labels_within_a_cap() -> None:
             "none": "Neither",
         },
     )
+    # Past MAX_AXIS_LABELS_CHARS (300), the labels are cut between labels.
     rows = spec.axis_question(["SE"], [f"Paint colour {i}" for i in range(100)]).options["rows"]
-    assert isinstance(rows, str)
-    assert len(rows) <= len("The row headers: ") + MAX_AXIS_LABELS_CHARS
-    assert rows.endswith("…")
+    assert rows == "The row headers: " + ", ".join(f"Paint colour {i}" for i in range(18)) + ", …"
 
 
 def test_table_header_questions_and_their_overrides() -> None:

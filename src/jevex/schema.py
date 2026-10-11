@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_core import PydanticUndefined
 
 from jevex.jev import Choice, JSONContent, Noul
-from jevex.layout import section_text
+from jevex.tables import axis_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -404,7 +404,8 @@ class SchemaSpec:
     def axis_question(self, columns: Sequence[str], rows: Sequence[str]) -> Choice:
         """For ``MultiEntity``: in a table where labels on both axes were accepted as
         entities (trims across the top, paint colours down the side), which axis names them,
-        or neither. Each option lists its axis's labels, cut to ``MAX_AXIS_LABELS_CHARS``."""
+        or neither. Each option lists its axis's labels, cut to ``MAX_AXIS_LABELS_CHARS``
+        (:func:`~jevex.tables.axis_text`)."""
         template = (
             self.config.axis_question
             or "Which headers of this table each name a separate {entity}?"
@@ -412,8 +413,8 @@ class SchemaSpec:
         return Choice(
             instructions=template.format(entity=self.entity_name),
             options={
-                "columns": f"The column headers: {_listed(columns)}",
-                "rows": f"The row headers: {_listed(rows)}",
+                "columns": f"The column headers: {axis_text(columns, 0, MAX_AXIS_LABELS_CHARS)}",
+                "rows": f"The row headers: {axis_text(rows, 0, MAX_AXIS_LABELS_CHARS)}",
                 NONE_OPTION: "Neither",
             },
         )
@@ -491,11 +492,6 @@ def _classify(name: str, annotation: Any) -> tuple[FieldKind, tuple[str, ...]]:
         if issubclass(annotation, BaseModel):
             return "model", ()
     raise UnsupportedFieldError(f"field {name!r} has unsupported type {annotation!r}")
-
-
-def _listed(labels: Sequence[str]) -> str:
-    """``labels`` joined with ", ", cut to :data:`MAX_AXIS_LABELS_CHARS` (ending "…")."""
-    return section_text([", ".join(labels)], max_heading_chars=MAX_AXIS_LABELS_CHARS)
 
 
 def _humanise(name: str) -> str:

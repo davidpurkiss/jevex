@@ -517,6 +517,41 @@ async def test_the_axis_jev_picks_claims_the_cells_of_the_columns_it_rejected() 
     assert "Blue · Price: £650" in texts(parsed, se.shared_statement_ids)
 
 
+async def test_when_jev_picks_the_rows_they_are_the_entities() -> None:
+    parsed = await parse(
+        "<table><tr><th></th><th>Price</th><th>Power</th></tr>"
+        "<tr><th>SE</th><td>£20,000</td><td>150PS</td></tr>"
+        "<tr><th>GT</th><td>£24,000</td><td>180PS</td></tr></table>"
+    )
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "rows")
+    se, gt = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (se.label, gt.label) == ("SE", "GT")
+    assert texts(parsed, gt.statement_ids) == ["GT", "GT · Price: £24,000", "GT · Power: 180PS"]
+    # The column headers head every row: shared, and not asked about.
+    assert texts(parsed, gt.shared_statement_ids) == ["Price", "Power"]
+    assert not any("entity" in c.questions for c in fake.calls)
+
+
+async def test_a_long_table_under_a_long_heading_is_cut_to_fit_the_axis_question() -> None:
+    rows = "".join(
+        f"<tr><th>Paint colour number {i} with a long name</th><td>std</td><td>£{i}</td></tr>"
+        for i in range(200)
+    )
+    parsed = await parse(
+        f"<h1>{'Kestrova paint and trim options ' * 12}</h1>"
+        f"<table><tr><th></th><th>SE</th><th>GT</th></tr>{rows}</table>"
+    )
+    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(AXIS, "columns").choice(WHICH, ALL_OPTION)
+    jev = JevClient(fake, state_token_budget=3000)
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, jev)  # no StateTooLargeError
+    assert [s.label for s in scopes] == ["SE", "GT"]
+    [axis] = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(axis.state, dict)
+    table = axis.state["table"]
+    assert isinstance(table, str)
+    assert table.startswith("SE | GT\nPaint colour number 0 with a long name | std | £0")
+
+
 async def test_when_jev_says_neither_axis_names_entities_the_table_proposes_none() -> None:
     parsed = await parse(TABLE_PAGE)
     fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "none")

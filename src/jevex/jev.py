@@ -30,6 +30,8 @@ from jevex._tasks import gather
 from jevex.logs import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from typesafe_sdk import AsyncTypeSafeClient, NoulCriteria
     from typesafe_sdk import RetryPolicy as SdkRetryPolicy
 
@@ -622,11 +624,20 @@ class JevClient:
             _limiter=self._limiter,
         )
 
-    def fit_state(self, text: str, questions: Mapping[str, Question]) -> str:
+    def fit_state(
+        self,
+        text: str,
+        questions: Mapping[str, Question],
+        *,
+        within: Callable[[str], JSONContent] | None = None,
+    ) -> str:
         """The leading part of ``text`` that fits in one request's state alongside the
         longest of ``questions``, by the same estimate :meth:`ask` plans with.
 
-        For a stage that would rather read less of a long text than split it.
+        ``within`` builds the state the text goes into (a dict with a section beside it,
+        say); the cut makes that whole state fit, its other parts and the escaping text
+        gets in JSON included. For a stage that would rather read less of a long text than
+        split it.
         """
         room = self._state_budget - max(
             (estimate_question_tokens(q) for q in questions.values()), default=0
@@ -636,7 +647,12 @@ class JevClient:
                 f"a question alone is ~{self._state_budget - room} tokens, over the "
                 f"~{self._state_budget} for state plus one question"
             )
-        return truncate_to_tokens(text, room)
+        cut = truncate_to_tokens(text, room)
+        if within is None:
+            return cut
+        while cut and (over := estimate_tokens(within(cut)) - room) > 0:
+            cut = truncate_to_tokens(cut, estimate_tokens(cut) - over)
+        return cut
 
     async def ask(
         self, state: JSONContent, questions: Mapping[str, Question]
