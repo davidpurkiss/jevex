@@ -8,7 +8,11 @@ from pydantic import BaseModel
 
 from jevex import Field, Questions, SchemaConfig, SchemaSpec
 from jevex.jev import Choice, Noul
-from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
+from jevex.schema import (
+    ALL_OPTION,
+    ReservedFieldNameError,
+    UnsupportedFieldError,
+)
 
 
 class VehicleSpec(BaseModel):
@@ -460,6 +464,7 @@ def test_entity_questions_can_be_overridden() -> None:
             entity_name="car",
             boundary_question="Is {label} one {entity} for sale?",
             entity_question="Which {entity} is this about?",
+            axis_question="Which headers are the {entity}s?",
         )
         price: int = Field(description="Price")
 
@@ -468,6 +473,22 @@ def test_entity_questions_can_be_overridden() -> None:
     question = spec.entity_question(["Golf"])
     assert question.instructions == "Which car is this about?"
     assert question.options[ALL_OPTION] == "It applies to every car"
+    assert spec.axis_question(["Golf"], ["Red"]).instructions == "Which headers are the cars?"
+
+
+def test_the_axis_question_lists_each_axiss_labels_within_a_cap() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.axis_question(["SE", "GT"], ["Red", "Blue"]) == Choice(
+        instructions="Which headers of this table each name a separate vehicle spec?",
+        options={
+            "columns": "The column headers: SE, GT",
+            "rows": "The row headers: Red, Blue",
+            "none": "Neither",
+        },
+    )
+    # Past MAX_AXIS_LABELS_CHARS (300), the labels are cut between labels.
+    rows = spec.axis_question(["SE"], [f"Paint colour {i}" for i in range(100)]).options["rows"]
+    assert rows == "The row headers: " + ", ".join(f"Paint colour {i}" for i in range(18)) + ", …"
 
 
 def test_table_header_questions_and_their_overrides() -> None:

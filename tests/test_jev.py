@@ -235,6 +235,20 @@ async def test_fit_state_cuts_text_to_the_state_budget() -> None:
         JevClient(RecordingBackend(), state_token_budget=5).fit_state(text, questions)
 
 
+async def test_fit_state_makes_the_whole_state_fit_when_the_text_goes_inside_one() -> None:
+    client = JevClient(RecordingBackend(), state_token_budget=200)
+    questions = {"q": Noul(instructions="Is this a car?")}
+
+    def within(text: str) -> dict[str, str]:
+        return {"table": text, "section": "Kestrova prices › Optional extras › Paint"}
+
+    fitted = client.fit_state(_table(200), questions, within=within)
+    # The text alone would fit more: escaping its newlines and the section cost room too.
+    assert len(fitted) < len(client.fit_state(_table(200), questions))
+    assert estimate_tokens(within(fitted)) + estimate_question_tokens(questions["q"]) <= 200
+    await client.ask(within(fitted), questions)  # plans without StateTooLargeError
+
+
 # --- Token estimates, against #6's measurements ------------------------------------------
 #
 # The states below are the ones #6's probe sent (benchmarks/jev_limits/probe.py, same seeds),
