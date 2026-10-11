@@ -90,9 +90,12 @@ class SchemaConfig(BaseModel):
     axis_question: str | None = None
     """Template for ``MultiEntity``'s Choice between a table's column and row headers when
     labels on both were accepted, with ``{entity}``."""
-    table_headers_question: str | None = None
+    table_column_headers_question: str | None = None
     """The component gate's Noul about a table without header cells shaped like a
-    comparison table: whether its first row and first column are headers."""
+    comparison table: whether its first row names its columns."""
+    table_row_headers_question: str | None = None
+    """The component gate's Noul about a table without header cells shaped like a
+    comparison table: whether its first column names its rows."""
     table_labels_question: str | None = None
     """The component gate's Noul about a two-column table without header cells: whether
     its first column labels the value beside it."""
@@ -348,13 +351,23 @@ class SchemaSpec:
             questions[group] = Noul(instructions=override or _gate_instructions(members))
         return questions
 
-    def table_headers_question(self) -> Noul:
-        """For the component gate: are a header-less table's first row and first column
-        headers (``Spec | SE | GT`` over ``Power | 150 PS | 200 PS``), or is its first row
-        data like the rest (``Gearbox | Manual | Automatic``)?"""
+    def table_column_headers_question(self) -> Noul:
+        """For the component gate: is a header-less table's first row its column headers
+        (``Spec | SE | GT`` over ``Power | 150 PS | 200 PS``), or data like the rest
+        (``Gearbox | Manual | Automatic``)? Asked apart from
+        :meth:`table_row_headers_question`: a price list's first row names its columns,
+        but its first column is the variant each row is about."""
         return Noul(
-            instructions=self.config.table_headers_question
-            or "Does the table's first row name its columns, and its first column name its rows?"
+            instructions=self.config.table_column_headers_question
+            or "Does the table's first row name its columns?"
+        )
+
+    def table_row_headers_question(self) -> Noul:
+        """For the component gate: is a header-less table's first column its row headers
+        (``Power``, ``Torque`` beside each trim's values)?"""
+        return Noul(
+            instructions=self.config.table_row_headers_question
+            or "Does the table's first column name its rows?"
         )
 
     def table_labels_question(self) -> Noul:
@@ -402,22 +415,23 @@ class SchemaSpec:
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
     def axis_question(self, columns: Sequence[str], rows: Sequence[str]) -> Choice:
-        """For ``MultiEntity``: in a table where labels on both axes were accepted as
-        entities (trims across the top, paint colours down the side), which axis names them,
-        or neither. Each option lists its axis's labels, cut to ``MAX_AXIS_LABELS_CHARS``
-        (:func:`~jevex.tables.axis_text`)."""
+        """For ``MultiEntity``: in a table where labels were accepted as entities, which
+        axis names them, or neither (a price list's rows are variants, an engine table's
+        rows aren't). Each axis with accepted labels is an option listing them, cut to
+        ``MAX_AXIS_LABELS_CHARS`` (:func:`~jevex.tables.axis_text`)."""
         template = (
             self.config.axis_question
             or "Which headers of this table each name a separate {entity}?"
         )
-        return Choice(
-            instructions=template.format(entity=self.entity_name),
-            options={
-                "columns": f"The column headers: {axis_text(columns, 0, MAX_AXIS_LABELS_CHARS)}",
-                "rows": f"The row headers: {axis_text(rows, 0, MAX_AXIS_LABELS_CHARS)}",
-                NONE_OPTION: "Neither",
-            },
-        )
+        options: dict[str, JSONContent | None] = {}
+        if columns:
+            options["columns"] = (
+                f"The column headers: {axis_text(columns, 0, MAX_AXIS_LABELS_CHARS)}"
+            )
+        if rows:
+            options["rows"] = f"The row headers: {axis_text(rows, 0, MAX_AXIS_LABELS_CHARS)}"
+        options[NONE_OPTION] = "Neither"
+        return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
         """One Choice per statement: which field does it state, or none of them.

@@ -108,8 +108,11 @@ class MultiEntity:
 
     1. **Table headers:** in a table whose cells have both row and column headers, each
        column label is proposed as an entity, holding the cells below it (a cell spanning
-       columns goes to each), and so is each row's label (its headers joined: "Kestrova
-       SE"), holding its row's cells (a cell spanning rows goes to each).
+       columns goes to each). In a table with column headers, so is each row's label,
+       holding its row's cells (a cell spanning rows goes to each): its headers joined
+       ("Kestrova SE"), then as many of its cells as it takes to tell it from the other
+       rows, so a price list's rows are proposed whether or not they have header cells
+       ("Icon", "ALLURE HYBRID 136 e-DSC6").
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
        first heading (or first text).
@@ -120,11 +123,12 @@ class MultiEntity:
     look just like "SE" and "SE L" ones, and a table's rows are as likely to be trims as
     its columns), so each proposed label is checked with one Noul
     (:meth:`~jevex.schema.SchemaSpec.boundary_question`), a group's labels in one
-    request. Labels at ``boundary_p`` or above are entities. Each axis of a table is
-    judged without the other, so where labels on both were accepted (trims across the
-    top, paint colours down the side), one Choice per table
-    (:meth:`~jevex.schema.SchemaSpec.axis_question`) keeps the columns, the rows or
-    neither. The same label in two places
+    request. Labels at ``boundary_p`` or above are entities. A label judged among its
+    axis's labels alone can't tell a price list's rows (variants) from an engine table's
+    (shared by the variants), nor which axis holds the entities where labels on both were
+    accepted (trims across the top, paint colours down the side), so one Choice per
+    table with accepted labels (:meth:`~jevex.schema.SchemaSpec.axis_question`), the
+    table as its state, keeps the columns, the rows or neither. The same label in two places
     (the "SE" column of two tables) is one entity: a page that splits one comparison over
     several tables repeats its headers in each (two cards or sections with the same label
     in one run are numbered instead, "Golf (2)"). With ``confirm=False`` nothing is
@@ -161,9 +165,9 @@ class MultiEntity:
         self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
     ) -> list[EntityScope]:
         groups = [*_table_groups(parsed, rows=self.confirm), *_component_groups(parsed)]
-        accepted = await self._one_axis_per_table(
-            parsed, await self._accepted(groups, schema, jev), schema, jev
-        )
+        accepted = await self._accepted(groups, schema, jev)
+        if self.confirm:
+            accepted = await self._one_axis_per_table(parsed, accepted, schema, jev)
         # The innermost group first, then the higher priority. A statement goes to every
         # label of the first group claiming it: a table cell spanning two columns is on
         # both.
@@ -228,22 +232,24 @@ class MultiEntity:
         schema: SchemaSpec,
         jev: JevClient,
     ) -> list[tuple[_Group, str, frozenset[str]]]:
-        """``accepted`` with at most one axis per table. Where labels on both a table's
-        columns and its rows were accepted (trims across the top, paint colours down the
-        side), one Choice per table (:meth:`~jevex.schema.SchemaSpec.axis_question`) asks
-        which names the entities, with the table's text as the state: each label was
-        judged without the other axis, and the losing axis would otherwise claim the cells
-        of the columns the winning one rejected (a paint's price). Neither drops both."""
+        """``accepted`` with at most one axis per table, the one Jev says names the
+        entities. Each label was judged among its axis's labels alone, which can't tell a
+        price list's rows (variants) from an engine table's or an options table's (shared by
+        the variants), nor, with labels accepted on both axes (trims across the top, paint
+        colours down the side), which axis holds the entities; the losing axis would
+        otherwise claim the cells of the columns the winning one rejected (a paint's
+        price). So one Choice per table with accepted labels
+        (:meth:`~jevex.schema.SchemaSpec.axis_question`), with the table's text as the
+        state, keeps one axis or neither."""
         axes: dict[str, dict[int, list[str]]] = {}
         for group, label, _ in accepted:
             if group.table is not None:
                 axes.setdefault(group.table, {}).setdefault(group.axis, []).append(label)
-        both = {t: labels for t, labels in axes.items() if len(labels) == 2}
-        if not both:
+        if not axes:
             return accepted
 
         async def ask(table_id: str) -> tuple[str, set[int]]:
-            question = schema.axis_question(both[table_id][0], both[table_id][1])
+            question = schema.axis_question(axes[table_id].get(0, []), axes[table_id].get(1, []))
             table = parsed.root.find(table_id)
             assert table is not None  # a group's table is in the tree it was found in
             section = section_text(table.heading_trail)
@@ -258,7 +264,7 @@ class MultiEntity:
             kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
             return table_id, {0, 1} - kept
 
-        dropped = dict(await gather(ask(t) for t in both))
+        dropped = dict(await gather(ask(t) for t in axes))
         return [
             (group, label, ids)
             for group, label, ids in accepted
@@ -324,7 +330,9 @@ class ParentChild:
 
     - ``"table_columns"``: in each table whose cells have row and column headers, each
       column label is a child holding the cells below it (a cell spanning columns goes to
-      each); ``"table_rows"`` does the same for each row's label (its headers joined).
+      each); ``"table_rows"`` does the same for each row's label in a table with column
+      headers (its headers joined, then its cells as far as they tell it from the other
+      rows).
     - A component type (``"section"``, ``"list_item"``, ``"column"``, ``"breakout"``,
       ``"table"``): each outermost component of that type is a child, labelled by its
       first heading (or first text), with its subtree. A lone one holding others of its
@@ -446,10 +454,14 @@ def _type_members(parsed: ParsedDocument, kind: str) -> list[tuple[str, frozense
 
 
 def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) -> list[_Group]:
-    """Per table whose cells have row and column headers: its column labels as one group,
-    and (with ``rows``) its row labels as another, each when there are ``min_labels`` or
-    more. A header's own statement (``table_header``) joins its label's group, but only a
-    label some cell already gives: an empty column proposes no entity."""
+    """Per table: its column labels as one group, when its cells have row and column
+    headers, and (with ``rows``) its rows' labels as another, when its cells have column
+    headers; each when there are ``min_labels`` or more. A row's label is its headers
+    joined, then as many of its cells as it takes to tell it from the table's other rows
+    (:attr:`TableCellRef.row_labels <jevex.statements.TableCellRef.row_labels>`): in a
+    price list (``Trim | Engine | Price``) each row is a variant, header cells or not. A
+    header's own statement (``table_header``) joins its label's group, but only a label
+    some cell already gives: an empty column proposes no entity."""
     depths = _depths(parsed.root)
     by_table: dict[str, list[Statement]] = {}
     for s in parsed.statements.values():
@@ -457,14 +469,12 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
             by_table.setdefault(s.component_id, []).append(s)
     groups: list[_Group] = []
     for table_id, cells in by_table.items():
-        # Only cells with headers on both axes: a header on one axis alone says what the
-        # cell states (a key/value table), not which entity it's about.
+        # Columns only with headers on both axes: a column header alone says what the cell
+        # states (a price list's "Price"), not which entity it's about. Rows need column
+        # headers: a row header alone labels a key/value table's value ("Power").
         refs = [(c.id, c.table, c.kind) for c in cells if c.table is not None]
-        both = [
-            (sid, r)
-            for sid, r, kind in refs
-            if kind == "table_cell" and r.row_headers and r.col_headers
-        ]
+        headed = [(sid, r) for sid, r, kind in refs if kind == "table_cell" and r.col_headers]
+        both = [(sid, r) for sid, r in headed if r.row_headers]
         heads = [(sid, r) for sid, r, kind in refs if kind == "table_header"]
         axes = [
             (
@@ -473,11 +483,10 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
             )
         ]
         if rows:
-            # A row's headers are levels ("Kestrova" spanning "SE" and "SE L"), joined into
-            # one label as stacked column headers are. A cell spanning rows goes to each.
+            # A cell spanning rows goes to each.
             axes.append(
                 (
-                    [(sid, ref.row_labels) for sid, ref in both],
+                    [(sid, ref.row_labels) for sid, ref in headed],
                     [(sid, ref.row_labels) for sid, ref in heads],
                 )
             )

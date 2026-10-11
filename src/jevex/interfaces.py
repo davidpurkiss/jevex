@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from jevex.document import Document
 from jevex.layout import Component
 from jevex.statements import Candidate, Statement
+from jevex.tables import HeaderAxis
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -113,16 +114,18 @@ class ComponentGateResult(BaseModel):
     """A component gate's answers about one document.
 
     ``components`` is ``{schema name: {group: [component ids]}}``: the components relevant
-    to each field group. ``headed_tables`` are the ids of tables without header cells that
-    have headers after all (:func:`~jevex.tables.header_shape`), which the statement stage
-    reads with them marked (:func:`~jevex.tables.infer_headers`); any other such table is
-    read one row at a time.
+    to each field group. ``headed_tables`` maps the ids of tables without header cells that
+    have headers after all (:func:`~jevex.tables.header_shape`) to the axes they're on,
+    which the statement stage reads with them marked (:func:`~jevex.tables.infer_headers`);
+    any other such table is read one row at a time.
     """
 
     model_config = ConfigDict(frozen=True)
 
     components: dict[str, dict[str, list[str]]]
-    headed_tables: frozenset[str] = frozenset()
+    headed_tables: dict[str, frozenset[HeaderAxis]] = Field(
+        default_factory=dict[str, frozenset[HeaderAxis]]
+    )
 
 
 class Scope(BaseModel):

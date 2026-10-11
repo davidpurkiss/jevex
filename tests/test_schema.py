@@ -493,9 +493,11 @@ def test_the_axis_question_lists_each_axiss_labels_within_a_cap() -> None:
 
 def test_table_header_questions_and_their_overrides() -> None:
     spec = SchemaSpec.from_model(VehicleSpec)
-    assert spec.table_headers_question() == Noul(
-        instructions="Does the table's first row name its columns, and its first column name "
-        "its rows?"
+    assert spec.table_column_headers_question() == Noul(
+        instructions="Does the table's first row name its columns?"
+    )
+    assert spec.table_row_headers_question() == Noul(
+        instructions="Does the table's first column name its rows?"
     )
     assert spec.table_labels_question() == Noul(
         instructions="Does the table's first column label the value beside it in each row?"
@@ -503,13 +505,15 @@ def test_table_header_questions_and_their_overrides() -> None:
 
     class Sheet(BaseModel):
         __jevex__ = SchemaConfig(
-            table_headers_question="Are trims across the top?",
+            table_column_headers_question="Are trims across the top?",
+            table_row_headers_question="Are specs down the side?",
             table_labels_question="Is each row a spec and its value?",
         )
         price: int = Field(description="Price")
 
     sheet = SchemaSpec.from_model(Sheet)
-    assert sheet.table_headers_question().instructions == "Are trims across the top?"
+    assert sheet.table_column_headers_question().instructions == "Are trims across the top?"
+    assert sheet.table_row_headers_question().instructions == "Are specs down the side?"
     assert sheet.table_labels_question().instructions == "Is each row a spec and its value?"
 
 
