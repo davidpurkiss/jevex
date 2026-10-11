@@ -152,7 +152,7 @@ An `EntityScope` is a label plus the components (or table cells) belonging to it
 
 ## Structured-data stage
 
-When a page embeds machine-readable data, jevex uses it first. By default it stops there: the layout route runs only when the page has no embedded data, or when the caller opts in.
+When a page embeds machine-readable data, jevex uses it first. By default it then runs the layout route only for the fields the embedded data left empty (`fill_gaps`); `structured_only` stops at the embedded data, and `merge` reads both routes for every field.
 
 **Sources read:** JSON-LD (schema.org `Vehicle`, `Car`, `Product`, `Offer`), microdata and RDFa, embedded app state (`__NEXT_DATA__`, Nuxt payloads, `window.__INITIAL_STATE__`), and `data-*` attributes.
 
@@ -166,8 +166,8 @@ When a page embeds machine-readable data, jevex uses it first. By default it sto
 
 | Mode | Behaviour |
 | --- | --- |
-| `structured_only` (default) | Use embedded data only. The layout route runs only when the page has none. |
-| `fill_gaps` | Structured data first, then the layout route for fields it left empty. |
+| `structured_only` | Use embedded data only. The layout route runs only when the page has none. |
+| `fill_gaps` (default) | Structured data first, then the layout route for fields it left empty. A page's embedded data is often only its metadata (a press release's make and model), so stopping at any value would leave its text unread. |
 | `merge` | Both routes run for every field. Confidence settles disagreements, which are recorded in `meta.conflicts`. |
 
 ## Layout, statements, tables and images
@@ -600,7 +600,7 @@ The project is `jevex`: Apache 2.0, Python 3.12+, Pydantic v2, fully typed (`py.
 | Learned state | `Store` interface: database at runtime, file packs for review and distribution, layered |
 | Uncertain fields | Return everything with metadata; review sink optional |
 | Result shape | Plain record + side-channel `meta`; opt-in thresholds (default: no filtering) |
-| Embedded data | Structured-only by default; `fill_gaps` and `merge` modes |
+| Embedded data | `fill_gaps` by default (embedded data first, the layout route for what it left empty); `structured_only` and `merge` modes |
 | Images | OCR on by default; pluggable image stage for vision models |
 | Cross-document merging | Out of scope |
 | LLM | Native adapters + optional LiteLLM; separate extraction and generator models |

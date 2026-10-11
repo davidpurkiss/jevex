@@ -18,15 +18,15 @@ structured stage's `mode` decides what happens next:
 
 | Mode | Behaviour |
 | --- | --- |
-| `structured_only` (default) | A schema the embedded data gave any value skips the layout route; the rest go on to it. |
-| `fill_gaps` | The layout route runs while some field is still empty, and only those fields get values from it. With the default `SingleEntity` resolver, the component gate skips field groups whose fields were all found; under other resolvers it asks about every group, since a field found for the page can still be empty for each entity. The categoriser still offers every field. |
+| `structured_only` | A schema the embedded data gave any value skips the layout route; the rest go on to it. |
+| `fill_gaps` (default) | The layout route runs while some field is still empty, and only those fields get values from it. With the default `SingleEntity` resolver, the component gate skips field groups whose fields were all found; under other resolvers it asks about every group, since a field found for the page can still be empty for each entity. The categoriser still offers every field. |
 | `merge` | The layout route looks for every field. The more confident value wins (a direct read of embedded data counts as certain), and the other is kept in `meta.conflicts`. |
 
 ```python
 from jevex import StructuredStage
 from jevex.extractor import default_pipeline
 
-pipeline = default_pipeline().replace("structured", StructuredStage(mode="fill_gaps"))
+pipeline = default_pipeline().replace("structured", StructuredStage(mode="merge"))
 ```
 
 On a page with several entities (a comparison table under `MultiEntity`), embedded values
