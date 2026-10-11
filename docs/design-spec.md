@@ -134,7 +134,7 @@ One document can yield one record, many records, or a parent with children. The 
 
 **MultiEntity boundary detection**, in priority order:
 
-1. Table headers: each column (or row) keyed by a variant label becomes an entity.
+1. Table headers: each column (or row) keyed by a variant label becomes an entity. A price list's rows, with column headers only, are keyed by their own cells (as many as tell them apart). Jev says which axis of each table names the variants, or neither (an engine or options table the variants share).
 2. Repeated sibling structures: components with the same shape and type sequence (listing cards).
 3. Headed sections: a heading per trim or engine, with its subtree.
 4. Anything still ambiguous: Jev Choice "Which vehicle does this statement apply to?", with options = entity labels + "all of them".
