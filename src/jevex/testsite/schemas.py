@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from jevex.schema import Field, SchemaConfig
+from jevex.schema import Field, Questions, SchemaConfig
 
 FuelType = Literal["petrol", "diesel", "hybrid", "phev", "ev"]
 
@@ -31,8 +31,15 @@ class VehicleSpec(BaseModel):
     top_speed_mph: int = Field(description="Top speed", unit="mph")
     co2_g_km: int | None = Field(description="CO2 emissions", unit="g/km")
     # Not "On-the-road price": Jev reads that literally, and a "Price from" or "Price" row,
-    # which the truth counts, passed the component gate at p 0.25-0.48 (#297).
-    price_gbp: Decimal = Field(description="Price", unit="GBP")
+    # which the truth counts, passed the component gate at p 0.25-0.48 (#297). Choosing
+    # among a price list's money figures (basic, VAT, retail, VED, on the road), "Which of
+    # these is the price?" took the basic or retail price; asked for what a buyer pays, Jev
+    # took the on-the-road price (p 0.88-0.94) and still took a plain "Price" (#326).
+    price_gbp: Decimal = Field(
+        description="Price",
+        unit="GBP",
+        questions=Questions(select="Which of these is the price a buyer pays for the vehicle?"),
+    )
     seats: int = Field(description="Number of seats")
     automatic: bool = Field(description="has an automatic gearbox")
 

@@ -26,7 +26,9 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, cast, get_args, get_ori
 
 from pydantic import TypeAdapter, ValidationError
 
+from jevex._tasks import gather
 from jevex.generators.units import spellings
+from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, UnexpectedAnswerError
 from jevex.locales import (
     ALL_MONTH_NAMES,
     ALL_MULTIPLIERS,
@@ -35,6 +37,7 @@ from jevex.locales import (
 )
 from jevex.pipeline import ValuePick, vision_values
 from jevex.results import Alternative, FieldMeta, Source
+from jevex.schema import NONE_OPTION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -575,16 +578,24 @@ class NormaliseStage:
     """Turns the selector's picks (``SchemaRun.selections``) into field values.
 
     Per scope and field, the most confident candidate that normalises and validates wins,
-    and the rest become alternatives. List fields keep every accepted value, deduplicated
-    in document order. An entity's own statements win over those it shares with every
-    entity (``MultiEntity``'s "all of them"); a value from a shared one is marked
-    ``shared``. If nothing normalises, the field's meta carries the error. A normaliser
-    that raises (:class:`NormaliserFailedError`) skips that candidate and is recorded with
-    :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>`. A field
-    another route already filled (e.g. structured data) isn't overwritten; in ``merge``
-    mode the two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are
-    recorded with ``method="generator"``, or ``"vision"`` when the statement came from a
-    vision model.
+    and the rest become alternatives. An entity's own statements win over those it shares
+    with every entity (``MultiEntity``'s "all of them"); a value from a shared one is marked
+    ``shared``. When a single-value field's best-ranked statements (the entity's own, or,
+    without any, those it shares) give different values (a price list row's basic, VAT and
+    on-the-road prices, each picked from its own cell), confidence can't choose: each was
+    picked without seeing the others. Jev is asked the field's own select question over the
+    distinct values (their raw spans, the first standing for a span repeated), with the
+    statements giving them as the state, cut to fit. Its pick wins, as sure as the less
+    sure of Jev's answer and the pick, and "none" leaves the field unfound. List fields
+    keep every accepted value, deduplicated in document order.
+
+    If nothing normalises, the field's meta carries the error. A normaliser that raises
+    (:class:`NormaliserFailedError`) skips that candidate and is recorded with
+    :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>`. A field another
+    route already filled (e.g. structured data) isn't overwritten; in ``merge`` mode the
+    two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are recorded
+    with ``method="generator"``, or ``"vision"`` when the statement came from a vision
+    model.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -596,11 +607,19 @@ class NormaliseStage:
             for (scope, field_name, statement_id), selection in run.selections.items():
                 if selection.candidate is not None:
                     grouped.setdefault((scope, field_name), []).append((statement_id, selection))
-            for (scope, field_name), picks in grouped.items():
-                if not run.needs(scope, field_name):
-                    continue
+            readings = [
+                (scope, field_name, self._accept(ctx, run.spec.field(field_name), picks, shared))
+                for (scope, field_name), picks in grouped.items()
+                if run.needs(scope, field_name)
+                for shared in [run.shared_statements(scope)]
+            ]
+            settled = await gather(
+                _settle(ctx, run.spec.field(field_name), reading)
+                for _, field_name, reading in readings
+            )
+            for (scope, field_name, reading), answer in zip(readings, settled, strict=True):
                 meta, generator_ids, checks, taken = self._field_meta(
-                    ctx, run, field_name, picks, shared=run.shared_statements(scope)
+                    ctx, run, field_name, reading, answer
                 )
                 run.offer_field(scope, field_name, meta)
                 run.value_generators[(scope, field_name)] = generator_ids
@@ -609,19 +628,15 @@ class NormaliseStage:
                     if run.spec.field(field_name).many:
                         run.value_picks[(scope, field_name)] = taken
 
-    def _field_meta(
+    def _accept(
         self,
         ctx: Context,
-        run: SchemaRun,
-        field_name: str,
+        field: FieldSpec,
         picks: list[tuple[str, Selection]],
-        *,
         shared: set[str],
-    ) -> tuple[FieldMeta, set[str], list[VisionValue], list[ValuePick]]:
-        """The field's meta, the ids of the generators whose candidates are in its value,
-        the values in it only vision statements gave, and the picks it took, best first."""
-        field = run.spec.field(field_name)
-        # The entity's own statements outrank those it shares with every entity.
+    ) -> _Reading:
+        """The picks ranked (the entity's own statements before those it shares with every
+        entity, then by confidence), and the candidates that normalise, in that order."""
         ranked = sorted(picks, key=lambda p: (p[0] in shared, -p[1].confidence))
         accepted: list[tuple[str, Selection, Candidate, Any]] = []
         errors: list[str] = []
@@ -646,6 +661,43 @@ class NormaliseStage:
                     errors.append(str(exc))
                     continue
                 accepted.append((statement_id, selection, candidate, value))
+        return _Reading(ranked, accepted, errors, shared)
+
+    def _field_meta(
+        self,
+        ctx: Context,
+        run: SchemaRun,
+        field_name: str,
+        reading: _Reading,
+        settled: _Settled | None,
+    ) -> tuple[FieldMeta, set[str], list[VisionValue], list[ValuePick]]:
+        """The field's meta, the ids of the generators whose candidates are in its value,
+        the values in it only vision statements gave, and the picks it took, best first.
+        ``settled`` is Jev's pick among the accepted values (:func:`_settle`), if asked."""
+        field = run.spec.field(field_name)
+        ranked, accepted, errors, shared = (
+            reading.ranked,
+            reading.accepted,
+            reading.errors,
+            reading.shared,
+        )
+        if settled is not None:
+            picked = next((a for a in accepted if a[2].raw == settled.raw), None)
+            if picked is None:  # Jev said none of them is the field's value
+                return (
+                    FieldMeta(
+                        confidence=settled.confidence, alternatives=_alternatives(ranked, [])
+                    ),
+                    set(),
+                    [],
+                    [],
+                )
+            statement_id, selection, candidate, value = picked
+            sure = min(selection.confidence, settled.confidence)
+            accepted = [
+                (statement_id, selection.model_copy(update={"confidence": sure}), candidate, value),
+                *(a for a in accepted if a is not picked),
+            ]
 
         if not accepted:
             statement_id, selection = ranked[0]
@@ -700,6 +752,53 @@ class NormaliseStage:
             vision_values(given),
             _picks(ctx, used, shared),
         )
+
+
+@dataclass(frozen=True)
+class _Reading:
+    """One scope's picks for a field: ranked, and those whose candidate normalised (with
+    its value), in rank order; the errors of those that didn't; the scope's shared ids."""
+
+    ranked: list[tuple[str, Selection]]
+    accepted: list[tuple[str, Selection, Candidate, Any]]
+    errors: list[str]
+    shared: set[str]
+
+
+@dataclass(frozen=True)
+class _Settled:
+    """Jev's pick among a field's distinct values: the picked raw span (``None`` for
+    "none") and how sure it is."""
+
+    raw: str | None
+    confidence: float
+
+
+async def _settle(ctx: Context, field: FieldSpec, reading: _Reading) -> _Settled | None:
+    """Jev's pick when a single-value field's best-ranked statements (the entity's own, or,
+    without any, those it shares) give two or more different values (see
+    :class:`NormaliseStage`); ``None`` when there's nothing to settle."""
+    if field.many or ctx.parsed is None or not reading.accepted:
+        return None
+    tier = reading.accepted[0][0] in reading.shared
+    accepted = [a for a in reading.accepted if (a[0] in reading.shared) == tier]
+    values: list[Any] = []
+    options: dict[str, str] = {}  # option → raw span
+    for _, _, candidate, value in accepted:
+        if value not in values:
+            values.append(value)
+        option = f'"{candidate.raw}"' if candidate.raw == NONE_OPTION else candidate.raw
+        options.setdefault(option, candidate.raw)
+    if len(values) < 2 or len(options) < 2:
+        return None
+    offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
+    question = field.select_question(list(offered))
+    statements = dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted)
+    text = ctx.jev.fit_state("\n".join(statements), {"settle": question})
+    answer = (await ctx.jev.ask(text, {"settle": question}))["settle"]
+    if not isinstance(answer, ChoiceAnswer):
+        raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+    return _Settled(offered.get(answer.choice), answer.confidence)
 
 
 def _picks(
