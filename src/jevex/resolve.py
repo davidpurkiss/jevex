@@ -84,6 +84,8 @@ class _Group:
     """(label, ids of the statements it claims) per proposed entity."""
     axis: int = 0
     """For a table's group: 0 for its column labels, 1 for its row labels."""
+    table: str | None = None
+    """For a table's group: the table's component id."""
 
     @property
     def labels(self) -> list[str]:
@@ -155,7 +157,9 @@ class MultiEntity:
         self, parsed: ParsedDocument, schema: SchemaSpec, jev: JevClient
     ) -> list[EntityScope]:
         groups = [*_table_groups(parsed, rows=self.confirm), *_component_groups(parsed)]
-        accepted = await self._accepted(groups, schema, jev)
+        accepted = await self._one_axis_per_table(
+            parsed, await self._accepted(groups, schema, jev), schema, jev
+        )
         # The innermost group first, then the higher priority. A statement goes to every
         # label of the first group claiming it: a table cell spanning two columns is on
         # both.
@@ -212,6 +216,47 @@ class MultiEntity:
 
         found = await gather(ask(g) for g in groups)
         return [a for per_group in found for a in per_group]
+
+    async def _one_axis_per_table(
+        self,
+        parsed: ParsedDocument,
+        accepted: list[tuple[_Group, str, frozenset[str]]],
+        schema: SchemaSpec,
+        jev: JevClient,
+    ) -> list[tuple[_Group, str, frozenset[str]]]:
+        """``accepted`` with at most one axis per table. Where labels on both a table's
+        columns and its rows were accepted (trims across the top, paint colours down the
+        side), one Choice per table (:meth:`~jevex.schema.SchemaSpec.axis_question`) asks
+        which names the entities, with the table's text as the state: each label was
+        judged without the other axis, and the losing axis would otherwise claim the cells
+        of the columns the winning one rejected (a paint's price). Neither drops both."""
+        axes: dict[str, dict[int, list[str]]] = {}
+        for group, label, _ in accepted:
+            if group.table is not None:
+                axes.setdefault(group.table, {}).setdefault(group.axis, []).append(label)
+        both = {t: labels for t, labels in axes.items() if len(labels) == 2}
+        if not both:
+            return accepted
+
+        async def ask(table_id: str) -> tuple[str, set[int]]:
+            question = schema.axis_question(both[table_id][0], both[table_id][1])
+            table = parsed.root.find(table_id)
+            assert table is not None  # a group's table is in the tree it was found in
+            state: dict[str, JSONContent] = {"table": jev.fit_state(table.text, {"axis": question})}
+            if section := section_text(table.heading_trail):
+                state["section"] = section
+            answer = (await jev.ask(state, {"axis": question}))["axis"]
+            if not isinstance(answer, ChoiceAnswer):
+                raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+            kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
+            return table_id, {0, 1} - kept
+
+        dropped = dict(await gather(ask(t) for t in both))
+        return [
+            (group, label, ids)
+            for group, label, ids in accepted
+            if group.table is None or group.axis not in dropped.get(group.table, set())
+        ]
 
     async def _assign(
         self,
@@ -444,7 +489,7 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
             unique = _unique(list(claims))
             members = [(u, frozenset(ids)) for u, ids in zip(unique, claims.values(), strict=True)]
             trail = list(cells[0].heading_trail)
-            groups.append(_Group(0, depths[table_id], trail, members, axis=axis_no))
+            groups.append(_Group(0, depths[table_id], trail, members, axis=axis_no, table=table_id))
     return groups
 
 

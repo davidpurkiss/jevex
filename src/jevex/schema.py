@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_core import PydanticUndefined
 
 from jevex.jev import Choice, JSONContent, Noul
+from jevex.layout import section_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
 
 EXTRA_KEY = "jevex"
 NONE_OPTION = "none"
+MAX_AXIS_LABELS_CHARS = 300
+"""The most an option of :meth:`SchemaSpec.axis_question` lists of its axis's labels: enough
+to tell trims from paint colours, while a long table's rows don't swamp the Choice."""
 NOT_STATED_OPTION = "not stated"
 ALL_OPTION = "all of them"
 """The entity question's option for a statement that applies to every entity."""
@@ -83,6 +87,9 @@ class SchemaConfig(BaseModel):
     """Template for ``MultiEntity``'s boundary Noul, with ``{label}`` and ``{entity}``."""
     entity_question: str | None = None
     """Template for ``MultiEntity``'s assignment Choice, with ``{entity}``."""
+    axis_question: str | None = None
+    """Template for ``MultiEntity``'s Choice between a table's column and row headers when
+    labels on both were accepted, with ``{entity}``."""
     table_headers_question: str | None = None
     """The component gate's Noul about a table without header cells shaped like a
     comparison table: whether its first row and first column are headers."""
@@ -394,6 +401,23 @@ class SchemaSpec:
         options[ALL_OPTION] = f"It applies to every {self.entity_name}"
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
+    def axis_question(self, columns: Sequence[str], rows: Sequence[str]) -> Choice:
+        """For ``MultiEntity``: in a table where labels on both axes were accepted as
+        entities (trims across the top, paint colours down the side), which axis names them,
+        or neither. Each option lists its axis's labels, cut to ``MAX_AXIS_LABELS_CHARS``."""
+        template = (
+            self.config.axis_question
+            or "Which headers of this table each name a separate {entity}?"
+        )
+        return Choice(
+            instructions=template.format(entity=self.entity_name),
+            options={
+                "columns": f"The column headers: {_listed(columns)}",
+                "rows": f"The row headers: {_listed(rows)}",
+                NONE_OPTION: "Neither",
+            },
+        )
+
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
         """One Choice per statement: which field does it state, or none of them.
 
@@ -467,6 +491,11 @@ def _classify(name: str, annotation: Any) -> tuple[FieldKind, tuple[str, ...]]:
         if issubclass(annotation, BaseModel):
             return "model", ()
     raise UnsupportedFieldError(f"field {name!r} has unsupported type {annotation!r}")
+
+
+def _listed(labels: Sequence[str]) -> str:
+    """``labels`` joined with ", ", cut to :data:`MAX_AXIS_LABELS_CHARS` (ending "…")."""
+    return section_text([", ".join(labels)], max_heading_chars=MAX_AXIS_LABELS_CHARS)
 
 
 def _humanise(name: str) -> str:

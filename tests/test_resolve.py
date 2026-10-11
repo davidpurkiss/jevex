@@ -187,6 +187,7 @@ class VehicleSpec(BaseModel):
 VEHICLE = SchemaSpec.from_model(VehicleSpec)
 BOUNDARY = "name a separate vehicle spec?"
 WHICH = "Which vehicle spec does this statement apply to?"
+AXIS = "Which headers of this table each name a separate vehicle spec?"
 
 TABLE_PAGE = """<h1>Kestrova</h1>
 <p>Every Kestrova has 5 doors.</p>
@@ -275,7 +276,7 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
 
 async def test_multi_entity_scopes_give_downstream_stages_their_statements() -> None:
     parsed = await parse(TABLE_PAGE)
-    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
+    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(AXIS, "columns").choice(WHICH, ALL_OPTION)
     se, _ = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert [s.text for s in parsed.scope_statements(se)] == [
         "Kestrova",
@@ -470,15 +471,64 @@ async def test_multi_entity_gives_a_cell_spanning_rows_to_each_rows_entity() -> 
     ]
 
 
-async def test_multi_entity_prefers_a_tables_columns_when_jev_accepts_both_axes() -> None:
+async def test_multi_entity_asks_which_axis_names_the_entities_when_both_are_accepted() -> None:
     parsed = await parse(TABLE_PAGE)
-    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
+    fake = FakeJev().noul(BOUNDARY, p=0.9).choice(AXIS, "columns").choice(WHICH, ALL_OPTION)
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
-    # The rows' labels lost their cells to the columns, so they're not entities: they're
-    # shared, without a question.
+    [axis] = [c for c in fake.calls if "axis" in c.questions]
+    assert axis.state == {
+        "table": "SE | SE L\nPower | 150PS | 180PS\nWarranty | 3 years",
+        "section": "Kestrova",
+    }
+    assert axis.questions == {
+        "axis": Choice(
+            instructions=AXIS,
+            options={
+                "columns": "The column headers: SE, SE L",
+                "rows": "The row headers: Power, Warranty",
+                "none": "Neither",
+            },
+        )
+    }
+    # The rows' labels aren't entities, and their headers head every column: shared,
+    # without a question.
     assert texts(parsed, scopes[0].shared_statement_ids)[-2:] == ["Power", "Warranty"]
     assert not any(c.state == {"statement": "Power"} for c in fake.calls)
+
+
+async def test_the_axis_jev_picks_claims_the_cells_of_the_columns_it_rejected() -> None:
+    # Paint colours down the side, trims across the top, and a price column no trim heads:
+    # without the axis question the colours would take the prices and become records.
+    parsed = await parse(
+        "<table><tr><th></th><th>SE</th><th>GT</th><th>Price</th></tr>"
+        "<tr><th>Red</th><td>std</td><td>std</td><td>£0</td></tr>"
+        "<tr><th>Blue</th><td>opt</td><td>std</td><td>£650</td></tr></table>"
+    )
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .noul('"Price"', p=0.1)
+        .choice(AXIS, "columns")
+        .choice(WHICH, ALL_OPTION)
+    )
+    se, gt = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (se.label, gt.label) == ("SE", "GT")
+    assert "Blue · Price: £650" in texts(parsed, se.shared_statement_ids)
+
+
+async def test_when_jev_says_neither_axis_names_entities_the_table_proposes_none() -> None:
+    parsed = await parse(TABLE_PAGE)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "none")
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert scopes == await SingleEntity().resolve(parsed, VEHICLE, fake.client())
+
+
+async def test_a_table_with_labels_accepted_on_one_axis_is_not_asked_about_axes() -> None:
+    parsed = await parse(ROW_KEYED)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).noul(BOUNDARY, p=0.1, state="Power")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert not any("axis" in c.questions for c in fake.calls)
 
 
 async def test_multi_entity_without_confirm_splits_tables_by_column_only() -> None:
@@ -672,6 +722,7 @@ async def test_shared_values_are_copied_into_each_record_and_own_values_win() ->
         .noul("Does this document", p=0.95)
         .noul("Does this section", p=0.9)
         .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, "columns")
         .choice(WHICH, ALL_OPTION)
         .choice(WHICH, "SE L", state="The SE L")
         .choice(WHICH, "SE", state="The SE has")
