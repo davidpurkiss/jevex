@@ -217,9 +217,8 @@ class MultiEntity:
     are one entity ("techno+ (incl canvas roof)" and "techno+ plein sud canvas roof").
     Entities that state different things under one header are never asked about each
     other (two price lists' rows). The search goes outwards from each part of the page,
-    and once something in a group's own part is a kind of one of its labels, none of them
-    is offered outside it: one model's trims aren't the next model's, whatever they're
-    called.
+    and a label that something in its own part is a kind of isn't offered outside it:
+    one model's trims aren't the next model's, whatever they're called.
 
     When accepted groups overlap, a statement goes to the innermost (a table's columns
     beat the section around it), then to the higher priority above (a table beats headed
@@ -453,9 +452,6 @@ class _Kinds:
             self._at.setdefault(group.at, []).append((group, members))
         self._coarse: set[_Entity] = set()
         self._asked: set[tuple[_Entity, _Entity]] = set()
-        self._closed: set[_Entity] = set()
-        """The entities of every set something in its own part of the page is a kind of:
-        they aren't offered further out."""
         self._into: dict[_Entity, _Entity] = {}
         """Each entity made part of another (:meth:`_same`), and which."""
 
@@ -485,9 +481,6 @@ class _Kinds:
         # Only where parts of the page meet is there anything new to ask.
         if self.schema is not None and len([c for c in below if c]) + len(here) > 1:
             await self._ask(sets, self.schema)
-        for found in sets:
-            if any(e in self._coarse for e in found):
-                self._closed.update(found)
         return _distinct([[e for e in found if e not in self._coarse] for found in sets])
 
     def _unify(self, sets: list[list[_Entity]]) -> None:
@@ -546,9 +539,7 @@ class _Kinds:
                 options = [
                     e
                     for e in found
-                    if e not in self._closed
-                    and (entity, e) not in self._asked
-                    and not _conflict(entity.values, e.values)
+                    if (entity, e) not in self._asked and not _conflict(entity.values, e.values)
                 ]
                 if options and len(options) < MAX_CHOICE_OPTIONS:
                     offered.append(options)

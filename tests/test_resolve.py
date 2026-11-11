@@ -1114,16 +1114,16 @@ async def test_labels_something_nearby_is_a_kind_of_are_not_offered_further_out(
     assert [s.label for s in scopes] == [
         "SE 1.5 TSI",
         "SE 2.0 TDI",
-        "SE L",  # no Kestrova row is one, so it's a record of its own
+        "SE L",  # no row is one, so it's a record of its own
         "SE 1.5 TSI Sport",
         "GT",
     ]
     asked = kind_calls(fake)
-    # The Kestrova's trims are its own rows' business: the Delmaro's rows aren't asked
-    # about them (nor about the Kestrova's rows, each with a price of its own).
-    assert "SE 1.5 TSI Sport" not in asked
-    assert "GT" not in asked
+    # "SE" is the Kestrova's rows' trim, so the Delmaro's rows aren't asked about it (nor
+    # about the Kestrova's rows, each with a price of its own).
     assert asked["SE 1.5 TSI"] == [["SE", "SE L", "none"]]
+    assert asked["SE 1.5 TSI Sport"] == [["SE L", "none"]]
+    assert asked["GT"] == [["SE L", "none"]]
     assert texts(parsed, scopes[3].shared_statement_ids) == ["Range", "Delmaro"]
 
 

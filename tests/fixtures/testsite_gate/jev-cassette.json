@@ -8878,6 +8878,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "57804cb9629a1b60": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Corvane\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Corvane Tamsin"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "make",
+          "confidence": 0.5,
+          "probabilities": {
+            "make": 0.75,
+            "model": 0.25
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 339,
+      "model": "jev-1.14.0"
+    }
+  },
   "588317b72f3a6535": {
     "request": {
       "questions": {

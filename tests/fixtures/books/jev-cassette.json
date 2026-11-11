@@ -3014,6 +3014,48 @@
       "model": "jev-1.13.0"
     }
   },
+  "6cbf48def261a200": {
+    "request": {
+      "questions": {
+        "settle": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "A Light in the Attic": "A Light in the Attic",
+            "History": "History",
+            "Sapiens": "Sapiens: A Brief History of Humankind",
+            "Sapiens: A Brief History of Humankind": "Sapiens: A Brief History of Humankind",
+            "Sharp Objects": "Sharp Objects",
+            "Soumission": "Soumission",
+            "Tipping the Velvet": "Tipping the Velvet",
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": "Sapiens: A Brief History of Humankind\nHistory\nSharp Objects\nA Light in the Attic\nTipping the Velvet\nSoumission"
+    },
+    "response": {
+      "answers": {
+        "settle": {
+          "choice": "Sapiens: A Brief History of Humankind",
+          "confidence": 0.92,
+          "probabilities": {
+            "A Light in the Attic": 0.0,
+            "History": 0.01,
+            "Sapiens": 0.05,
+            "Sapiens: A Brief History of Humankind": 0.93,
+            "Sharp Objects": 0.0,
+            "Soumission": 0.0,
+            "Tipping the Velvet": 0.0,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 479,
+      "model": "jev-1.14.0"
+    }
+  },
   "6da030408df06d40": {
     "request": {
       "questions": {
@@ -3148,6 +3190,44 @@
       },
       "input_tokens": 343,
       "model": "jev-1.13.0"
+    }
+  },
+  "788aef4103dd66d2": {
+    "request": {
+      "questions": {
+        "settle": {
+          "instructions": "Which of these is the price (GBP)?",
+          "options": {
+            "none": "None of these is the price",
+            "\u00a347.82": "\u00a347.82",
+            "\u00a350.10": "\u00a350.10",
+            "\u00a351.77": "\u00a351.77",
+            "\u00a353.74": "\u00a353.74",
+            "\u00a354.23": "\u00a354.23"
+          },
+          "type": "choice"
+        }
+      },
+      "state": "\u00a354.23\n\u00a347.82\n\u00a350.10\n\u00a353.74\n\u00a351.77\nPrice (excl. tax): \u00a354.23\nPrice (incl. tax): \u00a354.23"
+    },
+    "response": {
+      "answers": {
+        "settle": {
+          "choice": "\u00a354.23",
+          "confidence": 1.0,
+          "probabilities": {
+            "none": 0.0,
+            "\u00a347.82": 0.0,
+            "\u00a350.10": 0.0,
+            "\u00a351.77": 0.0,
+            "\u00a353.74": 0.0,
+            "\u00a354.23": 1.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 473,
+      "model": "jev-1.14.0"
     }
   },
   "78ab444e44a74092": {
@@ -3446,6 +3526,40 @@
       },
       "input_tokens": 392,
       "model": "jev-1.13.0"
+    }
+  },
+  "7dac870ff5700cbd": {
+    "request": {
+      "questions": {
+        "settle": {
+          "instructions": "Which of these is the price (GBP)?",
+          "options": {
+            "none": "None of these is the price",
+            "\u00a30.00": "Tax: \u00a30.00",
+            "\u00a351.77": "\u00a351.77",
+            "\u00a353.74": "\u00a353.74"
+          },
+          "type": "choice"
+        }
+      },
+      "state": "\u00a353.74\n\u00a351.77\nPrice (excl. tax): \u00a353.74\nPrice (incl. tax): \u00a353.74\nTax: \u00a30.00"
+    },
+    "response": {
+      "answers": {
+        "settle": {
+          "choice": "\u00a353.74",
+          "confidence": 0.97,
+          "probabilities": {
+            "none": 0.0,
+            "\u00a30.00": 0.0,
+            "\u00a351.77": 0.02,
+            "\u00a353.74": 0.98
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 416,
+      "model": "jev-1.14.0"
     }
   },
   "7e2f0315e04dd8b5": {
@@ -6982,6 +7096,40 @@
       },
       "input_tokens": 406,
       "model": "jev-1.13.0"
+    }
+  },
+  "f160e00c1967f7ae": {
+    "request": {
+      "questions": {
+        "settle": {
+          "instructions": "Which of these is the title of the book?",
+          "options": {
+            "A Light in the": "A Light in the ...",
+            "A Light in the Attic": "A Light in the Attic",
+            "Tipping the Velvet": "Tipping the Velvet",
+            "none": "None of these is the title of the book"
+          },
+          "type": "choice"
+        }
+      },
+      "state": "Tipping the Velvet\nA Light in the Attic\nA Light in the ..."
+    },
+    "response": {
+      "answers": {
+        "settle": {
+          "choice": "Tipping the Velvet",
+          "confidence": 0.41,
+          "probabilities": {
+            "A Light in the": 0.01,
+            "A Light in the Attic": 0.41,
+            "Tipping the Velvet": 0.56,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 385,
+      "model": "jev-1.14.0"
     }
   },
   "f17ca700dc32ef12": {
