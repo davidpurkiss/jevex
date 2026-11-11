@@ -197,7 +197,10 @@ class MultiEntity:
     repeats its headers in each. Not when the two state different things under one
     header (two models' price lists, each with a "techno" row and its own price): those
     are two entities, told apart by the heading over each, else numbered (as two cards
-    or sections with the same label in one run are, "Golf (2)").
+    or sections with the same label in one run are, "Golf (2)"). A place whose label fits
+    several such entities (an equipment table's "techno" column, with nothing to say
+    which model's) is neither of them: it is an entity over them, and they are kinds of
+    it.
 
     **Kinds.** A document often names its entities at several levels: a price list's rows
     are the variants ("SE 1.5 TSI 150 DSG"), an equipment table's columns their trims
@@ -212,7 +215,9 @@ class MultiEntity:
     related more reliably than which is the narrower (asked about a trim, it picks one
     of the trim's variants), so where one label has the other's words and more, that one
     is the kind ("SE 1.5 TSI" of "SE"), whichever picked the other; two with the same
-    words are one entity. Otherwise the one picking is the kind, and of two that pick
+    words are one entity, unless others that picked one of them state different things
+    (two rows with their own prices picking one column): then that one is over them, and
+    they are kinds of it. Otherwise the one picking is the kind, and of two that pick
     each other, the one more others pick is the coarser; with nothing between them they
     are one entity ("techno+ (incl canvas roof)" and "techno+ plein sud canvas roof").
     Entities that state different things under one header are never asked about each
@@ -592,13 +597,11 @@ class _Kinds:
             pickers[of] = pickers.get(of, 0) + 1
 
         def differing(entity: _Entity, of: _Entity) -> set[_Entity]:
-            """Of the two and the others with their words that picked either or were
-            picked by either, those that state something different from another."""
-            near = {entity, of}
-            near |= {a for a, b in picks if b in (entity, of)}
-            near |= {b for a, b in picks if a in (entity, of)}
-            alike = {self._now(e) for e in near if _words(e.label) == _words(of.label)}
-            return {e for e in alike if any(_conflict(e.values, o.values) for o in alike)}
+            """Of the two and the others that picked either, those that state something
+            different from another of them."""
+            near = {self._now(e) for e in (entity, of)}
+            near |= {self._now(a) for a, b in picks if b in (entity, of)}
+            return {e for e in near if any(_conflict(e.values, o.values) for o in near)}
 
         for entity, of in picks:
             now, now_of = self._now(entity), self._now(of)
@@ -610,15 +613,16 @@ class _Kinds:
                 continue
             words, words_of = _words(entity.label), _words(of.label)
             if words == words_of:
-                # One label, written two ways: one entity, unless it is over several
-                # that differ (two models' "techno" rows picking one "TECHNO" column).
+                # One label, written two ways: one entity, unless one of them is over
+                # several that differ (two rows with their own prices, "techno" and
+                # "techno plus", both picking a "TECHNO" column).
                 differ = differing(entity, of)
-                if not differ:
-                    self._same(sets, now, now_of)
-                elif now in differ and now_of not in differ:
+                if now in differ and now_of not in differ:
                     self._kind(now, now_of)
                 elif now_of in differ and now not in differ:
                     self._kind(now_of, now)
+                elif now not in differ:
+                    self._same(sets, now, now_of)
             elif words < words_of:
                 self._kind(now_of, now)  # "SE" picked "SE 1.5 TSI": that is the narrower
             elif words > words_of or (of, entity) not in picks:

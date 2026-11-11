@@ -430,23 +430,24 @@ class SelectStage:
         the others' selections become "none"."""
         contested: dict[str, list[tuple[str, list[_Ask]]]] = {}
         for sid, (_, asks) in plans.items():
-            picked: dict[tuple[str, str], list[_Ask]] = {}
+            picked: dict[tuple[str, int, int], tuple[str, list[_Ask]]] = {}
             for ask in asks.values():
                 if ask.spec.needs_candidates and not ask.spec.many:
-                    selection = ask.run.selections[(ask.scopes[0], ask.spec.name, sid)]
-                    candidate = selection.candidate
+                    candidate = ask.run.selections[(ask.scopes[0], ask.spec.name, sid)].candidate
                     if candidate is None:
                         continue
                     # Words the statement has twice ("5 doors and 5 seats") are two
-                    # spans, though a selection names them by their text alone.
+                    # spans, though a selection names them by their text alone: only
+                    # text a field's candidates have in one place says which it took.
                     spans = {
                         (c.span.start, c.span.end)
                         for c in ask.run.candidates.get((sid, ask.spec.name), [])
                         if c.raw == candidate.raw
                     }
                     if len(spans) == 1:
-                        picked.setdefault((ask.run.name, candidate.raw), []).append(ask)
-            found = [(raw, asks) for (_, raw), asks in picked.items() if len(asks) > 1]
+                        (span,) = spans
+                        picked.setdefault((ask.run.name, *span), (candidate.raw, []))[1].append(ask)
+            found = [(raw, asks) for raw, asks in picked.values() if len(asks) > 1]
             if found:
                 contested[sid] = found
 

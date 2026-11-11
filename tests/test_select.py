@@ -15,6 +15,7 @@ from jevex import (
     NormaliserStep,
     Questions,
     SchemaSpec,
+    Span,
     Statement,
 )
 from jevex.entities import EntityScope
@@ -1028,6 +1029,29 @@ async def test_the_same_words_in_two_places_are_two_spans_and_not_contested() ->
         assert selection.candidate is not None
         assert selection.candidate.raw == "5"
     assert len(fake.calls) == 1
+
+
+async def test_fields_whose_candidates_are_at_different_spans_are_not_contested() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the number of doors?", "5")
+        .choice("Which of these is the number of seats?", "5")
+    )
+    statement = st("s1", "5 doors and 5 seats")
+    ctx = context(fake, [statement], {}, models=(Body,))
+    run = ctx.schemas["Body"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="doors", confidence=0.6, probabilities={"doors": 0.6, "seats": 0.4}
+    )
+    # Each field's generator found its own "5" alone: the same text, two spans.
+    for name, start in (("doors", 0), ("seats", 12)):
+        span = Span(start=start, end=start + 1)
+        run.candidates[("s1", name)] = [
+            Candidate.from_statement(statement, span, generator_id="test")
+        ]
+    await SelectStage().run(ctx)
+    assert len(fake.calls) == 1
+    assert run.selections[("doc", "seats", "s1")].candidate is not None
 
 
 async def test_a_contested_span_is_settled_for_every_scope_holding_the_statement() -> None:

@@ -1137,21 +1137,32 @@ async def test_same_named_rows_under_no_heading_of_their_own_are_numbered() -> N
     assert texts(parsed, scopes[2].statement_ids) == ["Version: SE", "Price: £30,000"]
 
 
-async def test_a_label_that_fits_several_that_differ_is_over_them_not_one_of_them() -> None:
-    # Each model's "SE" has its own price; the equipment table's "SE" could be either's.
-    parsed = await parse(TWO_MODELS + "<h2>Equipment</h2>" + seats_table("SE", "SE L"))
+EQUIPMENT = "<h2>Equipment</h2>" + seats_table("SE", "SE L")
+
+
+@pytest.mark.parametrize("equipment_first", [False, True])
+async def test_a_label_that_fits_several_that_differ_is_over_them_not_one_of_them(
+    equipment_first: bool,
+) -> None:
+    # Each model's "SE" has its own price; the equipment table's "SE" could be either's,
+    # wherever on the page it comes.
+    models = TWO_MODELS.removeprefix("<h1>Range</h1>")
+    page = EQUIPMENT + models if equipment_first else models + EQUIPMENT
+    parsed = await parse("<h1>Range</h1>" + page)
     fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Kestrova", "Delmaro"')
-    kestrova_se, se_l, delmaro_se, gt = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    assert (kestrova_se.label, delmaro_se.label) == ("Kestrova SE", "Delmaro SE")
-    # Neither takes the column as its own, whichever comes first: both share it.
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    by_label = {s.label: s for s in scopes}
+    assert sorted(by_label) == ["Delmaro SE", "GT", "Kestrova SE", "SE L"]
+    kestrova_se, delmaro_se = by_label["Kestrova SE"], by_label["Delmaro SE"]
+    # Neither takes the column as its own: both share it.
     assert texts(parsed, kestrova_se.statement_ids) == ["Version: SE", "Price: £20,000"]
     assert texts(parsed, delmaro_se.statement_ids) == ["Version: SE", "Price: £30,000"]
-    column = ["Equipment", "SE", "Seats", "Seats · SE: 5"]
-    assert texts(parsed, kestrova_se.shared_statement_ids)[-4:] == column
-    assert texts(parsed, delmaro_se.shared_statement_ids)[-4:] == column
+    for se in (kestrova_se, delmaro_se):
+        shared = texts(parsed, se.shared_statement_ids)
+        assert {"Equipment", "SE", "Seats", "Seats · SE: 5"} <= set(shared)
     # Only one "SE L" is priced, so the equipment table's is that one.
-    assert texts(parsed, se_l.statement_ids)[-2:] == ["SE L", "Seats · SE L: 7"]
-    assert "SE" not in texts(parsed, gt.shared_statement_ids)
+    assert {"SE L", "Seats · SE L: 7"} <= set(texts(parsed, by_label["SE L"].statement_ids))
+    assert "SE" not in texts(parsed, by_label["GT"].shared_statement_ids)
 
 
 async def test_rows_that_differ_are_not_made_one_through_a_label_both_pick() -> None:
@@ -1208,39 +1219,115 @@ async def test_cells_that_differ_only_in_spacing_or_case_state_the_same() -> Non
     assert [s.label for s in scopes] == ["SE", "SE L"]
 
 
-async def test_two_that_pick_each_other_but_are_already_related_stay_two() -> None:
-    def columns(first: str, row: str) -> str:
-        return (
-            f"<table><tr><th></th><th>{first}</th><th>{first} 2</th></tr>"
-            f"<tr><th>{row}</th><td>1</td><td>2</td></tr></table>"
-        )
-
-    parsed = await parse(
-        columns("Bravo", "Seats") + columns("Alpha", "Doors") + columns("Charlie", "Power")
+def two_columns(first: str, row: str, cells: tuple[str, str] = ("1", "2")) -> str:
+    return (
+        f"<table><tr><th></th><th>{first}</th><th>{first} 2</th></tr>"
+        f"<tr><th>{row}</th><td>{cells[0]}</td><td>{cells[1]}</td></tr></table>"
     )
 
-    def to(*wanted: str) -> Callable[[Choice], str]:
-        return lambda q: next((w for w in wanted if w in q.options), "none")
 
+def picking(*wanted: str) -> Callable[[Choice], str]:
+    return lambda q: next((w for w in wanted if w in q.options), "none")
+
+
+async def test_two_that_pick_each_other_but_are_already_related_stay_two() -> None:
+    parsed = await parse(
+        two_columns("Bravo", "Seats")
+        + two_columns("Alpha Plus", "Doors")
+        + two_columns("Charlie", "Power")
+        + two_columns("Alpha", "Length")
+    )
     fake = (
         kinds_jev()
-        .choice(KIND, to("Charlie"), state='"Bravo"}')
-        .choice(KIND, to("Bravo", "Charlie"), state='"Alpha"}')
-        .choice(KIND, to("Alpha"), state='"Charlie"}')
+        .choice(KIND, picking("Charlie"), state='"Bravo"}')
+        .choice(KIND, picking("Bravo", "Charlie"), state='"Alpha Plus"}')
+        .choice(KIND, picking("Alpha Plus"), state='"Charlie"}')
+        .choice(KIND, picking("Alpha Plus"), state='"Alpha"}')
     )
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    # Alpha is a kind of Bravo, and Bravo of Charlie; Alpha and Charlie picking each
-    # other doesn't make the three one entity, or a loop that leaves no record.
-    assert [s.label for s in scopes] == ["Bravo 2", "Alpha", "Alpha 2", "Charlie 2"]
-    assert texts(parsed, scopes[1].shared_statement_ids) == [
-        "Bravo",
-        "Seats",
-        "Seats · Bravo: 1",
-        "Doors",
-        "Charlie",
-        "Power",
-        "Power · Charlie: 1",
+    # "Alpha Plus" is a kind of "Bravo", and "Bravo" of "Charlie". "Charlie" and "Alpha
+    # Plus" pick only each other at last, which mustn't make them one: a loop of kinds
+    # would leave "Alpha Plus" no record.
+    assert [s.label for s in scopes] == [
+        "Bravo 2",
+        "Alpha Plus",
+        "Alpha Plus 2",
+        "Charlie 2",
+        "Alpha 2",
     ]
+
+
+async def test_what_was_put_together_since_asking_is_not_related_to_what_it_differs_from() -> None:
+    parsed = await parse(
+        two_columns("Alpha", "Doors")
+        + two_columns("Beta", "Seats", ("5", "4"))
+        + two_columns("Gamma", "Seats", ("7", "2"))
+    )
+    # "Alpha" and "Beta" pick only each other, so they are one entity, with 5 seats.
+    # "Alpha" also picked "Gamma", before its seats were known: "Gamma" has 7.
+    fake = (
+        kinds_jev()
+        .choice(KIND, picking("Beta", "Gamma"), state='"Alpha"}')
+        .choice(KIND, picking("Alpha"), state='"Beta"}')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    by_label = {s.label: s for s in scopes}
+    assert sorted(by_label) == ["Alpha", "Alpha 2", "Beta 2", "Gamma", "Gamma 2"]
+    assert texts(parsed, by_label["Alpha"].statement_ids) == [
+        "Alpha",
+        "Doors · Alpha: 1",
+        "Beta",
+        "Seats · Beta: 5",
+    ]
+    # Not a kind of "Gamma": it shares none of that column.
+    assert texts(parsed, by_label["Alpha"].shared_statement_ids) == ["Doors", "Seats"]
+
+
+async def test_rows_with_their_own_prices_that_pick_one_column_are_both_kinds_of_it() -> None:
+    parsed = await parse(
+        price_list(("techno", "£20,000"), ("techno plus", "£21,000"))
+        + seats_table("TECHNO", "ICONIC")
+    )
+    fake = kinds_jev().choice(KIND, picking("TECHNO"), state="techno")
+    techno, plus, iconic = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (techno.label, plus.label, iconic.label) == ("techno", "techno plus", "ICONIC")
+    # "TECHNO" has the first row's words, but the second row picked it too and states
+    # another price: it is over both, not the first written another way.
+    assert texts(parsed, techno.statement_ids) == ["Version: techno", "Price: £20,000"]
+    column = ["TECHNO", "Seats", "Seats · TECHNO: 5"]
+    assert texts(parsed, techno.shared_statement_ids) == column
+    assert texts(parsed, plus.shared_statement_ids) == column
+
+
+async def test_a_label_over_rows_that_differ_is_still_one_with_its_other_spelling() -> None:
+    doors = (
+        "<table><tr><th></th><th>Techno</th><th>Iconic</th></tr>"
+        "<tr><th>Doors</th><td>3</td><td>5</td></tr></table>"
+    )
+    parsed = await parse(
+        "<h1>Range</h1><h2>Rafale</h2>"
+        + price_list(("techno", "£20,000"), ("esprit", "£24,000"))
+        + "<h2>Austral</h2>"
+        + price_list(("techno", "£30,000"), ("iconic", "£34,000"))
+        + "<h2>Equipment</h2>"
+        + seats_table("TECHNO", "ICONIC")
+        + "<h2>Dimensions</h2>"
+        + doors
+    )
+    fake = (
+        kinds_jev()
+        .noul(BOUNDARY, p=0.1, state='"Rafale", "Austral"')
+        .choice(KIND, picking("TECHNO"), state='"techno"}')
+        .choice(KIND, picking("TECHNO"), state='"Techno"}')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    by_label = {s.label: s for s in scopes}
+    # The rows differ from each other, not "Techno" from "TECHNO": those two are one,
+    # so each row shares both tables' columns, though it picked only one of them.
+    assert not {"Techno", "TECHNO"} & set(by_label)
+    for row in ("Rafale techno", "Austral techno"):
+        shared = texts(parsed, by_label[row].shared_statement_ids)
+        assert {"Seats · TECHNO: 5", "Doors · Techno: 3"} <= set(shared)
 
 
 async def test_an_entity_made_of_two_places_is_not_asked_the_same_thing_twice() -> None:
