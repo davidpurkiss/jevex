@@ -25,7 +25,7 @@ from jevex.jev import Choice, JSONContent, Noul
 from jevex.tables import axis_text
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from pydantic.fields import FieldInfo
 
@@ -199,6 +199,18 @@ class FieldSpec:
         options: dict[str, JSONContent | None] = dict.fromkeys(candidates)
         options[NONE_OPTION] = f"None of these is the {_lower_first(self.description)}"
         return Choice(instructions=self.select_instructions(), options=dict(options))
+
+    def settle_question(self, stated: Mapping[str, str]) -> Choice:
+        """The select Choice over spans that different statements give, each described by
+        its statement (``stated``: span → statement). A price list row's basic, VAT and
+        on-the-road prices are bare numbers alike. Asked which a buyer pays with only the
+        numbers as options, Jev took the on-the-road price in four of seven real price
+        lists' rows; with each number's statement beside it, in five, and more surely in
+        each (#326)."""
+        question = self.select_question(list(stated))
+        described: dict[str, JSONContent | None] = dict(stated)
+        described[NONE_OPTION] = question.options[NONE_OPTION]
+        return question.model_copy(update={"options": described})
 
     def enum_question(self) -> Choice:
         """For ``Literal``/``Enum`` fields: pick an option or "not stated"."""

@@ -801,11 +801,13 @@ async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading)
     accepted = [a for a in reading.accepted if (a[0] in reading.shared) == tier]
     values: list[Any] = []
     options: dict[str, str] = {}  # option → raw span
-    for _, _, candidate, value in accepted:
+    stated: dict[str, str] = {}  # option → the first statement giving it
+    for sid, _, candidate, value in accepted:
         if value not in values:
             values.append(value)
         option = f'"{candidate.raw}"' if candidate.raw == NONE_OPTION else candidate.raw
         options.setdefault(option, candidate.raw)
+        stated.setdefault(option, ctx.parsed.statements[sid].text)
     if len(values) < 2 or len(options) < 2:
         return None
     offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
@@ -815,7 +817,7 @@ async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading)
             "settle_values_skipped",
             f"{field.name}: asked about {len(offered)} of {len(options)} values",
         )
-    question = field.select_question(list(offered))
+    question = field.settle_question({option: stated[option] for option in offered})
     statements = dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted)
     text = ctx.jev.fit_state("\n".join(statements), {"settle": question})
     answer = (await ctx.jev.ask(text, {"settle": question}))["settle"]

@@ -9,6 +9,7 @@ Jev says is about one trim.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, get_args
 
@@ -420,9 +421,11 @@ class MultiEntity:
                 own[s.id] = [r for r in scope if r.label == choice]
 
 
-KIND_P = 0.5
+KIND_P = 0.7
 """The probability of the kind Choice's pick at or above which an entity is taken as a
-kind of the one picked."""
+kind of the one picked. On the real spec-sheets corpus's 18 development documents
+(#326), right picks were almost all above 0.8, and those under 0.7 were mostly a
+variant picking one of a run of page headings, or a trim one of its own variants."""
 
 
 class _Kinds:
@@ -563,10 +566,26 @@ class _Kinds:
             now, now_of = self._now(entity), self._now(of)
             if now is now_of:
                 continue
-            if (of, entity) not in picks or pickers[of] > pickers[entity]:
-                self._kind(now, now_of)  # with others picking it too, it is the coarser
+            words, words_of = _words(entity.label), _words(of.label)
+            if words == words_of:
+                self._same(sets, now, now_of)  # one label, written two ways
+            elif words < words_of:
+                self._kind(now_of, now)  # "SE" picked "SE 1.5 TSI": that is the narrower
+            elif words > words_of or (of, entity) not in picks:
+                self._kind(now, now_of)
+            elif pickers[of] > pickers[entity]:
+                self._kind(now, now_of)  # others pick it too, so it is the coarser
             elif pickers[of] == pickers[entity]:
                 self._same(sets, now, now_of)  # each picks only the other: one entity
+
+
+_WORD = re.compile(r"[^\W_]+")
+
+
+def _words(label: str) -> frozenset[str]:
+    """A label's words, whatever their case: of two labels Jev relates, the one with the
+    other's words and more ("SE 1.5 TSI" beside "SE") names the narrower thing."""
+    return frozenset(_WORD.findall(label.casefold()))
 
 
 def _distinct(sets: list[list[_Entity]]) -> list[list[_Entity]]:
