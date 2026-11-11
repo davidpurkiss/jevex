@@ -10,8 +10,9 @@ class EntityScope(BaseModel):
 
     Downstream stages run once per scope, over its statements: those of
     ``component_ids``, plus ``statement_ids`` (a table column's cells, a sentence assigned
-    to this entity) and ``shared_statement_ids``, statements assigned to "all of them",
-    which apply to every entity (see
+    to this entity) and ``shared_statement_ids``, statements that apply to this entity and
+    others: those assigned to "all of them", and what a coarser entity it is a kind of
+    states (its trim's column in another table) (see
     :meth:`ParsedDocument.scope_statements <jevex.interfaces.ParsedDocument.scope_statements>`).
     A child entity (from :class:`~jevex.resolve.ParentChild`) names its parent scope's
     label in ``parent`` and the parent schema's nested-model field it fills in ``field``.

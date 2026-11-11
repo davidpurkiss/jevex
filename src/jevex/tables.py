@@ -226,6 +226,7 @@ def table_statements(table: Component) -> list[Statement]:
                         col=c.col,
                         row_headers=[label],
                         row_labels=row_labels,
+                        group=group,
                         corner=" ".join(col_headers.get(c.col, [])) or None,
                         axis=axis_text(row_axes[c.col], row_positions[c.col][label]),
                     )

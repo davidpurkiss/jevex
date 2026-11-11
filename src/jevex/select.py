@@ -20,6 +20,12 @@ After categorising, each statement is assigned to a field (or none). Then:
     becomes the candidate's ``{unit: {from: ...}}`` step, and its confidence caps the
     selection's. A statement naming no other unit asks nothing more.
 
+  Each candidate field is asked without the others in view, so two fields of a schema can
+  pick the same words of a statement. A span states one field: one more request for the
+  statement asks, of each such span, which of the fields it is
+  (:meth:`~jevex.schema.SchemaSpec.span_question`), and the others' selections become
+  "none".
+
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
   came from a vision model). That happens once every answer is
@@ -409,9 +415,65 @@ class SelectStage:
                 self._read(
                     ask, statement, mine, units, conventions, order.get(sid, len(order)), outcomes
                 )
+        await self._one_field_per_span(ctx, plans)
         for (schema, scope, field_name), found in outcomes.items():
             run = ctx.schemas[schema]
             _record_direct(ctx, run, scope, run.spec.field(field_name), found)
+
+    async def _one_field_per_span(self, ctx: Context, plans: _Plans) -> None:
+        """Where two fields of a schema each picked the same words of a statement, keep
+        them for one: a span states one field. Each field was asked which span is its own
+        without the other in view ("Which of these is the model name?" takes a price
+        list's "Active X Edition" as readily as "Which of these is the trim?" does), so
+        Jev is asked which of the fields the span is
+        (:meth:`~jevex.schema.SchemaSpec.span_question`), one request per statement, and
+        the others' selections become "none"."""
+        contested: dict[str, list[tuple[str, list[_Ask]]]] = {}
+        for sid, (_, asks) in plans.items():
+            picked: dict[tuple[str, int, int], tuple[str, list[_Ask]]] = {}
+            for ask in asks.values():
+                if ask.spec.needs_candidates and not ask.spec.many:
+                    candidate = ask.run.selections[(ask.scopes[0], ask.spec.name, sid)].candidate
+                    if candidate is None:
+                        continue
+                    # Words the statement has twice ("5 doors and 5 seats") are two
+                    # spans, though a selection names them by their text alone: only
+                    # text a field's candidates have in one place says which it took.
+                    spans = {
+                        (c.span.start, c.span.end)
+                        for c in ask.run.candidates.get((sid, ask.spec.name), [])
+                        if c.raw == candidate.raw
+                    }
+                    if len(spans) == 1:
+                        (span,) = spans
+                        picked.setdefault((ask.run.name, *span), (candidate.raw, []))[1].append(ask)
+            found = [(raw, asks) for raw, asks in picked.values() if len(asks) > 1]
+            if found:
+                contested[sid] = found
+
+        def questions(found: list[tuple[str, list[_Ask]]]) -> dict[str, Question]:
+            return {
+                f"span{i}": asks[0].run.spec.span_question(raw, [a.spec.name for a in asks])
+                for i, (raw, asks) in enumerate(found)
+            }
+
+        replies = await gather(
+            ctx.jev.ask(statement_state(plans[sid][0]), questions(found))
+            for sid, found in contested.items()
+        )
+        for (sid, found), answers in zip(contested.items(), replies, strict=True):
+            for i, (raw, asks) in enumerate(found):
+                answer = answers[f"span{i}"]
+                assert isinstance(answer, ChoiceAnswer)
+                for ask in asks:
+                    if ask.spec.name != answer.choice:
+                        lost = Selection(
+                            candidate=None,
+                            confidence=answer.confidence,
+                            alternatives={raw: answer.probabilities.get(ask.spec.name, 0.0)},
+                        )
+                        for scope in ask.scopes:
+                            ask.run.selections[(scope, ask.spec.name, sid)] = lost
 
     def _plan(self, ctx: Context) -> _Plans:
         """Per statement id: the statement and one :class:`_Ask` per (schema, field)."""

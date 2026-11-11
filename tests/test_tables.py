@@ -563,6 +563,11 @@ def test_empty_corners_and_spacer_columns_do_not_make_blank_rows() -> None:
     )
     assert texts(band) == ["SE", "Power", "Performance › Power · SE: 150"]
     assert blank_rows(band) == set()
+    # A row header's own statement carries its band, as its row's cells do: an entity
+    # resolver may need it to tell the row from one of the same name under another band.
+    power = next(s.table for s in table_statements(band) if s.text == "Power")
+    assert power is not None
+    assert power.group == "Performance"
 
 
 def test_a_table_of_empty_cells_gives_no_statements() -> None:
