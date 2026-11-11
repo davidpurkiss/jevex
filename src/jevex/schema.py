@@ -73,6 +73,9 @@ class SchemaConfig(BaseModel):
     """The document gate's question, replacing "Does this document include {description}?
     It may include several." """
     categorise_question: str | None = None
+    span_question: str | None = None
+    """Template for the Choice of which field a span is, when two fields' selections
+    picked it, with ``{span}``."""
     key_path_question: str | None = None
     """Template for the structured-data question, with ``{path}`` and ``{example}``."""
     gate_unit: Literal["document", "page"] = "document"
@@ -87,6 +90,9 @@ class SchemaConfig(BaseModel):
     """Template for ``MultiEntity``'s boundary Noul, with ``{label}`` and ``{entity}``."""
     entity_question: str | None = None
     """Template for ``MultiEntity``'s assignment Choice, with ``{entity}``."""
+    kind_question: str | None = None
+    """Template for ``MultiEntity``'s Choice of which label from elsewhere in the document
+    describes an entity, with ``{entity}``."""
     axis_question: str | None = None
     """Template for ``MultiEntity``'s Choice between a table's column and row headers when
     labels on both were accepted, with ``{entity}``."""
@@ -414,6 +420,16 @@ class SchemaSpec:
         options[ALL_OPTION] = f"It applies to every {self.entity_name}"
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
+    def kind_question(self, labels: Sequence[str]) -> Choice:
+        """For ``MultiEntity``: which of ``labels`` (the entities one part of a document
+        names: a table's columns, a run of headed sections) describes the entity in the
+        state, or none of them. A price list's "SE 1.5 TSI 150 DSG" is a kind of an
+        equipment table's "SE" and of a specification table's "1.5 TSI 150"."""
+        template = self.config.kind_question or "Which of these describes this {entity}?"
+        options: dict[str, JSONContent | None] = dict.fromkeys(labels)
+        options[NONE_OPTION] = "None of them"
+        return Choice(instructions=template.format(entity=self.entity_name), options=options)
+
     def axis_question(self, columns: Sequence[str], rows: Sequence[str]) -> Choice:
         """For ``MultiEntity``: in a table where labels were accepted as entities, which
         axis names them, or neither (a price list's rows are variants, an engine table's
@@ -432,6 +448,16 @@ class SchemaSpec:
             options["rows"] = f"The row headers: {axis_text(rows, 0, MAX_AXIS_LABELS_CHARS)}"
         options[NONE_OPTION] = "Neither"
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
+
+    def span_question(self, span: str, fields: Sequence[str]) -> Choice:
+        """Which of ``fields`` the words ``span`` of a statement are, when each field's own
+        selection picked them: one span states one field. The options describe the
+        fields as the categorise Choice does."""
+        template = self.config.span_question or 'Which of these is "{span}"?'
+        options: dict[str, JSONContent | None] = {
+            name: self.field(name).questions.categorise or self.field(name).label for name in fields
+        }
+        return Choice(instructions=template.format(span=span), options=options)
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
         """One Choice per statement: which field does it state, or none of them.

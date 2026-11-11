@@ -17,8 +17,9 @@ from jevex.entities import EntityScope
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.pipeline import SchemaRun, for_each_schema
-from jevex.schema import ALL_OPTION, ReservedFieldNameError, UnsupportedFieldError
+from jevex.schema import ALL_OPTION, NONE_OPTION, ReservedFieldNameError, UnsupportedFieldError
 from jevex.select import statement_state
+from jevex.tables import header_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from jevex.pipeline import Context
     from jevex.results import FieldMeta
     from jevex.schema import SchemaSpec
-    from jevex.statements import Statement
+    from jevex.statements import Statement, TableCellRef
 
 SINGLE_ENTITY_LABEL = "document"
 
@@ -68,6 +69,19 @@ class SingleEntity:
         ]
 
 
+@dataclass(frozen=True, eq=False)
+class _Member:
+    """One entity a structural rule proposes: a table's column or row, a card, a section."""
+
+    label: str
+    ids: frozenset[str]
+    """The statements it claims."""
+    values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
+    """For a table's column or row, its cells' text by their headers on the other axis:
+    what it states, so two that state different things can be told apart
+    (:func:`_conflict`)."""
+
+
 @dataclass(frozen=True)
 class _Group:
     """Entities one structural rule proposes: a table's columns, or a run of siblings.
@@ -80,8 +94,9 @@ class _Group:
     rule: int
     depth: int
     section: list[str]
-    members: list[tuple[str, frozenset[str]]]
-    """(label, ids of the statements it claims) per proposed entity."""
+    members: list[_Member]
+    at: str
+    """The component the group sits at: its table, or its siblings' parent."""
     axis: int = 0
     """For a table's group: 0 for its column labels, 1 for its row labels."""
     table: str | None = None
@@ -89,7 +104,7 @@ class _Group:
 
     @property
     def labels(self) -> list[str]:
-        return [label for label, _ in self.members]
+        return [member.label for member in self.members]
 
     def state(self) -> JSONContent:
         """What Jev sees when asked which labels name entities: the labels together, so it
@@ -98,6 +113,45 @@ class _Group:
         if section := section_text(self.section):
             state["section"] = section
         return state
+
+
+@dataclass(eq=False)
+class _Entity:
+    """A label taken as an entity, with every place that proposed it. ``kinds`` are the
+    coarser entities it is a kind of (the "SE" a price list's "SE 1.5 TSI" row belongs
+    to, the section its table sits in): only an entity nothing is a kind of becomes a
+    record, and it shares what the coarser ones state."""
+
+    label: str
+    members: list[_Member]
+    section: list[str]
+    """The headings over the first place that proposed it."""
+    values: dict[tuple[str, ...], str]
+    """What its members state (:attr:`_Member.values`)."""
+    kinds: list[_Entity] = field(default_factory=list["_Entity"])
+
+    def add(self, member: _Member) -> None:
+        self.members.append(member)
+        self.values = {**member.values, **self.values}
+
+    def is_kind_of(self, other: _Entity) -> bool:
+        """Whether ``other`` is this entity or one of the coarser ones above it."""
+        seen: set[int] = set()
+        stack: list[_Entity] = [self]
+        while stack:
+            entity = stack.pop()
+            if entity is other:
+                return True
+            if id(entity) not in seen:
+                seen.add(id(entity))
+                stack.extend(entity.kinds)
+        return False
+
+
+def _conflict(a: dict[tuple[str, ...], str], b: dict[tuple[str, ...], str]) -> bool:
+    """Whether two table rows (or columns) state different things under one header: two
+    price-list rows with their own "Price" are two entities, whatever their labels."""
+    return any(key in b and b[key] != text for key, text in a.items())
 
 
 @dataclass(frozen=True)
@@ -112,7 +166,11 @@ class MultiEntity:
        holding its row's cells (a cell spanning rows goes to each): its headers joined
        ("Kestrova SE"), then as many of its cells as it takes to tell it from the other
        rows, so a price list's rows are proposed whether or not they have header cells
-       ("Icon", "ALLURE HYBRID 136 e-DSC6").
+       ("Icon", "ALLURE HYBRID 136 e-DSC6"). Rows with one label under different bands
+       are one row ("Power" under "Performance" in two parts of a table) unless they
+       state different things under one column header, as a price list's do (an engine's
+       row under each grade's band, each with its own price): then the band is part of
+       each row's label ("EXPRESSION TCe 110").
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
        first heading (or first text).
@@ -128,29 +186,52 @@ class MultiEntity:
     (shared by the variants), nor which axis holds the entities where labels on both were
     accepted (trims across the top, paint colours down the side), so one Choice per
     table with accepted labels (:meth:`~jevex.schema.SchemaSpec.axis_question`), the
-    table as its state, keeps the columns, the rows or neither. The same label in two places
-    (the "SE" column of two tables) is one entity: a page that splits one comparison over
-    several tables repeats its headers in each (two cards or sections with the same label
-    in one run are numbered instead, "Golf (2)"). With ``confirm=False`` nothing is
-    asked and every proposed label is an entity, except table rows (only columns are
-    proposed): use it only for pages whose structure is known to be one entity per
-    group, since otherwise topic sections split the record.
+    table as its state, keeps the columns, the rows or neither. With ``confirm=False``
+    nothing is asked and every proposed label is an entity, except table rows (only
+    columns are proposed): use it only for pages whose structure is known to be one
+    entity per group, since otherwise topic sections split the record.
 
-    When accepted groups overlap, a statement goes to the innermost (listing cards under
-    a trim heading are each an entity; a table's columns beat the section around it),
-    then to the higher priority above (a table beats headed sections). A label left with
-    nothing but its own heading or header is dropped.
+    **One entity in several places.** The same label in two places (the "SE" column of
+    two tables) is one entity: a page that splits one comparison over several tables
+    repeats its headers in each. Not when the two state different things under one
+    header (two models' price lists, each with a "techno" row and its own price): those
+    are two entities, told apart by the heading over each, else numbered (as two cards
+    or sections with the same label in one run are, "Golf (2)").
 
-    With two or more entities, every statement no boundary claimed is asked one Choice
-    (:meth:`~jevex.schema.SchemaSpec.entity_question`): which entity it applies to, or
-    "all of them". A table's header statements (``table_header``) join their column's or
-    row's entity; one no boundary claimed in a table whose other axis is the entities (a
-    row label when the columns are) applies to all of them without asking. Those go on
-    every scope's ``shared_statement_ids``: a value found only in them is copied into
-    each record with ``meta.shared`` set. Past 254 entities there are too many options
-    for a Choice, so those statements are left out (the entity stage reports them as
-    ``unassigned_statements``). With fewer than two entities, the document is one entity
-    labelled ``label``, as with :class:`SingleEntity`, and nothing more is asked.
+    **Kinds.** A document often names its entities at several levels: a price list's rows
+    are the variants ("SE 1.5 TSI 150 DSG"), an equipment table's columns their trims
+    ("SE") and a specification table's their engines ("1.5 TSI 150"). A trim or an
+    engine isn't a record of its own: what its column states is true of each variant of
+    that kind. So an entity that another is a kind of is not a record, and its
+    statements go on the ``shared_statement_ids`` of the entities that are kinds of it
+    (through however many levels). An entity is a kind of the section or card it sits
+    inside. Which label describes which is a judgement, so otherwise it's Jev's: one
+    Choice (:meth:`~jevex.schema.SchemaSpec.kind_question`) per entity and group of
+    labels from elsewhere, taken at ``KIND_P`` or above. Two that each pick the other
+    are one entity ("V1" and "BORN V1"), unless others pick one of them too (then it is
+    the coarser). Entities that state different things under one header are never asked
+    about each other (two price lists' rows). The search goes outwards from each part of
+    the page, and a label that something in its own part is a kind of isn't offered
+    outside it: one model's trims aren't the next model's, whatever they're called.
+
+    When accepted groups overlap, a statement goes to the innermost (a table's columns
+    beat the section around it), then to the higher priority above (a table beats headed
+    sections). A label left with nothing but its own heading or header, and nothing that
+    is a kind of it, is dropped.
+
+    With two or more entities, a statement no boundary claimed applies to the entities
+    of the nearest part of the page around it that has any (a model's section, else the
+    page): a heading to all of them, and for any other, one Choice
+    (:meth:`~jevex.schema.SchemaSpec.entity_question`) says which one, or "all of them",
+    unless there is only one. A table's header statements (``table_header``) join their
+    column's or row's entity; one no boundary claimed in a table whose other axis is the
+    entities (a row label when the columns are) applies to all of them without asking.
+    Those go on the entities' ``shared_statement_ids``: a value found only in them is
+    copied into each record with ``meta.shared`` set. Where there are too many entities
+    for a Choice's options (254), those statements are left out (the entity stage
+    reports them as ``unassigned_statements``). With fewer than two entities, the
+    document is one entity labelled ``label``, as with :class:`SingleEntity`, and
+    nothing more is asked.
     """
 
     confirm: bool = True
@@ -168,58 +249,64 @@ class MultiEntity:
         accepted = await self._accepted(groups, schema, jev)
         if self.confirm:
             accepted = await self._one_axis_per_table(parsed, accepted, schema, jev)
+        kinds = _Kinds(accepted, schema if self.confirm else None, jev)
+        await kinds.relate(parsed.root)
         # The innermost group first, then the higher priority. A statement goes to every
         # label of the first group claiming it: a table cell spanning two columns is on
         # both.
         ranked = sorted(accepted, key=lambda a: (-a[0].depth, a[0].rule))
-        owners: dict[str, list[str]] = {}
+        owners: dict[str, list[_Entity]] = {}
         winner: dict[str, _Group] = {}
-        for group, label, ids in ranked:
-            for sid in ids:
-                if winner.setdefault(sid, group) is group and label not in owners.get(sid, []):
-                    owners.setdefault(sid, []).append(label)
-        _drop_bare_headings(parsed, owners)
+        for group, member in ranked:
+            entity = kinds.entity_of[member]
+            for sid in member.ids:
+                if winner.setdefault(sid, group) is group and entity not in owners.get(sid, []):
+                    owners.setdefault(sid, []).append(entity)
         in_tree = {c.id for c in parsed.root.walk()}
         statements = [s for s in parsed.statements.values() if s.component_id in in_tree]
-        labels = list(dict.fromkeys(label for s in statements for label in owners.get(s.id, [])))
-        if len(labels) < 2:
+        records = _records(parsed, statements, owners)
+        if len(records) < 2:
             return await SingleEntity(label=self.label).resolve(parsed, schema, jev)
+        _name_apart(records)
+        own: dict[str, list[_Entity]] = {}
+        shared: dict[str, list[_Entity]] = {}
+        for s in statements:
+            for entity in owners.get(s.id, []):
+                if entity in records:
+                    own.setdefault(s.id, []).append(entity)
+                else:  # a coarser entity: what it states is true of each record of its kind
+                    held = shared.setdefault(s.id, [])
+                    held.extend(r for r in records if r.is_kind_of(entity) and r not in held)
         # (table, axis) for each table axis whose labels are entities: 0 columns, 1 rows.
-        entity_axes = {
-            (parsed.statements[sid].component_id, group.axis)
-            for group, _, ids in accepted
-            if group.rule == 0
-            for sid in ids
-        }
-        shared = await self._assign(
-            [s for s in statements if s.id not in owners],
-            labels,
-            owners,
-            schema,
-            jev,
-            entity_axes,
+        entity_axes = {(g.table, g.axis) for g, _ in accepted if g.table is not None}
+        loose = [s for s in statements if not own.get(s.id) and not shared.get(s.id)]
+        await self._assign(parsed, loose, records, own, shared, schema, jev, entity_axes)
+        return _scopes(
+            statements,
+            [r.label for r in records],
+            {sid: [r.label for r in found] for sid, found in own.items()},
+            {sid: [r.label for r in found] for sid, found in shared.items()},
         )
-        return _scopes(statements, labels, owners, shared)
 
     async def _accepted(
         self, groups: list[_Group], schema: SchemaSpec, jev: JevClient
-    ) -> list[tuple[_Group, str, frozenset[str]]]:
-        """(group, label, claimed ids) for every label taken as an entity."""
+    ) -> list[tuple[_Group, _Member]]:
+        """(group, member) for every label taken as an entity."""
         if not self.confirm:
-            return [(g, label, ids) for g in groups for label, ids in g.members]
+            return [(g, member) for g in groups for member in g.members]
 
-        async def ask(group: _Group) -> list[tuple[_Group, str, frozenset[str]]]:
+        async def ask(group: _Group) -> list[tuple[_Group, _Member]]:
             questions = {
                 f"label{i}": schema.boundary_question(label) for i, label in enumerate(group.labels)
             }
             answers = await jev.ask(group.state(), questions)
-            out: list[tuple[_Group, str, frozenset[str]]] = []
-            for i, (label, ids) in enumerate(group.members):
+            out: list[tuple[_Group, _Member]] = []
+            for i, member in enumerate(group.members):
                 answer = answers[f"label{i}"]
                 if not isinstance(answer, NoulAnswer):
                     raise UnexpectedAnswerError(f"expected a Noul answer, got {answer.type}")
                 if answer.p >= self.boundary_p:
-                    out.append((group, label, ids))
+                    out.append((group, member))
             return out
 
         found = await gather(ask(g) for g in groups)
@@ -228,10 +315,10 @@ class MultiEntity:
     async def _one_axis_per_table(
         self,
         parsed: ParsedDocument,
-        accepted: list[tuple[_Group, str, frozenset[str]]],
+        accepted: list[tuple[_Group, _Member]],
         schema: SchemaSpec,
         jev: JevClient,
-    ) -> list[tuple[_Group, str, frozenset[str]]]:
+    ) -> list[tuple[_Group, _Member]]:
         """``accepted`` with at most one axis per table, the one Jev says names the
         entities. Each label was judged among its axis's labels alone, which can't tell a
         price list's rows (variants) from an engine table's or an options table's (shared by
@@ -242,9 +329,9 @@ class MultiEntity:
         (:meth:`~jevex.schema.SchemaSpec.axis_question`), with the table's text as the
         state, keeps one axis or neither."""
         axes: dict[str, dict[int, list[str]]] = {}
-        for group, label, _ in accepted:
+        for group, member in accepted:
             if group.table is not None:
-                axes.setdefault(group.table, {}).setdefault(group.axis, []).append(label)
+                axes.setdefault(group.table, {}).setdefault(group.axis, []).append(member.label)
         if not axes:
             return accepted
 
@@ -266,46 +353,232 @@ class MultiEntity:
 
         dropped = dict(await gather(ask(t) for t in axes))
         return [
-            (group, label, ids)
-            for group, label, ids in accepted
+            (group, member)
+            for group, member in accepted
             if group.table is None or group.axis not in dropped.get(group.table, set())
         ]
 
     async def _assign(
         self,
-        ambiguous: list[Statement],
-        labels: list[str],
-        owners: dict[str, list[str]],
+        parsed: ParsedDocument,
+        loose: list[Statement],
+        records: list[_Entity],
+        own: dict[str, list[_Entity]],
+        shared: dict[str, list[_Entity]],
         schema: SchemaSpec,
         jev: JevClient,
         entity_axes: set[tuple[str, int]],
-    ) -> set[str]:
-        """Ask which entity each unclaimed statement applies to. Fills ``owners``; returns
-        the ids of statements that apply to all of them.
+    ) -> None:
+        """Give each unclaimed statement to the records it applies to, filling ``own`` and
+        ``shared``. They are among the records of the nearest part of the page around it
+        that has any: its own component, else each one above it in turn.
 
-        A header on the axis across a table's entities (``entity_axes``) isn't asked
-        about: it heads every entity's column or row (a row label, "Power", over every
-        trim's column), so it applies to all of them. Any other unclaimed header (one on the
-        entities' own axis that Jev didn't accept, or in a table with no entity axis) is
-        asked like any statement."""
-        shared = {s.id for s in ambiguous if _across_entities(s, entity_axes)}
-        ambiguous = [s for s in ambiguous if s.id not in shared]
-        if len(labels) >= MAX_CHOICE_OPTIONS:
-            return shared
-        question = schema.entity_question(labels)
+        A heading applies to all of them, as does a header on the axis across a table's
+        entities (``entity_axes``: a row label, "Power", over every trim's column), and
+        any statement where there is only one. Every other statement is asked about: one
+        of them (its own), or all of them. So is any other unclaimed header (one on the
+        entities' own axis that Jev didn't accept, or in a table with no entity axis)."""
+        parents = {child.id: c.id for c in parsed.root.walk() for child in c.children}
+        headings = {c.id for c in parsed.root.walk() if c.type == "heading"}
+        # The records each component's statements are on, with those of everything in it.
+        inside: dict[str, list[_Entity]] = {}
+        for sid in [*own, *shared]:
+            found = [*own.get(sid, []), *shared.get(sid, [])]
+            cid: str | None = parsed.statements[sid].component_id
+            while cid is not None:
+                held = inside.setdefault(cid, [])
+                held.extend(r for r in found if r not in held)
+                cid = parents.get(cid)
 
-        async def ask(statement: Statement) -> tuple[str, str]:
+        def around(statement: Statement) -> list[_Entity]:
+            cid: str | None = statement.component_id
+            while cid is not None and not inside.get(cid):
+                cid = parents.get(cid)
+            found = records if cid is None else inside[cid]
+            return [r for r in records if r in found]  # in document order
+
+        asked: list[tuple[Statement, list[_Entity]]] = []
+        for s in loose:
+            scope = around(s)
+            if len(scope) == 1 or s.component_id in headings or _across_entities(s, entity_axes):
+                shared[s.id] = scope
+            elif len(scope) < MAX_CHOICE_OPTIONS:
+                asked.append((s, scope))
+
+        async def ask(statement: Statement, scope: list[_Entity]) -> str:
+            question = schema.entity_question([r.label for r in scope])
             answer = (await jev.ask(statement_state(statement), {"entity": question}))["entity"]
             if not isinstance(answer, ChoiceAnswer):
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-            return statement.id, answer.choice
+            return answer.choice
 
-        for sid, choice in await gather(ask(s) for s in ambiguous):
+        choices = await gather(ask(s, scope) for s, scope in asked)
+        for (s, scope), choice in zip(asked, choices, strict=True):
             if choice == ALL_OPTION:
-                shared.add(sid)
+                shared[s.id] = scope
             else:
-                owners[sid] = [choice]
-        return shared
+                own[s.id] = [r for r in scope if r.label == choice]
+
+
+KIND_P = 0.5
+"""The probability of the kind Choice's pick at or above which an entity is taken as a
+kind of the one picked."""
+
+
+class _Kinds:
+    """Works out which accepted labels are one entity, and which is a kind of which (see
+    :class:`MultiEntity`), part by part from the innermost outwards. Without a ``schema``
+    nothing is asked: only what the structure says."""
+
+    def __init__(
+        self, accepted: list[tuple[_Group, _Member]], schema: SchemaSpec | None, jev: JevClient
+    ) -> None:
+        self.schema = schema
+        self.jev = jev
+        self.entity_of: dict[_Member, _Entity] = {}
+        by_group: dict[int, tuple[_Group, list[_Member]]] = {}
+        for group, member in accepted:
+            by_group.setdefault(id(group), (group, []))[1].append(member)
+        self._at: dict[str, list[tuple[_Group, list[_Member]]]] = {}
+        for group, members in by_group.values():
+            self._at.setdefault(group.at, []).append((group, members))
+        self._coarse: set[_Entity] = set()
+        self._asked: set[tuple[_Entity, _Entity]] = set()
+        self._into: dict[_Entity, _Entity] = {}
+        """Each entity made part of another (:meth:`_same`), and which."""
+
+    async def relate(self, component: Component) -> list[list[_Entity]]:
+        """The sets of entities in ``component`` that nothing in it is a kind of, once
+        everything in it is related: what its parent relates to the rest of the page. A
+        set is one group's entities (a table's columns, a run of cards)."""
+        below = [found for found in await gather(self.relate(c) for c in component.children)]
+        sets = [found for child in below for found in child]
+        here = self._at.get(component.id, [])
+        holders: list[tuple[_Member, _Entity]] = []
+        for group, members in here:
+            found = [_Entity(m.label, [m], group.section, dict(m.values)) for m in members]
+            self.entity_of.update(zip(members, found, strict=True))
+            if group.table is None:
+                holders += zip(members, found, strict=True)
+            sets.append(found)
+        self._unify(sets)
+        # A card or section holds whatever its statements hold.
+        for member, entity in holders:
+            outer = self.entity_of[member]
+            for inner in dict.fromkeys(e for found in sets for e in found):
+                held = frozenset(sid for m in inner.members for sid in m.ids)
+                if inner is not outer and inner is not entity and held <= member.ids:
+                    self._kind(inner, outer)
+        sets = _distinct(sets)
+        # Only where parts of the page meet is there anything new to ask.
+        if self.schema is not None and len([c for c in below if c]) + len(here) > 1:
+            await self._ask(sets, self.schema)
+        return _distinct([[e for e in found if e not in self._coarse] for found in sets])
+
+    def _unify(self, sets: list[list[_Entity]]) -> None:
+        """Make the entities in ``sets`` with one label one entity, unless they state
+        different things under one header."""
+        by_label: dict[str, list[_Entity]] = {}
+        for entity in list(dict.fromkeys(e for found in sets for e in found)):
+            same = by_label.setdefault(entity.label, [])
+            first = next((e for e in same if not _conflict(e.values, entity.values)), None)
+            if first is None:
+                same.append(entity)
+            else:
+                self._same(sets, first, entity)
+
+    def _same(self, sets: list[list[_Entity]], entity: _Entity, other: _Entity) -> None:
+        """Make ``other`` part of ``entity``: two places, or two labels, for one thing."""
+        for member in other.members:
+            entity.add(member)
+            self.entity_of[member] = entity
+        self._into[other] = entity
+        for e in set(self.entity_of.values()):
+            kinds = dict.fromkeys(entity if k is other else k for k in e.kinds)
+            e.kinds = [k for k in kinds if k is not e]
+        for of in other.kinds:
+            if of is not entity:
+                self._kind(entity, of)
+        if other in self._coarse:
+            self._coarse.add(entity)
+        for found in sets:
+            found[:] = list(dict.fromkeys(entity if e is other else e for e in found))
+
+    def _now(self, entity: _Entity) -> _Entity:
+        """The entity ``entity`` is part of by now."""
+        while entity in self._into:
+            entity = self._into[entity]
+        return entity
+
+    def _kind(self, entity: _Entity, of: _Entity) -> None:
+        if of not in entity.kinds and not of.is_kind_of(entity):
+            entity.kinds.append(of)
+            self._coarse.add(of)
+
+    async def _ask(self, sets: list[list[_Entity]], schema: SchemaSpec) -> None:
+        """Ask Jev, of each entity in ``sets``, which entity of each other set it is a kind
+        of, and record the answers."""
+        asks: list[tuple[_Entity, list[list[_Entity]]]] = []
+        for entity in dict.fromkeys(e for found in sets for e in found):
+            offered: list[list[_Entity]] = []
+            for found in sets:
+                # Not its own set, nor one it is already related to (the cards inside
+                # the section it is).
+                if entity in found or any(
+                    e.is_kind_of(entity) or entity.is_kind_of(e) for e in found
+                ):
+                    continue
+                options = [
+                    e
+                    for e in found
+                    if (entity, e) not in self._asked and not _conflict(entity.values, e.values)
+                ]
+                if options and len(options) < MAX_CHOICE_OPTIONS:
+                    offered.append(options)
+                    self._asked.update((entity, e) for e in options)
+            if offered:
+                asks.append((entity, offered))
+
+        async def ask(entity: _Entity, offered: list[list[_Entity]]) -> list[_Entity]:
+            questions = {
+                f"kind{i}": schema.kind_question([e.label for e in options])
+                for i, options in enumerate(offered)
+            }
+            answers = await self.jev.ask({schema.entity_name: entity.label}, questions)
+            picked: list[_Entity] = []
+            for i, options in enumerate(offered):
+                answer = answers[f"kind{i}"]
+                if not isinstance(answer, ChoiceAnswer):
+                    raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
+                if answer.probabilities.get(answer.choice, 0.0) >= KIND_P:
+                    picked.extend(e for e in options if e.label == answer.choice)
+            return picked
+
+        answers = await gather(ask(entity, offered) for entity, offered in asks)
+        picks = [(e, of) for (e, _), found in zip(asks, answers, strict=True) for of in found]
+        pickers: dict[_Entity, int] = {}
+        for _, of in picks:
+            pickers[of] = pickers.get(of, 0) + 1
+        for entity, of in picks:
+            now, now_of = self._now(entity), self._now(of)
+            if now is now_of:
+                continue
+            if (of, entity) not in picks or pickers[of] > pickers[entity]:
+                self._kind(now, now_of)  # with others picking it too, it is the coarser
+            elif pickers[of] == pickers[entity]:
+                self._same(sets, now, now_of)  # each picks only the other: one entity
+
+
+def _distinct(sets: list[list[_Entity]]) -> list[list[_Entity]]:
+    """``sets`` without the empty ones or the repeats (the same columns in two tables)."""
+    seen: set[frozenset[_Entity]] = set()
+    out: list[list[_Entity]] = []
+    for found in sets:
+        key = frozenset(found)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(found)
+    return out
 
 
 ChildPlace = Literal[
@@ -370,7 +643,7 @@ class ParentChild:
             axis = 0 if self.children == "table_columns" else 1
             groups = _table_groups(parsed, rows=axis == 1, min_labels=1)
             # The same label in two tables (the "SE" column of each) is one child.
-            members = [m for g in groups if g.axis == axis for m in g.members]
+            members = [(m.label, m.ids) for g in groups if g.axis == axis for m in g.members]
         else:
             found = _type_members(parsed, self.children)
             unique = _unique([label for label, _ in found])
@@ -386,7 +659,7 @@ class ParentChild:
         statements = list(parsed.statements.values())
         for s in statements:
             owners.setdefault(s.id, [self.label])
-        parent, *children = _scopes(statements, [self.label, *labels], owners, set())
+        parent, *children = _scopes(statements, [self.label, *labels], owners, {})
         return [
             parent,
             *(c.model_copy(update={"parent": self.label, "field": name}) for c in children),
@@ -459,8 +732,10 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     headers; each when there are ``min_labels`` or more. A row's label is its headers
     joined, then as many of its cells as it takes to tell it from the table's other rows
     (:attr:`TableCellRef.row_labels <jevex.statements.TableCellRef.row_labels>`): in a
-    price list (``Trim | Engine | Price``) each row is a variant, header cells or not. A
-    header's own statement (``table_header``) joins its label's group, but only a label
+    price list (``Trim | Engine | Price``) each row is a variant, header cells or not.
+    Rows with one label under different bands are one member, unless two of them state
+    different things under a column header: then every row's label starts with its band.
+    A header's own statement (``table_header``) joins its label's group, but only a label
     some cell already gives: an empty column proposes no entity."""
     depths = _depths(parsed.root)
     by_table: dict[str, list[Statement]] = {}
@@ -472,41 +747,81 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
         # Columns only with headers on both axes: a column header alone says what the cell
         # states (a price list's "Price"), not which entity it's about. Rows need column
         # headers: a row header alone labels a key/value table's value ("Power").
-        refs = [(c.id, c.table, c.kind) for c in cells if c.table is not None]
-        headed = [(sid, r) for sid, r, kind in refs if kind == "table_cell" and r.col_headers]
-        both = [(sid, r) for sid, r in headed if r.row_headers]
-        heads = [(sid, r) for sid, r, kind in refs if kind == "table_header"]
-        axes = [
-            (
-                [(sid, ref.col_headers) for sid, ref in both],
-                [(sid, ref.col_headers) for sid, ref in heads],
-            )
-        ]
-        if rows:
-            # A cell spanning rows goes to each.
-            axes.append(
-                (
-                    [(sid, ref.row_labels) for sid, ref in headed],
-                    [(sid, ref.row_labels) for sid, ref in heads],
-                )
-            )
-        for axis_no, (axis, header_axis) in enumerate(axes):
-            claims: dict[str, set[str]] = {}
-            for sid, headers in axis:
-                for header in headers:
+        refs = [(c, c.table) for c in cells if c.table is not None]
+        headed = [(s, r) for s, r in refs if s.kind == "table_cell" and r.col_headers]
+        heads = [(s, r) for s, r in refs if s.kind == "table_header"]
+        columns: dict[str, _Claim] = {}
+        for s, ref in headed:
+            if ref.row_headers:
+                across = ("row", ref.group or "", *ref.row_headers)
+                for header in ref.col_headers:
                     if label := _short(header):
-                        claims.setdefault(label, set()).add(sid)
-            for sid, headers in header_axis:
-                for header in headers:
-                    if (label := _short(header)) in claims:
-                        claims[label].add(sid)
+                        columns.setdefault(label, _Claim()).cell(s, ref, across)
+        for s, ref in heads:
+            for header in ref.col_headers:
+                if (label := _short(header)) in columns:
+                    columns[label].ids.add(s.id)
+        axes = [columns, _row_claims(headed, heads)] if rows else [columns]
+        for axis_no, claims in enumerate(axes):
             if len(claims) < min_labels:
                 continue
             unique = _unique(list(claims))
-            members = [(u, frozenset(ids)) for u, ids in zip(unique, claims.values(), strict=True)]
+            members = [
+                _Member(u, frozenset(claim.ids), claim.values)
+                for u, claim in zip(unique, claims.values(), strict=True)
+            ]
             trail = list(cells[0].heading_trail)
-            groups.append(_Group(0, depths[table_id], trail, members, axis=axis_no, table=table_id))
+            depth = depths[table_id]
+            groups.append(
+                _Group(0, depth, trail, members, at=table_id, axis=axis_no, table=table_id)
+            )
     return groups
+
+
+@dataclass
+class _Claim:
+    """What one label of a table's axis claims: statements, and its cells' text by their
+    headers on the other axis (:attr:`_Member.values`)."""
+
+    ids: set[str] = field(default_factory=set[str])
+    values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
+
+    def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
+        self.ids.add(statement.id)
+        self.values.setdefault(across, statement.text.removeprefix(header_prefix(ref)))
+
+
+def _row_claims(
+    headed: list[tuple[Statement, TableCellRef]], heads: list[tuple[Statement, TableCellRef]]
+) -> dict[str, _Claim]:
+    """Each row label's claim, from a table's cells with column headers (a cell spanning
+    rows goes to each) and its header statements."""
+    banded: dict[tuple[str | None, str], _Claim] = {}
+    for s, ref in headed:
+        for row in ref.row_labels:
+            if label := _short(row):
+                banded.setdefault((ref.group, label), _Claim()).cell(
+                    s, ref, ("column", *ref.col_headers)
+                )
+    for s, ref in heads:
+        for row in ref.row_labels:
+            if (key := (ref.group, _short(row))) in banded:
+                banded[key].ids.add(s.id)
+    by_label: dict[str, list[_Claim]] = {}
+    for (_, label), claim in banded.items():
+        by_label.setdefault(label, []).append(claim)
+    apart = any(
+        _conflict(a.values, b.values)
+        for same in by_label.values()
+        for i, a in enumerate(same)
+        for b in same[i + 1 :]
+    )
+    claims: dict[str, _Claim] = {}
+    for (band, label), claim in banded.items():
+        merged = claims.setdefault(_short(f"{band} {label}") if apart and band else label, _Claim())
+        merged.ids |= claim.ids
+        merged.values = {**claim.values, **merged.values}
+    return claims
 
 
 def _component_groups(parsed: ParsedDocument) -> list[_Group]:
@@ -516,7 +831,7 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
         by_component.setdefault(s.component_id, []).append(s.id)
     groups: list[_Group] = []
 
-    def group(rule: int, depth: int, members: list[Component]) -> None:
+    def group(rule: int, depth: int, parent: Component, members: list[Component]) -> None:
         found: list[tuple[str, frozenset[str]]] = []
         for member in members:
             label = _label(member)
@@ -525,8 +840,9 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
                 found.append((label, ids))
         if len(found) >= 2:
             labels = _unique([label for label, _ in found])
-            members_ = [(u, ids) for u, (_, ids) in zip(labels, found, strict=True)]
-            groups.append(_Group(rule, depth, list(members[0].heading_trail), members_))
+            members_ = [_Member(u, ids) for u, (_, ids) in zip(labels, found, strict=True)]
+            trail = list(members[0].heading_trail)
+            groups.append(_Group(rule, depth, trail, members_, at=parent.id))
 
     def visit(parent: Component, depth: int) -> None:
         shapes: dict[tuple[str, tuple[str, ...]], list[Component]] = {}
@@ -535,13 +851,13 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
                 shapes.setdefault(_shape(child), []).append(child)
         runs = [same for same in shapes.values() if len(same) >= 2]
         for same in runs:
-            group(1, depth + 1, same)
+            group(1, depth + 1, parent, same)
         # Headed sections of different shapes ("SE" with one paragraph, "SE L" with two).
         # When they're all one shape, the run above already asks about them.
         headed = [c for c in parent.children if _is_headed(c)]
         ids = {c.id for c in headed}
         if len(headed) >= 2 and not any(ids <= {c.id for c in same} for same in runs):
-            group(2, depth + 1, headed)
+            group(2, depth + 1, parent, headed)
         for child in parent.children:
             visit(child, depth + 1)
 
@@ -549,32 +865,68 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     return groups
 
 
+def _records(
+    parsed: ParsedDocument, statements: list[Statement], owners: dict[str, list[_Entity]]
+) -> list[_Entity]:
+    """The entities that become records, in document order: those owning more than
+    headings and table headers (a trim heading whose listing cards claimed the rest names
+    no record of its own) that no other such entity is a kind of."""
+    headings = {c.id for c in parsed.root.walk() if c.type == "heading"}
+    solid = list(
+        dict.fromkeys(
+            entity
+            for s in statements
+            if s.component_id not in headings and s.kind != "table_header"
+            for entity in owners.get(s.id, [])
+        )
+    )
+    return [e for e in solid if not any(o is not e and o.is_kind_of(e) for o in solid)]
+
+
+def _name_apart(records: list[_Entity]) -> None:
+    """Give records that share a label one each: with the innermost heading over it that
+    isn't over them all ("RAFALE techno", "AUSTRAL techno"), else numbered."""
+    by_label: dict[str, list[_Entity]] = {}
+    for record in records:
+        by_label.setdefault(record.label, []).append(record)
+    for label, same in by_label.items():
+        if len(same) > 1:
+            for record in same:
+                apart = [h for h in record.section if not all(h in r.section for r in same)]
+                if apart:
+                    record.label = _short(f"{apart[-1]} {label}")
+    for record, label in zip(records, _unique([r.label for r in records]), strict=True):
+        record.label = label
+
+
 def _scopes(
     statements: list[Statement],
     labels: list[str],
-    owners: dict[str, list[str]],
-    shared: set[str],
+    own: dict[str, list[str]],
+    shared: dict[str, list[str]],
 ) -> list[EntityScope]:
-    """One scope per label, in document order. A component is on a scope when all its
-    statements are on it alone; a table split by column is on none (its cells are)."""
-    by_label: dict[str, list[str]] = {label: [] for label in labels}
-    component_labels: dict[str, set[str | None]] = {}
+    """One scope per label: the statements that are its ``own``, and those it shares with
+    others (``shared``). A component is on a scope when all its statements are on it
+    alone; a table split by column is on none (its cells are)."""
+    ids: dict[str, list[str]] = {label: [] for label in labels}
+    shared_ids: dict[str, list[str]] = {label: [] for label in labels}
+    owners: dict[str, set[str | None]] = {}
     for s in statements:
-        found = owners.get(s.id, [])
+        found = own.get(s.id, [])
         for label in found:
-            by_label[label].append(s.id)
-        component_labels.setdefault(s.component_id, set()).add(
-            found[0] if len(found) == 1 else None
-        )
-    shared_ids = [s.id for s in statements if s.id in shared]
+            ids[label].append(s.id)
+        for label in shared.get(s.id, []):
+            if label not in found:
+                shared_ids[label].append(s.id)
+        owners.setdefault(s.component_id, set()).add(found[0] if len(found) == 1 else None)
     return [
         EntityScope(
             label=label,
-            component_ids=[c for c, found in component_labels.items() if found == {label}],
-            statement_ids=ids,
-            shared_statement_ids=list(shared_ids),
+            component_ids=[c for c, found in owners.items() if found == {label}],
+            statement_ids=ids[label],
+            shared_statement_ids=shared_ids[label],
         )
-        for label, ids in by_label.items()
+        for label in labels
     ]
 
 
@@ -586,23 +938,6 @@ def _across_entities(statement: Statement, entity_axes: set[tuple[str, int]]) ->
         return False
     across = 0 if ref.row_headers else 1
     return (statement.component_id, across) in entity_axes
-
-
-def _drop_bare_headings(parsed: ParsedDocument, owners: dict[str, list[str]]) -> None:
-    """Drop labels that own nothing but headings: a trim heading whose listing cards are
-    entities of their own, or a table's row label when its columns won the cells. Those
-    headings are left unclaimed."""
-    headings = {c.id for c in parsed.root.walk() if c.type == "heading"}
-
-    def bare(sid: str) -> bool:
-        statement = parsed.statements[sid]
-        return statement.component_id in headings or statement.kind == "table_header"
-
-    kept = {label for sid, labels in owners.items() if not bare(sid) for label in labels}
-    for sid in list(owners):
-        owners[sid] = [label for label in owners[sid] if label in kept]
-        if not owners[sid]:
-            del owners[sid]
 
 
 def _depths(root: Component) -> dict[str, int]:
@@ -650,9 +985,9 @@ def _short(text: str) -> str:
 
 
 def _unique(labels: Sequence[str], reserved: str | None = None) -> list[str]:
-    """``labels`` with repeats numbered ("Golf", "Golf (2)"); none is "all of them" or
-    ``reserved`` (a parent's label)."""
-    seen: set[str] = {ALL_OPTION} if reserved is None else {ALL_OPTION, reserved}
+    """``labels`` with repeats numbered ("Golf", "Golf (2)"); none is a Choice's reserved
+    option ("all of them", "none") or ``reserved`` (a parent's label)."""
+    seen: set[str] = {ALL_OPTION, NONE_OPTION} if reserved is None else {ALL_OPTION, reserved}
     out: list[str] = []
     for label in labels:
         unique, n = label, 1
