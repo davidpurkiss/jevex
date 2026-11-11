@@ -129,7 +129,7 @@ One document can yield one record, many records, or a parent with children. The 
 | Resolver | Use when | How entities are found | Cost |
 | --- | --- | --- | --- |
 | `SingleEntity` | You know the page holds one record (a listing detail page) | The whole document is one entity | Lowest: no entity questions |
-| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, one Choice per table with accepted labels (which axis names the entities, or neither), then one Choice per ambiguous statement |
+| `MultiEntity` (car-finder default) | Structure is unknown: spec tables with trim columns, listing grids, a section per trim | Boundary detection, then Jev assignment | One Noul per proposed label, one Choice per table with accepted labels (which axis names the entities, or neither), one Choice per entity and group of labels from elsewhere (which of them describes it), then one Choice per ambiguous statement |
 | `ParentChild` | You know the shape: a model page with variant children | Caller declares where children live (e.g. "table columns", a component type) | Low: statements go to parent or child |
 
 **MultiEntity boundary detection**, in priority order:
@@ -137,7 +137,11 @@ One document can yield one record, many records, or a parent with children. The 
 1. Table headers: each column (or row) keyed by a variant label becomes an entity. A price list's rows, with column headers only, are keyed by their own cells (as many as tell them apart). Jev says which axis of each table names the variants, or neither (an engine or options table the variants share).
 2. Repeated sibling structures: components with the same shape and type sequence (listing cards).
 3. Headed sections: a heading per trim or engine, with its subtree.
-4. Anything still ambiguous: Jev Choice "Which vehicle does this statement apply to?", with options = entity labels + "all of them".
+4. Anything still ambiguous: Jev Choice "Which vehicle does this statement apply to?", with options = entity labels + "all of them". The entities offered are those of the nearest part of the page around the statement that has any (a model's section in a price guide covering several models). A heading applies to all of them without a question, as does any statement where there is only one.
+
+**One label in several places.** The same label in two places (a trim's column in two tables) is one entity, unless the two state different things under one header: two models' price lists each with an "SE" row and its own price are two entities, named apart by the heading over each. Within a table, same-named rows under different bands that state different things (an engine's row under each grade's band) take their band's name.
+
+**Kinds.** A document often names its entities at several levels: a price list's rows are the variants ("SE 1.5 TSI 150 DSG"), an equipment table's columns their trims ("SE"), a specification table's their engines ("1.5 TSI 150"). Only the finest are records. An entity that another is a kind of isn't a record: its statements are shared by the records that are kinds of it. An entity is a kind of the section or card it sits inside. Otherwise Jev says: one Choice per entity and group of labels from elsewhere, "Which of these describes this {entity}?", with options = the labels + "none". Jev says that two labels are related more reliably than which is the narrower, so where one label has the other's words and more, that one is the kind. The search goes outwards from each part of the page, and a label that something in its own part is a kind of isn't offered outside it, so one model's trims aren't offered to the next model's variants.
 
 Statements assigned to "all of them" become shared values. With `ParentChild`, they land on the parent and are inherited by every child. With `MultiEntity`, they are copied into each record, with `meta` marking them as shared.
 
@@ -218,9 +222,10 @@ Values come from verbatim candidate spans that Jev chooses between. An LLM is us
 1. Enum or bool field: Jev answers directly (Choice or Noul). Done.
 2. Run the generators in scope for the field (by type, field, schema, locale and source) to get candidate spans with character offsets.
 3. Jev Choice: "Which of these is the {description}?", with options = candidates + "none".
+   Each field is asked without the others in view, so two fields can pick the same words (a price list's "Active X Edition" as the model and as the trim). A span states one field: Jev is asked 'Which of these is "{span}"?', with the fields that picked it as the options, and the others' selections become "none".
    In the same request, a bare number (no unit beside it) in a statement that names another unit of the field's dimension ("Power (kW) · SE: 110" for a field in PS) gets a Choice: 'Which unit is "{span}" in?', with the field's unit and the others named as options. The answer becomes the candidate's `unit` step, and its confidence caps the selection's.
 4. Normalise the chosen span through its generator's normaliser chain, then validate it against the field type.
-   A single-value field whose statements, within one entity, give different values (a price list row's basic, VAT and on-the-road prices, each chosen in its own cell) is settled across them. Jev is asked the field's select Choice over the distinct values, with the statements as the state. Only the best-ranked tier is weighed: the entity's own statements, or, when it has none, the ones it shares. "none" leaves the field unfound.
+   A single-value field whose statements, within one entity, give different values (a price list row's basic, VAT and on-the-road prices, each chosen in its own cell) is settled across them. Jev is asked the field's select Choice over the distinct values, each described by the statement giving it, with the statements as the state. Only the best-ranked tier is weighed: the entity's own statements, or, when it has none, the ones it shares. "none" leaves the field unfound.
 5. Fall back to the LLM if any of these hold:
    - no candidates were generated
    - Jev chose "none", but the statement was categorised as this field with probability ≥ `category_threshold`

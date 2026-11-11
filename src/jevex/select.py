@@ -20,6 +20,12 @@ After categorising, each statement is assigned to a field (or none). Then:
     becomes the candidate's ``{unit: {from: ...}}`` step, and its confidence caps the
     selection's. A statement naming no other unit asks nothing more.
 
+  Each candidate field is asked without the others in view, so two fields of a schema can
+  pick the same words of a statement. A span states one field: one more request for the
+  statement asks, of each such span, which of the fields it is
+  (:meth:`~jevex.schema.SchemaSpec.span_question`), and the others' selections become
+  "none".
+
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
   came from a vision model). That happens once every answer is

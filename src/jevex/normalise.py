@@ -584,8 +584,9 @@ class NormaliseStage:
     without any, those it shares) give different values (a price list row's basic, VAT and
     on-the-road prices, each picked from its own cell), confidence can't choose: each was
     picked without seeing the others. Jev is asked the field's own select question over the
-    distinct values (their raw spans, the first standing for a span repeated), with the
-    statements giving them as the state, cut to fit. Its pick wins, as sure as the less
+    distinct values (their raw spans, the first standing for a span repeated), each
+    described by the statement giving it (:meth:`~jevex.schema.FieldSpec.settle_question`),
+    with those statements as the state, cut to fit. Its pick wins, as sure as the less
     sure of Jev's answer and the pick, and "none" leaves the field unfound. List fields
     keep every accepted value, deduplicated in document order.
 

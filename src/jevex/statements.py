@@ -53,8 +53,8 @@ class TableCellRef(BaseModel):
     then its cells as far as it takes to tell the row from the others: see
     :mod:`jevex.tables`), so a cell spanning two rows can go to each row's entity. A column header's
     statement has only ``col_headers`` (its own label), a row header's only
-    ``row_headers`` (its own label) and ``row_labels``, and both carry ``corner`` and
-    ``axis``."""
+    ``row_headers`` (its own label), ``row_labels`` and its band (``group``), and both
+    carry ``corner`` and ``axis``."""
 
     model_config = ConfigDict(frozen=True)
 
