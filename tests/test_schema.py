@@ -446,6 +446,33 @@ def test_custom_templates_get_the_description_as_written() -> None:
     )
 
 
+def test_settle_question_describes_each_value_by_its_statement() -> None:
+    price = SchemaSpec.from_model(VehicleSpec).field("engine_size_cc")
+    stated = {"1498": "SE · Engine (cc): 1498", "1968": "GT · Engine (cc): 1968"}
+    assert price.settle_question(stated) == Choice(
+        instructions="Which of these is the engine displacement (cc)?",
+        options={**stated, "none": "None of these is the engine displacement"},
+    )
+    with pytest.raises(ValueError, match="reserved"):
+        price.settle_question({"none": "Engine: none"})
+
+
+def test_span_question_offers_the_fields_that_picked_the_span() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.span_question("Active X Edition", ["trim", "model"]) == Choice(
+        instructions='Which of these is "Active X Edition"?',
+        options={"trim": "Trim or grade name, e.g. SE L", "model": "Model name, e.g. Golf"},
+    )
+
+
+def test_kind_question_offers_the_labels_or_none() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.kind_question(["SE", "SE L"]) == Choice(
+        instructions="Which of these describes this vehicle spec?",
+        options={"SE": None, "SE L": None, "none": "None of them"},
+    )
+
+
 def test_entity_questions_name_the_record_after_the_model() -> None:
     spec = SchemaSpec.from_model(VehicleSpec)
     assert spec.entity_name == "vehicle spec"
@@ -465,10 +492,14 @@ def test_entity_questions_can_be_overridden() -> None:
             boundary_question="Is {label} one {entity} for sale?",
             entity_question="Which {entity} is this about?",
             axis_question="Which headers are the {entity}s?",
+            kind_question="Which of these is this {entity}?",
+            span_question="What is {span}?",
         )
         price: int = Field(description="Price")
 
     spec = SchemaSpec.from_model(Listing)
+    assert spec.kind_question(["Golf"]).instructions == "Which of these is this car?"
+    assert spec.span_question("£5,000", ["price"]).instructions == "What is £5,000?"
     assert spec.boundary_question("Golf").instructions == "Is Golf one car for sale?"
     question = spec.entity_question(["Golf"])
     assert question.instructions == "Which car is this about?"

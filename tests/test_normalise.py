@@ -596,10 +596,11 @@ async def test_jev_settles_a_fields_statements_that_give_different_values() -> N
     assert asked.questions == {
         "settle": Choice(
             instructions="Which of these is the price (GBP)?",
+            # Each value with the statement giving it: the numbers alone read alike.
             options={
-                "£9,354.17": None,
-                "£11,990": None,
-                "£1,870.83": None,
+                "£9,354.17": "SE · Basic price: £9,354.17",
+                "£11,990": "SE · On the road price: £11,990",
+                "£1,870.83": "SE · VAT 20%: £1,870.83",
                 "none": "None of these is the price",
             },
         )
@@ -633,7 +634,11 @@ async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() 
     assert asked.questions == {
         "settle": Choice(
             instructions="Which of these is the seats?",
-            options={"2": None, "5": None, "none": "None of these is the seats"},
+            options={
+                "2": "The van seats 2",
+                "5": "Every trim seats 5",
+                "none": "None of these is the seats",
+            },
         )
     }
 

@@ -188,6 +188,7 @@ VEHICLE = SchemaSpec.from_model(VehicleSpec)
 BOUNDARY = "name a separate vehicle spec?"
 WHICH = "Which vehicle spec does this statement apply to?"
 AXIS = "Which headers of this table each name a separate vehicle spec?"
+KIND = "Which of these describes this vehicle spec?"
 
 TABLE_PAGE = """<h1>Kestrova</h1>
 <p>Every Kestrova has 5 doors.</p>
@@ -240,7 +241,8 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
         "Power · SE L: 180PS",
         "Warranty · SE / SE L: 3 years",  # a cell spanning both columns is on both
     ]
-    # Row labels head every column, so they're shared without a question.
+    # The page's heading is over both, and row labels head every column, so they're
+    # shared without a question.
     shared = ["Kestrova", "Every Kestrova has 5 doors.", "Power", "Warranty"]
     assert texts(parsed, se.shared_statement_ids) == shared
     assert texts(parsed, se_l.shared_statement_ids) == shared
@@ -264,9 +266,8 @@ async def test_multi_entity_splits_a_comparison_table_by_column() -> None:
         )
     }
     # Every statement no boundary claimed is asked which entity it's about, except the
-    # table's headers.
+    # heading and the table's headers.
     assert [c.state for c in assigned] == [
-        {"statement": "Kestrova"},
         {"statement": "Every Kestrova has 5 doors.", "section": "Kestrova"},
         {"statement": "The SE L has 3 doors.", "section": "Kestrova"},
     ]
@@ -369,16 +370,29 @@ async def test_multi_entity_gives_nested_groups_to_the_innermost() -> None:
         .noul(BOUNDARY, p=0.9)
         .choice(AXIS, "columns")
         .noul(BOUNDARY, p=0.1, state='"Engine"')  # topics, not trims
+        .choice(KIND, "none")
     )
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     by_label = {s.label: texts(parsed, s.statement_ids) for s in scopes}
     assert by_label == {
         "SE": ["SE", "Engine", "150PS.", "Price", "£20,000."],
-        # The table's row label isn't a column's, so the section around it claims it.
-        "SE L": ["SE L", "Engine", "180PS.", "0-62 mph", "Price", "£24,000."],
         # A table's columns win over the section around it, headers included.
         "Manual": ["Manual", "0-62 mph · Manual: 8.9 s"],
         "Automatic": ["Automatic", "0-62 mph · Automatic: 9.2 s"],
+    }
+    # "SE L" holds the table, so its columns are kinds of it and it is no record of its
+    # own: what the rest of its section states, each of them shares. The table's row
+    # label isn't a column's, so the section had claimed it too.
+    rest = ["SE L", "Engine", "180PS.", "0-62 mph", "Price", "£24,000."]
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [[], rest, rest]
+    # Only "SE" is asked which gearbox it is: the columns sit inside "SE L".
+    (kind,) = [c for c in fake.calls if "kind0" in c.questions]
+    assert kind.state == {"vehicle spec": "SE"}
+    assert kind.questions == {
+        "kind0": Choice(
+            instructions=KIND,
+            options={"Manual": None, "Automatic": None, "none": "None of them"},
+        )
     }
 
 
@@ -392,10 +406,10 @@ async def test_multi_entity_splits_listing_cards_under_trim_headings() -> None:
         + card.format("2020 SE L, 30k miles", "£22,000")
         + card.format("2022 SE L, 8k miles", "£26,000")
     )
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(WHICH, ALL_OPTION)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(KIND, "none")
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    # Each card is a listing; "SE" and "SE L" are left with only their headings, so they
-    # aren't entities, and their headings are asked about like any other statement.
+    # Each card is a listing, and a kind of the trim whose section holds it: "SE" and
+    # "SE L" aren't records, and each one's heading is shared by its own cards.
     assert [s.label for s in scopes] == [
         "2019 SE, 40k miles",
         "2021 SE, 12k miles",
@@ -408,7 +422,24 @@ async def test_multi_entity_splits_listing_cards_under_trim_headings() -> None:
         "£22,000",
         "£26,000",
     ]
-    assert texts(parsed, scopes[0].shared_statement_ids) == ["SE", "SE L"]
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [
+        ["SE"],
+        ["SE"],
+        ["SE L"],
+        ["SE L"],
+    ]
+    # A card is asked only about the other trim's cards, not the trims it sits under.
+    (card,) = [c for c in fake.calls if c.state == {"vehicle spec": "2022 SE L, 8k miles"}]
+    assert card.questions == {
+        "kind0": Choice(
+            instructions=KIND,
+            options={
+                "2019 SE, 40k miles": None,
+                "2021 SE, 12k miles": None,
+                "none": "None of them",
+            },
+        )
+    }
 
 
 ROW_KEYED = (
@@ -445,9 +476,9 @@ async def test_multi_entity_proposes_a_price_lists_rows_without_row_headers() ->
         "<tr><td>Icon</td><td>£34,495</td></tr>"
         "<tr><td>Design</td><td>£36,995</td></tr></table>"
     )
-    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "rows").choice(WHICH, ALL_OPTION)
+    fake = FakeJev(strict=True).noul(BOUNDARY, p=0.9).choice(AXIS, "rows")
     icon, design = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
-    rows, axis, heading = fake.calls  # the column headers alone propose nothing
+    rows, axis = fake.calls  # the column headers alone propose nothing
     assert axis.questions["axis"] == Choice(
         instructions=AXIS,
         options={"rows": "The row headers: Icon, Design", "none": "Neither"},
@@ -459,8 +490,7 @@ async def test_multi_entity_proposes_a_price_lists_rows_without_row_headers() ->
     }
     assert (icon.label, design.label) == ("Icon", "Design")
     assert texts(parsed, design.statement_ids) == ["Model: Design", "OTR price: £36,995"]
-    # Every cell is a row's; only the heading is asked which entity it's about.
-    assert heading.state == {"statement": "Kestrova prices"}
+    # Every cell is a row's, and the heading over the table is shared without asking.
     assert texts(parsed, design.shared_statement_ids) == ["Kestrova prices"]
 
 
@@ -797,6 +827,337 @@ async def test_multi_entity_uses_the_schemas_entity_questions() -> None:
     options = fake.calls[3].questions["entity"]
     assert isinstance(options, Choice)
     assert options.options[ALL_OPTION] == "It applies to every trim"
+
+
+# --- MultiEntity: kinds, and one label in several places ------------------------------
+
+
+def price_list(*rows: tuple[str, str]) -> str:
+    body = "".join(f"<tr><td>{name}</td><td>{price}</td></tr>" for name, price in rows)
+    return f"<table><tr><th>Version</th><th>Price</th></tr>{body}</table>"
+
+
+def seats_table(first: str, second: str, seats: tuple[str, str] = ("5", "7")) -> str:
+    return (
+        f"<table><tr><th></th><th>{first}</th><th>{second}</th></tr>"
+        f"<tr><th>Seats</th><td>{seats[0]}</td><td>{seats[1]}</td></tr></table>"
+    )
+
+
+def kinds_jev() -> FakeJev:
+    """Jev accepting every label, taking a price list's rows and a comparison table's
+    columns as the entities, and relating nothing unless a later rule says so."""
+    return (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(AXIS, lambda q: "rows" if "rows" in q.options else "columns")
+        .choice(KIND, "none")
+        .choice(WHICH, ALL_OPTION)
+    )
+
+
+def kind_calls(fake: FakeJev) -> dict[str, list[list[str]]]:
+    """Per entity asked which of some labels describes it: each Choice's options."""
+    asked: dict[str, list[list[str]]] = {}
+    for call in fake.calls:
+        for question in call.questions.values():
+            if isinstance(question, Choice) and question.instructions == KIND:
+                assert isinstance(call.state, dict)
+                asked.setdefault(str(call.state["vehicle spec"]), []).append(list(question.options))
+    return asked
+
+
+VERSIONS = price_list(
+    ("SE 1.5 TSI", "£20,000"), ("SE 2.0 TDI", "£22,000"), ("SE L 1.5 TSI", "£24,000")
+)
+
+
+async def test_a_label_others_are_kinds_of_is_no_record_and_they_share_what_it_states() -> None:
+    parsed = await parse("<h1>Kestrova</h1>" + VERSIONS + seats_table("SE", "SE L"))
+    fake = (
+        kinds_jev()
+        .choice(KIND, "SE", state="SE 1.5 TSI")
+        .choice(KIND, "SE", state="SE 2.0 TDI")
+        .choice(KIND, "SE L", state="SE L 1.5 TSI")
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The price list's rows are the records: a trim is what several of them are.
+    assert [s.label for s in scopes] == ["SE 1.5 TSI", "SE 2.0 TDI", "SE L 1.5 TSI"]
+    assert texts(parsed, scopes[1].statement_ids) == ["Version: SE 2.0 TDI", "Price: £22,000"]
+    # Each shares what its trim's column states, and what is over them all.
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [
+        ["Kestrova", "SE", "Seats", "Seats · SE: 5"],
+        ["Kestrova", "SE", "Seats", "Seats · SE: 5"],
+        ["Kestrova", "SE L", "Seats", "Seats · SE L: 7"],
+    ]
+    # Each label is asked about the other table's, in one request, with itself as the state.
+    row = next(c for c in fake.calls if c.state == {"vehicle spec": "SE 2.0 TDI"})
+    assert row.questions == {
+        "kind0": Choice(
+            instructions=KIND,
+            options={"SE": None, "SE L": None, "none": "None of them"},
+        )
+    }
+    assert kind_calls(fake)["SE"] == [["SE 1.5 TSI", "SE 2.0 TDI", "SE L 1.5 TSI", "none"]]
+
+
+async def test_the_label_with_the_others_words_and_more_is_the_kind_whichever_picks() -> None:
+    parsed = await parse(VERSIONS + seats_table("SE", "SE L"))
+    # Asked about a trim, Jev picks one of its versions; asked about a version, nothing.
+    fake = (
+        kinds_jev()
+        .choice(KIND, "SE 1.5 TSI", state='"SE"')
+        .choice(KIND, "SE L 1.5 TSI", state='"SE L"')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["SE 1.5 TSI", "SE 2.0 TDI", "SE L 1.5 TSI"]
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [
+        ["SE", "Seats", "Seats · SE: 5"],
+        [],  # nothing related it to a trim
+        ["SE L", "Seats", "Seats · SE L: 7"],
+    ]
+
+
+async def test_a_kind_jev_is_unsure_of_is_not_taken() -> None:
+    parsed = await parse(VERSIONS + seats_table("SE", "SE L"))
+    fake = kinds_jev().choice(KIND, "SE", state="SE 1.5 TSI", confidence=0.69)
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Under KIND_P, so the trims stay records of their own.
+    assert [s.label for s in scopes] == ["SE 1.5 TSI", "SE 2.0 TDI", "SE L 1.5 TSI", "SE", "SE L"]
+    assert texts(parsed, scopes[0].shared_statement_ids) == []
+
+
+async def test_labels_with_the_same_words_are_one_entity() -> None:
+    doors = (
+        "<table><tr><th></th><th>se</th><th>se l</th></tr>"
+        "<tr><th>Doors</th><td>3</td><td>5</td></tr></table>"
+    )
+    parsed = await parse(seats_table("SE", "SE L") + doors)
+    fake = kinds_jev().choice(KIND, "se", state='"SE"').choice(KIND, "se l", state='"SE L"')
+    se, se_l = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (se.label, se_l.label) == ("SE", "SE L")
+    assert texts(parsed, se_l.statement_ids) == [
+        "SE L",
+        "Seats · SE L: 7",
+        "se l",
+        "Doors · se l: 5",
+    ]
+
+
+async def test_two_labels_that_pick_only_each_other_are_one_entity() -> None:
+    parsed = await parse(
+        price_list(("Entry", "£20,000"), ("Top", "£24,000")) + seats_table("Base", "Plus")
+    )
+    fake = kinds_jev().choice(KIND, "Base", state="Entry").choice(KIND, "Entry", state='"Base"')
+    entry, top, plus = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (entry.label, top.label, plus.label) == ("Entry", "Top", "Plus")
+    # "Base" is another name for "Entry": its column is the record's own.
+    assert texts(parsed, entry.statement_ids) == [
+        "Version: Entry",
+        "Price: £20,000",
+        "Base",
+        "Seats · Base: 5",
+    ]
+
+
+async def test_of_two_that_pick_each_other_the_one_more_pick_is_the_coarser() -> None:
+    rows = price_list(("Petrol manual", "£20,000"), ("Petrol auto", "£21,000"), ("Top", "£24,000"))
+    parsed = await parse(rows + seats_table("Base", "Plus"))
+    fake = (
+        kinds_jev()
+        .choice(KIND, "Base", state="Petrol")
+        .choice(KIND, "Petrol manual", state='"Base"')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Both petrol rows pick "Base", so it isn't one of them: they are kinds of it.
+    assert [s.label for s in scopes] == ["Petrol manual", "Petrol auto", "Top", "Plus"]
+    assert texts(parsed, scopes[1].shared_statement_ids) == ["Base", "Seats", "Seats · Base: 5"]
+
+
+TWO_MODELS = (
+    "<h1>Range</h1>"
+    "<h2>Kestrova</h2>"
+    + price_list(("SE", "£20,000"), ("SE L", "£24,000"))
+    + "<p>Kestrova prices include delivery.</p>"
+    "<h2>Delmaro</h2>"
+    + price_list(("SE", "£30,000"), ("GT", "£34,000"))
+    + "<p>Delmaro prices include delivery.</p>"
+)
+
+
+async def test_rows_with_one_label_and_their_own_prices_are_two_entities() -> None:
+    parsed = await parse(TWO_MODELS)
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='["Kestrova", "Delmaro"]')
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Each model's "SE" has its own price, so they are two, named by the heading over each.
+    assert [s.label for s in scopes] == ["Kestrova SE", "SE L", "Delmaro SE", "GT"]
+    assert texts(parsed, scopes[2].statement_ids) == ["Version: SE", "Price: £30,000"]
+    # Rows that each state their own price are never asked about each other.
+    assert kind_calls(fake) == {}
+    # What a model's section says applies to its own rows: its heading without asking,
+    # and its text is asked about among them alone.
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [
+        ["Range", "Kestrova", "Kestrova prices include delivery."],
+        ["Range", "Kestrova", "Kestrova prices include delivery."],
+        ["Range", "Delmaro", "Delmaro prices include delivery."],
+        ["Range", "Delmaro", "Delmaro prices include delivery."],
+    ]
+    asked = {
+        str(c.state["statement"]): list(q.options)
+        for c in fake.calls
+        if isinstance(c.state, dict) and isinstance(q := c.questions.get("entity"), Choice)
+    }
+    assert asked == {
+        "Kestrova prices include delivery.": ["Kestrova SE", "SE L", ALL_OPTION],
+        "Delmaro prices include delivery.": ["Delmaro SE", "GT", ALL_OPTION],
+    }
+
+
+async def test_with_one_entity_around_it_a_statement_is_shared_without_asking() -> None:
+    parsed = await parse(
+        "<h2>Kestrova</h2>"
+        + price_list(("SE", "£20,000"), ("SE L", "£24,000"))
+        + "<h2>Delmaro</h2>"
+        + price_list(("GT", "£34,000"), ("Metallic paint", "£650"))
+        + "<p>Prices include delivery.</p>"
+    )
+    fake = (
+        kinds_jev()
+        .noul(BOUNDARY, p=0.1, state='["Kestrova", "Delmaro"]')
+        .noul('"Metallic paint"', p=0.1)
+    )
+    _, _, gt = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The Delmaro's section holds one entity: what else it says is that one's, unasked.
+    assert texts(parsed, gt.shared_statement_ids) == [
+        "Delmaro",
+        "Version: Metallic paint",
+        "Price: £650",
+        "Prices include delivery.",
+    ]
+    assert not [c for c in fake.calls if "entity" in c.questions]
+
+
+async def test_the_same_row_in_two_tables_saying_the_same_is_one_entity() -> None:
+    parsed = await parse(
+        price_list(("SE", "£20,000"), ("SE L", "£24,000"))
+        + price_list(("SE", "£20,000"), ("GT", "£34,000"))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["SE", "SE L", "GT"]
+    assert texts(parsed, scopes[0].statement_ids) == [
+        "Version: SE",
+        "Price: £20,000",
+        "Version: SE",
+        "Price: £20,000",
+    ]
+
+
+async def test_rows_under_bands_with_their_own_prices_take_their_bands_name() -> None:
+    parsed = await parse(
+        "<table><tr><th>Engine</th><th>Price</th></tr>"
+        '<tr><th colspan="2">Expression</th></tr>'
+        "<tr><td>TCe 100</td><td>£15,000</td></tr><tr><td>Hybrid 155</td><td>£19,000</td></tr>"
+        '<tr><th colspan="2">Journey</th></tr>'
+        "<tr><td>TCe 100</td><td>£16,000</td></tr></table>"
+    )
+    fake = kinds_jev()
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # A grade's band is part of each of its rows' names: one engine, two prices.
+    assert [s.label for s in scopes] == [
+        "Expression TCe 100",
+        "Expression Hybrid 155",
+        "Journey TCe 100",
+    ]
+    assert texts(parsed, scopes[2].statement_ids) == [
+        "Journey › Engine: TCe 100",
+        "Journey › Price: £16,000",
+    ]
+    assert fake.calls[0].state == {
+        "names": ["Expression TCe 100", "Expression Hybrid 155", "Journey TCe 100"]
+    }
+
+
+async def test_rows_under_topic_bands_that_agree_stay_one_entity() -> None:
+    parsed = await parse(
+        "<table><tr><th>Trim</th><th>Power</th><th>Length</th></tr>"
+        '<tr><th colspan="3">Performance</th></tr>'
+        "<tr><td>SE</td><td>150PS</td><td></td></tr><tr><td>SE L</td><td>180PS</td><td></td></tr>"
+        '<tr><th colspan="3">Dimensions</th></tr>'
+        "<tr><td>SE</td><td></td><td>4.2 m</td></tr><tr><td>SE L</td><td></td><td>4.4 m</td></tr>"
+        "</table>"
+    )
+    se, se_l = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert (se.label, se_l.label) == ("SE", "SE L")
+    assert texts(parsed, se_l.statement_ids) == [
+        "Performance › Trim: SE L",
+        "Performance › Power: 180PS",
+        "Dimensions › Trim: SE L",
+        "Dimensions › Length: 4.4 m",
+    ]
+
+
+async def test_labels_something_nearby_is_a_kind_of_are_not_offered_further_out() -> None:
+    parsed = await parse(
+        "<h1>Range</h1><h2>Kestrova</h2>"
+        + price_list(("SE 1.5 TSI", "£20,000"), ("SE 2.0 TDI", "£22,000"))
+        + seats_table("SE", "SE L")
+        + "<h2>Delmaro</h2>"
+        + price_list(("SE 1.5 TSI Sport", "£30,000"), ("GT", "£34,000"))
+    )
+    fake = (
+        kinds_jev()
+        .noul(BOUNDARY, p=0.1, state='["Kestrova", "Delmaro"]')
+        .choice(KIND, "SE", state='"SE 1.5 TSI"')
+        .choice(KIND, "SE", state='"SE 2.0 TDI"')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == [
+        "SE 1.5 TSI",
+        "SE 2.0 TDI",
+        "SE L",  # no Kestrova row is one, so it's a record of its own
+        "SE 1.5 TSI Sport",
+        "GT",
+    ]
+    asked = kind_calls(fake)
+    # The Kestrova's trims are its own rows' business: the Delmaro's rows aren't asked
+    # about them (nor about the Kestrova's rows, each with a price of its own).
+    assert "SE 1.5 TSI Sport" not in asked
+    assert "GT" not in asked
+    assert asked["SE 1.5 TSI"] == [["SE", "SE L", "none"]]
+    assert texts(parsed, scopes[3].shared_statement_ids) == ["Range", "Delmaro"]
+
+
+async def test_a_label_that_is_a_reserved_option_is_numbered() -> None:
+    parsed = await parse(price_list(("none", "£20,000"), ("SE L", "£24,000")))
+    first, _ = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert first.label == "none (2)"
+
+
+async def test_multi_entity_uses_the_schemas_kind_question() -> None:
+    class Trim(BaseModel):
+        __jevex__ = SchemaConfig(entity_name="trim", kind_question="Which is this {entity}?")
+        power_ps: int = Field(description="Power", unit="PS")
+
+    parsed = await parse(VERSIONS + seats_table("SE", "SE L"))
+    fake = (
+        FakeJev(strict=True)
+        .noul("name a separate trim?", p=0.9)
+        .choice(
+            "Which headers of this table", lambda q: "rows" if "rows" in q.options else "columns"
+        )
+        .choice("Which is this trim?", "none")
+    )
+    await MultiEntity().resolve(parsed, SchemaSpec.from_model(Trim), fake.client())
+    assert fake.calls[-1].state == {"trim": "SE L"}
+    assert fake.calls[-1].questions["kind0"] == Choice(
+        instructions="Which is this trim?",
+        options={
+            "SE 1.5 TSI": None,
+            "SE 2.0 TDI": None,
+            "SE L 1.5 TSI": None,
+            "none": "None of them",
+        },
+    )
 
 
 async def test_entity_stage_gives_multi_entity_only_what_passed_the_component_gate() -> None:

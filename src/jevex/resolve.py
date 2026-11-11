@@ -208,12 +208,18 @@ class MultiEntity:
     (through however many levels). An entity is a kind of the section or card it sits
     inside. Which label describes which is a judgement, so otherwise it's Jev's: one
     Choice (:meth:`~jevex.schema.SchemaSpec.kind_question`) per entity and group of
-    labels from elsewhere, taken at ``KIND_P`` or above. Two that each pick the other
-    are one entity ("V1" and "BORN V1"), unless others pick one of them too (then it is
-    the coarser). Entities that state different things under one header are never asked
-    about each other (two price lists' rows). The search goes outwards from each part of
-    the page, and a label that something in its own part is a kind of isn't offered
-    outside it: one model's trims aren't the next model's, whatever they're called.
+    labels from elsewhere, its pick taken at ``KIND_P`` or above. Jev says the two are
+    related more reliably than which is the narrower (asked about a trim, it picks one
+    of the trim's variants), so where one label has the other's words and more, that one
+    is the kind ("SE 1.5 TSI" of "SE"), whichever picked the other; two with the same
+    words are one entity. Otherwise the one picking is the kind, and of two that pick
+    each other, the one more others pick is the coarser; with nothing between them they
+    are one entity ("techno+ (incl canvas roof)" and "techno+ plein sud canvas roof").
+    Entities that state different things under one header are never asked about each
+    other (two price lists' rows). The search goes outwards from each part of the page,
+    and once something in a group's own part is a kind of one of its labels, none of them
+    is offered outside it: one model's trims aren't the next model's, whatever they're
+    called.
 
     When accepted groups overlap, a statement goes to the innermost (a table's columns
     beat the section around it), then to the higher priority above (a table beats headed
@@ -447,6 +453,9 @@ class _Kinds:
             self._at.setdefault(group.at, []).append((group, members))
         self._coarse: set[_Entity] = set()
         self._asked: set[tuple[_Entity, _Entity]] = set()
+        self._closed: set[_Entity] = set()
+        """The entities of every set something in its own part of the page is a kind of:
+        they aren't offered further out."""
         self._into: dict[_Entity, _Entity] = {}
         """Each entity made part of another (:meth:`_same`), and which."""
 
@@ -454,28 +463,31 @@ class _Kinds:
         """The sets of entities in ``component`` that nothing in it is a kind of, once
         everything in it is related: what its parent relates to the rest of the page. A
         set is one group's entities (a table's columns, a run of cards)."""
-        below = [found for found in await gather(self.relate(c) for c in component.children)]
+        below = await gather(self.relate(c) for c in component.children)
         sets = [found for child in below for found in child]
         here = self._at.get(component.id, [])
-        holders: list[tuple[_Member, _Entity]] = []
+        holders: list[_Member] = []
         for group, members in here:
             found = [_Entity(m.label, [m], group.section, dict(m.values)) for m in members]
             self.entity_of.update(zip(members, found, strict=True))
             if group.table is None:
-                holders += zip(members, found, strict=True)
+                holders += members
             sets.append(found)
         self._unify(sets)
         # A card or section holds whatever its statements hold.
-        for member, entity in holders:
+        for member in holders:
             outer = self.entity_of[member]
             for inner in dict.fromkeys(e for found in sets for e in found):
                 held = frozenset(sid for m in inner.members for sid in m.ids)
-                if inner is not outer and inner is not entity and held <= member.ids:
+                if inner is not outer and held <= member.ids:
                     self._kind(inner, outer)
         sets = _distinct(sets)
         # Only where parts of the page meet is there anything new to ask.
         if self.schema is not None and len([c for c in below if c]) + len(here) > 1:
             await self._ask(sets, self.schema)
+        for found in sets:
+            if any(e in self._coarse for e in found):
+                self._closed.update(found)
         return _distinct([[e for e in found if e not in self._coarse] for found in sets])
 
     def _unify(self, sets: list[list[_Entity]]) -> None:
@@ -534,7 +546,9 @@ class _Kinds:
                 options = [
                     e
                     for e in found
-                    if (entity, e) not in self._asked and not _conflict(entity.values, e.values)
+                    if e not in self._closed
+                    and (entity, e) not in self._asked
+                    and not _conflict(entity.values, e.values)
                 ]
                 if options and len(options) < MAX_CHOICE_OPTIONS:
                     offered.append(options)

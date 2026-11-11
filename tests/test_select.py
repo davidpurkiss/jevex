@@ -928,3 +928,77 @@ async def test_list_options_a_text_statement_also_gives_need_no_vision_check() -
         (("red",), "jev", "s2"),
     ]
     assert picks[0].source == run.fields["doc"]["colours"].source
+
+
+# --- one span, one field ---------------------------------------------------------------
+
+
+class Named(BaseModel):
+    model: str = Field(description="Model name")
+    trim: str = Field(description="Trim name")
+
+
+def named_context(fake: FakeJev, text: str) -> Context:
+    ctx = context(fake, [st("s1", text)], {}, models=(Named,))
+    ctx.schemas["Named"].categories["s1"] = ChoiceAnswer(
+        choice="trim", confidence=0.6, probabilities={"trim": 0.6, "model": 0.3}
+    )
+    return ctx
+
+
+async def test_a_span_two_fields_picked_is_kept_for_the_one_jev_says_it_is() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Active X Edition")
+        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice('Which of these is "Active X Edition"?', "trim", confidence=0.9)
+    )
+    ctx = named_context(fake, "Active X Edition: £30,775")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    trim = run.selections[("doc", "trim", "s1")]
+    assert trim.candidate is not None
+    assert trim.candidate.raw == "Active X Edition"
+    # The model's selection of the same words becomes "none", as sure as Jev's answer.
+    model = run.selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.9)
+    assert model.alternatives == {"Active X Edition": pytest.approx(0.1)}
+    # One more request for the statement: the span, and the fields that picked it,
+    # described as the categorise Choice describes them.
+    _, asked = fake.calls
+    assert asked.state == {"statement": "Active X Edition: £30,775"}
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "Active X Edition"?',
+            options={"trim": "Trim name", "model": "Model name"},
+        )
+    }
+
+
+async def test_fields_that_pick_different_spans_are_not_asked_which_is_which() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Kestrova")
+        .choice("Which of these is the trim name?", "SE L")
+    )
+    ctx = named_context(fake, "Kestrova SE L")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    picked = {name: run.selections[("doc", name, "s1")].candidate for name in ("model", "trim")}
+    assert {name: c.raw for name, c in picked.items() if c is not None} == {
+        "model": "Kestrova",
+        "trim": "SE L",
+    }
+    assert len(fake.calls) == 1
+
+
+async def test_a_span_one_field_picked_and_another_refused_is_not_asked_about() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "none")
+        .choice("Which of these is the trim name?", "Active X Edition")
+    )
+    ctx = named_context(fake, "Active X Edition: £30,775")
+    await run_both(ctx)
+    assert len(fake.calls) == 1
+    assert ctx.schemas["Named"].selections[("doc", "model", "s1")].candidate is None
