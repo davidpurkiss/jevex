@@ -461,14 +461,17 @@ class SchemaSpec:
         options[NONE_OPTION] = "Neither"
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
-    def span_question(self, span: str, fields: Sequence[str]) -> Choice:
-        """Which of ``fields`` the words ``span`` of a statement are, when each field's own
-        selection picked them: one span states one field. The options describe the
-        fields as the categorise Choice does."""
+    def span_question(self, span: str, fields: Sequence[str], *, or_none: bool = False) -> Choice:
+        """Which of ``fields`` the words ``span`` of a statement are: one span states one
+        field. ``or_none`` adds that it is none of them, for a span that may be some other
+        kind of name than the text fields offered. The options describe the fields as the
+        categorise Choice does."""
         template = self.config.span_question or 'Which of these is "{span}"?'
         options: dict[str, JSONContent | None] = {
             name: self.field(name).questions.categorise or self.field(name).label for name in fields
         }
+        if or_none:
+            options[NONE_OPTION] = "None of these"
         return Choice(instructions=template.format(span=span), options=options)
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:
