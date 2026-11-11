@@ -1002,3 +1002,49 @@ async def test_a_span_one_field_picked_and_another_refused_is_not_asked_about() 
     await run_both(ctx)
     assert len(fake.calls) == 1
     assert ctx.schemas["Named"].selections[("doc", "model", "s1")].candidate is None
+
+
+class Body(BaseModel):
+    doors: int = Field(description="Number of doors")
+    seats: int = Field(description="Number of seats")
+
+
+async def test_the_same_words_in_two_places_are_two_spans_and_not_contested() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the number of doors?", "5")
+        .choice("Which of these is the number of seats?", "5")
+    )
+    ctx = context(fake, [st("s1", "5 doors and 5 seats")], {}, models=(Body,))
+    run = ctx.schemas["Body"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="doors", confidence=0.6, probabilities={"doors": 0.6, "seats": 0.4}
+    )
+    await run_both(ctx)
+    # Each field's "5" may be the other one in the statement: nothing says they took the
+    # same span, so both stand and nothing more is asked.
+    for name in ("doors", "seats"):
+        selection = run.selections[("doc", name, "s1")]
+        assert selection.candidate is not None
+        assert selection.candidate.raw == "5"
+    assert len(fake.calls) == 1
+
+
+async def test_a_contested_span_is_settled_for_every_scope_holding_the_statement() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Active X Edition")
+        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice('Which of these is "Active X Edition"?', "trim")
+    )
+    ctx = named_context(fake, "Active X Edition: £30,775")
+    run = ctx.schemas["Named"]
+    run.scopes = [
+        EntityScope(label="5 door", shared_statement_ids=["s1"]),
+        EntityScope(label="Estate", shared_statement_ids=["s1"]),
+    ]
+    await run_both(ctx)
+    assert len(fake.calls) == 2  # asked once, whatever the number of scopes
+    for scope in ("5 door", "Estate"):
+        assert run.selections[(scope, "model", "s1")].candidate is None
+        assert run.selections[(scope, "trim", "s1")].candidate is not None

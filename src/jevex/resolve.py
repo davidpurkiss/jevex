@@ -78,9 +78,9 @@ class _Member:
     ids: frozenset[str]
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
-    """For a table's column or row, its cells' text by their headers on the other axis:
-    what it states, so two that state different things can be told apart
-    (:func:`_conflict`)."""
+    """For a table's column or row, its cells' text (without spacing or case) by their
+    headers on the other axis: what it states, so two that state different things can be
+    told apart (:func:`_conflict`)."""
 
 
 @dataclass(frozen=True)
@@ -485,15 +485,33 @@ class _Kinds:
 
     def _unify(self, sets: list[list[_Entity]]) -> None:
         """Make the entities in ``sets`` with one label one entity, unless they state
-        different things under one header."""
+        different things under one header. One that fits several that differ from each
+        other (an equipment table's "SE" column beside two models' "SE" rows, each with
+        its own price) can't be said to be either of them: it stays an entity of its own,
+        and they are kinds of it."""
         by_label: dict[str, list[_Entity]] = {}
-        for entity in list(dict.fromkeys(e for found in sets for e in found)):
-            same = by_label.setdefault(entity.label, [])
-            first = next((e for e in same if not _conflict(e.values, entity.values)), None)
-            if first is None:
-                same.append(entity)
-            else:
-                self._same(sets, first, entity)
+        for entity in dict.fromkeys(e for found in sets for e in found):
+            by_label.setdefault(entity.label, []).append(entity)
+        for same in by_label.values():
+            # Those that differ from another first, so the rest are placed knowing them
+            # all, whatever order the page has them in.
+            apart = [e for e in same if any(_conflict(e.values, o.values) for o in same)]
+            distinct: list[_Entity] = []
+            over: list[_Entity] = []  # those that fit several of the distinct ones
+            for entity in [*apart, *(e for e in same if e not in apart)]:
+                fits = [e for e in distinct if not _conflict(e.values, entity.values)]
+                if len(fits) == 1:
+                    self._same(sets, fits[0], entity)
+                elif not fits:
+                    distinct.append(entity)
+                else:
+                    held = next((e for e in over if not _conflict(e.values, entity.values)), None)
+                    if held is None:
+                        over.append(held := entity)
+                    else:
+                        self._same(sets, held, entity)
+                    for narrower in fits:
+                        self._kind(narrower, held)
 
     def _same(self, sets: list[list[_Entity]], entity: _Entity, other: _Entity) -> None:
         """Make ``other`` part of ``entity``: two places, or two labels, for one thing."""
@@ -509,6 +527,11 @@ class _Kinds:
                 self._kind(entity, of)
         if other in self._coarse:
             self._coarse.add(entity)
+        self._asked |= {
+            (entity if a is other else a, entity if b is other else b)
+            for a, b in self._asked
+            if other in (a, b)
+        }
         for found in sets:
             found[:] = list(dict.fromkeys(entity if e is other else e for e in found))
 
@@ -567,13 +590,35 @@ class _Kinds:
         pickers: dict[_Entity, int] = {}
         for _, of in picks:
             pickers[of] = pickers.get(of, 0) + 1
+
+        def differing(entity: _Entity, of: _Entity) -> set[_Entity]:
+            """Of the two and the others with their words that picked either or were
+            picked by either, those that state something different from another."""
+            near = {entity, of}
+            near |= {a for a, b in picks if b in (entity, of)}
+            near |= {b for a, b in picks if a in (entity, of)}
+            alike = {self._now(e) for e in near if _words(e.label) == _words(of.label)}
+            return {e for e in alike if any(_conflict(e.values, o.values) for o in alike)}
+
         for entity, of in picks:
             now, now_of = self._now(entity), self._now(of)
-            if now is now_of:
+            # Nothing new where they are already one or related, and what was put
+            # together since they were asked about may state something different.
+            if now.is_kind_of(now_of) or now_of.is_kind_of(now):
+                continue
+            if _conflict(now.values, now_of.values):
                 continue
             words, words_of = _words(entity.label), _words(of.label)
             if words == words_of:
-                self._same(sets, now, now_of)  # one label, written two ways
+                # One label, written two ways: one entity, unless it is over several
+                # that differ (two models' "techno" rows picking one "TECHNO" column).
+                differ = differing(entity, of)
+                if not differ:
+                    self._same(sets, now, now_of)
+                elif now in differ and now_of not in differ:
+                    self._kind(now, now_of)
+                elif now_of in differ and now not in differ:
+                    self._kind(now_of, now)
             elif words < words_of:
                 self._kind(now_of, now)  # "SE" picked "SE 1.5 TSI": that is the narrower
             elif words > words_of or (of, entity) not in picks:
@@ -629,7 +674,8 @@ class ParentChild:
       column label is a child holding the cells below it (a cell spanning columns goes to
       each); ``"table_rows"`` does the same for each row's label in a table with column
       headers (its headers joined, then its cells as far as they tell it from the other
-      rows).
+      rows, and its band's name first where same-named rows under different bands state
+      different things: a grade's band over each engine's row and price).
     - A component type (``"section"``, ``"list_item"``, ``"column"``, ``"breakout"``,
       ``"table"``): each outermost component of that type is a child, labelled by its
       first heading (or first text), with its subtree. A lone one holding others of its
@@ -812,7 +858,9 @@ class _Claim:
 
     def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
         self.ids.add(statement.id)
-        self.values.setdefault(across, statement.text.removeprefix(header_prefix(ref)))
+        value = statement.text.removeprefix(header_prefix(ref))
+        # Without spacing or case: "150PS" and "150 PS" state one thing.
+        self.values.setdefault(across, "".join(value.split()).casefold())
 
 
 def _row_claims(

@@ -1127,6 +1127,153 @@ async def test_labels_something_nearby_is_a_kind_of_are_not_offered_further_out(
     assert texts(parsed, scopes[3].shared_statement_ids) == ["Range", "Delmaro"]
 
 
+async def test_same_named_rows_under_no_heading_of_their_own_are_numbered() -> None:
+    parsed = await parse(
+        price_list(("SE", "£20,000"), ("SE L", "£24,000"))
+        + price_list(("SE", "£30,000"), ("GT", "£34,000"))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["SE", "SE L", "SE (2)", "GT"]
+    assert texts(parsed, scopes[2].statement_ids) == ["Version: SE", "Price: £30,000"]
+
+
+async def test_a_label_that_fits_several_that_differ_is_over_them_not_one_of_them() -> None:
+    # Each model's "SE" has its own price; the equipment table's "SE" could be either's.
+    parsed = await parse(TWO_MODELS + "<h2>Equipment</h2>" + seats_table("SE", "SE L"))
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Kestrova", "Delmaro"')
+    kestrova_se, se_l, delmaro_se, gt = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert (kestrova_se.label, delmaro_se.label) == ("Kestrova SE", "Delmaro SE")
+    # Neither takes the column as its own, whichever comes first: both share it.
+    assert texts(parsed, kestrova_se.statement_ids) == ["Version: SE", "Price: £20,000"]
+    assert texts(parsed, delmaro_se.statement_ids) == ["Version: SE", "Price: £30,000"]
+    column = ["Equipment", "SE", "Seats", "Seats · SE: 5"]
+    assert texts(parsed, kestrova_se.shared_statement_ids)[-4:] == column
+    assert texts(parsed, delmaro_se.shared_statement_ids)[-4:] == column
+    # Only one "SE L" is priced, so the equipment table's is that one.
+    assert texts(parsed, se_l.statement_ids)[-2:] == ["SE L", "Seats · SE L: 7"]
+    assert "SE" not in texts(parsed, gt.shared_statement_ids)
+
+
+async def test_rows_that_differ_are_not_made_one_through_a_label_both_pick() -> None:
+    parsed = await parse(
+        "<h1>Range</h1><h2>Rafale</h2>"
+        + price_list(("techno", "£20,000"), ("esprit", "£24,000"))
+        + "<h2>Austral</h2>"
+        + price_list(("techno", "£30,000"), ("iconic", "£34,000"))
+        + "<h2>Equipment</h2>"
+        + seats_table("TECHNO", "ICONIC")
+    )
+    fake = (
+        kinds_jev()
+        .noul(BOUNDARY, p=0.1, state='"Rafale", "Austral"')
+        .choice(KIND, "TECHNO", state='"techno"}')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # "TECHNO" has both rows' words, but they state different prices: it isn't either
+    # row written another way. Each is a kind of it.
+    assert [s.label for s in scopes] == [
+        "Rafale techno",
+        "esprit",
+        "Austral techno",
+        "iconic",
+        "ICONIC",
+    ]
+    assert [texts(parsed, s.statement_ids) for s in scopes[:3:2]] == [
+        ["Version: techno", "Price: £20,000"],
+        ["Version: techno", "Price: £30,000"],
+    ]
+    for techno in scopes[:3:2]:
+        assert texts(parsed, techno.shared_statement_ids)[-3:] == [
+            "TECHNO",
+            "Seats",
+            "Seats · TECHNO: 5",
+        ]
+
+
+async def test_cells_that_differ_only_in_spacing_or_case_state_the_same() -> None:
+    def power(first: str, second: str) -> str:
+        return (
+            "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+            f"<tr><th>Power</th><td>{first}</td><td>{second}</td></tr></table>"
+        )
+
+    parsed = await parse(
+        "<h2>Summary</h2>"
+        + power("150PS", "180PS")
+        + "<h2>Details</h2>"
+        + power("150 ps", "180 ps")
+    )
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Summary", "Details"')
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["SE", "SE L"]
+
+
+async def test_two_that_pick_each_other_but_are_already_related_stay_two() -> None:
+    def columns(first: str, row: str) -> str:
+        return (
+            f"<table><tr><th></th><th>{first}</th><th>{first} 2</th></tr>"
+            f"<tr><th>{row}</th><td>1</td><td>2</td></tr></table>"
+        )
+
+    parsed = await parse(
+        columns("Bravo", "Seats") + columns("Alpha", "Doors") + columns("Charlie", "Power")
+    )
+
+    def to(*wanted: str) -> Callable[[Choice], str]:
+        return lambda q: next((w for w in wanted if w in q.options), "none")
+
+    fake = (
+        kinds_jev()
+        .choice(KIND, to("Charlie"), state='"Bravo"}')
+        .choice(KIND, to("Bravo", "Charlie"), state='"Alpha"}')
+        .choice(KIND, to("Alpha"), state='"Charlie"}')
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # Alpha is a kind of Bravo, and Bravo of Charlie; Alpha and Charlie picking each
+    # other doesn't make the three one entity, or a loop that leaves no record.
+    assert [s.label for s in scopes] == ["Bravo 2", "Alpha", "Alpha 2", "Charlie 2"]
+    assert texts(parsed, scopes[1].shared_statement_ids) == [
+        "Bravo",
+        "Seats",
+        "Seats · Bravo: 1",
+        "Doors",
+        "Charlie",
+        "Power",
+        "Power · Charlie: 1",
+    ]
+
+
+async def test_an_entity_made_of_two_places_is_not_asked_the_same_thing_twice() -> None:
+    doors = (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        "<tr><th>Doors</th><td>3</td><td>5</td></tr></table>"
+    )
+    parsed = await parse(
+        "<h1>Range</h1><h2>Alpha</h2>"
+        + price_list(("X one", "£1"), ("Y two", "£2"))
+        + seats_table("SE", "SE L")
+        + "<h2>Beta</h2>"
+        + price_list(("Z three", "£3"), ("W four", "£4"))
+        + doors
+    )
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='["Alpha", "Beta"]')
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The two "SE" columns are one entity once the sections meet: it has been asked
+    # about each section's rows already.
+    assert kind_calls(fake)["SE"] == [["X one", "Y two", "none"], ["Z three", "W four", "none"]]
+
+
+async def test_a_group_with_too_many_labels_for_a_choice_is_not_offered() -> None:
+    many = price_list(*((f"Version {i}", f"£{20_000 + i}") for i in range(255)))
+    parsed = await parse(many + seats_table("SE", "SE L"))
+    fake = kinds_jev()
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert len(scopes) == 257
+    asked = kind_calls(fake)
+    assert "SE" not in asked  # 255 rows and "none" are more than a Choice takes
+    assert asked["Version 254"] == [["SE", "SE L", "none"]]
+
+
 async def test_a_label_that_is_a_reserved_option_is_numbered() -> None:
     parsed = await parse(price_list(("none", "£20,000"), ("SE L", "£24,000")))
     first, _ = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
@@ -1382,6 +1529,25 @@ async def test_parent_child_takes_a_price_lists_rows_without_row_headers() -> No
         "Price: £39,995",
     ]
     assert texts(parsed, parent.statement_ids) == ["Kestrova"]
+
+
+async def test_parent_child_names_rows_with_their_own_prices_by_their_band() -> None:
+    parsed = await parse(
+        "<table><tr><th>Engine</th><th>Price</th></tr>"
+        '<tr><th colspan="2">Expression</th></tr>'
+        "<tr><td>TCe 100</td><td>£15,000</td></tr><tr><td>Hybrid 155</td><td>£19,000</td></tr>"
+        '<tr><th colspan="2">Journey</th></tr>'
+        "<tr><td>TCe 100</td><td>£16,000</td></tr></table>"
+    )
+    _, *children = await ParentChild(children="table_rows").resolve(
+        parsed, CAR, FakeJev(strict=True).client()
+    )
+    # One engine under two grades' bands, each with its own price: two children.
+    assert [c.label for c in children] == [
+        "Expression TCe 100",
+        "Expression Hybrid 155",
+        "Journey TCe 100",
+    ]
 
 
 async def test_parent_child_gives_a_cell_spanning_rows_to_each_row_child() -> None:

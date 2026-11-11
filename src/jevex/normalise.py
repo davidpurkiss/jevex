@@ -28,7 +28,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from jevex._tasks import gather
 from jevex.generators.units import spellings
-from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, UnexpectedAnswerError
+from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, UnexpectedAnswerError, estimate_tokens
 from jevex.locales import (
     ALL_MONTH_NAMES,
     ALL_MULTIPLIERS,
@@ -790,12 +790,20 @@ class _Settled:
         return sorted(weighed, key=lambda a: -a.p)
 
 
+SETTLE_QUESTION_TOKENS = 12_000
+"""The most a settle question's options and the statements describing them may take
+(:func:`~jevex.jev.estimate_tokens`): under half of what Jev takes for a state and one
+question, so the statements still fit as the state. Values past it aren't offered."""
+
+
 async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading) -> _Settled | None:
     """Jev's pick when a single-value field's best-ranked statements (the entity's own, or,
     without any, those it shares) give two or more different values (see
     :class:`NormaliseStage`); ``None`` when there's nothing to settle. The statements go in
     rank order, so a state cut to fit keeps the likeliest; past the most options a Choice
-    takes, the rest aren't offered, and a ``settle_values_skipped`` event says so."""
+    takes, or the most that fit with their statements in :data:`SETTLE_QUESTION_TOKENS`
+    (two at least), the rest aren't offered, and a ``settle_values_skipped`` event says
+    so."""
     if field.many or ctx.parsed is None or not reading.accepted:
         return None
     tier = reading.accepted[0][0] in reading.shared
@@ -811,7 +819,13 @@ async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading)
         stated.setdefault(option, ctx.parsed.statements[sid].text)
     if len(values) < 2 or len(options) < 2:
         return None
-    offered = dict(list(options.items())[: MAX_CHOICE_OPTIONS - 1])
+    offered: dict[str, str] = {}
+    room = SETTLE_QUESTION_TOKENS
+    for option, raw in list(options.items())[: MAX_CHOICE_OPTIONS - 1]:
+        room -= estimate_tokens(option) + estimate_tokens(stated[option])
+        if room < 0 and len(offered) >= 2:
+            break
+        offered[option] = raw
     if len(offered) < len(options):
         ctx.event(
             stage,

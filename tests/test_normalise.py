@@ -19,10 +19,11 @@ from jevex import (
 from jevex.entities import EntityScope
 from jevex.errors import PartError
 from jevex.interfaces import ParsedDocument, Selection
-from jevex.jev import Choice
+from jevex.jev import Choice, estimate_tokens
 from jevex.layout import Component
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
+    SETTLE_QUESTION_TOKENS,
     FunctionNormaliser,
     NormaliseError,
     NormaliserFailedError,
@@ -641,6 +642,29 @@ async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() 
             },
         )
     }
+
+
+async def test_values_whose_statements_would_overfill_the_question_are_left_out() -> None:
+    # Each option carries its statement, so long statements are offered only as far as
+    # they fit: the question alone must leave room for a state.
+    filler = "SE 1.5 TSI 150 DSG £1,234.56 £246.91 £1,481.47 CO2 123 g/km; " * 64
+    rows = [statement(f"s{i}", f"Row {i}: £{1000 + i} {filler}") for i in range(10)]
+    fake = FakeJev(strict=True).choice("Which of these is the price", "£1000")
+    ctx = context(*rows, jev=fake)
+    run = ctx.schemas["Car"]
+    money = {"parse_money": {"currency": "GBP"}}
+    for i, row in enumerate(rows):
+        run.selections[("doc", "price", row.id)] = pick(row, f"£{1000 + i}", 0.9 - i / 100, money)
+    await NormaliseStage().run(ctx)
+    assert run.fields["doc"]["price"].value == Decimal(1000)
+    [asked] = fake.calls
+    question = asked.questions["settle"]
+    assert isinstance(question, Choice)
+    offered = [o for o in question.options if o != "none"]
+    assert offered == ["£1000", "£1001", "£1002", "£1003"]  # the likeliest, in rank order
+    assert estimate_tokens(question.options) <= SETTLE_QUESTION_TOKENS
+    [event] = [e for e in ctx.events if e.kind == "settle_values_skipped"]
+    assert event.message == "price: asked about 4 of 10 values"
 
 
 async def test_values_past_the_most_a_choice_offers_are_left_out_and_reported() -> None:

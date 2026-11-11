@@ -434,9 +434,18 @@ class SelectStage:
             for ask in asks.values():
                 if ask.spec.needs_candidates and not ask.spec.many:
                     selection = ask.run.selections[(ask.scopes[0], ask.spec.name, sid)]
-                    if selection.candidate is not None:
-                        key = (ask.run.name, selection.candidate.raw)
-                        picked.setdefault(key, []).append(ask)
+                    candidate = selection.candidate
+                    if candidate is None:
+                        continue
+                    # Words the statement has twice ("5 doors and 5 seats") are two
+                    # spans, though a selection names them by their text alone.
+                    spans = {
+                        (c.span.start, c.span.end)
+                        for c in ask.run.candidates.get((sid, ask.spec.name), [])
+                        if c.raw == candidate.raw
+                    }
+                    if len(spans) == 1:
+                        picked.setdefault((ask.run.name, candidate.raw), []).append(ask)
             found = [(raw, asks) for (_, raw), asks in picked.items() if len(asks) > 1]
             if found:
                 contested[sid] = found
