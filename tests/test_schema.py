@@ -463,6 +463,12 @@ def test_span_question_offers_the_fields_that_picked_the_span() -> None:
         instructions='Which of these is "Active X Edition"?',
         options={"trim": "Trim or grade name, e.g. SE L", "model": "Model name, e.g. Golf"},
     )
+    # A span one field picked alone may be none of the fields offered.
+    assert spec.span_question("ZWE219L", ["model", "trim"], or_none=True).options == {
+        "model": "Model name, e.g. Golf",
+        "trim": "Trim or grade name, e.g. SE L",
+        "none": "None of these",
+    }
 
 
 def test_kind_question_offers_the_labels_or_none() -> None:

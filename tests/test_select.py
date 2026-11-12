@@ -963,24 +963,26 @@ async def test_a_span_two_fields_picked_is_kept_for_the_one_jev_says_it_is() -> 
     # The model's selection of the same words becomes "none", as sure as Jev's answer.
     model = run.selections[("doc", "model", "s1")]
     assert (model.candidate, model.confidence) == (None, 0.9)
-    assert model.alternatives == {"Active X Edition": pytest.approx(0.1)}
-    # One more request for the statement: the span, and the fields that picked it,
-    # described as the categorise Choice describes them.
+    assert model.alternatives == {"Active X Edition": pytest.approx(0.05)}
+    # One more request for the statement: the span, and the schema's name fields,
+    # described as the categorise Choice describes them, or none of them.
     _, asked = fake.calls
     assert asked.state == {"statement": "Active X Edition: £30,775"}
     assert asked.questions == {
         "span0": Choice(
             instructions='Which of these is "Active X Edition"?',
-            options={"trim": "Trim name", "model": "Model name"},
+            options={"trim": "Trim name", "model": "Model name", "none": "None of these"},
         )
     }
 
 
-async def test_fields_that_pick_different_spans_are_not_asked_which_is_which() -> None:
+async def test_each_name_a_field_picked_is_asked_about_on_its_own() -> None:
     fake = (
         FakeJev(strict=True)
         .choice("Which of these is the model name?", "Kestrova")
         .choice("Which of these is the trim name?", "SE L")
+        .choice('Which of these is "Kestrova"?', "model")
+        .choice('Which of these is "SE L"?', "trim")
     )
     ctx = named_context(fake, "Kestrova SE L")
     await run_both(ctx)
@@ -990,19 +992,69 @@ async def test_fields_that_pick_different_spans_are_not_asked_which_is_which() -
         "model": "Kestrova",
         "trim": "SE L",
     }
-    assert len(fake.calls) == 1
+    # Both spans in one request, the field that picked each offered first.
+    _, asked = fake.calls
+    assert {key: list(q.options) for key, q in asked.questions.items()} == {
+        "span0": ["trim", "model", "none"],
+        "span1": ["model", "trim", "none"],
+    }
+    assert [q.instructions for q in asked.questions.values()] == [
+        'Which of these is "SE L"?',
+        'Which of these is "Kestrova"?',
+    ]
 
 
-async def test_a_span_one_field_picked_and_another_refused_is_not_asked_about() -> None:
+async def test_a_name_jev_says_is_another_field_is_not_the_field_that_picked_it() -> None:
+    # Only the model's question took the grade: the trim's refused it, so nothing
+    # contests the span, and it is still not the model.
     fake = (
         FakeJev(strict=True)
-        .choice("Which of these is the model name?", "none")
-        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice("Which of these is the model name?", "Active X Edition")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "Active X Edition"?', "trim", confidence=0.8)
     )
     ctx = named_context(fake, "Active X Edition: £30,775")
     await run_both(ctx)
+    run = ctx.schemas["Named"]
+    model = run.selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.8)
+    # The span check takes a pick away and never gives one: the trim's "none" stands.
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+
+
+async def test_a_name_jev_says_is_none_of_the_fields_is_dropped() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "ZWE219L-DEXNBW")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "ZWE219L-DEXNBW"?', "none", confidence=0.7)
+    )
+    ctx = named_context(fake, "Model code: ZWE219L-DEXNBW")
+    await run_both(ctx)
+    model = ctx.schemas["Named"].selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.7)
+    assert model.alternatives == {"ZWE219L-DEXNBW": pytest.approx(0.15)}
+
+
+class Priced(BaseModel):
+    trim: str = Field(description="Trim name")
+    price: int = Field(description="Price")
+
+
+async def test_a_schema_with_one_name_field_is_not_asked_what_its_picks_are() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice("Which of these is the price?", "£30,775")
+    )
+    ctx = context(fake, [st("s1", "Active X Edition: £30,775")], {}, models=(Priced,))
+    run = ctx.schemas["Priced"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="trim", confidence=0.6, probabilities={"trim": 0.6, "price": 0.4}
+    )
+    await run_both(ctx)
     assert len(fake.calls) == 1
-    assert ctx.schemas["Named"].selections[("doc", "model", "s1")].candidate is None
+    assert run.selections[("doc", "trim", "s1")].candidate is not None
 
 
 class Body(BaseModel):
@@ -1052,6 +1104,31 @@ async def test_fields_whose_candidates_are_at_different_spans_are_not_contested(
     await SelectStage().run(ctx)
     assert len(fake.calls) == 1
     assert run.selections[("doc", "seats", "s1")].candidate is not None
+
+
+async def test_a_span_two_other_fields_picked_is_asked_about_among_them() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the number of doors?", "5")
+        .choice("Which of these is the number of seats?", "5")
+        .choice('Which of these is "5"?', "seats")
+    )
+    ctx = context(fake, [st("s1", "5 seats")], {}, models=(Body,))
+    run = ctx.schemas["Body"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="seats", confidence=0.6, probabilities={"doors": 0.4, "seats": 0.6}
+    )
+    await run_both(ctx)
+    assert run.selections[("doc", "doors", "s1")].candidate is None
+    assert run.selections[("doc", "seats", "s1")].candidate is not None
+    # A number is one of the fields that took it: "none" is offered only for names.
+    _, asked = fake.calls
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "5"?',
+            options={"doors": "Number of doors", "seats": "Number of seats"},
+        )
+    }
 
 
 async def test_a_contested_span_is_settled_for_every_scope_holding_the_statement() -> None:
