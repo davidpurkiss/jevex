@@ -29,6 +29,7 @@ from jevex.normalise import NormaliseStage
 from jevex.pipeline import Pipeline, VisionValue
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
+    SPAN_P,
     CandidateStage,
     JevCandidateSelector,
     SelectStage,
@@ -1089,6 +1090,38 @@ async def test_a_contested_span_stays_with_the_likeliest_field_that_picked_it() 
     assert model.alternatives == {"Excel": 0.25}
 
 
+async def test_a_name_jev_says_is_something_else_at_span_p_is_dropped() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Kestrova")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "Kestrova"?', "none", confidence=SPAN_P)
+    )
+    ctx = named_context(fake, "Kestrova")
+    await run_both(ctx)
+    assert ctx.schemas["Named"].selections[("doc", "model", "s1")].candidate is None
+
+
+async def test_the_field_jev_says_a_contested_span_is_keeps_it_on_a_tie() -> None:
+    # Jev's probabilities come rounded: its choice is the tie-break, not the fields' order.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Excel")
+        .choice("Which of these is the trim name?", "Excel")
+        .choice(
+            'Which of these is "Excel"?',
+            "model",
+            confidence=0.4,
+            probabilities={"trim": 0.4, "none": 0.2},
+        )
+    )
+    ctx = named_context(fake, "Excel")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    assert run.selections[("doc", "model", "s1")].candidate is not None
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+
+
 class Priced(BaseModel):
     trim: str = Field(description="Trim name")
     price: int = Field(description="Price")
@@ -1159,12 +1192,37 @@ async def test_fields_whose_candidates_are_at_different_spans_are_not_contested(
     assert run.selections[("doc", "seats", "s1")].candidate is not None
 
 
+async def test_a_span_a_name_field_and_another_field_picked_is_asked_about_among_them() -> None:
+    # One name field in the schema: its picks aren't checked alone, but a span is one field.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the trim name?", "30")
+        .choice("Which of these is the price?", "30")
+        .choice('Which of these is "30"?', "price")
+    )
+    ctx = context(fake, [st("s1", "Kestrova 30")], {}, models=(Priced,))
+    run = ctx.schemas["Priced"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="trim", confidence=0.6, probabilities={"trim": 0.6, "price": 0.4}
+    )
+    await run_both(ctx)
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+    assert run.selections[("doc", "price", "s1")].candidate is not None
+    _, asked = fake.calls
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "30"?',
+            options={"trim": "Trim name", "price": "Price"},
+        )
+    }
+
+
 async def test_a_span_two_other_fields_picked_is_asked_about_among_them() -> None:
     fake = (
         FakeJev(strict=True)
         .choice("Which of these is the number of doors?", "5")
         .choice("Which of these is the number of seats?", "5")
-        .choice('Which of these is "5"?', "seats")
+        .choice('Which of these is "5"?', "seats", confidence=0.5, probabilities={"doors": 0.5})
     )
     ctx = context(fake, [st("s1", "5 seats")], {}, models=(Body,))
     run = ctx.schemas["Body"]

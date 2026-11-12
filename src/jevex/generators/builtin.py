@@ -472,7 +472,10 @@ def _value_span(text: str) -> tuple[int, int] | None:
 
 
 # An apostrophe is part of a word only inside it ("Škoda’s"): at either end of one it is
-# a quotation mark ("the 'GT-Line' grade"), and a phrase break as the double ones are.
+# read as a quotation mark ("the 'GT-Line' grade"), and a phrase break as the double ones
+# are. Nothing tells a closing quote from a plural possessive or a mark for feet, so
+# "drivers' seat" and "19' wheels" break there too: the price of names not ending in a
+# quote.
 _WORD = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|[\w](?:['’](?=\w)|[\w&/+-])*(?:\.\d+)?")
 # A comma between digits ("18,495") is a thousands separator, not a phrase break.
 _BREAK = re.compile(

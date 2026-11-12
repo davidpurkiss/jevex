@@ -24,10 +24,12 @@ After categorising, each statement is assigned to a field (or none). Then:
   pick the same words of a statement, and a text field takes what is some other kind of
   name where nothing better is on offer. A span states one field: one more request for
   the statement asks which field each such span is
-  (:meth:`~jevex.schema.SchemaSpec.span_question`; a text field's pick among the schema's
-  text fields or none of them, any other pick among the fields that made it). Only the
-  likeliest of the fields that picked a span keeps it, and none when Jev says at
-  :data:`SPAN_P` or above that it is something else: the others' selections become "none".
+  (:meth:`~jevex.schema.SchemaSpec.span_question`): a span a text field picked, in a
+  schema with more than one, among the fields that picked it, the other text fields and
+  none of them; any other span two or more fields picked, among those. The field Jev
+  says it is keeps it. When Jev says it is something else, none does at :data:`SPAN_P`
+  or above, and under that the likeliest of those that picked it. The others' selections
+  become "none".
 
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
@@ -72,10 +74,10 @@ ACCEPT_AT = 0.5
 
 
 SPAN_P = 0.5
-"""A field keeps the span it picked unless Jev says, at this probability or above, that the
-span is something else (:meth:`SelectStage._one_field_per_span`). Below it Jev is torn:
-an unfamiliar name ("Delmaro Kestrova") is as likely a model as a make, and the field's
-own question has already taken it."""
+"""A span stays with a field that picked it unless Jev says, at this probability or above,
+that it is something none of them is (:meth:`SelectStage._one_field_per_span`). Below it
+Jev is torn: an unfamiliar name ("Delmaro Kestrova") is as likely a model as a make, and
+the field's own question has already taken it."""
 
 
 ALSO_CATEGORY_P = 0.1
@@ -438,13 +440,15 @@ class SelectStage:
         Jev is asked the other way round, which field the span is
         (:meth:`~jevex.schema.SchemaSpec.span_question`), one more request per statement:
 
-        - a span a text field picked, among the schema's text fields (when it has more
-          than one), or none of them: a name can be told from another kind of name;
-        - a span only other fields picked, when two or more did, among those fields.
+        - a span a text field picked, when the schema has more than one text field:
+          among the fields that picked it and the schema's other text fields, or none of
+          them (a name can be told from another kind of name);
+        - any other span two or more fields picked, among those fields.
 
-        Of the fields that picked a span, only the likeliest keeps it, and not even that
-        one when Jev says at :data:`SPAN_P` or above that the span is something else. A
-        field that loses a span has its selection become "none"."""
+        Of the fields that picked a span, the one Jev says it is keeps it. When Jev says
+        it is something else, none of them does at :data:`SPAN_P` or above, and under
+        that the likeliest of them. A field that loses a span has its selection become
+        "none"."""
         asked: dict[str, list[tuple[str, list[_Ask], list[str], bool]]] = {}
         for sid, (_, asks) in plans.items():
             picked: dict[tuple[str, int, int], tuple[str, list[_Ask]]] = {}
@@ -490,9 +494,9 @@ class SelectStage:
                 answer = answers[f"span{i}"]
                 assert isinstance(answer, ChoiceAnswer)
                 likely = answer.probabilities
-                keeper = max(pickers, key=lambda ask: likely.get(ask.spec.name, 0.0))
-                if answer.choice != keeper.spec.name and likely.get(answer.choice, 0.0) >= SPAN_P:
-                    keeper = None
+                keeper = next((ask for ask in pickers if ask.spec.name == answer.choice), None)
+                if keeper is None and likely.get(answer.choice, 0.0) < SPAN_P:
+                    keeper = max(pickers, key=lambda ask: likely.get(ask.spec.name, 0.0))
                 for ask in pickers:
                     if ask is not keeper:
                         lost = Selection(

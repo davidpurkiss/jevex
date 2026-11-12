@@ -459,7 +459,7 @@ def test_settle_question_describes_each_value_by_its_statement() -> None:
 
 def test_span_question_offers_the_fields_that_picked_the_span() -> None:
     spec = SchemaSpec.from_model(VehicleSpec)
-    assert spec.span_question("Active X Edition", ["trim", "model"]) == Choice(
+    assert spec.span_question("Active X Edition", ["trim", "model"], or_none=False) == Choice(
         instructions='Which of these is "Active X Edition"?',
         options={"trim": "Trim or grade name, e.g. SE L", "model": "Model name, e.g. Golf"},
     )
@@ -500,12 +500,15 @@ def test_entity_questions_can_be_overridden() -> None:
             axis_question="Which headers are the {entity}s?",
             kind_question="Which of these is this {entity}?",
             span_question="What is {span}?",
+            entities_elsewhere="other {entity}s",
         )
         price: int = Field(description="Price")
 
     spec = SchemaSpec.from_model(Listing)
     assert spec.kind_question(["Golf"]).instructions == "Which of these is this car?"
-    assert spec.span_question("£5,000", ["price"]).instructions == "What is £5,000?"
+    asked = spec.span_question("£5,000", ["price"], or_none=False)
+    assert asked.instructions == "What is £5,000?"
+    assert spec.entities_elsewhere == "other cars"
     assert spec.boundary_question("Golf").instructions == "Is Golf one car for sale?"
     question = spec.entity_question(["Golf"])
     assert question.instructions == "Which car is this about?"
@@ -515,6 +518,7 @@ def test_entity_questions_can_be_overridden() -> None:
 
 def test_the_axis_question_lists_each_axiss_labels_within_a_cap() -> None:
     spec = SchemaSpec.from_model(VehicleSpec)
+    assert spec.entities_elsewhere == "vehicle specs elsewhere"
     assert spec.axis_question(["SE", "GT"], ["Red", "Blue"]) == Choice(
         instructions="Which headers of this table each name a separate vehicle spec?",
         options={

@@ -85,7 +85,7 @@ class _Member:
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
     """For a table's column or row, its cells' text (without spacing, case or the
-    punctuation inside a word) by their
+    punctuation joining a word's parts) by their
     headers on the other axis: what it states, so two that state different things can be
     told apart (:func:`_conflict`)."""
 
@@ -370,19 +370,19 @@ class MultiEntity:
             named = _named_elsewhere([*labels.get(0, []), *labels.get(1, [])], elsewhere)
 
             def state(text: str) -> JSONContent:
-                state: dict[str, JSONContent] = {"table": text}
+                around: dict[str, JSONContent] = {"table": text}
                 if section:
-                    state["section"] = section
+                    around["section"] = section
                 if named:
-                    state[f"{schema.entity_name}s elsewhere"] = list(named)
-                return state
+                    around[schema.entities_elsewhere] = list(named)
+                return around
 
             text = jev.fit_state(table.text, {"axis": question}, within=state)
             answer = (await jev.ask(state(text), {"axis": question}))["axis"]
             if not isinstance(answer, ChoiceAnswer):
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-            kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
-            return table_id, {0, 1} - kept
+            entities = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
+            return table_id, {0, 1} - entities
 
         def kept(dropped: dict[str, set[int]]) -> list[tuple[_Group, _Member]]:
             # A table not asked about yet has neither axis.
@@ -667,16 +667,20 @@ _WORD = re.compile(r"[^\W_]+")
 def _named_elsewhere(labels: Sequence[str], elsewhere: Sequence[str]) -> list[str]:
     """The entities' labels in ``elsewhere`` that one of ``labels`` names: one with the
     label's words, or those and more, or fewer ("techno" names "techno 1.2 TCe"). In
-    order, each once, and no more than fit in ``MAX_AXIS_LABELS_CHARS``."""
-    words = [found for found in map(_words, labels) if found]
+    order, each once, those that fit in ``MAX_AXIS_LABELS_CHARS`` between them.
+
+    This only chooses what goes beside the axis question: a document can hold hundreds of
+    entities, and the ones that bear on a table are those called what its headers are.
+    Which axis they speak for is still Jev's to say. A label with no letters ("5") is
+    left out of the matching: it is in any label with that number."""
+    words = [found for found in map(_words, labels) if any(w.isalpha() for w in found)]
     named: list[str] = []
     room = MAX_AXIS_LABELS_CHARS
     for other in dict.fromkeys(elsewhere):
         theirs = _words(other)
-        if theirs and any(mine <= theirs or theirs <= mine for mine in words):
+        fits = len(other) <= room
+        if fits and theirs and any(mine <= theirs or theirs <= mine for mine in words):
             room -= len(other)
-            if room < 0:
-                break
             named.append(other)
     return named
 
@@ -897,10 +901,11 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     return groups
 
 
-_JOINER = re.compile(r"(?<=[^\W_])[\W_]+(?=[^\W\d_])|(?<=[^\W\d_])[\W_]+(?=[^\W_])")
-"""Punctuation inside a word, which cells are compared without, as they are without spacing
-or case: "6 speed manual" and "6-Speed Manual" state one thing. Between two digits it
-stays ("7-8", "1.5"), and so does a cell that is only a symbol."""
+_JOINER = re.compile(r"(?<=[^\W_])[-/._'’]+(?=[^\W\d_])")
+"""A hyphen, slash, full stop or apostrophe joining a word to the letters after it, which
+cells are compared without, as they are without spacing or case: "6 speed manual" and
+"6-Speed Manual" state one thing. Before a digit it stays, where it may be a sign, a
+range or a decimal point ("-5", "7-8", "1.5"), and so does every other mark."""
 
 
 @dataclass

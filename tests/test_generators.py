@@ -463,6 +463,13 @@ def test_noun_phrases_keep_an_apostrophe_only_inside_a_word() -> None:
     assert raws(NounPhrase(), "the 'GT-Line' grade") == ["GT-Line", "grade"]
     assert raws(NounPhrase(), "the ‘GT-Line S’") == ["GT-Line", "GT-Line S", "S"]
     assert raws(NounPhrase(), "Škoda’s Kamiq") == ["Škoda’s", "Škoda’s Kamiq", "Kamiq"]
+    # A plural possessive ends as a quotation does, so it breaks the phrase too.
+    assert raws(NounPhrase(), "Drivers' seat height") == [
+        "Drivers",
+        "seat",
+        "seat height",
+        "height",
+    ]
 
 
 def test_noun_phrases_chunk_long_runs() -> None:

@@ -971,15 +971,32 @@ async def test_entities_a_table_was_found_not_to_have_are_not_named_to_another()
     }
 
 
+async def test_a_label_with_no_letters_names_no_entity_elsewhere() -> None:
+    # A row labelled "5" is not the "1.5" of an engine: only what the trims name is told.
+    seats = (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        "<tr><th>5</th><td>std</td><td>std</td></tr>"
+        "<tr><th>7</th><td>opt</td><td>std</td></tr></table>"
+    )
+    versions = price_list(("SE 1.5 TSI", "£20,000"), ("GT 1.5 TSI", "£30,000"))
+    parsed = await parse(seats + versions)
+    fake = one_axis_jev().choice(AXIS, "columns", state="std")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    _, asked = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(asked.state, dict)
+    assert asked.state["vehicle specs elsewhere"] == ["SE 1.5 TSI"]
+
+
 async def test_the_entities_named_to_a_table_are_cut_to_a_length() -> None:
     engines = [f"SE {i}.0 litre turbocharged petrol automatic" for i in range(1, 13)]
+    engines.append("SE 13")  # short enough to fit where the eighth doesn't
     parsed = await parse(price_list(*((name, "£20,000") for name in engines)) + PAINTS)
     fake = one_axis_jev().choice(AXIS, "columns", state="Red")
     await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     _, paints = [c for c in fake.calls if "axis" in c.questions]
     assert isinstance(paints.state, dict)
     # Whole labels, in order, within MAX_AXIS_LABELS_CHARS (300) between them.
-    assert paints.state["vehicle specs elsewhere"] == engines[:7]
+    assert paints.state["vehicle specs elsewhere"] == [*engines[:7], "SE 13"]
 
 
 async def test_the_label_with_the_others_words_and_more_is_the_kind_whichever_picks() -> None:
@@ -1314,6 +1331,8 @@ async def test_cells_that_differ_only_in_spacing_case_or_punctuation_in_a_word_s
     ("first", "second"),
     [
         (("7-8", "9"), ("78", "9")),  # a range is not a number
+        (("Up to -5°C", "0°C"), ("Up to 5°C", "0°C")),  # nor a sign a hyphen
+        (("Option +£250", "£0"), ("Option -£250", "£0")),
         (("1.5", "2.0"), ("15", "2.0")),
         (("●", "●"), ("-", "●")),  # fitted, and not available
     ],
