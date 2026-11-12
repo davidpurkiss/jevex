@@ -194,7 +194,9 @@ class MultiEntity:
     (shared by the variants), nor which axis holds the entities where labels on both were
     accepted (trims across the top, paint colours down the side), so one Choice per
     table with accepted labels (:meth:`~jevex.schema.SchemaSpec.axis_question`), the
-    table as its state, keeps the columns, the rows or neither. With ``confirm=False``
+    table as its state, keeps the columns, the rows or neither. A table with labels
+    accepted on both axes is asked about after the others, with the entities found
+    elsewhere that its labels name in the state too. With ``confirm=False``
     nothing is asked and every proposed label is an entity, except table rows (only
     columns are proposed): use it only for pages whose structure is known to be one
     entity per group, since otherwise topic sections split the record.
