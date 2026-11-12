@@ -1043,6 +1043,52 @@ async def test_a_name_jev_says_is_none_of_the_fields_is_dropped() -> None:
     assert model.alternatives == {"ZWE219L-DEXNBW": pytest.approx(0.15)}
 
 
+async def test_a_name_jev_is_torn_about_stays_with_the_field_that_picked_it() -> None:
+    # An invented make is as likely a model to Jev, and no likelier anything else: under
+    # SPAN_P the make's own pick stands.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Kestrova")
+        .choice("Which of these is the trim name?", "Delmaro")
+        .choice('Which of these is "Kestrova"?', "model")
+        .choice(
+            'Which of these is "Delmaro"?',
+            "model",
+            confidence=0.49,
+            probabilities={"trim": 0.34, "none": 0.17},
+        )
+    )
+    ctx = named_context(fake, "Delmaro Kestrova")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    trim = run.selections[("doc", "trim", "s1")]
+    assert trim.candidate is not None
+    assert trim.candidate.raw == "Delmaro"
+
+
+async def test_a_contested_span_stays_with_the_likeliest_field_that_picked_it() -> None:
+    # Jev's first choice is no field at all, but it is torn: of the two that picked the
+    # span, the one it finds likelier keeps it.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Excel")
+        .choice("Which of these is the trim name?", "Excel")
+        .choice(
+            'Which of these is "Excel"?',
+            "none",
+            confidence=0.4,
+            probabilities={"trim": 0.35, "model": 0.25},
+        )
+    )
+    ctx = named_context(fake, "Excel")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    assert run.selections[("doc", "trim", "s1")].candidate is not None
+    model = run.selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.4)
+    assert model.alternatives == {"Excel": 0.25}
+
+
 class Priced(BaseModel):
     trim: str = Field(description="Trim name")
     price: int = Field(description="Price")

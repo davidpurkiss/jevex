@@ -25,8 +25,9 @@ After categorising, each statement is assigned to a field (or none). Then:
   name where nothing better is on offer. A span states one field: one more request for
   the statement asks which field each such span is
   (:meth:`~jevex.schema.SchemaSpec.span_question`; a text field's pick among the schema's
-  text fields or none of them, any other pick among the fields that made it), and a field
-  the span isn't has its selection become "none".
+  text fields or none of them, any other pick among the fields that made it). Only the
+  likeliest of the fields that picked a span keeps it, and none when Jev says at
+  :data:`SPAN_P` or above that it is something else: the others' selections become "none".
 
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
@@ -68,6 +69,13 @@ if TYPE_CHECKING:
 
 ACCEPT_AT = 0.5
 """Noul probability at or above which a bool is True or a list member is accepted."""
+
+
+SPAN_P = 0.5
+"""A field keeps the span it picked unless Jev says, at this probability or above, that the
+span is something else (:meth:`SelectStage._one_field_per_span`). Below it Jev is torn:
+an unfamiliar name ("Delmaro Kestrova") is as likely a model as a make, and the field's
+own question has already taken it."""
 
 
 ALSO_CATEGORY_P = 0.1
@@ -434,8 +442,9 @@ class SelectStage:
           than one), or none of them: a name can be told from another kind of name;
         - a span only other fields picked, when two or more did, among those fields.
 
-        A field that picked a span Jev says is something else has its selection become
-        "none"."""
+        Of the fields that picked a span, only the likeliest keeps it, and not even that
+        one when Jev says at :data:`SPAN_P` or above that the span is something else. A
+        field that loses a span has its selection become "none"."""
         asked: dict[str, list[tuple[str, list[_Ask], list[str], bool]]] = {}
         for sid, (_, asks) in plans.items():
             picked: dict[tuple[str, int, int], tuple[str, list[_Ask]]] = {}
@@ -480,12 +489,16 @@ class SelectStage:
             for i, (raw, pickers, _, _) in enumerate(found):
                 answer = answers[f"span{i}"]
                 assert isinstance(answer, ChoiceAnswer)
+                likely = answer.probabilities
+                keeper = max(pickers, key=lambda ask: likely.get(ask.spec.name, 0.0))
+                if answer.choice != keeper.spec.name and likely.get(answer.choice, 0.0) >= SPAN_P:
+                    keeper = None
                 for ask in pickers:
-                    if ask.spec.name != answer.choice:
+                    if ask is not keeper:
                         lost = Selection(
                             candidate=None,
                             confidence=answer.confidence,
-                            alternatives={raw: answer.probabilities.get(ask.spec.name, 0.0)},
+                            alternatives={raw: likely.get(ask.spec.name, 0.0)},
                         )
                         for scope in ask.scopes:
                             ask.run.selections[(scope, ask.spec.name, sid)] = lost

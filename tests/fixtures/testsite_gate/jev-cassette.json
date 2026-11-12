@@ -1334,6 +1334,64 @@
       "model": "jev-1.13.0"
     }
   },
+  "1215f7bc846aefa1": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Parhelia\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Brantis\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Brantis Parhelia"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.76,
+          "probabilities": {
+            "colour": 0.01,
+            "make": 0.07,
+            "model": 0.82,
+            "none": 0.1
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "make",
+          "confidence": 0.39,
+          "probabilities": {
+            "colour": 0.03,
+            "make": 0.54,
+            "model": 0.3,
+            "none": 0.13
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 452,
+      "model": "jev-1.14.0"
+    }
+  },
   "125a34385ee9c5a5": {
     "request": {
       "questions": {
@@ -2308,6 +2366,45 @@
       },
       "input_tokens": 530,
       "model": "jev-1.13.0"
+    }
+  },
+  "1ccf5ed40f73be15": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Edition\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Edition",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.99,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.01,
+            "trim": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
+      "model": "jev-1.14.0"
     }
   },
   "1e5894705dbf46cc": {
@@ -3767,6 +3864,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "22887868fca50596": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Forest Green\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Esquel Wrenna",
+        "statement": "Finished in Forest Green"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 371,
+      "model": "jev-1.14.0"
+    }
+  },
   "23232d9eddd9c5cd": {
     "request": {
       "questions": {
@@ -4095,6 +4229,42 @@
       },
       "input_tokens": 346,
       "model": "jev-1.13.0"
+    }
+  },
+  "24a934c5b638df92": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Aurel Marlow\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "2024 Aurel Marlow"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.36,
+          "probabilities": {
+            "colour": 0.02,
+            "make": 0.09,
+            "model": 0.52,
+            "none": 0.37
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 358,
+      "model": "jev-1.14.0"
     }
   },
   "250e5714ea38c8f3": {
@@ -4966,6 +5136,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "2d779ea29f40ecb2": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Deep Black\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Corvane Tamsin",
+        "statement": "Colour: Deep Black"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 372,
+      "model": "jev-1.14.0"
+    }
+  },
   "2d856096ff15651c": {
     "request": {
       "questions": {
@@ -5402,6 +5609,64 @@
       },
       "input_tokens": 365,
       "model": "jev-1.13.0"
+    }
+  },
+  "30b15eb82455737e": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Wrenna\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Esquel\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Esquel Wrenna"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.39,
+          "probabilities": {
+            "colour": 0.04,
+            "make": 0.23,
+            "model": 0.54,
+            "none": 0.19
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "make",
+          "confidence": 0.21,
+          "probabilities": {
+            "colour": 0.05,
+            "make": 0.41,
+            "model": 0.26,
+            "none": 0.28
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 450,
+      "model": "jev-1.14.0"
     }
   },
   "31468f57d37146a6": {
@@ -6172,6 +6437,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "3af14e7c3684c1d5": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Pure White\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Aurel Marlow",
+        "statement": "Pure White"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "3ba5d9f0a445e7a5": {
     "request": {
       "questions": {
@@ -6287,6 +6589,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "3bd55f6ac52815ac": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Edition\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.69,
+          "probabilities": {
+            "make": 0.01,
+            "model": 0.02,
+            "none": 0.2,
+            "trim": 0.77
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "3c13036968b2e3d6": {
     "request": {
       "questions": {
@@ -6375,6 +6714,43 @@
       },
       "input_tokens": 447,
       "model": "jev-1.13.0"
+    }
+  },
+  "3d8ab552e15fa7bd": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Forest Green\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Halden Lumo",
+        "statement": "Finished in Forest Green"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 370,
+      "model": "jev-1.14.0"
     }
   },
   "3dae2bebf0b6b877": {
@@ -7520,6 +7896,64 @@
       "model": "jev-1.13.0"
     }
   },
+  "49cf6625ba7732be": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Quorra\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Galvor\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Galvor Quorra"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.63,
+          "probabilities": {
+            "colour": 0.01,
+            "make": 0.23,
+            "model": 0.72,
+            "none": 0.04
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "make",
+          "confidence": 0.48,
+          "probabilities": {
+            "colour": 0.02,
+            "make": 0.61,
+            "model": 0.17,
+            "none": 0.2
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 448,
+      "model": "jev-1.14.0"
+    }
+  },
   "4a89b28bd85c571f": {
     "request": {
       "questions": {
@@ -8480,6 +8914,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "53809ec2da63b2b0": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Racing Red\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Delmaro Kestrova",
+        "statement": "Finished in Racing Red"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 373,
+      "model": "jev-1.14.0"
+    }
+  },
   "54c09bac5e04f784": {
     "request": {
       "questions": {
@@ -8911,6 +9382,45 @@
       "model": "jev-1.14.0"
     }
   },
+  "5874e9e0a547b8a0": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"GT\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "GT",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.97,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.01,
+            "none": 0.01,
+            "trim": 0.98
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
+      "model": "jev-1.14.0"
+    }
+  },
   "588317b72f3a6535": {
     "request": {
       "questions": {
@@ -9032,6 +9542,43 @@
       },
       "input_tokens": 364,
       "model": "jev-1.13.0"
+    }
+  },
+  "5b12e1b7f05c0dad": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Atlantic Blue\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Galvor Rivette",
+        "statement": "Colour: Atlantic Blue"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 371,
+      "model": "jev-1.14.0"
     }
   },
   "5b3c952e0d4566b4": {
@@ -9597,6 +10144,43 @@
       },
       "input_tokens": 640,
       "model": "jev-1.13.0"
+    }
+  },
+  "61648f1dc29860ab": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Pure White\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "2024 Aurel Marlow",
+        "statement": "Colour: Pure White"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 0.99,
+          "probabilities": {
+            "colour": 0.99,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 367,
+      "model": "jev-1.14.0"
     }
   },
   "617a4f13f0611b57": {
@@ -11574,6 +12158,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "79117cbc45b0aab1": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Corvane\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Corvane Tamsin"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "make",
+          "confidence": 0.48,
+          "probabilities": {
+            "colour": 0.07,
+            "make": 0.61,
+            "model": 0.23,
+            "none": 0.09
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "79166ac55f46d5d2": {
     "request": {
       "questions": {
@@ -12230,6 +12851,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "7e7dc2b2de085872": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Atlantic Blue\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Brantis Parhelia",
+        "statement": "Colour: Atlantic Blue"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 372,
+      "model": "jev-1.14.0"
+    }
+  },
   "7ece8a7ece2eae8d": {
     "request": {
       "questions": {
@@ -12767,6 +13425,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "87bcc6b28c43b1a1": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Sport\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "Sport"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.99,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.01,
+            "trim": 0.99
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "87e44ea427c32612": {
     "request": {
       "questions": {
@@ -13015,6 +13710,45 @@
       "model": "jev-1.13.0"
     }
   },
+  "896bd74f254320af": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Sport\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Sport",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.97,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.02,
+            "trim": 0.98
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
+      "model": "jev-1.14.0"
+    }
+  },
   "89b7322c2ea25aff": {
     "request": {
       "questions": {
@@ -13107,6 +13841,82 @@
       },
       "input_tokens": 350,
       "model": "jev-1.13.0"
+    }
+  },
+  "8be366a8a25e2169": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"SE\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "SE",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.96,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.01,
+            "none": 0.02,
+            "trim": 0.97
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 395,
+      "model": "jev-1.14.0"
+    }
+  },
+  "8cd920edae54ea47": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Silver Frost\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Galvor Quorra",
+        "statement": "Finished in Silver Frost"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 0.99,
+          "probabilities": {
+            "colour": 0.99,
+            "make": 0.0,
+            "model": 0.01,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 370,
+      "model": "jev-1.14.0"
     }
   },
   "8ce9a1ae7ebd7427": {
@@ -14839,6 +15649,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "9ddfc36f6ad521b9": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"SE\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "SE"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.96,
+          "probabilities": {
+            "make": 0.0,
+            "model": 0.01,
+            "none": 0.02,
+            "trim": 0.97
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "9e521ad1f2c72f7c": {
     "request": {
       "questions": {
@@ -15400,6 +16247,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "a473ffb4eceade73": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"GT\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "GT"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.72,
+          "probabilities": {
+            "make": 0.02,
+            "model": 0.16,
+            "none": 0.03,
+            "trim": 0.79
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
   "a4bc13ef124109e6": {
     "request": {
       "questions": {
@@ -15474,6 +16358,84 @@
       },
       "input_tokens": 358,
       "model": "jev-1.13.0"
+    }
+  },
+  "a661ca2c4af1b1f8": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"SE\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Kestrova\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        },
+        "span2": {
+          "instructions": "Which of these is \"Delmaro\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova SE"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "trim",
+          "confidence": 0.76,
+          "probabilities": {
+            "make": 0.03,
+            "model": 0.03,
+            "none": 0.12,
+            "trim": 0.82
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "model",
+          "confidence": 0.37,
+          "probabilities": {
+            "make": 0.3,
+            "model": 0.53,
+            "none": 0.13,
+            "trim": 0.04
+          },
+          "type": "choice"
+        },
+        "span2": {
+          "choice": "model",
+          "confidence": 0.29,
+          "probabilities": {
+            "make": 0.34,
+            "model": 0.47,
+            "none": 0.17,
+            "trim": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 540,
+      "model": "jev-1.14.0"
     }
   },
   "a6a0c821d28d9b0c": {
@@ -15562,6 +16524,43 @@
       },
       "input_tokens": 348,
       "model": "jev-1.13.0"
+    }
+  },
+  "a72a04fe998ac458": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Moonstone Grey\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Farlan Brixa",
+        "statement": "Moonstone Grey"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 374,
+      "model": "jev-1.14.0"
     }
   },
   "aa1d37310ce62268": {
@@ -16579,6 +17578,43 @@
       "model": "jev-1.13.0"
     }
   },
+  "b295255abec900cc": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Silver Frost\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Farlan Brixa",
+        "statement": "Colour: Silver Frost"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 372,
+      "model": "jev-1.14.0"
+    }
+  },
   "b2a4f8a475528ef0": {
     "request": {
       "questions": {
@@ -17199,6 +18235,42 @@
       },
       "input_tokens": 544,
       "model": "jev-1.13.0"
+    }
+  },
+  "b9455cff65b1c5ef": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Kestrova\"?",
+          "options": {
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these",
+            "trim": "Trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova trims"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.21,
+          "probabilities": {
+            "make": 0.18,
+            "model": 0.41,
+            "none": 0.19,
+            "trim": 0.22
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 362,
+      "model": "jev-1.14.0"
     }
   },
   "b988ba21bb407582": {
@@ -18032,6 +19104,64 @@
       "model": "jev-1.13.0"
     }
   },
+  "c3856d935cbdb881": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Rivette\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Galvor\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Galvor Rivette"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.73,
+          "probabilities": {
+            "colour": 0.01,
+            "make": 0.11,
+            "model": 0.8,
+            "none": 0.08
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "make",
+          "confidence": 0.35,
+          "probabilities": {
+            "colour": 0.08,
+            "make": 0.51,
+            "model": 0.29,
+            "none": 0.12
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 450,
+      "model": "jev-1.14.0"
+    }
+  },
   "c55b10933cee7a47": {
     "request": {
       "questions": {
@@ -18385,6 +19515,64 @@
       },
       "input_tokens": 348,
       "model": "jev-1.13.0"
+    }
+  },
+  "cdd5ffbc14487085": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Lumo\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "instructions": "Which of these is \"Halden\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1",
+        "statement": "Halden Lumo"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "model",
+          "confidence": 0.64,
+          "probabilities": {
+            "colour": 0.07,
+            "make": 0.16,
+            "model": 0.73,
+            "none": 0.04
+          },
+          "type": "choice"
+        },
+        "span1": {
+          "choice": "none",
+          "confidence": 0.24,
+          "probabilities": {
+            "colour": 0.08,
+            "make": 0.22,
+            "model": 0.27,
+            "none": 0.43
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 448,
+      "model": "jev-1.14.0"
     }
   },
   "ce2595bcf0c0faf6": {
@@ -19047,6 +20235,43 @@
       },
       "input_tokens": 377,
       "model": "jev-1.13.0"
+    }
+  },
+  "d4a6b76b527e82a8": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Racing Red\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Brantis Parhelia",
+        "statement": "Racing Red"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 372,
+      "model": "jev-1.14.0"
     }
   },
   "d4ca7317754d8b7f": {
@@ -20741,6 +21966,43 @@
       },
       "input_tokens": 506,
       "model": "jev-1.13.0"
+    }
+  },
+  "ef7818295952f607": {
+    "request": {
+      "questions": {
+        "span0": {
+          "instructions": "Which of these is \"Copper Orange\"?",
+          "options": {
+            "colour": "Exterior colour",
+            "make": "Manufacturer (make) name",
+            "model": "Model name",
+            "none": "None of these"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Used cars: page 1 \u203a Delmaro Tovani",
+        "statement": "Copper Orange"
+      }
+    },
+    "response": {
+      "answers": {
+        "span0": {
+          "choice": "colour",
+          "confidence": 1.0,
+          "probabilities": {
+            "colour": 1.0,
+            "make": 0.0,
+            "model": 0.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 371,
+      "model": "jev-1.14.0"
     }
   },
   "efd3c6a8eb074a29": {
