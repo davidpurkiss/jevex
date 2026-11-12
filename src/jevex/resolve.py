@@ -18,7 +18,13 @@ from jevex.entities import EntityScope
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.pipeline import SchemaRun, for_each_schema
-from jevex.schema import ALL_OPTION, NONE_OPTION, ReservedFieldNameError, UnsupportedFieldError
+from jevex.schema import (
+    ALL_OPTION,
+    MAX_AXIS_LABELS_CHARS,
+    NONE_OPTION,
+    ReservedFieldNameError,
+    UnsupportedFieldError,
+)
 from jevex.select import statement_state
 from jevex.tables import header_prefix
 
@@ -338,7 +344,13 @@ class MultiEntity:
         otherwise claim the cells of the columns the winning one rejected (a paint's
         price). So one Choice per table with accepted labels
         (:meth:`~jevex.schema.SchemaSpec.axis_question`), with the table's text as the
-        state, keeps one axis or neither."""
+        state, keeps one axis or neither.
+
+        Where both axes have accepted labels, Jev is torn between two sets of plausible
+        names (and takes a paint table's long row labels over its bare trims). What tells
+        them apart is on the rest of the page: the trims are the trims of the price list.
+        So those tables are asked about after the others, with the entities found
+        elsewhere that their labels name (:func:`_named_elsewhere`) in the state."""
         axes: dict[str, dict[int, list[str]]] = {}
         for group, member in accepted:
             if group.table is not None:
@@ -346,14 +358,21 @@ class MultiEntity:
         if not axes:
             return accepted
 
-        async def ask(table_id: str) -> tuple[str, set[int]]:
-            question = schema.axis_question(axes[table_id].get(0, []), axes[table_id].get(1, []))
+        async def ask(table_id: str, elsewhere: Sequence[str] = ()) -> tuple[str, set[int]]:
+            labels = axes[table_id]
+            question = schema.axis_question(labels.get(0, []), labels.get(1, []))
             table = parsed.root.find(table_id)
             assert table is not None  # a group's table is in the tree it was found in
             section = section_text(table.heading_trail)
+            named = _named_elsewhere([*labels.get(0, []), *labels.get(1, [])], elsewhere)
 
             def state(text: str) -> JSONContent:
-                return {"table": text, "section": section} if section else {"table": text}
+                state: dict[str, JSONContent] = {"table": text}
+                if section:
+                    state["section"] = section
+                if named:
+                    state[f"{schema.entity_name}s elsewhere"] = list(named)
+                return state
 
             text = jev.fit_state(table.text, {"axis": question}, within=state)
             answer = (await jev.ask(state(text), {"axis": question}))["axis"]
@@ -362,12 +381,18 @@ class MultiEntity:
             kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
             return table_id, {0, 1} - kept
 
-        dropped = dict(await gather(ask(t) for t in axes))
-        return [
-            (group, member)
-            for group, member in accepted
-            if group.table is None or group.axis not in dropped.get(group.table, set())
-        ]
+        def kept(dropped: dict[str, set[int]]) -> list[tuple[_Group, _Member]]:
+            # A table not asked about yet has neither axis.
+            return [
+                (group, member)
+                for group, member in accepted
+                if group.table is None or group.axis not in dropped.get(group.table, {0, 1})
+            ]
+
+        dropped = dict(await gather(ask(t) for t in axes if len(axes[t]) == 1))
+        elsewhere = [member.label for _, member in kept(dropped)]
+        dropped.update(await gather(ask(t, elsewhere) for t in axes if len(axes[t]) == 2))
+        return kept(dropped)
 
     async def _assign(
         self,
@@ -634,6 +659,23 @@ class _Kinds:
 
 
 _WORD = re.compile(r"[^\W_]+")
+
+
+def _named_elsewhere(labels: Sequence[str], elsewhere: Sequence[str]) -> list[str]:
+    """The entities' labels in ``elsewhere`` that one of ``labels`` names: one with the
+    label's words, or those and more, or fewer ("techno" names "techno 1.2 TCe"). In
+    order, each once, and no more than fit in ``MAX_AXIS_LABELS_CHARS``."""
+    words = [found for found in map(_words, labels) if found]
+    named: list[str] = []
+    room = MAX_AXIS_LABELS_CHARS
+    for other in dict.fromkeys(elsewhere):
+        theirs = _words(other)
+        if theirs and any(mine <= theirs or theirs <= mine for mine in words):
+            room -= len(other)
+            if room < 0:
+                break
+            named.append(other)
+    return named
 
 
 def _words(label: str) -> frozenset[str]:
