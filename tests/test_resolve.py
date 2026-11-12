@@ -1282,22 +1282,55 @@ async def test_rows_that_differ_are_not_made_one_through_a_label_both_pick() -> 
         ]
 
 
-async def test_cells_that_differ_only_in_spacing_or_case_state_the_same() -> None:
-    def power(first: str, second: str) -> str:
-        return (
-            "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
-            f"<tr><th>Power</th><td>{first}</td><td>{second}</td></tr></table>"
-        )
+def stated(row: str, first: str, second: str) -> str:
+    return (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        f"<tr><th>{row}</th><td>{first}</td><td>{second}</td></tr></table>"
+    )
 
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("150PS", "180PS"), ("150 ps", "180 ps")),
+        (("6 speed manual", "7-speed auto"), ("6-Speed Manual", "7 speed auto")),
+    ],
+)
+async def test_cells_that_differ_only_in_spacing_case_or_punctuation_in_a_word_state_the_same(
+    first: tuple[str, str], second: tuple[str, str]
+) -> None:
     parsed = await parse(
         "<h2>Summary</h2>"
-        + power("150PS", "180PS")
+        + stated("Fitted", *first)
         + "<h2>Details</h2>"
-        + power("150 ps", "180 ps")
+        + stated("Fitted", *second)
     )
     fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Summary", "Details"')
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("7-8", "9"), ("78", "9")),  # a range is not a number
+        (("1.5", "2.0"), ("15", "2.0")),
+        (("●", "●"), ("-", "●")),  # fitted, and not available
+    ],
+)
+async def test_cells_that_differ_in_a_number_or_a_symbol_state_different_things(
+    first: tuple[str, str], second: tuple[str, str]
+) -> None:
+    parsed = await parse(
+        "<h2>Summary</h2>"
+        + stated("Fitted", *first)
+        + "<h2>Details</h2>"
+        + stated("Fitted", *second)
+    )
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Summary", "Details"')
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The two "SE" columns can't be one entity: named apart by their headings.
+    assert [s.label for s in scopes] == ["Summary SE", "SE L", "Details SE"]
 
 
 def two_columns(first: str, row: str, cells: tuple[str, str] = ("1", "2")) -> str:

@@ -84,7 +84,8 @@ class _Member:
     ids: frozenset[str]
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
-    """For a table's column or row, its cells' text (without spacing or case) by their
+    """For a table's column or row, its cells' text (without spacing, case or the
+    punctuation inside a word) by their
     headers on the other axis: what it states, so two that state different things can be
     told apart (:func:`_conflict`)."""
 
@@ -894,6 +895,12 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     return groups
 
 
+_JOINER = re.compile(r"(?<=[^\W_])[\W_]+(?=[^\W\d_])|(?<=[^\W\d_])[\W_]+(?=[^\W_])")
+"""Punctuation inside a word, which cells are compared without, as they are without spacing
+or case: "6 speed manual" and "6-Speed Manual" state one thing. Between two digits it
+stays ("7-8", "1.5"), and so does a cell that is only a symbol."""
+
+
 @dataclass
 class _Claim:
     """What one label of a table's axis claims: statements, and its cells' text by their
@@ -905,8 +912,7 @@ class _Claim:
     def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
         self.ids.add(statement.id)
         value = statement.text.removeprefix(header_prefix(ref))
-        # Without spacing or case: "150PS" and "150 PS" state one thing.
-        self.values.setdefault(across, "".join(value.split()).casefold())
+        self.values.setdefault(across, _JOINER.sub("", "".join(value.split())).casefold())
 
 
 def _row_claims(
