@@ -29,6 +29,7 @@ from jevex.normalise import NormaliseStage
 from jevex.pipeline import Pipeline, VisionValue
 from jevex.results import Conflict, FieldMeta
 from jevex.select import (
+    SPAN_P,
     CandidateStage,
     JevCandidateSelector,
     SelectStage,
@@ -963,24 +964,26 @@ async def test_a_span_two_fields_picked_is_kept_for_the_one_jev_says_it_is() -> 
     # The model's selection of the same words becomes "none", as sure as Jev's answer.
     model = run.selections[("doc", "model", "s1")]
     assert (model.candidate, model.confidence) == (None, 0.9)
-    assert model.alternatives == {"Active X Edition": pytest.approx(0.1)}
-    # One more request for the statement: the span, and the fields that picked it,
-    # described as the categorise Choice describes them.
+    assert model.alternatives == {"Active X Edition": pytest.approx(0.05)}
+    # One more request for the statement: the span, and the schema's name fields,
+    # described as the categorise Choice describes them, or none of them.
     _, asked = fake.calls
     assert asked.state == {"statement": "Active X Edition: £30,775"}
     assert asked.questions == {
         "span0": Choice(
             instructions='Which of these is "Active X Edition"?',
-            options={"trim": "Trim name", "model": "Model name"},
+            options={"trim": "Trim name", "model": "Model name", "none": "None of these"},
         )
     }
 
 
-async def test_fields_that_pick_different_spans_are_not_asked_which_is_which() -> None:
+async def test_each_name_a_field_picked_is_asked_about_on_its_own() -> None:
     fake = (
         FakeJev(strict=True)
         .choice("Which of these is the model name?", "Kestrova")
         .choice("Which of these is the trim name?", "SE L")
+        .choice('Which of these is "Kestrova"?', "model")
+        .choice('Which of these is "SE L"?', "trim")
     )
     ctx = named_context(fake, "Kestrova SE L")
     await run_both(ctx)
@@ -990,19 +993,154 @@ async def test_fields_that_pick_different_spans_are_not_asked_which_is_which() -
         "model": "Kestrova",
         "trim": "SE L",
     }
-    assert len(fake.calls) == 1
+    # Both spans in one request, the field that picked each offered first.
+    _, asked = fake.calls
+    none = "None of these"
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "SE L"?',
+            options={"trim": "Trim name", "model": "Model name", "none": none},
+        ),
+        "span1": Choice(
+            instructions='Which of these is "Kestrova"?',
+            options={"model": "Model name", "trim": "Trim name", "none": none},
+        ),
+    }
+    assert [list(q.options) for q in asked.questions.values() if isinstance(q, Choice)] == [
+        ["trim", "model", "none"],
+        ["model", "trim", "none"],
+    ]
 
 
-async def test_a_span_one_field_picked_and_another_refused_is_not_asked_about() -> None:
+async def test_a_name_jev_says_is_another_field_is_not_the_field_that_picked_it() -> None:
+    # Only the model's question took the grade: the trim's refused it, so nothing
+    # contests the span, and it is still not the model.
     fake = (
         FakeJev(strict=True)
-        .choice("Which of these is the model name?", "none")
-        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice("Which of these is the model name?", "Active X Edition")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "Active X Edition"?', "trim", confidence=0.8)
     )
     ctx = named_context(fake, "Active X Edition: £30,775")
     await run_both(ctx)
-    assert len(fake.calls) == 1
+    run = ctx.schemas["Named"]
+    model = run.selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.8)
+    # The span check takes a pick away and never gives one: the trim's "none" stands.
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+
+
+async def test_a_name_jev_says_is_none_of_the_fields_is_dropped() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "ZWE219L-DEXNBW")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "ZWE219L-DEXNBW"?', "none", confidence=0.7)
+    )
+    ctx = named_context(fake, "Model code: ZWE219L-DEXNBW")
+    await run_both(ctx)
+    model = ctx.schemas["Named"].selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.7)
+    assert model.alternatives == {"ZWE219L-DEXNBW": pytest.approx(0.15)}
+
+
+async def test_a_name_jev_is_torn_about_stays_with_the_field_that_picked_it() -> None:
+    # An invented make is as likely a model to Jev, and no likelier anything else: under
+    # SPAN_P the make's own pick stands.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Kestrova")
+        .choice("Which of these is the trim name?", "Delmaro")
+        .choice('Which of these is "Kestrova"?', "model")
+        .choice(
+            'Which of these is "Delmaro"?',
+            "model",
+            confidence=0.49,
+            probabilities={"trim": 0.34, "none": 0.17},
+        )
+    )
+    ctx = named_context(fake, "Delmaro Kestrova")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    trim = run.selections[("doc", "trim", "s1")]
+    assert trim.candidate is not None
+    assert trim.candidate.raw == "Delmaro"
+
+
+async def test_a_contested_span_stays_with_the_likeliest_field_that_picked_it() -> None:
+    # Jev's first choice is no field at all, but it is torn: of the two that picked the
+    # span, the one it finds likelier keeps it.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Excel")
+        .choice("Which of these is the trim name?", "Excel")
+        .choice(
+            'Which of these is "Excel"?',
+            "none",
+            confidence=0.4,
+            probabilities={"trim": 0.35, "model": 0.25},
+        )
+    )
+    ctx = named_context(fake, "Excel")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    assert run.selections[("doc", "trim", "s1")].candidate is not None
+    model = run.selections[("doc", "model", "s1")]
+    assert (model.candidate, model.confidence) == (None, 0.4)
+    assert model.alternatives == {"Excel": 0.25}
+
+
+async def test_a_name_jev_says_is_something_else_at_span_p_is_dropped() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Kestrova")
+        .choice("Which of these is the trim name?", "none")
+        .choice('Which of these is "Kestrova"?', "none", confidence=SPAN_P)
+    )
+    ctx = named_context(fake, "Kestrova")
+    await run_both(ctx)
     assert ctx.schemas["Named"].selections[("doc", "model", "s1")].candidate is None
+
+
+async def test_the_field_jev_says_a_contested_span_is_keeps_it_on_a_tie() -> None:
+    # Jev's probabilities come rounded: its choice is the tie-break, not the fields' order.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the model name?", "Excel")
+        .choice("Which of these is the trim name?", "Excel")
+        .choice(
+            'Which of these is "Excel"?',
+            "model",
+            confidence=0.4,
+            probabilities={"trim": 0.4, "none": 0.2},
+        )
+    )
+    ctx = named_context(fake, "Excel")
+    await run_both(ctx)
+    run = ctx.schemas["Named"]
+    assert run.selections[("doc", "model", "s1")].candidate is not None
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+
+
+class Priced(BaseModel):
+    trim: str = Field(description="Trim name")
+    price: int = Field(description="Price")
+
+
+async def test_a_schema_with_one_name_field_is_not_asked_what_its_picks_are() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the trim name?", "Active X Edition")
+        .choice("Which of these is the price?", "£30,775")
+    )
+    ctx = context(fake, [st("s1", "Active X Edition: £30,775")], {}, models=(Priced,))
+    run = ctx.schemas["Priced"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="trim", confidence=0.6, probabilities={"trim": 0.6, "price": 0.4}
+    )
+    await run_both(ctx)
+    assert len(fake.calls) == 1
+    assert run.selections[("doc", "trim", "s1")].candidate is not None
 
 
 class Body(BaseModel):
@@ -1052,6 +1190,57 @@ async def test_fields_whose_candidates_are_at_different_spans_are_not_contested(
     await SelectStage().run(ctx)
     assert len(fake.calls) == 1
     assert run.selections[("doc", "seats", "s1")].candidate is not None
+
+
+async def test_a_span_a_name_field_and_another_field_picked_is_asked_about_among_them() -> None:
+    # One name field in the schema: its picks aren't checked alone, but a span is one field.
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the trim name?", "30")
+        .choice("Which of these is the price?", "30")
+        .choice('Which of these is "30"?', "price")
+    )
+    ctx = context(fake, [st("s1", "Kestrova 30")], {}, models=(Priced,))
+    run = ctx.schemas["Priced"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="trim", confidence=0.6, probabilities={"trim": 0.6, "price": 0.4}
+    )
+    await run_both(ctx)
+    assert run.selections[("doc", "trim", "s1")].candidate is None
+    assert run.selections[("doc", "price", "s1")].candidate is not None
+    _, asked = fake.calls
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "30"?',
+            options={"trim": "Trim name", "price": "Price"},
+        )
+    }
+
+
+async def test_a_span_two_other_fields_picked_is_asked_about_among_them() -> None:
+    fake = (
+        FakeJev(strict=True)
+        .choice("Which of these is the number of doors?", "5")
+        .choice("Which of these is the number of seats?", "5")
+        .choice('Which of these is "5"?', "doors", confidence=0.5, probabilities={"seats": 0.5})
+    )
+    ctx = context(fake, [st("s1", "5 doors")], {}, models=(Body,))
+    run = ctx.schemas["Body"]
+    run.categories["s1"] = ChoiceAnswer(
+        choice="seats", confidence=0.6, probabilities={"doors": 0.4, "seats": 0.6}
+    )
+    await run_both(ctx)
+    # Jev's choice keeps the span, though the other field is as likely and asked first.
+    assert run.selections[("doc", "doors", "s1")].candidate is not None
+    assert run.selections[("doc", "seats", "s1")].candidate is None
+    # A number is one of the fields that took it: "none" is offered only for names.
+    _, asked = fake.calls
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "5"?',
+            options={"doors": "Number of doors", "seats": "Number of seats"},
+        )
+    }
 
 
 async def test_a_contested_span_is_settled_for_every_scope_holding_the_statement() -> None:

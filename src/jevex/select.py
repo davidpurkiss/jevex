@@ -21,10 +21,15 @@ After categorising, each statement is assigned to a field (or none). Then:
     selection's. A statement naming no other unit asks nothing more.
 
   Each candidate field is asked without the others in view, so two fields of a schema can
-  pick the same words of a statement. A span states one field: one more request for the
-  statement asks, of each such span, which of the fields it is
-  (:meth:`~jevex.schema.SchemaSpec.span_question`), and the others' selections become
-  "none".
+  pick the same words of a statement, and a text field takes what is some other kind of
+  name where nothing better is on offer. A span states one field: one more request for
+  the statement asks which field each such span is
+  (:meth:`~jevex.schema.SchemaSpec.span_question`): a span a text field picked, in a
+  schema with more than one, among the fields that picked it, the other text fields and
+  none of them; any other span two or more fields picked, among those. The field Jev
+  says it is keeps it. When Jev says it is something else, none does at :data:`SPAN_P`
+  or above, and under that the likeliest of those that picked it. The others' selections
+  become "none".
 
   Enum and bool answers are already values, so they're recorded as
   :class:`~jevex.results.FieldMeta` (``method="jev"``, or ``"vision"`` when the statement
@@ -66,6 +71,13 @@ if TYPE_CHECKING:
 
 ACCEPT_AT = 0.5
 """Noul probability at or above which a bool is True or a list member is accepted."""
+
+
+SPAN_P = 0.5
+"""A span stays with a field that picked it unless Jev says, at this probability or above,
+that it is something none of them is (:meth:`SelectStage._one_field_per_span`). Below it
+Jev is torn: an unfamiliar name ("Delmaro Kestrova") is as likely a model as a make, and
+the field's own question has already taken it."""
 
 
 ALSO_CATEGORY_P = 0.1
@@ -421,14 +433,23 @@ class SelectStage:
             _record_direct(ctx, run, scope, run.spec.field(field_name), found)
 
     async def _one_field_per_span(self, ctx: Context, plans: _Plans) -> None:
-        """Where two fields of a schema each picked the same words of a statement, keep
-        them for one: a span states one field. Each field was asked which span is its own
-        without the other in view ("Which of these is the model name?" takes a price
-        list's "Active X Edition" as readily as "Which of these is the trim?" does), so
-        Jev is asked which of the fields the span is
-        (:meth:`~jevex.schema.SchemaSpec.span_question`), one request per statement, and
-        the others' selections become "none"."""
-        contested: dict[str, list[tuple[str, list[_Ask]]]] = {}
+        """Keep each picked span for the one field it is. Each field was asked which span
+        is its own without the others in view: "Which of these is the model name?" takes
+        a price list's "Active X Edition" as readily as "Which of these is the trim?"
+        does, and a model code or an engine's name where nothing better is on offer. So
+        Jev is asked the other way round, which field the span is
+        (:meth:`~jevex.schema.SchemaSpec.span_question`), one more request per statement:
+
+        - a span a text field picked, when the schema has more than one text field:
+          among the fields that picked it and the schema's other text fields, or none of
+          them (a name can be told from another kind of name);
+        - any other span two or more fields picked, among those fields.
+
+        Of the fields that picked a span, the one Jev says it is keeps it. When Jev says
+        it is something else, none of them does at :data:`SPAN_P` or above, and under
+        that the likeliest of them. A field that loses a span has its selection become
+        "none"."""
+        asked: dict[str, list[tuple[str, list[_Ask], list[str], bool]]] = {}
         for sid, (_, asks) in plans.items():
             picked: dict[tuple[str, int, int], tuple[str, list[_Ask]]] = {}
             for ask in asks.values():
@@ -447,30 +468,41 @@ class SelectStage:
                     if len(spans) == 1:
                         (span,) = spans
                         picked.setdefault((ask.run.name, *span), (candidate.raw, []))[1].append(ask)
-            found = [(raw, asks) for raw, asks in picked.values() if len(asks) > 1]
-            if found:
-                contested[sid] = found
+            for raw, pickers in picked.values():
+                names = [a.spec.name for a in pickers]
+                texts = [
+                    f.name for f in pickers[0].run.spec.fields if f.kind == "str" and not f.many
+                ]
+                if len(texts) > 1 and any(a.spec.kind == "str" for a in pickers):
+                    options = [*names, *(name for name in texts if name not in names)]
+                    asked.setdefault(sid, []).append((raw, pickers, options, True))
+                elif len(pickers) > 1:
+                    asked.setdefault(sid, []).append((raw, pickers, names, False))
 
-        def questions(found: list[tuple[str, list[_Ask]]]) -> dict[str, Question]:
+        def questions(found: list[tuple[str, list[_Ask], list[str], bool]]) -> dict[str, Question]:
             return {
-                f"span{i}": asks[0].run.spec.span_question(raw, [a.spec.name for a in asks])
-                for i, (raw, asks) in enumerate(found)
+                f"span{i}": pickers[0].run.spec.span_question(raw, options, or_none=or_none)
+                for i, (raw, pickers, options, or_none) in enumerate(found)
             }
 
         replies = await gather(
             ctx.jev.ask(statement_state(plans[sid][0]), questions(found))
-            for sid, found in contested.items()
+            for sid, found in asked.items()
         )
-        for (sid, found), answers in zip(contested.items(), replies, strict=True):
-            for i, (raw, asks) in enumerate(found):
+        for (sid, found), answers in zip(asked.items(), replies, strict=True):
+            for i, (raw, pickers, _, _) in enumerate(found):
                 answer = answers[f"span{i}"]
                 assert isinstance(answer, ChoiceAnswer)
-                for ask in asks:
-                    if ask.spec.name != answer.choice:
+                likely = answer.probabilities
+                keeper = next((ask for ask in pickers if ask.spec.name == answer.choice), None)
+                if keeper is None and likely.get(answer.choice, 0.0) < SPAN_P:
+                    keeper = max(pickers, key=lambda ask: likely.get(ask.spec.name, 0.0))
+                for ask in pickers:
+                    if ask is not keeper:
                         lost = Selection(
                             candidate=None,
                             confidence=answer.confidence,
-                            alternatives={raw: answer.probabilities.get(ask.spec.name, 0.0)},
+                            alternatives={raw: likely.get(ask.spec.name, 0.0)},
                         )
                         for scope in ask.scopes:
                             ask.run.selections[(scope, ask.spec.name, sid)] = lost

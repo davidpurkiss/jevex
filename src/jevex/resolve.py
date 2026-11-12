@@ -18,7 +18,13 @@ from jevex.entities import EntityScope
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, NoulAnswer, UnexpectedAnswerError
 from jevex.layout import section_text
 from jevex.pipeline import SchemaRun, for_each_schema
-from jevex.schema import ALL_OPTION, NONE_OPTION, ReservedFieldNameError, UnsupportedFieldError
+from jevex.schema import (
+    ALL_OPTION,
+    MAX_AXIS_LABELS_CHARS,
+    NONE_OPTION,
+    ReservedFieldNameError,
+    UnsupportedFieldError,
+)
 from jevex.select import statement_state
 from jevex.tables import header_prefix
 
@@ -78,7 +84,8 @@ class _Member:
     ids: frozenset[str]
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
-    """For a table's column or row, its cells' text (without spacing or case) by their
+    """For a table's column or row, its cells' text (without spacing, case or the
+    punctuation joining a word's parts) by their
     headers on the other axis: what it states, so two that state different things can be
     told apart (:func:`_conflict`)."""
 
@@ -187,7 +194,9 @@ class MultiEntity:
     (shared by the variants), nor which axis holds the entities where labels on both were
     accepted (trims across the top, paint colours down the side), so one Choice per
     table with accepted labels (:meth:`~jevex.schema.SchemaSpec.axis_question`), the
-    table as its state, keeps the columns, the rows or neither. With ``confirm=False``
+    table as its state, keeps the columns, the rows or neither. A table with labels
+    accepted on both axes is asked about after the others, with the entities found
+    elsewhere that its labels name in the state too. With ``confirm=False``
     nothing is asked and every proposed label is an entity, except table rows (only
     columns are proposed): use it only for pages whose structure is known to be one
     entity per group, since otherwise topic sections split the record.
@@ -338,7 +347,13 @@ class MultiEntity:
         otherwise claim the cells of the columns the winning one rejected (a paint's
         price). So one Choice per table with accepted labels
         (:meth:`~jevex.schema.SchemaSpec.axis_question`), with the table's text as the
-        state, keeps one axis or neither."""
+        state, keeps one axis or neither.
+
+        Where both axes have accepted labels, Jev is torn between two sets of plausible
+        names (and takes a paint table's long row labels over its bare trims). What tells
+        them apart is on the rest of the page: the trims are the trims of the price list.
+        So those tables are asked about after the others, with the entities found
+        elsewhere that their labels name (:func:`_named_elsewhere`) in the state."""
         axes: dict[str, dict[int, list[str]]] = {}
         for group, member in accepted:
             if group.table is not None:
@@ -346,28 +361,41 @@ class MultiEntity:
         if not axes:
             return accepted
 
-        async def ask(table_id: str) -> tuple[str, set[int]]:
-            question = schema.axis_question(axes[table_id].get(0, []), axes[table_id].get(1, []))
+        async def ask(table_id: str, elsewhere: Sequence[str] = ()) -> tuple[str, set[int]]:
+            labels = axes[table_id]
+            question = schema.axis_question(labels.get(0, []), labels.get(1, []))
             table = parsed.root.find(table_id)
             assert table is not None  # a group's table is in the tree it was found in
             section = section_text(table.heading_trail)
+            named = _named_elsewhere([*labels.get(0, []), *labels.get(1, [])], elsewhere)
 
             def state(text: str) -> JSONContent:
-                return {"table": text, "section": section} if section else {"table": text}
+                around: dict[str, JSONContent] = {"table": text}
+                if section:
+                    around["section"] = section
+                if named:
+                    around[schema.entities_elsewhere] = list(named)
+                return around
 
             text = jev.fit_state(table.text, {"axis": question}, within=state)
             answer = (await jev.ask(state(text), {"axis": question}))["axis"]
             if not isinstance(answer, ChoiceAnswer):
                 raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
-            kept = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
-            return table_id, {0, 1} - kept
+            entities = {"columns": {0}, "rows": {1}}.get(answer.choice, set[int]())
+            return table_id, {0, 1} - entities
 
-        dropped = dict(await gather(ask(t) for t in axes))
-        return [
-            (group, member)
-            for group, member in accepted
-            if group.table is None or group.axis not in dropped.get(group.table, set())
-        ]
+        def kept(dropped: dict[str, set[int]]) -> list[tuple[_Group, _Member]]:
+            # A table not asked about yet has neither axis.
+            return [
+                (group, member)
+                for group, member in accepted
+                if group.table is None or group.axis not in dropped.get(group.table, {0, 1})
+            ]
+
+        dropped = dict(await gather(ask(t) for t in axes if len(axes[t]) == 1))
+        elsewhere = [member.label for _, member in kept(dropped)]
+        dropped.update(await gather(ask(t, elsewhere) for t in axes if len(axes[t]) == 2))
+        return kept(dropped)
 
     async def _assign(
         self,
@@ -636,6 +664,27 @@ class _Kinds:
 _WORD = re.compile(r"[^\W_]+")
 
 
+def _named_elsewhere(labels: Sequence[str], elsewhere: Sequence[str]) -> list[str]:
+    """The entities' labels in ``elsewhere`` that one of ``labels`` names: one with the
+    label's words, or those and more, or fewer ("techno" names "techno 1.2 TCe"). In
+    order, each once, those that fit in ``MAX_AXIS_LABELS_CHARS`` between them.
+
+    This only chooses what goes beside the axis question: a document can hold hundreds of
+    entities, and the ones that bear on a table are those called what its headers are.
+    Which axis they speak for is still Jev's to say. A label with no letters ("5") is
+    left out of the matching: it is in any label with that number."""
+    words = [found for found in map(_words, labels) if any(c.isalpha() for c in "".join(found))]
+    named: list[str] = []
+    room = MAX_AXIS_LABELS_CHARS
+    for other in dict.fromkeys(elsewhere):
+        theirs = _words(other)
+        fits = len(other) <= room
+        if fits and theirs and any(mine <= theirs or theirs <= mine for mine in words):
+            room -= len(other)
+            named.append(other)
+    return named
+
+
 def _words(label: str) -> frozenset[str]:
     """A label's words, whatever their case: of two labels Jev relates, the one with the
     other's words and more ("SE 1.5 TSI" beside "SE") names the narrower thing."""
@@ -852,6 +901,13 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     return groups
 
 
+_JOINER = re.compile(r"(?<=[^\W_])[-/.'’]+(?=[^\W\d_])")
+"""A hyphen, slash, full stop or apostrophe joining a word to the letters after it, which
+cells are compared without, as they are without spacing or case: "6 speed manual" and
+"6-Speed Manual" state one thing. Before a digit it stays, where it may be a sign, a
+range or a decimal point ("-5", "7-8", "1.5"), and so does every other mark."""
+
+
 @dataclass
 class _Claim:
     """What one label of a table's axis claims: statements, and its cells' text by their
@@ -863,8 +919,7 @@ class _Claim:
     def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
         self.ids.add(statement.id)
         value = statement.text.removeprefix(header_prefix(ref))
-        # Without spacing or case: "150PS" and "150 PS" state one thing.
-        self.values.setdefault(across, "".join(value.split()).casefold())
+        self.values.setdefault(across, _JOINER.sub("", "".join(value.split())).casefold())
 
 
 def _row_claims(

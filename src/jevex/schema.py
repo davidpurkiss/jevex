@@ -33,7 +33,9 @@ EXTRA_KEY = "jevex"
 NONE_OPTION = "none"
 MAX_AXIS_LABELS_CHARS = 300
 """The most an option of :meth:`SchemaSpec.axis_question` lists of its axis's labels: enough
-to tell trims from paint colours, while a long table's rows don't swamp the Choice."""
+to tell trims from paint colours, while a long table's rows don't swamp the Choice. The
+entities named beside the question (:attr:`SchemaSpec.entities_elsewhere`) are cut to
+it too."""
 NOT_STATED_OPTION = "not stated"
 ALL_OPTION = "all of them"
 """The entity question's option for a statement that applies to every entity."""
@@ -74,8 +76,9 @@ class SchemaConfig(BaseModel):
     It may include several." """
     categorise_question: str | None = None
     span_question: str | None = None
-    """Template for the Choice of which field a span is, when two fields' selections
-    picked it, with ``{span}``."""
+    """Template for the Choice of which field a span is, with ``{span}``: asked about a
+    span a text field picked (among the schema's text fields, or none of them) and about
+    one several fields picked."""
     key_path_question: str | None = None
     """Template for the structured-data question, with ``{path}`` and ``{example}``."""
     gate_unit: Literal["document", "page"] = "document"
@@ -96,6 +99,9 @@ class SchemaConfig(BaseModel):
     axis_question: str | None = None
     """Template for ``MultiEntity``'s Choice between a table's column and row headers when
     labels on both were accepted, with ``{entity}``."""
+    entities_elsewhere: str | None = None
+    """What the axis question's state calls the entities found elsewhere in the document
+    that the table's labels name, with ``{entity}``. Defaults to "{entity}s elsewhere"."""
     table_column_headers_question: str | None = None
     """The component gate's Noul about a table without header cells shaped like a
     comparison table: whether its first row names its columns."""
@@ -461,14 +467,25 @@ class SchemaSpec:
         options[NONE_OPTION] = "Neither"
         return Choice(instructions=template.format(entity=self.entity_name), options=options)
 
-    def span_question(self, span: str, fields: Sequence[str]) -> Choice:
-        """Which of ``fields`` the words ``span`` of a statement are, when each field's own
-        selection picked them: one span states one field. The options describe the
-        fields as the categorise Choice does."""
+    @property
+    def entities_elsewhere(self) -> str:
+        """The key, in the state of :meth:`axis_question` for a table with labels accepted
+        on both axes, of the entities found elsewhere that those labels name
+        (``SchemaConfig.entities_elsewhere``): "vehicle specs elsewhere"."""
+        template = self.config.entities_elsewhere or "{entity}s elsewhere"
+        return template.format(entity=self.entity_name)
+
+    def span_question(self, span: str, fields: Sequence[str], *, or_none: bool) -> Choice:
+        """Which of ``fields`` the words ``span`` of a statement are: one span states one
+        field. ``or_none`` adds that it is none of them, for a span that may be some other
+        kind of name than the text fields offered. The options describe the fields as the
+        categorise Choice does."""
         template = self.config.span_question or 'Which of these is "{span}"?'
         options: dict[str, JSONContent | None] = {
             name: self.field(name).questions.categorise or self.field(name).label for name in fields
         }
+        if or_none:
+            options[NONE_OPTION] = "None of these"
         return Choice(instructions=template.format(span=span), options=options)
 
     def categorise_question(self, fields: Sequence[str] | None = None) -> Choice:

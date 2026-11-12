@@ -901,6 +901,119 @@ async def test_a_label_others_are_kinds_of_is_no_record_and_they_share_what_it_s
     assert kind_calls(fake)["SE"] == [["SE 1.5 TSI", "SE 2.0 TDI", "SE L 1.5 TSI", "none"]]
 
 
+PAINTS = (
+    "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+    "<tr><th>Red</th><td>£0</td><td>£0</td></tr>"
+    "<tr><th>Blue</th><td>£650</td><td>£0</td></tr></table>"
+)
+
+
+def one_axis_jev() -> FakeJev:
+    """:func:`kinds_jev`, with a price list's column headers rejected: only its rows are
+    proposed, so only a table of trims by paints has labels accepted on both axes."""
+    return kinds_jev().noul('"Version"', p=0.1).noul('"Price"', p=0.1)
+
+
+async def test_a_table_with_two_accepted_axes_is_asked_about_with_the_entities_it_names() -> None:
+    versions = price_list(
+        ("SE 1.5 TSI", "£20,000"), ("SE L 1.5 TSI", "£24,000"), ("GT 2.0 TSI", "£30,000")
+    )
+    parsed = await parse("<h1>Kestrova</h1>" + PAINTS + versions)
+    fake = (
+        one_axis_jev()
+        .choice(AXIS, "columns", state="Red")
+        .choice(KIND, "SE", state="SE 1.5 TSI")
+        .choice(KIND, "SE L", state="SE L 1.5 TSI")
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The paints aren't records: their prices are shared by the versions of each trim.
+    assert [s.label for s in scopes] == ["SE 1.5 TSI", "SE L 1.5 TSI", "GT 2.0 TSI"]
+    assert "Blue · SE: £650" in texts(parsed, scopes[0].shared_statement_ids)
+    # The price list's rows are settled first, though the paint table comes first on the
+    # page. Then the paint table, with the versions its labels name: not "GT 2.0 TSI".
+    listed, paints = [c for c in fake.calls if "axis" in c.questions]
+    assert listed.questions["axis"] == Choice(
+        instructions=AXIS,
+        options={
+            "rows": "The row headers: SE 1.5 TSI, SE L 1.5 TSI, GT 2.0 TSI",
+            "none": "Neither",
+        },
+    )
+    assert paints.state == {
+        "table": "SE | SE L\nRed | £0 | £0\nBlue | £650 | £0",
+        "section": "Kestrova",
+        "vehicle specs elsewhere": ["SE 1.5 TSI", "SE L 1.5 TSI"],
+    }
+    assert paints.questions == {
+        "axis": Choice(
+            instructions=AXIS,
+            options={
+                "columns": "The column headers: SE, SE L",
+                "rows": "The row headers: Red, Blue",
+                "none": "Neither",
+            },
+        )
+    }
+
+
+async def test_entities_a_table_was_found_not_to_have_are_not_named_to_another() -> None:
+    # Jev says the engine table's rows aren't the entities: the paint table isn't told of
+    # them, and with nothing else on the page it is asked about on its own.
+    engines = price_list(("SE petrol", "150PS"), ("SE diesel", "130PS"))
+    parsed = await parse("<h1>Kestrova</h1>" + engines + PAINTS)
+    fake = one_axis_jev().choice(AXIS, "none", state="petrol").choice(AXIS, "columns", state="Red")
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["SE", "SE L"]
+    _, paints = [c for c in fake.calls if "axis" in c.questions]
+    assert paints.state == {
+        "table": "SE | SE L\nRed | £0 | £0\nBlue | £650 | £0",
+        "section": "Kestrova",
+    }
+
+
+async def test_a_label_with_no_letters_names_no_entity_elsewhere() -> None:
+    # A row labelled "5" is not the "1.5" of an engine: only what the trims name is told.
+    seats = (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        "<tr><th>5</th><td>std</td><td>std</td></tr>"
+        "<tr><th>7</th><td>opt</td><td>std</td></tr></table>"
+    )
+    versions = price_list(("SE 1.5 TSI", "£20,000"), ("GT 1.5 TSI", "£30,000"))
+    parsed = await parse(seats + versions)
+    fake = one_axis_jev().choice(AXIS, "columns", state="std")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    _, asked = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(asked.state, dict)
+    assert asked.state["vehicle specs elsewhere"] == ["SE 1.5 TSI"]
+
+
+async def test_a_label_of_letters_and_digits_names_entities_elsewhere() -> None:
+    models = (
+        "<table><tr><th></th><th>i10</th><th>i20</th></tr>"
+        "<tr><th>Red</th><td>£0</td><td>£0</td></tr>"
+        "<tr><th>Blue</th><td>£650</td><td>£0</td></tr></table>"
+    )
+    versions = price_list(("i10 Advance", "£16,000"), ("i20 Premium", "£21,000"))
+    parsed = await parse(models + versions)
+    fake = one_axis_jev().choice(AXIS, "columns", state="Red")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    _, asked = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(asked.state, dict)
+    assert asked.state["vehicle specs elsewhere"] == ["i10 Advance", "i20 Premium"]
+
+
+async def test_the_entities_named_to_a_table_are_cut_to_a_length() -> None:
+    engines = [f"SE {i}.0 litre turbocharged petrol automatic" for i in range(1, 13)]
+    engines.append("SE 13")  # short enough to fit where the eighth doesn't
+    parsed = await parse(price_list(*((name, "£20,000") for name in engines)) + PAINTS)
+    fake = one_axis_jev().choice(AXIS, "columns", state="Red")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    _, paints = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(paints.state, dict)
+    # Whole labels, in order, within MAX_AXIS_LABELS_CHARS (300) between them.
+    assert paints.state["vehicle specs elsewhere"] == [*engines[:7], "SE 13"]
+
+
 async def test_the_label_with_the_others_words_and_more_is_the_kind_whichever_picks() -> None:
     parsed = await parse(VERSIONS + seats_table("SE", "SE L"))
     # Asked about a trim, Jev picks one of its versions; asked about a version, nothing.
@@ -1201,22 +1314,57 @@ async def test_rows_that_differ_are_not_made_one_through_a_label_both_pick() -> 
         ]
 
 
-async def test_cells_that_differ_only_in_spacing_or_case_state_the_same() -> None:
-    def power(first: str, second: str) -> str:
-        return (
-            "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
-            f"<tr><th>Power</th><td>{first}</td><td>{second}</td></tr></table>"
-        )
+def stated(row: str, first: str, second: str) -> str:
+    return (
+        "<table><tr><th></th><th>SE</th><th>SE L</th></tr>"
+        f"<tr><th>{row}</th><td>{first}</td><td>{second}</td></tr></table>"
+    )
 
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("150PS", "180PS"), ("150 ps", "180 ps")),
+        (("6 speed manual", "7-speed auto"), ("6-Speed Manual", "7 speed auto")),
+    ],
+)
+async def test_cells_that_differ_only_in_spacing_case_or_punctuation_in_a_word_state_the_same(
+    first: tuple[str, str], second: tuple[str, str]
+) -> None:
     parsed = await parse(
         "<h2>Summary</h2>"
-        + power("150PS", "180PS")
+        + stated("Fitted", *first)
         + "<h2>Details</h2>"
-        + power("150 ps", "180 ps")
+        + stated("Fitted", *second)
     )
     fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Summary", "Details"')
     scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("7-8", "9"), ("78", "9")),  # a range is not a number
+        (("Up to -5°C", "0°C"), ("Up to 5°C", "0°C")),  # nor a sign a hyphen
+        (("Option +£250", "£0"), ("Option -£250", "£0")),
+        (("1.5", "2.0"), ("15", "2.0")),
+        (("●", "●"), ("-", "●")),  # fitted, and not available
+    ],
+)
+async def test_cells_that_differ_in_a_number_or_a_symbol_state_different_things(
+    first: tuple[str, str], second: tuple[str, str]
+) -> None:
+    parsed = await parse(
+        "<h2>Summary</h2>"
+        + stated("Fitted", *first)
+        + "<h2>Details</h2>"
+        + stated("Fitted", *second)
+    )
+    fake = kinds_jev().noul(BOUNDARY, p=0.1, state='"Summary", "Details"')
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    # The two "SE" columns can't be one entity: named apart by their headings.
+    assert [s.label for s in scopes] == ["Summary SE", "SE L", "Details SE"]
 
 
 def two_columns(first: str, row: str, cells: tuple[str, str] = ("1", "2")) -> str:
