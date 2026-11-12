@@ -994,13 +994,20 @@ async def test_each_name_a_field_picked_is_asked_about_on_its_own() -> None:
     }
     # Both spans in one request, the field that picked each offered first.
     _, asked = fake.calls
-    assert {key: list(q.options) for key, q in asked.questions.items()} == {
-        "span0": ["trim", "model", "none"],
-        "span1": ["model", "trim", "none"],
+    none = "None of these"
+    assert asked.questions == {
+        "span0": Choice(
+            instructions='Which of these is "SE L"?',
+            options={"trim": "Trim name", "model": "Model name", "none": none},
+        ),
+        "span1": Choice(
+            instructions='Which of these is "Kestrova"?',
+            options={"model": "Model name", "trim": "Trim name", "none": none},
+        ),
     }
-    assert [q.instructions for q in asked.questions.values()] == [
-        'Which of these is "SE L"?',
-        'Which of these is "Kestrova"?',
+    assert [list(q.options) for q in asked.questions.values() if isinstance(q, Choice)] == [
+        ["trim", "model", "none"],
+        ["model", "trim", "none"],
     ]
 
 
