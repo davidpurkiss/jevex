@@ -948,60 +948,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "0d8f325eabe691c5": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which listing does this statement apply to?",
-          "options": {
-            "Aurel Marlow": null,
-            "Brantis Parhelia": null,
-            "Brantis Parhelia (2)": null,
-            "Corvane Tamsin": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Tovani": null,
-            "Esquel Wrenna": null,
-            "Farlan Brixa": null,
-            "Farlan Brixa (2)": null,
-            "Galvor Quorra": null,
-            "Galvor Rivette": null,
-            "Halden Lumo": null,
-            "all of them": "It applies to every listing"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Used cars: page 1"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.88,
-          "probabilities": {
-            "Aurel Marlow": 0.01,
-            "Brantis Parhelia": 0.01,
-            "Brantis Parhelia (2)": 0.01,
-            "Corvane Tamsin": 0.01,
-            "Delmaro Kestrova": 0.01,
-            "Delmaro Tovani": 0.01,
-            "Esquel Wrenna": 0.0,
-            "Farlan Brixa": 0.01,
-            "Farlan Brixa (2)": 0.01,
-            "Galvor Quorra": 0.01,
-            "Galvor Rivette": 0.01,
-            "Halden Lumo": 0.01,
-            "all of them": 0.89
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 443,
-      "model": "jev-1.13.0"
-    }
-  },
   "0dc5cb752ddbab1e": {
     "request": {
       "questions": {
@@ -2127,59 +2073,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "1aafbb40eb24c0ca": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Top speed: 217 km/h"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 1.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 530,
-      "model": "jev-1.13.0"
-    }
-  },
   "1b282056e5787bb6": {
     "request": {
       "questions": {
@@ -2235,41 +2128,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "1b410fd83b2d7867": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "21,495": null,
-            "none": "None of these is the price",
-            "\u00a321,495": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 Sport: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a321,495",
-          "confidence": 0.97,
-          "probabilities": {
-            "21,495": 0.02,
-            "none": 0.0,
-            "\u00a321,495": 0.98
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 360,
-      "model": "jev-1.13.0"
-    }
-  },
   "1b48d262716e7b33": {
     "request": {
       "questions": {
@@ -2315,59 +2173,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "1b51ddc9ec57052c": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Peak power: 114bhp"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.99,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.99,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.01,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 530,
-      "model": "jev-1.13.0"
-    }
-  },
   "1ccf5ed40f73be15": {
     "request": {
       "questions": {
@@ -2405,45 +2210,6 @@
       },
       "input_tokens": 395,
       "model": "jev-1.14.0"
-    }
-  },
-  "1e5894705dbf46cc": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle spec does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle spec"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications",
-        "statement": "Compare the Delmaro Kestrova range below."
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.92,
-          "probabilities": {
-            "Edition": 0.01,
-            "GT": 0.02,
-            "SE": 0.01,
-            "Sport": 0.02,
-            "all of them": 0.94
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 360,
-      "model": "jev-1.13.0"
     }
   },
   "1e5e06bc314e371c": {
@@ -3712,49 +3478,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "211223a420523843": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "64,190 miles"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "mileage_miles",
-          "confidence": 1.0,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 1.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 432,
-      "model": "jev-1.13.0"
-    }
-  },
   "21dda8cc6ee1cfee": {
     "request": {
       "questions": {
@@ -3935,79 +3658,6 @@
         }
       },
       "input_tokens": 377,
-      "model": "jev-1.13.0"
-    }
-  },
-  "236b83a80f140cc6": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "25,995": null,
-            "25,995 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 Edition: 25,995 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "25,995 GBP",
-          "confidence": 0.48,
-          "probabilities": {
-            "25,995": 0.35,
-            "25,995 GBP": 0.65,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 361,
-      "model": "jev-1.13.0"
-    }
-  },
-  "2398fdeaf1c3939f": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle variant does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle variant"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova: specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.91,
-          "probabilities": {
-            "Edition": 0.01,
-            "GT": 0.02,
-            "SE": 0.02,
-            "Sport": 0.02,
-            "all of them": 0.93
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 342,
       "model": "jev-1.13.0"
     }
   },
@@ -4676,98 +4326,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "276f4b90cb90dc57": {
-    "request": {
-      "questions": {
-        "label0": {
-          "criteria": null,
-          "instructions": "Does \"SE\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label1": {
-          "criteria": null,
-          "instructions": "Does \"Sport\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label2": {
-          "criteria": null,
-          "instructions": "Does \"GT\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label3": {
-          "criteria": null,
-          "instructions": "Does \"Edition\" name a separate vehicle spec?",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "names": [
-          "SE",
-          "Sport",
-          "GT",
-          "Edition"
-        ],
-        "section": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "label0": {
-          "p": 0.73,
-          "type": "noul"
-        },
-        "label1": {
-          "p": 0.7,
-          "type": "noul"
-        },
-        "label2": {
-          "p": 0.77,
-          "type": "noul"
-        },
-        "label3": {
-          "p": 0.61,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 362,
-      "model": "jev-1.13.0"
-    }
-  },
-  "293dcafeb8180aef": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "19,000": null,
-            "19,000 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a SE",
-        "statement": "Price from: 19,000 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "19,000 GBP",
-          "confidence": 0.45,
-          "probabilities": {
-            "19,000": 0.37,
-            "19,000 GBP": 0.63,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 358,
-      "model": "jev-1.13.0"
-    }
-  },
   "2988369353b5700e": {
     "request": {
       "questions": {
@@ -5387,59 +4945,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "2ea0f090164404f4": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Fuel type: Diesel"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "fuel_type",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 1.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 525,
-      "model": "jev-1.13.0"
-    }
-  },
   "2ed74fb8e2e679e3": {
     "request": {
       "questions": {
@@ -5878,112 +5383,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "348f72a4bfa7015c": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "Sport"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "trim",
-          "confidence": 0.53,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.01,
-            "make": 0.0,
-            "model": 0.02,
-            "none": 0.39,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.5700000000000001,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 520,
-      "model": "jev-1.13.0"
-    }
-  },
-  "34ae8e7fe2871bc4": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Seats: 7"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "seats",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 1.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 525,
-      "model": "jev-1.13.0"
-    }
-  },
   "35317428b791b752": {
     "request": {
       "questions": {
@@ -6012,37 +5411,6 @@
         }
       },
       "input_tokens": 439,
-      "model": "jev-1.13.0"
-    }
-  },
-  "36047190b221894a": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "2024 Aurel Marlow\n\n2024 Aurel Marlow\nPrice: \u00a329,635. Mileage: 8,150 mi.\nFuel\nPetrol\nColour\nPure White\nFirst registered\n2024"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.86,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.15,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 372,
       "model": "jev-1.13.0"
     }
   },
@@ -6472,44 +5840,6 @@
       },
       "input_tokens": 368,
       "model": "jev-1.14.0"
-    }
-  },
-  "3ba5d9f0a445e7a5": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle variant does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle variant"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.35,
-          "probabilities": {
-            "Edition": 0.09,
-            "GT": 0.17,
-            "SE": 0.1,
-            "Sport": 0.16,
-            "all of them": 0.48
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 341,
-      "model": "jev-1.13.0"
     }
   },
   "3ba9fd8fff4a80f2": {
@@ -7232,70 +6562,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "425a78d6c1dc6c64": {
-    "request": {
-      "questions": {
-        "Listing.make/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the manufacturer (make) name is Halden.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1",
-        "statement": "Halden Lumo"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing.make/verify": {
-          "p": 0.47,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 303,
-      "model": "jev-1.13.0"
-    }
-  },
-  "43aa419a646685f1": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle spec does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle spec"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications",
-        "statement": "Specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.95,
-          "probabilities": {
-            "Edition": 0.01,
-            "GT": 0.01,
-            "SE": 0.01,
-            "Sport": 0.01,
-            "all of them": 0.96
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 350,
-      "model": "jev-1.13.0"
-    }
-  },
   "44b10ba27fcf7687": {
     "request": {
       "questions": {
@@ -7473,56 +6739,6 @@
         }
       },
       "input_tokens": 443,
-      "model": "jev-1.13.0"
-    }
-  },
-  "46d34e88e56b700f": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "GT": null,
-            "none": "None of these is the model name"
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "GT": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "GT"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/choice0": {
-          "choice": "GT",
-          "confidence": 0.94,
-          "probabilities": {
-            "GT": 0.97,
-            "none": 0.03
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "choice": "GT",
-          "confidence": 0.98,
-          "probabilities": {
-            "GT": 0.99,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 394,
       "model": "jev-1.13.0"
     }
   },
@@ -7987,59 +7203,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "4a9b0f02251287bd": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Top speed: 217 km/h"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.64,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.67,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.33,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 530,
-      "model": "jev-1.13.0"
-    }
-  },
   "4aa605da58d747ad": {
     "request": {
       "questions": {
@@ -8413,113 +7576,6 @@
         }
       },
       "input_tokens": 430,
-      "model": "jev-1.13.0"
-    }
-  },
-  "4f3cc3b7e30d11c2": {
-    "request": {
-      "questions": {
-        "label0": {
-          "criteria": null,
-          "instructions": "Does \"Fuel\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label1": {
-          "criteria": null,
-          "instructions": "Does \"Displacement\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label2": {
-          "criteria": null,
-          "instructions": "Does \"Power output\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label3": {
-          "criteria": null,
-          "instructions": "Does \"Acceleration 0\u201362mph\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label4": {
-          "criteria": null,
-          "instructions": "Does \"Top speed\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label5": {
-          "criteria": null,
-          "instructions": "Does \"CO2 (g/km)\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label6": {
-          "criteria": null,
-          "instructions": "Does \"Price from\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label7": {
-          "criteria": null,
-          "instructions": "Does \"Seating capacity\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label8": {
-          "criteria": null,
-          "instructions": "Does \"Gearbox\" name a separate vehicle spec?",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "names": [
-          "Fuel",
-          "Displacement",
-          "Power output",
-          "Acceleration 0\u201362mph",
-          "Top speed",
-          "CO2 (g/km)",
-          "Price from",
-          "Seating capacity",
-          "Gearbox"
-        ],
-        "section": "Delmaro Kestrova: specifications \u203a Specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "label0": {
-          "p": 0.95,
-          "type": "noul"
-        },
-        "label1": {
-          "p": 0.96,
-          "type": "noul"
-        },
-        "label2": {
-          "p": 0.97,
-          "type": "noul"
-        },
-        "label3": {
-          "p": 0.98,
-          "type": "noul"
-        },
-        "label4": {
-          "p": 0.98,
-          "type": "noul"
-        },
-        "label5": {
-          "p": 0.98,
-          "type": "noul"
-        },
-        "label6": {
-          "p": 0.81,
-          "type": "noul"
-        },
-        "label7": {
-          "p": 0.97,
-          "type": "noul"
-        },
-        "label8": {
-          "p": 0.97,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 509,
       "model": "jev-1.13.0"
     }
   },
@@ -9124,37 +8180,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5689b70e4780902d": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "Used cars page 1\n\nUsed cars: page 1\nAurel Marlow\nPrice: \u00a329,635\n8,150 miles\nFuel: Petrol\nPure White\nFirst registered in 2024\nView details\nCorvane Tamsin\nPrice: \u00a320,840\n43,850 miles on the clock\nFuel: Electric\nColour: Deep Black\nRegistered 2021\nView details\nFarlan Brixa\nPrice: \u00a312,540\n65,250 miles\nFuel: Plug-in hybrid\nMoonstone Grey\nFirst registered in 2016\nView details\nHalden Lumo\nPrice: \u00a314,130\nMileage: 66,240 mi\nFuel: Hybrid\nFinished in Forest Green\nFirst registered in 2019\nView details\nFarlan Brixa\n\u00a321,065\n37,310 miles\nFuel: Plug-in hybrid\nColour: Silver Frost\nFirst registered in 2019\nView details\nDelmaro Kestrova\nYours for \u00a311,280\n52,040 miles on the clock\nDiesel\nFinished in Racing Red\nRegistered 2021\nView details\nDelmaro Tovani\n\u00a36,480\n64,190 miles\nFuel: Petrol\nCopper Orange\nFirst registered in 2017\nView details\nBrantis Parhelia\nPrice: \u00a320,520\n20,590 miles\nFuel: Petrol\nRacing Red\nRegistered 2023\nView details\nBrantis Parhelia\n\u00a312,890\n50,840 miles\nFuel: Petrol\nColour: Atlantic Blue\n2019 reg\nView details\nGalvor Quorra\nYours for \u00a317,780\n46,270 miles\nDiesel\nFinished in Silver Frost\n2021 reg\nView details\nGalvor Rivette\nYours for \u00a33,000\nMileage: 55,250 mi\nPetrol\nColour: Atlantic Blue\nRegistered 2017\nView details\nEsquel Wrenna\nPrice: \u00a325,090\n7,550 miles on the clock\nElectric\nFinished in Forest Green\nRegistered 2025\nView details"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.99,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.05,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 866,
-      "model": "jev-1.13.0"
-    }
-  },
   "5692bba7fa2b1e61": {
     "request": {
       "questions": {
@@ -9347,39 +8372,6 @@
       },
       "input_tokens": 513,
       "model": "jev-1.13.0"
-    }
-  },
-  "57804cb9629a1b60": {
-    "request": {
-      "questions": {
-        "span0": {
-          "instructions": "Which of these is \"Corvane\"?",
-          "options": {
-            "make": "Manufacturer (make) name",
-            "model": "Model name"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1",
-        "statement": "Corvane Tamsin"
-      }
-    },
-    "response": {
-      "answers": {
-        "span0": {
-          "choice": "make",
-          "confidence": 0.5,
-          "probabilities": {
-            "make": 0.75,
-            "model": 0.25
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 339,
-      "model": "jev-1.14.0"
     }
   },
   "5874e9e0a547b8a0": {
@@ -9622,41 +8614,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5beb983071df7584": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "19,000": null,
-            "none": "None of these is the price",
-            "\u00a319,000": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova SE",
-        "statement": "Expect to pay \u00a319,000 for this version."
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a319,000",
-          "confidence": 0.83,
-          "probabilities": {
-            "19,000": 0.11,
-            "none": 0.0,
-            "\u00a319,000": 0.89
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 359,
-      "model": "jev-1.13.0"
-    }
-  },
   "5c8e15a84487f46e": {
     "request": {
       "questions": {
@@ -9742,44 +8699,6 @@
         }
       },
       "input_tokens": 552,
-      "model": "jev-1.13.0"
-    }
-  },
-  "5d9d4a84ba6e7365": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle spec does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle spec"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova: specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.89,
-          "probabilities": {
-            "Edition": 0.01,
-            "GT": 0.03,
-            "SE": 0.02,
-            "Sport": 0.03,
-            "all of them": 0.91
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 342,
       "model": "jev-1.13.0"
     }
   },
@@ -9974,59 +8893,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5fda00bf3e6ce412": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Transmission: Manual"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.91,
-          "probabilities": {
-            "automatic": 0.07,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.92,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.01,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 524,
-      "model": "jev-1.13.0"
-    }
-  },
   "5ffc194b19d0b820": {
     "request": {
       "questions": {
@@ -10112,37 +8978,6 @@
         }
       },
       "input_tokens": 338,
-      "model": "jev-1.13.0"
-    }
-  },
-  "60c38bdcdc96760f": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova trims\n\nDelmaro Kestrova trims\nSE\nFuel type\nDiesel\nEngine size\n1,395 cc\nPower output\n70 kW\n0-62mph\n9.1 s\nMax speed\n128 mph\nCO2\n127\nPrice from\n19,000 GBP\nSeating capacity\n7\nTransmission\nManual\nSport\nFuel type\nDiesel\nDisplacement\n1,395 cc\nPeak power\n114bhp\n0-62mph\n8.4 s\nTop speed\n217 km/h\nCO2 emissions (g/km)\n128\nOTR price\n\u00a321,495\nSeats\n7\nTransmission\nManual\nGT\nFuel type\nDiesel\nDisplacement\n1395cc\nPeak power\n105 kW\n0-62 mph (s)\n7.7 s\nMax speed\n233 km/h\nCO2\n130\nOTR price\n23,995 GBP\nSeating capacity\n7\nTransmission\nAutomatic\nEdition\nPowertrain\nDiesel\nDisplacement\n1,395 cc\nPower output\n129 kW\nAcceleration 0\u201362mph\n6.5 s\nMaximum speed\n155 mph\nCO2\n132\nPrice\n\u00a325,995\nSeating\n7\nGearbox\nManual"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.02,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.91,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 640,
       "model": "jev-1.13.0"
     }
   },
@@ -10419,37 +9254,6 @@
         }
       },
       "input_tokens": 548,
-      "model": "jev-1.13.0"
-    }
-  },
-  "655be382939ab943": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova SE\n\nDelmaro Kestrova SE\nIt will run on to a maximum of 128 mph. This version is diesel. It comes with a six-speed manual gearbox.\nExpect to pay \u00a319,000 for this version. There's room for 7 people. Its engine has a capacity of 1,395 cc.\nCO2 emissions are 127 g/km. Peak output is 94bhp. Accelerating from 0 to 62 mph takes just 9.1 seconds."
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.03,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.93,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 435,
       "model": "jev-1.13.0"
     }
   },
@@ -10792,49 +9596,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "6c145dc5d555ff99": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "First registered in 2017"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "year",
-          "confidence": 1.0,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "year": 1.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 433,
-      "model": "jev-1.13.0"
-    }
-  },
   "6d30cac3d7ee3e49": {
     "request": {
       "questions": {
@@ -10895,37 +9656,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "6f7b7f66c1893050": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova specifications\n\nDelmaro Kestrova: specifications\nCompare the Delmaro Kestrova range below.\nSpecifications\nSpecification SE Sport GT Edition\nFuel Diesel Diesel Diesel Diesel\nDisplacement 1395cc 1395 cc 1,395 cc 1,395 cc\nPower output 70 kW 114 bhp 143PS 173 bhp\nAcceleration 0\u201362mph 9.1 8.4 s 7.7 s 6.5 s\nTop speed 128 mph 217 km/h 145 mph 249 km/h\nCO2 (g/km) 127 128 130 132\nPrice from 19,000 GBP \u00a321,495 \u00a323,995 25,995 GBP\nSeating capacity 7 7 7 7\nGearbox Manual Manual Automatic Manual"
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.02,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.91,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 540,
-      "model": "jev-1.13.0"
-    }
-  },
   "6f933d9984fcda9d": {
     "request": {
       "questions": {
@@ -10956,59 +9686,6 @@
         }
       },
       "input_tokens": 348,
-      "model": "jev-1.13.0"
-    }
-  },
-  "6fc76aca2037e1ec": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "CO2 emissions (g/km): 128"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "co2_g_km",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 1.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
       "model": "jev-1.13.0"
     }
   },
@@ -11115,59 +9792,6 @@
         }
       },
       "input_tokens": 511,
-      "model": "jev-1.13.0"
-    }
-  },
-  "70a4a76ba4972039": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "OTR price: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "price_gbp",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 1.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
       "model": "jev-1.13.0"
     }
   },
@@ -11540,41 +10164,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "7275d14ec864a38f": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "23,995": null,
-            "none": "None of these is the price",
-            "\u00a323,995": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 GT: \u00a323,995"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a323,995",
-          "confidence": 0.95,
-          "probabilities": {
-            "23,995": 0.03,
-            "none": 0.0,
-            "\u00a323,995": 0.97
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 360,
-      "model": "jev-1.13.0"
-    }
-  },
   "72a883a326249e6f": {
     "request": {
       "questions": {
@@ -11728,59 +10317,6 @@
         }
       },
       "input_tokens": 587,
-      "model": "jev-1.13.0"
-    }
-  },
-  "735fea3dd3c67f4e": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Peak power: 114bhp"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.48,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.52,
-            "power_kw": 0.47,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.01,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 530,
       "model": "jev-1.13.0"
     }
   },
@@ -12070,49 +10606,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "77d3b041818e8228": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "\u00a36,480"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "price_gbp",
-          "confidence": 1.0,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 1.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 431,
-      "model": "jev-1.13.0"
-    }
-  },
   "7824efb73da35b5f": {
     "request": {
       "questions": {
@@ -12303,93 +10796,6 @@
         }
       },
       "input_tokens": 360,
-      "model": "jev-1.13.0"
-    }
-  },
-  "79e98aef9c3546d4": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova: specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.6,
-          "probabilities": {
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.01,
-            "model": 0.35,
-            "none": 0.63,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.01,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 517,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7a7e0e9ec4637a46": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "25,995": null,
-            "none": "None of these is the price",
-            "\u00a325,995": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Edition",
-        "statement": "Price: \u00a325,995"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a325,995",
-          "confidence": 0.97,
-          "probabilities": {
-            "25,995": 0.02,
-            "none": 0.0,
-            "\u00a325,995": 0.98
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 356,
       "model": "jev-1.13.0"
     }
   },
@@ -12641,59 +11047,6 @@
         }
       },
       "input_tokens": 359,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7d0bac6e8b87f44b": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications",
-        "statement": "Compare the Delmaro Kestrova range below."
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "model",
-          "confidence": 0.44,
-          "probabilities": {
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.01,
-            "model": 0.49,
-            "none": 0.48,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.02,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 535,
       "model": "jev-1.13.0"
     }
   },
@@ -13517,97 +11870,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "87faf4495e3d863a": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle spec does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle spec"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.26,
-          "probabilities": {
-            "Edition": 0.09,
-            "GT": 0.15,
-            "SE": 0.12,
-            "Sport": 0.23,
-            "all of them": 0.41000000000000003
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 341,
-      "model": "jev-1.13.0"
-    }
-  },
-  "884f820a8e8ecc41": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Displacement: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "engine_size_cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 1.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
-      "model": "jev-1.13.0"
-    }
-  },
   "88dc3b70f41d18c6": {
     "request": {
       "questions": {
@@ -13804,45 +12066,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "89ba0478a6c19b34": {
-    "request": {
-      "questions": {
-        "entity": {
-          "instructions": "Which vehicle variant does this statement apply to?",
-          "options": {
-            "Edition": null,
-            "GT": null,
-            "SE": null,
-            "Sport": null,
-            "all of them": "It applies to every vehicle variant"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications",
-        "statement": "Specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "entity": {
-          "choice": "all of them",
-          "confidence": 0.95,
-          "probabilities": {
-            "Edition": 0.01,
-            "GT": 0.01,
-            "SE": 0.01,
-            "Sport": 0.01,
-            "all of them": 0.96
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 350,
-      "model": "jev-1.13.0"
-    }
-  },
   "8be366a8a25e2169": {
     "request": {
       "questions": {
@@ -13917,41 +12140,6 @@
       },
       "input_tokens": 370,
       "model": "jev-1.14.0"
-    }
-  },
-  "8ce9a1ae7ebd7427": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "23,995": null,
-            "23,995 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a GT",
-        "statement": "OTR price: 23,995 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "23,995 GBP",
-          "confidence": 0.66,
-          "probabilities": {
-            "23,995": 0.23,
-            "23,995 GBP": 0.77,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 359,
-      "model": "jev-1.13.0"
     }
   },
   "8d0ea897865c6d38": {
@@ -14044,63 +12232,6 @@
             "none": 0.0
           },
           "type": "choice"
-        }
-      },
-      "input_tokens": 365,
-      "model": "jev-1.13.0"
-    }
-  },
-  "8e0d03c7a41d398f": {
-    "request": {
-      "questions": {
-        "label0": {
-          "criteria": null,
-          "instructions": "Does \"SE\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label1": {
-          "criteria": null,
-          "instructions": "Does \"Sport\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label2": {
-          "criteria": null,
-          "instructions": "Does \"GT\" name a separate vehicle spec?",
-          "type": "noul"
-        },
-        "label3": {
-          "criteria": null,
-          "instructions": "Does \"Edition\" name a separate vehicle spec?",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "names": [
-          "SE",
-          "Sport",
-          "GT",
-          "Edition"
-        ],
-        "section": "Delmaro Kestrova: specifications \u203a Specifications"
-      }
-    },
-    "response": {
-      "answers": {
-        "label0": {
-          "p": 0.65,
-          "type": "noul"
-        },
-        "label1": {
-          "p": 0.57,
-          "type": "noul"
-        },
-        "label2": {
-          "p": 0.69,
-          "type": "noul"
-        },
-        "label3": {
-          "p": 0.55,
-          "type": "noul"
         }
       },
       "input_tokens": 365,
@@ -14423,59 +12554,6 @@
         }
       },
       "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
-  "93142031c081e991": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Seats: 7"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "seats",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "seats": 1.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 525,
       "model": "jev-1.13.0"
     }
   },
@@ -16325,41 +14403,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "a55030a03752c8ae": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "21,495": null,
-            "none": "None of these is the price",
-            "\u00a321,495": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "OTR price: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a321,495",
-          "confidence": 0.91,
-          "probabilities": {
-            "21,495": 0.06,
-            "none": 0.0,
-            "\u00a321,495": 0.94
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 358,
-      "model": "jev-1.13.0"
-    }
-  },
   "a661ca2c4af1b1f8": {
     "request": {
       "questions": {
@@ -16561,59 +14604,6 @@
       },
       "input_tokens": 374,
       "model": "jev-1.14.0"
-    }
-  },
-  "aa1d37310ce62268": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "OTR price: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "price_gbp",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 1.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
-      "model": "jev-1.13.0"
     }
   },
   "ab4fe4dfe5ccb17f": {
@@ -16896,30 +14886,6 @@
         }
       },
       "input_tokens": 554,
-      "model": "jev-1.13.0"
-    }
-  },
-  "ad86e8de21c08fed": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the model name is Kestrova SE.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/verify": {
-          "p": 0.67,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 292,
       "model": "jev-1.13.0"
     }
   },
@@ -17525,59 +15491,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "b29036c6358b53d4": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Transmission: Manual"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "none",
-          "confidence": 0.9,
-          "probabilities": {
-            "automatic": 0.07,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.01,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.91,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.01,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 524,
-      "model": "jev-1.13.0"
-    }
-  },
   "b295255abec900cc": {
     "request": {
       "questions": {
@@ -17613,37 +15526,6 @@
       },
       "input_tokens": 372,
       "model": "jev-1.14.0"
-    }
-  },
-  "b2a4f8a475528ef0": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "criteria": null,
-          "instructions": "Does this document include a used car advertised for sale, with its mileage and year of registration? It may include several.",
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "criteria": null,
-          "instructions": "Does this document include a manufacturer's technical specification for one vehicle variant? It may include several.",
-          "type": "noul"
-        }
-      },
-      "state": "Delmaro Kestrova Sport\n\nDelmaro Kestrova Sport\nPeak output is 85 kW. This version is diesel. It seats 7.\nThe sprint from 0\u201362mph is over in 8.4s. The engine displaces 1395 cc. It emits 128 g/km of CO2.\nTop speed is 135 mph. The Sport costs \u00a321,495 on the road. It comes with a six-speed manual gearbox."
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "p": 0.02,
-          "type": "noul"
-        },
-        "VehicleSpec": {
-          "p": 0.93,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 425,
-      "model": "jev-1.13.0"
     }
   },
   "b2cf1eb2dfaafc76": {
@@ -17806,75 +15688,6 @@
         }
       },
       "input_tokens": 547,
-      "model": "jev-1.13.0"
-    }
-  },
-  "b3df206c7eedb295": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova trims": null,
-            "Kestrova": null,
-            "Kestrova trims": null,
-            "none": "None of these is the model name",
-            "trims": null
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova trims": null,
-            "Kestrova": null,
-            "Kestrova trims": null,
-            "none": "None of these is the trim or variant name, e.g. SE L",
-            "trims": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/choice0": {
-          "choice": "Kestrova",
-          "confidence": 0.26,
-          "probabilities": {
-            "Delmaro": 0.04,
-            "Delmaro Kestrova": 0.34,
-            "Delmaro Kestrova trims": 0.18,
-            "Kestrova": 0.37,
-            "Kestrova trims": 0.03,
-            "none": 0.01,
-            "trims": 0.03
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "choice": "Kestrova",
-          "confidence": 0.1,
-          "probabilities": {
-            "Delmaro": 0.01,
-            "Delmaro Kestrova": 0.1,
-            "Delmaro Kestrova trims": 0.14,
-            "Kestrova": 0.23,
-            "Kestrova trims": 0.13,
-            "none": 0.21,
-            "trims": 0.18
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 484,
       "model": "jev-1.13.0"
     }
   },
@@ -18432,128 +16245,6 @@
         }
       },
       "input_tokens": 378,
-      "model": "jev-1.13.0"
-    }
-  },
-  "babf86d76fd8323b": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the model name is Kestrova.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/verify": {
-          "p": 0.75,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 291,
-      "model": "jev-1.13.0"
-    }
-  },
-  "bb5710ea2197ae19": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1",
-        "statement": "Delmaro Tovani"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "none",
-          "confidence": 0.85,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 0.0,
-            "model": 0.13,
-            "none": 0.87,
-            "price_gbp": 0.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 424,
-      "model": "jev-1.13.0"
-    }
-  },
-  "bb591daf2979ecb7": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "Compare": null,
-            "Compare the Delmaro Kestrova range below": null,
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova range": null,
-            "Delmaro Kestrova range below": null,
-            "Kestrova": null,
-            "Kestrova range": null,
-            "Kestrova range below": null,
-            "below": null,
-            "none": "None of these is the model name",
-            "range": null,
-            "range below": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications",
-        "statement": "Compare the Delmaro Kestrova range below."
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/choice0": {
-          "choice": "Delmaro Kestrova",
-          "confidence": 0.77,
-          "probabilities": {
-            "Compare": 0.0,
-            "Compare the Delmaro Kestrova range below": 0.0,
-            "Delmaro": 0.01,
-            "Delmaro Kestrova": 0.79,
-            "Delmaro Kestrova range": 0.01,
-            "Delmaro Kestrova range below": 0.0,
-            "Kestrova": 0.17,
-            "Kestrova range": 0.0,
-            "Kestrova range below": 0.0,
-            "below": 0.0,
-            "none": 0.01,
-            "range": 0.0,
-            "range below": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 445,
       "model": "jev-1.13.0"
     }
   },
@@ -19197,59 +16888,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "c692478f3dd0d486": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "CO2 emissions (g/km): 128"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "co2_g_km",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 1.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
-      "model": "jev-1.13.0"
-    }
-  },
   "c8bfed032e4bcfca": {
     "request": {
       "questions": {
@@ -19282,147 +16920,6 @@
         }
       },
       "input_tokens": 364,
-      "model": "jev-1.13.0"
-    }
-  },
-  "c8d01a71aca7f903": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Displacement: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "engine_size_cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 1.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
-      "model": "jev-1.13.0"
-    }
-  },
-  "cb4533853490d846": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "power_kw": "Maximum power output (kW)",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "0-62mph: 8.4 s"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "zero_to_62_s",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "power_kw": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 1.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
-      "model": "jev-1.13.0"
-    }
-  },
-  "cb80b9447dfe4419": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price (GBP)?",
-          "options": {
-            "19,000": null,
-            "19,000 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 SE: 19,000 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "19,000 GBP",
-          "confidence": 0.59,
-          "probabilities": {
-            "19,000": 0.27,
-            "19,000 GBP": 0.73,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 361,
       "model": "jev-1.13.0"
     }
   },
@@ -20042,49 +17539,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "d0e7d0197cee8aa7": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "Copper Orange"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "colour",
-          "confidence": 1.0,
-          "probabilities": {
-            "colour": 1.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 428,
-      "model": "jev-1.13.0"
-    }
-  },
   "d34aaa55586ae42c": {
     "request": {
       "questions": {
@@ -20125,39 +17579,6 @@
         }
       },
       "input_tokens": 425,
-      "model": "jev-1.13.0"
-    }
-  },
-  "d3539a15b7fae675": {
-    "request": {
-      "questions": {
-        "VehicleSpec.make/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the manufacturer (make) name is Delmaro.",
-          "type": "noul"
-        },
-        "VehicleSpec.model/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the model name is Delmaro Kestrova SE.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.make/verify": {
-          "p": 0.67,
-          "type": "noul"
-        },
-        "VehicleSpec.model/verify": {
-          "p": 0.74,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 317,
       "model": "jev-1.13.0"
     }
   },
@@ -20640,59 +18061,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "dc3b94bee63ff57d": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "Sport"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "trim",
-          "confidence": 0.73,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.02,
-            "none": 0.23,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.75,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 520,
-      "model": "jev-1.13.0"
-    }
-  },
   "ddb3840fc65eaec7": {
     "request": {
       "questions": {
@@ -20860,49 +18228,6 @@
         }
       },
       "input_tokens": 448,
-      "model": "jev-1.13.0"
-    }
-  },
-  "deccf85d2709b99c": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "Fuel: Petrol"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "fuel_type",
-          "confidence": 1.0,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 1.0,
-            "mileage_miles": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 429,
       "model": "jev-1.13.0"
     }
   },
@@ -21387,82 +18712,6 @@
         }
       },
       "input_tokens": 348,
-      "model": "jev-1.13.0"
-    }
-  },
-  "e5b9ec80918bab0e": {
-    "request": {
-      "questions": {
-        "Listing": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "colour": "Exterior colour",
-            "fuel_type": "Fuel or powertrain type",
-            "mileage_miles": "Mileage (miles)",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Asking price (GBP)",
-            "year": "Year of first registration"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Used cars: page 1 \u203a Delmaro Tovani",
-        "statement": "View details"
-      }
-    },
-    "response": {
-      "answers": {
-        "Listing": {
-          "choice": "none",
-          "confidence": 0.94,
-          "probabilities": {
-            "colour": 0.0,
-            "fuel_type": 0.0,
-            "mileage_miles": 0.0,
-            "model": 0.05,
-            "none": 0.95,
-            "price_gbp": 0.0,
-            "year": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 427,
-      "model": "jev-1.13.0"
-    }
-  },
-  "e5e6a9d317f7e6cd": {
-    "request": {
-      "questions": {
-        "VehicleSpec.make/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the manufacturer (make) name is Delmaro.",
-          "type": "noul"
-        },
-        "VehicleSpec.model/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the model name is Kestrova.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.make/verify": {
-          "p": 0.69,
-          "type": "noul"
-        },
-        "VehicleSpec.model/verify": {
-          "p": 0.72,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 313,
       "model": "jev-1.13.0"
     }
   },
@@ -22171,59 +19420,6 @@
         }
       },
       "input_tokens": 439,
-      "model": "jev-1.13.0"
-    }
-  },
-  "f214ae47d92ed55c": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "0-62mph: 8.4 s"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "zero_to_62_s",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 0.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 1.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 532,
       "model": "jev-1.13.0"
     }
   },
@@ -23328,59 +20524,6 @@
         }
       },
       "input_tokens": 452,
-      "model": "jev-1.13.0"
-    }
-  },
-  "ffe7139d18abe667": {
-    "request": {
-      "questions": {
-        "VehicleSpec": {
-          "instructions": "Which detail does this statement state?",
-          "options": {
-            "automatic": "has an automatic gearbox",
-            "co2_g_km": "CO2 emissions (g/km)",
-            "engine_size_cc": "Engine displacement (cc)",
-            "fuel_type": "Fuel or powertrain type",
-            "make": "Manufacturer (make) name",
-            "model": "Model name",
-            "none": "None of these details",
-            "price_gbp": "Price (GBP)",
-            "seats": "Number of seats",
-            "top_speed_mph": "Top speed (mph)",
-            "trim": "Trim or variant name, e.g. SE L",
-            "zero_to_62_s": "0-62 mph acceleration time (s)"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Fuel type: Diesel"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec": {
-          "choice": "fuel_type",
-          "confidence": 1.0,
-          "probabilities": {
-            "automatic": 0.0,
-            "co2_g_km": 0.0,
-            "engine_size_cc": 0.0,
-            "fuel_type": 1.0,
-            "make": 0.0,
-            "model": 0.0,
-            "none": 0.0,
-            "price_gbp": 0.0,
-            "seats": 0.0,
-            "top_speed_mph": 0.0,
-            "trim": 0.0,
-            "zero_to_62_s": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 525,
       "model": "jev-1.13.0"
     }
   }
