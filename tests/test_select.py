@@ -1222,16 +1222,17 @@ async def test_a_span_two_other_fields_picked_is_asked_about_among_them() -> Non
         FakeJev(strict=True)
         .choice("Which of these is the number of doors?", "5")
         .choice("Which of these is the number of seats?", "5")
-        .choice('Which of these is "5"?', "seats", confidence=0.5, probabilities={"doors": 0.5})
+        .choice('Which of these is "5"?', "doors", confidence=0.5, probabilities={"seats": 0.5})
     )
-    ctx = context(fake, [st("s1", "5 seats")], {}, models=(Body,))
+    ctx = context(fake, [st("s1", "5 doors")], {}, models=(Body,))
     run = ctx.schemas["Body"]
     run.categories["s1"] = ChoiceAnswer(
         choice="seats", confidence=0.6, probabilities={"doors": 0.4, "seats": 0.6}
     )
     await run_both(ctx)
-    assert run.selections[("doc", "doors", "s1")].candidate is None
-    assert run.selections[("doc", "seats", "s1")].candidate is not None
+    # Jev's choice keeps the span, though the other field is as likely and asked first.
+    assert run.selections[("doc", "doors", "s1")].candidate is not None
+    assert run.selections[("doc", "seats", "s1")].candidate is None
     # A number is one of the fields that took it: "none" is offered only for names.
     _, asked = fake.calls
     assert asked.questions == {

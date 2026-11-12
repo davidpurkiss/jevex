@@ -673,7 +673,7 @@ def _named_elsewhere(labels: Sequence[str], elsewhere: Sequence[str]) -> list[st
     entities, and the ones that bear on a table are those called what its headers are.
     Which axis they speak for is still Jev's to say. A label with no letters ("5") is
     left out of the matching: it is in any label with that number."""
-    words = [found for found in map(_words, labels) if any(w.isalpha() for w in found)]
+    words = [found for found in map(_words, labels) if any(c.isalpha() for c in "".join(found))]
     named: list[str] = []
     room = MAX_AXIS_LABELS_CHARS
     for other in dict.fromkeys(elsewhere):
@@ -901,7 +901,7 @@ def _table_groups(parsed: ParsedDocument, *, rows: bool, min_labels: int = 2) ->
     return groups
 
 
-_JOINER = re.compile(r"(?<=[^\W_])[-/._'’]+(?=[^\W\d_])")
+_JOINER = re.compile(r"(?<=[^\W_])[-/.'’]+(?=[^\W\d_])")
 """A hyphen, slash, full stop or apostrophe joining a word to the letters after it, which
 cells are compared without, as they are without spacing or case: "6 speed manual" and
 "6-Speed Manual" state one thing. Before a digit it stays, where it may be a sign, a

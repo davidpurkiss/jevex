@@ -987,6 +987,21 @@ async def test_a_label_with_no_letters_names_no_entity_elsewhere() -> None:
     assert asked.state["vehicle specs elsewhere"] == ["SE 1.5 TSI"]
 
 
+async def test_a_label_of_letters_and_digits_names_entities_elsewhere() -> None:
+    models = (
+        "<table><tr><th></th><th>i10</th><th>i20</th></tr>"
+        "<tr><th>Red</th><td>£0</td><td>£0</td></tr>"
+        "<tr><th>Blue</th><td>£650</td><td>£0</td></tr></table>"
+    )
+    versions = price_list(("i10 Advance", "£16,000"), ("i20 Premium", "£21,000"))
+    parsed = await parse(models + versions)
+    fake = one_axis_jev().choice(AXIS, "columns", state="Red")
+    await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    _, asked = [c for c in fake.calls if "axis" in c.questions]
+    assert isinstance(asked.state, dict)
+    assert asked.state["vehicle specs elsewhere"] == ["i10 Advance", "i20 Premium"]
+
+
 async def test_the_entities_named_to_a_table_are_cut_to_a_length() -> None:
     engines = [f"SE {i}.0 litre turbocharged petrol automatic" for i in range(1, 13)]
     engines.append("SE 13")  # short enough to fit where the eighth doesn't
