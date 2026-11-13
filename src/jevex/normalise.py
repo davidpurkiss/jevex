@@ -605,9 +605,12 @@ class NormaliseStage:
     with ``method="generator"``, or ``"vision"`` when the statement came from a vision
     model.
 
-    Last, among a schema's top-level entities, those that give little of what the others
-    give are dropped, with their values (:func:`_unlike_the_rest`; an ``entity_dropped``
-    event each), so later stages don't work on them and they make no record.
+    Last, the entities that give little of what the others give are dropped, with their
+    values (:func:`_unlike_the_rest`; an ``entity_dropped`` event each, naming the fields
+    it gave), so later stages don't work on them and they make no record: the fallback
+    never gets to fill one in. A schema with a nested model keeps all its entities, parents
+    and children: a parent's children are part of what it gives, and they are in another
+    run.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -639,15 +642,21 @@ class NormaliseStage:
                     run.vision_values[(scope, field_name)] = checks
                     if run.spec.field(field_name).many:
                         run.value_picks[(scope, field_name)] = taken
-            if run.parent is None:
-                for label in _unlike_the_rest(run):
-                    run.scopes = [s for s in run.scopes if s.label != label]
-                    del run.fields[label]
-                    ctx.event(
-                        self.name,
-                        "entity_dropped",
-                        f"{run.name}: {label!r} gives little of what the other entities give",
-                    )
+            nested = run.parent is not None or any(
+                other.parent == run.name for other in ctx.schemas.values()
+            )
+            unlike = _unlike_the_rest(run) if not nested else {}
+            for label, gave in unlike.items():
+                run.scopes = [s for s in run.scopes if s.label != label]
+                run.fields.pop(label, None)
+                ctx.event(
+                    self.name,
+                    "entity_dropped",
+                    f"{run.name}: {label!r} gives little of what the other entities give",
+                    schema=run.name,
+                    entity=label,
+                    fields=gave,
+                )
 
     def _accept(
         self,
@@ -778,43 +787,64 @@ class NormaliseStage:
         )
 
 
+UNLIKE_SHARE = 0.5
+"""An entity is unlike the rest when it gives less than this share of the fields most
+entities give (and fewer fields than the median entity). Chosen on the spec-sheets dev
+documents, simulated on recorded runs: at a half, 18 of 31 spurious records went and 4
+that had matched a truth record, and accuracy rose from 68.3% to 70.2%; at a third
+(tried without the median condition), 13 and 2, to 69.6% (#326)."""
+
+
 MIN_ALIKE = 3
-"""The fewest entities a document needs before one of them can be unlike the rest: with
-two, neither is the usual one."""
+"""The fewest entities giving anything before one can be unlike the rest: what "most" of
+one or two give is what a single entity gives, or what both do, and that is no pattern
+for a third to be unlike."""
 
 
-def _unlike_the_rest(run: SchemaRun) -> list[str]:
-    """The entities that aren't records like the document's others, by what each gives
-    for itself (its found values that aren't shared).
+def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
+    """The entities that aren't records like the document's others, each with the fields
+    it gives for itself (its found values that aren't shared).
 
     The records of one document are described alike: a price list gives every variant a
     price, a fuel and a power. The entity resolver also keeps things that only read like
     one (a page's heading with its make and model, an equipment row, a section named after
-    a fuel type), and Jev can't tell those from records, by their labels or shown what
-    they state: on real price lists it was no surer of the real ones. What they state
-    does tell them apart, so this is decided from structure. An entity is unlike the rest
-    when it gives fewer than half of the fields most entities give, and fewer fields than
-    the median entity does (so one that gives plenty, only not what a majority of sparse
-    ones give, stays). Nothing is dropped among fewer than :data:`MIN_ALIKE` entities.
+    a fuel type). Jev's answer doesn't tell them apart: the resolver's own question ("Does
+    ... name a separate ...?"), asked again of each entity on four real price lists with
+    the entity's own statements as the state, came back no surer for the real records
+    (p 0.17-0.5 for many) than for the spurious ones (up to 0.85). What they state does,
+    so this is decided from structure.
+
+    Among the entities that give anything, a field is usual when more than half give it.
+    An entity is unlike the rest when it gives less than :data:`UNLIKE_SHARE` of the
+    usual fields and fewer fields than the median of them does. The second condition keeps
+    one that gives plenty where a majority of sparse ones give something else. One that
+    gives nothing is unlike the rest whenever any field is usual, and doesn't count
+    towards what most give. Nothing is, while fewer than :data:`MIN_ALIKE` entities give
+    anything.
+
+    What it costs: a real record the document says little about goes with the rest (of
+    two full variants and a third with only a price, the third), and values an entity
+    gets from a coarser one it is a kind of are shared, so they don't count for it.
     """
     own = {
-        scope.label: {
+        scope.label: sorted(
             name
             for name, meta in run.fields.get(scope.label, {}).items()
             if meta.found and not meta.shared
-        }
+        )
         for scope in run.scopes
     }
-    if len(own) < MIN_ALIKE:
-        return []
-    given = Counter(name for fields in own.values() for name in fields)
-    usual = {name for name, entities in given.items() if entities * 2 > len(own)}
-    typical = median(len(fields) for fields in own.values())
-    return [
-        label
+    giving = [fields for fields in own.values() if fields]
+    if len(giving) < MIN_ALIKE:
+        return {}
+    given = Counter(name for fields in giving for name in fields)
+    usual = {name for name, entities in given.items() if entities * 2 > len(giving)}
+    typical = median(len(fields) for fields in giving)
+    return {
+        label: fields
         for label, fields in own.items()
-        if label in run.fields and len(fields & usual) * 2 < len(usual) and len(fields) < typical
-    ]
+        if len(usual.intersection(fields)) < UNLIKE_SHARE * len(usual) and len(fields) < typical
+    }
 
 
 @dataclass(frozen=True)
