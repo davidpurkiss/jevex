@@ -145,6 +145,8 @@ One document can yield one record, many records, or a parent with children. The 
 
 Statements assigned to "all of them" become shared values. With `ParentChild`, they land on the parent and are inherited by every child. With `MultiEntity`, they are copied into each record, with `meta` marking them as shared.
 
+**Unlike the rest.** The records of one document are described alike: a price list gives every variant a price, a fuel and a power. The resolver also keeps things that only read like an entity (a page's heading with its make and model, an equipment row, a section named after a fuel type), and Jev can't tell them from records, by their labels or shown what they state. What they state does tell them apart, so once values are normalised, an entity is dropped when it gives for itself (not from shared statements) fewer than half of the fields most entities give, and fewer fields than the median entity does. The second condition keeps an entity that gives plenty where a majority of sparse ones give something else. Nothing is dropped among fewer than three entities, or among a parent's children. Each drop is an `entity_dropped` event.
+
 ```python
 class EntityResolver(Protocol):
     async def resolve(

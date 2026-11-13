@@ -23,6 +23,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from statistics import median
 from typing import TYPE_CHECKING, Annotated, Any, Union, cast, get_args, get_origin
 
 from pydantic import TypeAdapter, ValidationError
@@ -603,6 +604,10 @@ class NormaliseStage:
     two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are recorded
     with ``method="generator"``, or ``"vision"`` when the statement came from a vision
     model.
+
+    Last, among a schema's top-level entities, those that give little of what the others
+    give are dropped, with their values (:func:`_unlike_the_rest`; an ``entity_dropped``
+    event each), so later stages don't work on them and they make no record.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -634,6 +639,15 @@ class NormaliseStage:
                     run.vision_values[(scope, field_name)] = checks
                     if run.spec.field(field_name).many:
                         run.value_picks[(scope, field_name)] = taken
+            if run.parent is None:
+                for label in _unlike_the_rest(run):
+                    run.scopes = [s for s in run.scopes if s.label != label]
+                    del run.fields[label]
+                    ctx.event(
+                        self.name,
+                        "entity_dropped",
+                        f"{run.name}: {label!r} gives little of what the other entities give",
+                    )
 
     def _accept(
         self,
@@ -762,6 +776,45 @@ class NormaliseStage:
             vision_values(given),
             _picks(ctx, used, shared),
         )
+
+
+MIN_ALIKE = 3
+"""The fewest entities a document needs before one of them can be unlike the rest: with
+two, neither is the usual one."""
+
+
+def _unlike_the_rest(run: SchemaRun) -> list[str]:
+    """The entities that aren't records like the document's others, by what each gives
+    for itself (its found values that aren't shared).
+
+    The records of one document are described alike: a price list gives every variant a
+    price, a fuel and a power. The entity resolver also keeps things that only read like
+    one (a page's heading with its make and model, an equipment row, a section named after
+    a fuel type), and Jev can't tell those from records, by their labels or shown what
+    they state: on real price lists it was no surer of the real ones. What they state
+    does tell them apart, so this is decided from structure. An entity is unlike the rest
+    when it gives fewer than half of the fields most entities give, and fewer fields than
+    the median entity does (so one that gives plenty, only not what a majority of sparse
+    ones give, stays). Nothing is dropped among fewer than :data:`MIN_ALIKE` entities.
+    """
+    own = {
+        scope.label: {
+            name
+            for name, meta in run.fields.get(scope.label, {}).items()
+            if meta.found and not meta.shared
+        }
+        for scope in run.scopes
+    }
+    if len(own) < MIN_ALIKE:
+        return []
+    given = Counter(name for fields in own.values() for name in fields)
+    usual = {name for name, entities in given.items() if entities * 2 > len(own)}
+    typical = median(len(fields) for fields in own.values())
+    return [
+        label
+        for label, fields in own.items()
+        if label in run.fields and len(fields & usual) * 2 < len(usual) and len(fields) < typical
+    ]
 
 
 @dataclass(frozen=True)

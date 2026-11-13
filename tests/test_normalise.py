@@ -832,6 +832,80 @@ async def test_only_the_entitys_own_values_are_settled_when_it_has_some() -> Non
     assert run.fields["doc"]["seats"].value == 4
 
 
+def given(run: SchemaRun, label: str, *own: str, shared: tuple[str, ...] = ()) -> None:
+    """An entity that found ``own`` for itself and ``shared`` from statements it shares."""
+    run.scopes.append(EntityScope(label=label))
+    for name in own:
+        run.set_field(label, name, FieldMeta(value=1, confidence=0.9))
+    for name in shared:
+        run.set_field(label, name, FieldMeta(value=1, confidence=0.9, shared=True))
+
+
+async def test_an_entity_that_gives_little_of_what_the_others_give_is_dropped() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    # A page heading the resolver took for a variant: all it gives for itself is a year.
+    given(run, "Tourer range", "model_year", shared=("price", "power_kw", "seats"))
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport"]
+    assert "Tourer range" not in run.fields
+    [event] = [e for e in ctx.events if e.kind == "entity_dropped"]
+    assert (event.stage, event.message) == (
+        "normalise",
+        "Car: 'Tourer range' gives little of what the other entities give",
+    )
+
+
+async def test_an_entity_giving_half_of_what_most_give_stays() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Van", "price", "seats")
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport", "Van"]
+    assert not [e for e in ctx.events if e.kind == "entity_dropped"]
+
+
+async def test_an_entity_giving_plenty_stays_among_a_majority_that_gives_little() -> None:
+    # Two headings and one real record: what most give (a year) the record doesn't, but
+    # it gives more than they do.
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    given(run, "Range", "model_year")
+    given(run, "Range (2)", "model_year")
+    given(run, "SE", "price", "power_kw", "seats")
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["Range", "Range (2)", "SE"]
+
+
+async def test_two_entities_are_too_few_for_one_to_be_unlike_the_rest() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    given(run, "SE", "price", "power_kw", "seats", "economy")
+    given(run, "Range", shared=("price",))
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "Range"]
+
+
+async def test_child_entities_arent_compared_with_each_other() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.parent = "Dealer"
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Range", "model_year")
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport", "Range"]
+
+
 def _buggy(value: object, *, field: object = None) -> str:
     raise KeyError("lookup table")
 
