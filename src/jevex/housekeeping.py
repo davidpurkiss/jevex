@@ -5,8 +5,8 @@ The learn stage hands each finished document to a :class:`Housekeeper`, which ad
 the store's :class:`~jevex.store.GeneratorStats` for every generator the candidate stage
 ran there (:func:`generator_use`):
 
-- ``documents``: the document was in the generator's scope, and the candidate stage ran it
-  on at least one statement.
+- ``documents``: the document was in the generator's scope, and the candidate stage kept
+  candidates for its field on at least one statement.
 - ``hits``: it gave at least one candidate there.
 - ``wins``: one of its candidates became a field value that stood: it normalised, fitted
   the field, and no LLM fallback replaced it. Without ground truth at run time, a value

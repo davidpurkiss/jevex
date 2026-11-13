@@ -3,9 +3,11 @@
 After categorising, each statement is assigned to a field (or none). Then:
 
 - :class:`CandidateStage` runs the generator registry on statements whose field needs
-  candidates (numbers, dates, strings) and stores them in ``SchemaRun.candidates``.
-- :class:`SelectStage` asks Jev about every categorised statement, **one request per
-  statement** covering every schema and scope that assigned it:
+  candidates (numbers, dates, strings) and stores them in ``SchemaRun.candidates``. It
+  also reads every table header for a quantity in a number field's units, whatever the
+  header was categorised as (:func:`field_statements`).
+- :class:`SelectStage` asks Jev about every statement assigned a field, **one request
+  per statement** covering every schema and scope that assigned it:
 
   - candidate fields: the :class:`~jevex.interfaces.CandidateSelector`'s questions (by
     default a Choice over the candidate spans plus "none", split across several Choices

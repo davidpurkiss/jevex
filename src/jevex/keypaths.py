@@ -52,7 +52,8 @@ The stage's :data:`StructuredMode` decides what the layout route (stages 5–13)
   about it aren't misrouted.
 - ``merge``: the layout route looks for every field, and
   :meth:`~jevex.pipeline.SchemaRun.offer_field` settles each disagreement by confidence,
-  recording the losing value in ``meta.conflicts``.
+  recording the losing value in ``meta.conflicts`` (a page-wide value every entity shares
+  gives way to the text's without weighing, as in ``fill_gaps``).
 """
 
 from __future__ import annotations
