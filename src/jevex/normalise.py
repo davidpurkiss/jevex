@@ -827,19 +827,13 @@ def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
     two full variants and a third with only a price, the third), and values an entity
     gets from a coarser one it is a kind of are shared, so they don't count for it.
     """
-    own = {
-        scope.label: sorted(
-            {
-                *run.values.get(scope.label, {}),
-                *(
-                    name
-                    for name, meta in run.fields.get(scope.label, {}).items()
-                    if meta.found and not meta.shared
-                ),
-            }
-        )
-        for scope in run.scopes
-    }
+    own: dict[str, list[str]] = {}
+    for scope in run.scopes:
+        metas = run.fields.get(scope.label, {})
+        found = {name for name, meta in metas.items() if meta.found and not meta.shared}
+        # A bare value stands only where the field has no meta, as in the record.
+        bare = {name for name in run.values.get(scope.label, {}) if name not in metas}
+        own[scope.label] = sorted(found | bare)
     giving = [fields for fields in own.values() if fields]
     if not giving:
         return {}

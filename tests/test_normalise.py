@@ -993,8 +993,14 @@ async def test_a_bare_value_counts_as_given_and_goes_with_a_dropped_entity() -> 
     for label, names in (("Tourer", ("price", "power_kw", "seats")), ("Range", ("model_year",))):
         run.scopes.append(EntityScope(label=label))
         run.values[label] = dict.fromkeys(names, 1)
+    # A bare value under a field that has a meta isn't the record's: the meta is.
+    given(run, "Guide", shared=("price", "power_kw", "seats"))
+    run.values["Guide"] = dict.fromkeys(("price", "power_kw", "seats"), 1)
     await NormaliseStage().run(ctx)
-    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", ["model_year"])]
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [
+        ("Range", ["model_year"]),
+        ("Guide", []),
+    ]
     assert set(run.values) == {"Tourer"}
 
 
@@ -1012,6 +1018,18 @@ async def test_a_schema_whose_nested_model_has_records_keeps_all_its_entities() 
         given(run, "Range", "model_year")
         await NormaliseStage().run(ctx)
         assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport", "Range"]
+
+
+async def test_another_schemas_child_run_doesnt_keep_this_schemas_entities() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    ctx.schemas["Dealer.offers"] = SchemaRun(SPEC, parent="Dealer")
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Range", "model_year")
+    await NormaliseStage().run(ctx)
+    assert [d["entity"] for d in dropped(ctx)] == ["Range"]
 
 
 def _buggy(value: object, *, field: object = None) -> str:
