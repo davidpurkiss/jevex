@@ -803,3 +803,67 @@ async def test_cleaned_pages_segment_under_their_title(
         holders = [c for c in root.walk() if fact in c.text]
         assert holders, fact
         assert all(c.heading_trail[:1] == [heading] for c in holders), fact
+
+
+# --- repeated wrappers ------------------------------------------------------------------
+
+
+def test_wrappers_that_repeat_one_structure_are_each_a_section() -> None:
+    # A price grid built from div elements: nothing but the repetition marks its rows.
+    row = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
+    root = parse_html(
+        "<body><h2>SE</h2><div>"
+        + row.format("1.0 TSI 95PS", "£22,095")
+        + row.format("1.0 TSI 116PS", "£23,070")
+        + "</div></body>"
+    )
+    assert outline(root) == [
+        (0, "heading", "SE"),
+        (0, "section", ""),
+        (1, "paragraph", "1.0 TSI 95PS"),
+        (1, "paragraph", "£22,095"),
+        (0, "section", ""),
+        (1, "paragraph", "1.0 TSI 116PS"),
+        (1, "paragraph", "£23,070"),
+    ]
+    assert [path(c) for c in root.children if c.type == "section"] == [
+        "/html/body/div/div[1]",
+        "/html/body/div/div[2]",
+    ]
+
+
+def test_cards_built_from_divs_keep_their_heading_and_text_together() -> None:
+    card = "<div><h3>{}</h3><p>{}</p></div>"
+    root = parse_html("<body>" + card.format("SE", "£22,095") + card.format("SE L", "£23,895"))
+    assert outline(root) == [
+        (0, "section", ""),
+        (1, "heading", "SE"),
+        (1, "paragraph", "£22,095"),
+        (0, "section", ""),
+        (1, "heading", "SE L"),
+        (1, "paragraph", "£23,895"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        # One wrapper, repeating nothing.
+        "<div><p>Power</p><p>110 kW</p></div><p>Notes</p>",
+        # Two wrappers of different structures: a page's parts, not a run.
+        "<div><p>Power</p><p>110 kW</p></div><div><p>Notes</p><ul><li>one</li></ul></div>",
+        # Wrappers of one block each: nothing to keep together.
+        "<div><p>Power</p></div><div><p>110 kW</p></div>",
+        # Text of the wrapper's own beside its blocks: not a pure container.
+        "<div>Power <p>110 kW</p><p>148 bhp</p></div><div>Torque <p>250 Nm</p><p>184 lb</p></div>",
+    ],
+)
+def test_other_wrappers_add_no_level(markup: str) -> None:
+    root = parse_html(f"<body>{markup}</body>")
+    assert [c for c in root.walk() if c.type == "section" and c is not root] == []
+
+
+def test_elements_with_a_component_of_their_own_arent_taken_for_repeated_wrappers() -> None:
+    lists = "<ul><li>a</li><li>b</li></ul>" * 2
+    root = parse_html(f"<body>{lists}</body>")
+    assert [c.type for c in root.children] == ["list", "list"]

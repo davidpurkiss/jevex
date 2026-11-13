@@ -181,7 +181,10 @@ class MultiEntity:
        each row's label ("EXPRESSION TCe 110").
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
-       first heading (or first text).
+       first heading (or first text). One made only of paragraphs is a row of a grid that
+       isn't a table: what it states is its cells, by their place in it
+       (:func:`_row_values`), so two such rows with one label and different cells are
+       two entities, as two table rows are.
     3. **Headed sections:** sibling sections that each start with a heading ("SE",
        "SE L"), each with its subtree.
 
@@ -919,7 +922,13 @@ class _Claim:
     def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
         self.ids.add(statement.id)
         value = statement.text.removeprefix(header_prefix(ref))
-        self.values.setdefault(across, _JOINER.sub("", "".join(value.split())).casefold())
+        self.values.setdefault(across, _stated(value))
+
+
+def _stated(text: str) -> str:
+    """A cell's text as two cells are compared: without spacing, case or the punctuation
+    joining a word's parts (:data:`_JOINER`)."""
+    return _JOINER.sub("", "".join(text.split())).casefold()
 
 
 def _row_claims(
@@ -963,15 +972,17 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     groups: list[_Group] = []
 
     def group(rule: int, depth: int, parent: Component, members: list[Component]) -> None:
-        found: list[tuple[str, frozenset[str]]] = []
+        found: list[tuple[str, frozenset[str], dict[tuple[str, ...], str]]] = []
         for member in members:
             label = _label(member)
             ids = frozenset(sid for c in member.walk() for sid in by_component.get(c.id, ()))
             if label and ids:
-                found.append((label, ids))
+                found.append((label, ids, _row_values(member) if rule == 1 else {}))
         if len(found) >= 2:
-            labels = _unique([label for label, _ in found])
-            members_ = [_Member(u, ids) for u, (_, ids) in zip(labels, found, strict=True)]
+            labels = _unique([label for label, *_ in found])
+            members_ = [
+                _Member(u, ids, values) for u, (_, ids, values) in zip(labels, found, strict=True)
+            ]
             trail = list(members[0].heading_trail)
             groups.append(_Group(rule, depth, trail, members_, at=parent.id))
 
@@ -994,6 +1005,21 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
 
     visit(parsed.root, 0)
     return groups
+
+
+def _row_values(member: Component) -> dict[tuple[str, ...], str]:
+    """What a same-shaped sibling states, when it is a row of a grid that isn't a table:
+    nothing but paragraphs, the first its label and the others its cells, each by its
+    place in the row (as a table row's are by their column headers, :attr:`_Member.values`).
+    Two such rows with one label and different cells are two entities (an engine's row
+    under each trim's heading, each with its own price). A card (a heading, a mix of
+    blocks) states nothing this way: its parts aren't known to line up with another's."""
+    cells = member.children
+    if any(cell.type != "paragraph" or cell.children for cell in cells):
+        return {}
+    return {
+        ("cell", str(len(cells)), str(i)): _stated(cell.text) for i, cell in enumerate(cells) if i
+    }
 
 
 def _records(

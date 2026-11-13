@@ -792,6 +792,69 @@ async def test_multi_entity_leaves_statements_out_past_the_choice_option_limit()
     assert all(texts(parsed, s.shared_statement_ids) == ["Power"] for s in scopes)
 
 
+GRID_ROW = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
+
+
+def price_grid(heading: str, *rows: tuple[str, str]) -> str:
+    """A trim's engines and prices as a grid of div elements, under its heading."""
+    return (
+        f"<section><h3>{heading}</h3>" + "".join(GRID_ROW.format(*r) for r in rows) + "</section>"
+    )
+
+
+async def test_rows_of_a_grid_with_one_label_and_different_cells_are_entities_apart() -> None:
+    # An engine's row under each trim, each with its own price: nothing but the repeated
+    # structure marks the rows, and their cells tell the two "1.0 TSI" rows apart.
+    parsed = await parse(
+        price_grid("SE", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + price_grid("SE L", ("1.0 TSI", "£23,895"), ("1.5 TSI", "£26,215"))
+    )
+    fake = kinds_jev()
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["SE 1.0 TSI", "SE 1.5 TSI", "SE L 1.0 TSI", "SE L 1.5 TSI"]
+    assert [texts(parsed, s.statement_ids) for s in scopes] == [
+        ["1.0 TSI", "£22,095"],
+        ["1.5 TSI", "£24,370"],
+        ["1.0 TSI", "£23,895"],
+        ["1.5 TSI", "£26,215"],
+    ]
+    # Each row is a kind of the trim whose section holds it, and shares its heading.
+    assert [texts(parsed, s.shared_statement_ids) for s in scopes] == [
+        ["SE"],
+        ["SE"],
+        ["SE L"],
+        ["SE L"],
+    ]
+
+
+async def test_rows_of_a_grid_with_one_label_and_the_same_cells_are_one_entity() -> None:
+    parsed = await parse(
+        price_grid("Prices", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + price_grid("Prices again", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["1.0 TSI", "1.5 TSI"]
+    assert texts(parsed, scopes[0].statement_ids) == ["1.0 TSI", "£22,095", "1.0 TSI", "£22,095"]
+
+
+async def test_cards_with_one_label_stay_one_entity_whatever_else_they_say() -> None:
+    # A card's parts aren't known to line up with another's: a trim's card in the overview
+    # and its card further down are the same trim.
+    card = "<article><h3>{}</h3><p>{}</p></article>"
+    parsed = await parse(
+        "<section>"
+        + card.format("SE", "From £22,095")
+        + card.format("SE L", "From £23,895")
+        + "</section><section>"
+        + card.format("SE", "Cloth seats")
+        + card.format("SE L", "Leather seats")
+        + "</section>"
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["SE", "SE L"]
+    assert texts(parsed, scopes[0].statement_ids) == ["SE", "From £22,095", "SE", "Cloth seats"]
+
+
 @pytest.mark.parametrize("p", [-0.1, 1.5])
 def test_multi_entity_rejects_a_boundary_p_outside_0_to_1(p: float) -> None:
     with pytest.raises(ValueError, match="boundary_p"):

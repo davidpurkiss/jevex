@@ -18,7 +18,9 @@ it was given. It then walks the DOM and maps it to components:
   instead.
 - A ``figure`` holding one image or table attaches its ``figcaption`` to it.
 - Any other text becomes paragraphs: one per block element (``p``, ``div``, ``li``...),
-  and one per run of loose text between blocks. Wrapper ``div`` elements add no level.
+  and one per run of loose text between blocks. Wrapper ``div`` elements add no level,
+  except siblings that repeat one structure of blocks (cards, the rows of a grid built
+  from ``div`` elements): each of those is a section.
 - ``img`` becomes an image component whose text is its alt text and whose ``src`` is its
   URL (a lazy loader's ``data-src`` first, then ``src``, then the first ``srcset``
   candidate), resolved against the document's URL.
@@ -538,11 +540,17 @@ class _Segmenter:
         """Blocks for the node's children, with loose inline runs as paragraphs."""
         blocks: list[_Block] = []
         inline = _Inline()
+        repeated = _repeated(node)
         for child in node.children:
             if isinstance(child, str):
                 inline.pieces.append(child if pre else _WHITESPACE.sub(" ", child))
             elif child.skip:
                 continue
+            elif id(child) in repeated:
+                self._flush(inline, node, blocks, pre=pre)
+                inline = _Inline()
+                if children := self.contents(child):
+                    blocks.append(_Block("section", self.path(child), children=children))
             elif _is_block(child):
                 self._flush(inline, node, blocks, pre=pre)
                 inline = _Inline()
@@ -737,6 +745,42 @@ class _Segmenter:
             media[0].children.extend(captions)
             return media
         return [_Block("section", self.path(node), children=blocks)] if blocks else []
+
+
+_STRUCTURED = (
+    frozenset(_HEADINGS) | _LIST_TAGS | SECTION_TAGS | _TABLE_PARTS | {"table", "dl", "figure"}
+)
+"""Elements :meth:`_Segmenter.block` gives a component of their own; the rest are wrappers."""
+
+
+def _repeated(node: _Node) -> set[int]:
+    """The ids of ``node``'s wrapper children that repeat one structure: two or more
+    with the same tree of block elements, each holding at least two blocks and no text of
+    its own. A page built from ``div`` elements marks its cards, and the rows of a grid
+    that isn't a ``table``, only this way; each stays a container, so what belongs to one
+    stays together (an engine and its price). The exact tree is compared, so the parts of
+    a page that merely each hold two blocks (a header, a body) aren't taken for a run.
+    """
+    shapes: dict[tuple[object, ...], list[_Node]] = {}
+    for child in node.elements():
+        if child.tag not in _STRUCTURED and _heading_level(child) == 0:
+            shape = _block_shape(child)
+            if len(shape) >= 2 and not _loose_text(child):
+                shapes.setdefault(shape, []).append(child)
+    return {id(child) for same in shapes.values() if len(same) >= 2 for child in same}
+
+
+def _block_shape(node: _Node) -> tuple[object, ...]:
+    """The tree of block elements under ``node``: each one's tag and its own tree."""
+    return tuple((child.tag, _block_shape(child)) for child in node.elements() if _is_block(child))
+
+
+def _loose_text(node: _Node) -> bool:
+    """Whether ``node`` holds text or inline elements beside its blocks."""
+    return any(
+        child.strip() if isinstance(child, str) else not child.skip and not _is_block(child)
+        for child in node.children
+    )
 
 
 def _is_block(node: _Node) -> bool:
