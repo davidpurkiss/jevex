@@ -94,10 +94,15 @@ def field_statements(
     """(statement, field) pairs in scope that the classifier assigned to a field.
 
     A statement pairs with its top category and, when that is a field, with every other
-    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. Fields another
-    route already found for the scope (structured data, in ``fill_gaps`` mode) are left
-    out, so nothing is asked about them; in ``merge`` mode, or with ``include_found`` (the
-    LLM fallback second-guesses low-confidence values), every field stays.
+    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. A table header
+    also pairs with the number fields it gives a quantity in a unit of
+    (:attr:`SchemaRun.header_quantities <jevex.pipeline.SchemaRun.header_quantities>`): a
+    price list's row label packs a trim, an engine and its power into one cell
+    ("GT-Line 1.6 T-GDi 147bhp"), the classifier puts it down to one of them, and a figure
+    with its unit says what it is whichever that was. Fields another route already found
+    for the scope (structured data, in ``fill_gaps`` mode) are left out, so nothing is
+    asked about them; in ``merge`` mode, or with ``include_found`` (the LLM fallback
+    second-guesses low-confidence values), every field stays.
     """
     if ctx.parsed is None:
         return []
@@ -105,16 +110,17 @@ def field_statements(
     names = {f.name for f in run.spec.fields}
     for statement in ctx.parsed.scope_statements(scope):
         answer = run.categories.get(statement.id)
-        if answer is None or answer.choice not in names:
-            # A "none" answer routes nowhere, even if a field came close: a bool field
-            # would record False from a statement that isn't about it.
-            continue
-        also = sorted(
-            (p, name)
-            for name, p in answer.probabilities.items()
-            if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
-        )
-        chosen = [answer.choice, *(name for _, name in reversed(also))]
+        chosen: list[str] = []
+        # A "none" answer routes to no category, even if a field came close: a bool field
+        # would record False from a statement that isn't about it.
+        if answer is not None and answer.choice in names:
+            also = sorted(
+                (p, name)
+                for name, p in answer.probabilities.items()
+                if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
+            )
+            chosen = [answer.choice, *(name for _, name in reversed(also))]
+        chosen += [n for n in run.header_quantities.get(statement.id, []) if n not in chosen]
         out.extend(
             (statement, run.spec.field(name))
             for name in chosen
@@ -305,7 +311,11 @@ class JevCandidateSelector:
 
 @dataclass
 class CandidateStage:
-    """Generates candidate spans for every categorised statement whose field needs them.
+    """Generates candidate spans for every categorised statement whose field needs them,
+    and finds the quantities table headers give
+    (:attr:`SchemaRun.header_quantities <jevex.pipeline.SchemaRun.header_quantities>`): a
+    header pairs with each number field it has a candidate for spelled in a unit of that
+    field's dimension ("147bhp" for a field in kW, not "1.6" or "59 kWh").
 
     ``registry`` holds the stage's own generators; the document's learned ones
     (``ctx.generators``) run after them. Generators are scoped by the document's locale
@@ -322,6 +332,8 @@ class CandidateStage:
     name: str = "candidates"
 
     async def run(self, ctx: Context) -> None:
+        if ctx.parsed is None:
+            return
         registry = self.registry
         if ctx.generators is not None:
             registry = ctx.generators.on(registry)
@@ -333,26 +345,50 @@ class CandidateStage:
 
         for run in ctx.active:
             counted: set[str] = set()
+            measured = [f for f in run.spec.fields if f.kind == "number" and f.unit is not None]
+            # (statement, field, whether it's a header to keep only for a quantity it gives)
+            pairs: list[tuple[Statement, FieldSpec, bool]] = []
             for scope in run.scopes:
-                for statement, spec in field_statements(ctx, run, scope):
-                    key = (statement.id, spec.name)
-                    if spec.needs_candidates and key not in run.candidates:
-                        run.candidates[key] = registry.generate(
-                            statement,
-                            spec,
-                            schema=run.name,
-                            locale=locale,
-                            source=source,
-                            on_error=failed,
+                for statement in ctx.parsed.scope_statements(scope):
+                    if statement.kind == "table_header" and (
+                        statement.id not in run.header_quantities
+                    ):
+                        run.header_quantities[statement.id] = []
+                        pairs.extend((statement, spec, True) for spec in measured)
+                pairs.extend(
+                    (statement, spec, False)
+                    for statement, spec in field_statements(ctx, run, scope)
+                    if spec.needs_candidates
+                )
+            for statement, spec, header in pairs:
+                key = (statement.id, spec.name)
+                if key in run.candidates:
+                    continue
+                candidates = registry.generate(
+                    statement, spec, schema=run.name, locale=locale, source=source, on_error=failed
+                )
+                if header:
+                    if not any(_in_units_of(c, spec) for c in candidates):
+                        continue
+                    run.header_quantities[statement.id].append(spec.name)
+                run.candidates[key] = candidates
+                if spec.name not in counted:
+                    counted.add(spec.name)
+                    ctx.generators_ran.update(
+                        g.id
+                        for g in registry.for_field(
+                            spec, schema=run.name, locale=locale, source=source
                         )
-                        if spec.name not in counted:
-                            counted.add(spec.name)
-                            ctx.generators_ran.update(
-                                g.id
-                                for g in registry.for_field(
-                                    spec, schema=run.name, locale=locale, source=source
-                                )
-                            )
+                    )
+
+
+def _in_units_of(candidate: Candidate, field: FieldSpec) -> bool:
+    """Whether the candidate is spelled in a unit of the field's dimension."""
+    wanted = dimension(field.unit) if field.unit else None
+    return wanted is not None and any(
+        step.name == "unit" and dimension(str(step.args.get("from"))) == wanted
+        for step in candidate.normalise
+    )
 
 
 def candidate_locale(ctx: Context) -> str | None:

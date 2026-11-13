@@ -122,6 +122,10 @@ class SchemaRun:
     candidates: dict[tuple[str, str], list[Candidate]] = field(
         default_factory=dict[tuple[str, str], list["Candidate"]]
     )
+    header_quantities: dict[str, list[str]] = field(default_factory=dict[str, list[str]])
+    """By table-header statement id, the number fields the header gives a quantity in a
+    unit of (the candidate stage finds them): the selector asks about those too, whatever
+    the header was categorised as (:func:`~jevex.select.field_statements`)."""
     selections: dict[tuple[str, str, str], Selection] = field(
         default_factory=dict[tuple[str, str, str], "Selection"]
     )
@@ -214,7 +218,10 @@ class SchemaRun:
         """Record a route's ``meta`` unless another route already found the field.
 
         A value of the entity's own replaces one it shares with every entity (in ``merge``
-        mode the shared one, if it differs, goes on its ``conflicts``). In ``merge`` mode,
+        mode the shared one, if it differs, goes on its ``conflicts``). So does a shared
+        value from the page's text when the one it has came from the page's embedded data:
+        that describes the page (an article's headline, a site's list of brands), the
+        same for every entity, where the text's was chosen for this one. In ``merge`` mode,
         two found values are otherwise weighed: the more confident one wins (a value with
         no confidence, such as a direct read of embedded data, counts as certain; a tie
         keeps the earlier route's), and the other, if it differs, goes on the winner's
@@ -224,7 +231,8 @@ class SchemaRun:
         if existing is None or not existing.found:
             self.set_field(scope, name, meta)
             return
-        if existing.shared and meta.found and not meta.shared:
+        of_the_page = existing.method == "structured" and meta.method != "structured"
+        if existing.shared and meta.found and (not meta.shared or of_the_page):
             conflicts = list(meta.conflicts)
             if self.merge and existing.value != meta.value:
                 conflicts.append(_conflict(existing))

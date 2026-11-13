@@ -171,7 +171,7 @@ When a page embeds machine-readable data, jevex uses it first. By default it the
 | Mode | Behaviour |
 | --- | --- |
 | `structured_only` | Use embedded data only. The layout route runs only when the page has none. |
-| `fill_gaps` (default) | Structured data first, then the layout route for fields it left empty. A page's embedded data is often only its metadata (a press release's make and model), so stopping at any value would leave its text unread. |
+| `fill_gaps` (default) | Structured data first, then the layout route for fields it left empty. A page's embedded data is often only its metadata (a press release's make and model), so stopping at any value would leave its text unread. On a page with several records, a value the embedded data gives for the whole page is each record's only until the text gives it one: a value of its own, or one from text it shares with other records (the embedded one describes the page, an article's headline or a site's list of brands; the text's was chosen for that record). |
 | `merge` | Both routes run for every field. Confidence settles disagreements, which are recorded in `meta.conflicts`. |
 
 ## Layout, statements, tables and images
@@ -216,6 +216,8 @@ Table headers do triple duty: they give each cell its meaning, they mark entity 
 ## Value extraction
 
 Values come from verbatim candidate spans that Jev chooses between. An LLM is used only when that fails, and only if the caller enables it. Generators are built for recall; Jev provides the precision.
+
+A statement is asked about the field it was categorised as, and about any other field the categoriser gave a probability of at least 0.1. A table header is also asked about each number field it gives a quantity in a unit of ("GT-Line 1.6 T-GDi 147bhp" for a power field): a price list's row label packs a trim, an engine and its power into one cell, the categoriser puts it down to one of them, and a figure with its unit says what it is whichever that was. Only headers are: a cell repeats its row's label, which is read once, as its own statement.
 
 **Order of resolution, per statement and field**
 

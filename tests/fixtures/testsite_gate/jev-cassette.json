@@ -508,6 +508,62 @@
       "model": "jev-1.13.0"
     }
   },
+  "0827b2462b6a83cf": {
+    "request": {
+      "questions": {
+        "VehicleSpec.top_speed_mph/choice0": {
+          "instructions": "Which of these is the top speed (mph)?",
+          "options": {
+            "0": null,
+            "62mph": null,
+            "none": "None of these is the top speed"
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.zero_to_62_s/choice0": {
+          "instructions": "Which of these is the 0-62 mph acceleration time (s)?",
+          "options": {
+            "0": null,
+            "62mph": null,
+            "none": "None of these is the 0-62 mph acceleration time"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Acceleration 0\u201362mph",
+        "table_corner": "Specification",
+        "table_headers": "Fuel, Displacement, Power output, Acceleration 0\u201362mph, Top speed, CO2 (g/km), Price from, Seating capacity, Gearbox"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.top_speed_mph/choice0": {
+          "choice": "none",
+          "confidence": 0.91,
+          "probabilities": {
+            "0": 0.02,
+            "62mph": 0.04,
+            "none": 0.94
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.zero_to_62_s/choice0": {
+          "choice": "none",
+          "confidence": 0.86,
+          "probabilities": {
+            "0": 0.03,
+            "62mph": 0.06,
+            "none": 0.91
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 474,
+      "model": "jev-1.14.0"
+    }
+  },
   "093875ec256674eb": {
     "request": {
       "questions": {
@@ -8796,43 +8852,6 @@
       },
       "input_tokens": 353,
       "model": "jev-1.14.0"
-    }
-  },
-  "5f22f86b30c1b951": {
-    "request": {
-      "questions": {
-        "VehicleSpec.zero_to_62_s/choice0": {
-          "instructions": "Which of these is the 0-62 mph acceleration time (s)?",
-          "options": {
-            "0": null,
-            "62mph": null,
-            "none": "None of these is the 0-62 mph acceleration time"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Acceleration 0\u201362mph",
-        "table_corner": "Specification",
-        "table_headers": "Fuel, Displacement, Power output, Acceleration 0\u201362mph, Top speed, CO2 (g/km), Price from, Seating capacity, Gearbox"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.zero_to_62_s/choice0": {
-          "choice": "none",
-          "confidence": 0.92,
-          "probabilities": {
-            "0": 0.02,
-            "62mph": 0.03,
-            "none": 0.95
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 415,
-      "model": "jev-1.13.0"
     }
   },
   "5f2ed0e53ece4633": {
