@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import types
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -29,6 +30,7 @@ from pydantic import TypeAdapter, ValidationError
 from jevex._tasks import gather
 from jevex.generators.units import spellings
 from jevex.jev import MAX_CHOICE_OPTIONS, ChoiceAnswer, UnexpectedAnswerError, estimate_tokens
+from jevex.layout import section_text
 from jevex.locales import (
     ALL_MONTH_NAMES,
     ALL_MULTIPLIERS,
@@ -42,7 +44,8 @@ from jevex.schema import NONE_OPTION
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-    from jevex.interfaces import Selection
+    from jevex.interfaces import ParsedDocument, Selection
+    from jevex.jev import JSONContent
     from jevex.pipeline import Context, SchemaRun, VisionValue
     from jevex.results import Method
     from jevex.schema import FieldSpec
@@ -586,7 +589,9 @@ class NormaliseStage:
     picked without seeing the others. Jev is asked the field's own select question over the
     distinct values (their raw spans, the first standing for a span repeated), each
     described by the statement giving it (:meth:`~jevex.schema.FieldSpec.settle_question`),
-    with those statements as the state, cut to fit. Its pick wins, as sure as the less
+    with those statements as the state, cut to fit. Shared statements don't say which
+    entity is being asked about, so with them the state also names it: its label and the
+    headings most of its own statements are under. Jev's pick wins, as sure as the less
     sure of Jev's answer and the pick, and "none" leaves the field unfound. List fields
     keep every accepted value, deduplicated in document order.
 
@@ -615,8 +620,8 @@ class NormaliseStage:
                 for shared in [run.shared_statements(scope)]
             ]
             settled = await gather(
-                _settle(ctx, self.name, run.spec.field(field_name), reading)
-                for _, field_name, reading in readings
+                _settle(ctx, self.name, run, scope, run.spec.field(field_name), reading)
+                for scope, field_name, reading in readings
             )
             for (scope, field_name, reading), answer in zip(readings, settled, strict=True):
                 meta, generator_ids, checks, taken = self._field_meta(
@@ -796,18 +801,22 @@ SETTLE_QUESTION_TOKENS = 12_000
 question, so the statements still fit as the state. Values past it aren't offered."""
 
 
-async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading) -> _Settled | None:
+async def _settle(
+    ctx: Context, stage: str, run: SchemaRun, scope: str, field: FieldSpec, reading: _Reading
+) -> _Settled | None:
     """Jev's pick when a single-value field's best-ranked statements (the entity's own, or,
     without any, those it shares) give two or more different values (see
     :class:`NormaliseStage`); ``None`` when there's nothing to settle. The statements go in
     rank order, so a state cut to fit keeps the likeliest; past the most options a Choice
     takes, or the most that fit with their statements in :data:`SETTLE_QUESTION_TOKENS`
     (two at least), the rest aren't offered, and a ``settle_values_skipped`` event says
-    so."""
+    so. Shared statements don't say which entity is being asked about (a price guide's
+    headings name every model in it, and asked over them alone Jev gave every record the
+    same one), so with them the state also names the entity (:func:`_asked_about`)."""
     if field.many or ctx.parsed is None or not reading.accepted:
         return None
-    tier = reading.accepted[0][0] in reading.shared
-    accepted = [a for a in reading.accepted if (a[0] in reading.shared) == tier]
+    shared = reading.accepted[0][0] in reading.shared
+    accepted = [a for a in reading.accepted if (a[0] in reading.shared) == shared]
     values: list[Any] = []
     options: dict[str, str] = {}  # option → raw span
     stated: dict[str, str] = {}  # option → the first statement giving it
@@ -833,9 +842,18 @@ async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading)
             f"{field.name}: asked about {len(offered)} of {len(options)} values",
         )
     question = field.settle_question({option: stated[option] for option in offered})
-    statements = dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted)
-    text = ctx.jev.fit_state("\n".join(statements), {"settle": question})
-    answer = (await ctx.jev.ask(text, {"settle": question}))["settle"]
+    statements = "\n".join(dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted))
+    state: JSONContent
+    if shared:
+        about = _asked_about(ctx.parsed, run, scope)
+
+        def beside(text: str) -> JSONContent:
+            return {**about, "statements": text}
+
+        state = beside(ctx.jev.fit_state(statements, {"settle": question}, within=beside))
+    else:
+        state = ctx.jev.fit_state(statements, {"settle": question})
+    answer = (await ctx.jev.ask(state, {"settle": question}))["settle"]
     if not isinstance(answer, ChoiceAnswer):
         raise UnexpectedAnswerError(f"expected a Choice answer, got {answer.type}")
     return _Settled(
@@ -843,6 +861,24 @@ async def _settle(ctx: Context, stage: str, field: FieldSpec, reading: _Reading)
         answer.confidence,
         {raw: answer.probabilities.get(option, 0.0) for option, raw in offered.items()},
     )
+
+
+def _asked_about(parsed: ParsedDocument, run: SchemaRun, scope: str) -> dict[str, JSONContent]:
+    """Which entity a question over shared statements is about, as Jev sees it: its label
+    (under the schema's entity name) and, as ``section``, the headings most of its own
+    statements are under (capped by :func:`~jevex.layout.section_text`)."""
+    shared = run.shared_statements(scope)
+    trails = Counter(
+        tuple(statement.heading_trail)
+        for entity in run.scopes
+        if entity.label == scope
+        for statement in parsed.scope_statements(entity)
+        if statement.id not in shared
+    )
+    about: dict[str, JSONContent] = {run.spec.entity_name: scope}
+    if trails and (section := section_text(trails.most_common(1)[0][0])):
+        about["section"] = section
+    return about
 
 
 def _picks(

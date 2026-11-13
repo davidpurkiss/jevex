@@ -23,11 +23,40 @@ def test_a_listing_keeps_its_name_as_the_entity() -> None:
     )
 
 
-def test_a_vehicle_spec_price_is_chosen_as_what_a_buyer_pays() -> None:
+def test_a_vehicle_spec_price_is_the_on_the_road_one_before_a_grant() -> None:
     price = SchemaSpec.from_model(VehicleSpec).field("price_gbp")
     assert price.select_question(["£9,354.17", "£11,990"]) == Choice(
-        instructions="Which of these is the price a buyer pays for the vehicle?",
+        instructions=(
+            "Which of these is the vehicle's recommended on-the-road price, before any grant?"
+        ),
         options={"£9,354.17": None, "£11,990": None, "none": "None of these is the price"},
+    )
+
+
+def test_a_vehicle_specs_names_are_asked_for_without_what_a_label_adds_to_them() -> None:
+    spec = SchemaSpec.from_model(VehicleSpec)
+    asked = {
+        name: spec.field(name).select_question(["Premium 1.2 79PS"]).instructions
+        for name in ("make", "model", "trim", "engine_size_cc")
+    }
+    assert asked == {
+        "make": "Which of these is the vehicle's manufacturer (make)?",
+        "model": (
+            "Which of these is the name of the model alone, not its code, without the make, "
+            "trim level or engine?"
+        ),
+        "trim": (
+            "Which of these is the trim level alone, e.g. SE L, without the engine, power or "
+            "body style?"
+        ),
+        "engine_size_cc": "Which of these is the engine displacement in cc, not a size in litres?",
+    }
+
+
+def test_a_listing_asks_for_its_names_by_their_descriptions() -> None:
+    spec = SchemaSpec.from_model(Listing)
+    assert spec.field("model").select_question(["Kestrova"]).instructions == (
+        "Which of these is the model name?"
     )
 
 
