@@ -1287,7 +1287,8 @@ async def place_document_values(run: SchemaRun, jev: JevClient) -> tuple[int, in
       from text it shares, replaces it, :meth:`~jevex.pipeline.SchemaRun.offer_field`):
       the document's value, unless it came from an object placed on an entity, or Jev
       found none of the document's values to be it while some entity has one of its own
-      (the values disagreed because they're the entities'). Then it's the value from outside every object
+      (the values disagreed because they're the entities'). Then it's the value from
+      outside every object
       (:attr:`~jevex.pipeline.SchemaRun.structured_rest`, settled by Jev on its own when
       those values disagree), else from the first object that applies to every entity
       (and isn't inside a placed one), else, after Jev's "none", the document's unfound
