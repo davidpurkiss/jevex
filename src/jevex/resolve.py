@@ -84,10 +84,11 @@ class _Member:
     ids: frozenset[str]
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
-    """For a table's column or row, its cells' text (without spacing, case or the
-    punctuation joining a word's parts) by their
-    headers on the other axis: what it states, so two that state different things can be
-    told apart (:func:`_conflict`)."""
+    """What it states, so two that state different things can be told apart
+    (:func:`_conflict`). For a table's column or row, its cells' text (without spacing,
+    case or the punctuation joining a word's parts) by their headers on the other axis;
+    for a row of a grid that isn't a table, its cells' figures by their place and form
+    (:func:`_row_values`)."""
 
 
 @dataclass(frozen=True)
@@ -157,8 +158,9 @@ class _Entity:
 
 
 def _conflict(a: dict[tuple[str, ...], str], b: dict[tuple[str, ...], str]) -> bool:
-    """Whether two table rows (or columns) state different things under one header: two
-    price-list rows with their own "Price" are two entities, whatever their labels."""
+    """Whether two table rows (or columns) state different things under one header, or two
+    rows of a grid different figures in one place: two price-list rows with their own
+    "Price" are two entities, whatever their labels."""
     return any(key in b and b[key] != text for key, text in a.items())
 
 
@@ -181,7 +183,10 @@ class MultiEntity:
        each row's label ("EXPRESSION TCe 110").
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
-       first heading (or first text).
+       first heading (or first text). One made only of paragraphs is a row of a grid that
+       isn't a table: what it states is the figures in its cells
+       (:func:`_row_values`), so two such rows with one label and different figures in
+       one place are two entities, as two table rows are.
     3. **Headed sections:** sibling sections that each start with a heading ("SE",
        "SE L"), each with its subtree.
 
@@ -233,6 +238,8 @@ class MultiEntity:
     other (two price lists' rows). The search goes outwards from each part of the page,
     and a label that something in its own part is a kind of isn't offered outside it:
     one model's trims aren't the next model's, whatever they're called.
+    What one group proposes side by side (a run of cards, a table's columns) are peers:
+    none is offered as what another is a kind of, wherever else one of them is named.
 
     When accepted groups overlap, a statement goes to the innermost (a table's columns
     beat the section around it), then to the higher priority above (a table beats headed
@@ -584,6 +591,9 @@ class _Kinds:
         of, and record the answers."""
         asks: list[tuple[_Entity, list[list[_Entity]]]] = []
         for entity in dict.fromkeys(e for found in sets for e in found):
+            # What a group proposes side by side are peers (a run of cards, a table's
+            # columns): none is a kind of another, wherever else one of them is named.
+            peers = {e for found in sets if entity in found for e in found}
             offered: list[list[_Entity]] = []
             for found in sets:
                 # Not its own set, nor one it is already related to (the cards inside
@@ -595,7 +605,9 @@ class _Kinds:
                 options = [
                     e
                     for e in found
-                    if (entity, e) not in self._asked and not _conflict(entity.values, e.values)
+                    if e not in peers
+                    and (entity, e) not in self._asked
+                    and not _conflict(entity.values, e.values)
                 ]
                 if options and len(options) < MAX_CHOICE_OPTIONS:
                     offered.append(options)
@@ -919,7 +931,13 @@ class _Claim:
     def cell(self, statement: Statement, ref: TableCellRef, across: tuple[str, ...]) -> None:
         self.ids.add(statement.id)
         value = statement.text.removeprefix(header_prefix(ref))
-        self.values.setdefault(across, _JOINER.sub("", "".join(value.split())).casefold())
+        self.values.setdefault(across, _stated(value))
+
+
+def _stated(text: str) -> str:
+    """A cell's text as two cells are compared: without spacing, case or the punctuation
+    joining a word's parts (:data:`_JOINER`)."""
+    return _JOINER.sub("", "".join(text.split())).casefold()
 
 
 def _row_claims(
@@ -963,15 +981,17 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     groups: list[_Group] = []
 
     def group(rule: int, depth: int, parent: Component, members: list[Component]) -> None:
-        found: list[tuple[str, frozenset[str]]] = []
+        found: list[tuple[str, frozenset[str], dict[tuple[str, ...], str]]] = []
         for member in members:
             label = _label(member)
             ids = frozenset(sid for c in member.walk() for sid in by_component.get(c.id, ()))
             if label and ids:
-                found.append((label, ids))
+                found.append((label, ids, _row_values(member)))
         if len(found) >= 2:
-            labels = _unique([label for label, _ in found])
-            members_ = [_Member(u, ids) for u, (_, ids) in zip(labels, found, strict=True)]
+            labels = _unique([label for label, *_ in found])
+            members_ = [
+                _Member(u, ids, values) for u, (_, ids, values) in zip(labels, found, strict=True)
+            ]
             trail = list(members[0].heading_trail)
             groups.append(_Group(rule, depth, trail, members_, at=parent.id))
 
@@ -994,6 +1014,40 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
 
     visit(parsed.root, 0)
     return groups
+
+
+_FIGURE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _row_values(member: Component) -> dict[tuple[str, ...], str]:
+    """What a sibling states, when it is a row of a grid that isn't a table: nothing but
+    paragraphs, the first its label and the others its cells (:attr:`_Member.values`).
+
+    A table row's cells are compared under their column headers; these have none. A
+    figure's form stands in for one: the cells in one place of two rows that give a
+    figure written the same way (the text around its digits: "£22,095" and "£23,895")
+    give the same kind of thing, so two rows with one label and different figures there
+    are two entities (an engine's row under each trim's heading, each with its own
+    price). That is number syntax, which code can read; whether two differently written
+    cells mean one thing it can't, so a price beside an emissions figure, or a card's
+    "From £22,095" beside another's "Cloth seats", says nothing either way, and those
+    stay one entity as before. A card with a heading or a mix of blocks states nothing
+    this way: its parts aren't known to line up with another's.
+
+    The form is a stand-in for a header, and wrong where two quantities are written
+    alike: an on-the-road price in one grid and a monthly payment in another (both "£0"),
+    bare numbers under different headings (a power, a torque), or one amount written
+    with and without pence, each make two entities of one, named by their headings. The
+    place is the cell's among those the layout kept, so an empty cell shifts it."""
+    cells = member.children
+    if any(cell.type != "paragraph" or cell.children for cell in cells):
+        return {}
+    values: dict[tuple[str, ...], str] = {}
+    for place, cell in enumerate(cells[1:], start=1):
+        text = _stated(cell.text)
+        if _FIGURE.search(text):
+            values["cell", str(place), _FIGURE.sub("0", text)] = text
+    return values
 
 
 def _records(

@@ -803,3 +803,239 @@ async def test_cleaned_pages_segment_under_their_title(
         holders = [c for c in root.walk() if fact in c.text]
         assert holders, fact
         assert all(c.heading_trail[:1] == [heading] for c in holders), fact
+
+
+# --- repeated wrappers ------------------------------------------------------------------
+
+
+def test_wrappers_that_repeat_one_structure_are_each_a_section() -> None:
+    # A price grid built from div elements: nothing but the repetition marks its rows.
+    row = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
+    root = parse_html(
+        "<body><h2>SE</h2><div>"
+        + row.format("1.0 TSI 95PS", "£22,095")
+        + row.format("1.0 TSI 116PS", "£23,070")
+        + "</div></body>"
+    )
+    assert outline(root) == [
+        (0, "heading", "SE"),
+        (0, "section", ""),
+        (1, "paragraph", "1.0 TSI 95PS"),
+        (1, "paragraph", "£22,095"),
+        (0, "section", ""),
+        (1, "paragraph", "1.0 TSI 116PS"),
+        (1, "paragraph", "£23,070"),
+    ]
+    assert [path(c) for c in root.children if c.type == "section"] == [
+        "/html/body/div/div[1]",
+        "/html/body/div/div[2]",
+    ]
+
+
+def test_wrappers_holding_a_heading_are_left_to_the_sections_their_headings_open() -> None:
+    # Cards built from div elements: each heading already keeps its card's text with it,
+    # closes the card before, and takes what follows the last card too.
+    card = "<div><h3>{}</h3><p>{}</p></div>"
+    root = parse_html(
+        "<body><h3>Kamiq</h3><p>From £25,000</p>"
+        + card.format("Scala", "From £22,000")
+        + card.format("Fabia", "From £19,000")
+        + "<p>All prices on the road</p></body>"
+    )
+    assert outline(root) == [
+        (0, "section", ""),
+        (1, "heading", "Kamiq"),
+        (1, "paragraph", "From £25,000"),
+        (0, "section", ""),
+        (1, "heading", "Scala"),
+        (1, "paragraph", "From £22,000"),
+        (0, "section", ""),
+        (1, "heading", "Fabia"),
+        (1, "paragraph", "From £19,000"),
+        (1, "paragraph", "All prices on the road"),
+    ]
+    # The sections are the headings' own, not the wrappers.
+    assert [path(c) for c in root.children] == [
+        "/html/body/h3",
+        "/html/body/div[1]/h3",
+        "/html/body/div[2]/h3",
+    ]
+
+
+def test_a_heading_deep_inside_a_wrapper_keeps_it_flat_too() -> None:
+    wrapper = "<div><div><h2>{}</h2></div><p>{}</p></div>"
+    root = parse_html(
+        "<body><div>"
+        + wrapper.format("Engine", "What drives it")
+        + wrapper.format("Petrol", "Unleaded")
+        + "</div><table><tr><th>Power</th><td>110 kW</td></tr></table></body>"
+    )
+    [table] = only(root, "table")
+    assert table.heading_trail == ["Petrol"]
+
+
+def test_a_list_items_blocks_stay_its_text() -> None:
+    pair = "<div><p>{}</p><p>{}</p></div>"
+    root = parse_html(
+        "<body><ul><li>"
+        + pair.format("Engine:", "1.0 TSI")
+        + pair.format("Price:", "£22,095")
+        + "</li></ul></body>"
+    )
+    [item] = only(root, "list_item")
+    assert (item.text, item.children) == ("Engine:\n1.0 TSI\nPrice:\n£22,095", [])
+
+
+def test_a_no_break_space_between_wrappers_is_text_between_them() -> None:
+    root = parse_html(
+        "<body>" + ROW.format("1.0 TSI", "£22,095") + "&nbsp;" + ROW.format("1.5 TSI", "£1")
+    )
+    assert [c for c in root.walk() if c.type == "section" and c is not root] == []
+
+
+ROW = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        # One wrapper, repeating nothing.
+        "<div><p>Power</p><p>110 kW</p></div><p>Notes</p>",
+        # Two wrappers of different structures: a page's parts, not a run.
+        "<div><p>Power</p><p>110 kW</p></div><div><p>Notes</p><ul><li>one</li></ul></div>",
+        # The same blocks at the top and different trees beneath: the whole tree counts.
+        "<div><div><p>a</p></div><div><p>b</p></div></div>"
+        "<div><div><p>c</p><p>d</p></div><div><p>e</p></div></div>",
+        # Wrappers of one block each: nothing to keep together.
+        "<div><p>Power</p></div><div><p>110 kW</p></div>",
+        # Text of the wrapper's own beside its blocks: not a pure container.
+        "<div>Power <p>110 kW</p><p>148 bhp</p></div><div>Torque <p>250 Nm</p><p>184 lb</p></div>",
+        # An inline element of its own counts as text does.
+        "<div><span>Power</span><p>110 kW</p><p>148 bhp</p></div>"
+        "<div><span>Torque</span><p>250 Nm</p><p>184 lb</p></div>",
+        # Something between them: only neighbours make a run.
+        ROW.format("1.0 TSI", "£22,095") + "<p>or</p>" + ROW.format("1.5 TSI", "£24,370"),
+        ROW.format("1.0 TSI", "£22,095") + "or" + ROW.format("1.5 TSI", "£24,370"),
+        # Their other blocks are empty: one paragraph each is nothing to keep together.
+        "<div><div><p>a</p></div><div></div></div><div><div><p>b</p></div><div></div></div>",
+        # Different elements with the same blocks inside: a page's parts again.
+        "<header><p>a</p><p>b</p></header><footer><p>c</p><p>d</p></footer>",
+        # The cells of a table used for layout place a page's parts.
+        '<table role="presentation"><tr><td><p>a</p><p>b</p></td><td><p>c</p><p>d</p></td></tr>'
+        "</table>",
+        # A figure's captions are its own.
+        "<figure><img src=a.png alt=A><figcaption><p>a</p><p>b</p></figcaption>"
+        "<figcaption><p>c</p><p>d</p></figcaption></figure>",
+    ],
+)
+def test_other_wrappers_add_no_level(markup: str) -> None:
+    root = parse_html(f"<body>{markup}</body>")
+    assert [c for c in root.walk() if c.type == "section" and c is not root] == []
+
+
+def test_hidden_children_dont_break_a_run_or_count_as_a_wrappers_own_text() -> None:
+    row = "<div><span hidden>x</span><div><p>{}</p></div><div><p>{}</p></div></div>"
+    root = parse_html(
+        "<body>"
+        + row.format("1.0 TSI", "£22,095")
+        + "<p hidden>or</p>"
+        + row.format("1.5 TSI", "£24,370")
+        + "</body>"
+    )
+    assert [c.type for c in root.children] == ["section", "section"]
+
+
+def test_text_before_a_run_stays_before_it() -> None:
+    root = parse_html(
+        "<body>Engines "
+        + ROW.format("1.0 TSI", "£22,095")
+        + ROW.format("1.5 TSI", "£24,370")
+        + "</body>"
+    )
+    assert [(c.type, c.text) for c in root.children] == [
+        ("paragraph", "Engines"),
+        ("section", ""),
+        ("section", ""),
+    ]
+
+
+def test_wrappers_inside_pre_keep_their_text_as_written() -> None:
+    wrapper = "<div><p>a   b</p><p>c</p></div>"
+    root = parse_html(f"<body><pre>{wrapper * 2}</pre></body>")
+    assert [(c.type, c.text) for c in root.children] == [
+        ("paragraph", "a   b"),
+        ("paragraph", "c"),
+        ("paragraph", "a   b"),
+        ("paragraph", "c"),
+    ]
+
+
+def test_neighbouring_heading_wrappers_with_content_after_them_stay_flat() -> None:
+    # Kept, the second would close its heading's section before the table that belongs to it.
+    wrapper = "<div><h2>{}</h2><p>{}</p></div>"
+    root = parse_html(
+        "<body>"
+        + wrapper.format("Engine", "What drives it")
+        + wrapper.format("Petrol", "Unleaded")
+        + "<table><tr><th>Power</th><td>110 kW</td></tr></table></body>"
+    )
+    [table] = only(root, "table")
+    assert table.heading_trail == ["Petrol"]
+    assert [(depth, kind) for depth, kind, _ in outline(root)] == [
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
+    ]
+
+
+def test_a_heading_wrapper_that_recurs_still_opens_the_section_its_content_follows_in() -> None:
+    part = "<div><h2>{}</h2><p>{}</p></div><table><tr><th>{}</th><td>{}</td></tr></table>"
+    root = parse_html(
+        "<body>"
+        + part.format("Engine", "What drives it", "Power", "110 kW")
+        + part.format("Dimensions", "How big", "Length", "4.3 m")
+        + "</body>"
+    )
+    assert [(depth, kind) for depth, kind, _ in outline(root)] == [
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
+    ]
+    assert [t.heading_trail for t in only(root, "table")] == [["Engine"], ["Dimensions"]]
+
+
+@pytest.mark.parametrize(
+    ("element", "kinds"),
+    [
+        ("<ul><li>a</li><li>b</li></ul>", ["list", "list"]),
+        ("<dl><dt>a</dt><dd>1</dd><dt>b</dt><dd>2</dd></dl>", ["list", "list"]),
+        (
+            "<table><thead><tr><th>a</th><th>b</th></tr></thead>"
+            "<tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+            ["table", "table"],
+        ),
+        ("<aside><h3>Tip</h3><p>a</p></aside>", ["breakout", "breakout"]),
+        ("<section><h3>SE</h3><p>a</p></section>", ["section", "section"]),
+        ("<pre><p>a</p><p>b</p></pre>", ["paragraph"] * 4),
+    ],
+)
+def test_elements_with_a_component_of_their_own_arent_taken_for_repeated_wrappers(
+    element: str, kinds: list[str]
+) -> None:
+    root = parse_html(f"<body>{element * 2}</body>")
+    assert [c.type for c in root.children] == kinds
+
+
+def test_a_wrapper_with_a_heading_role_is_a_heading_not_a_container() -> None:
+    wrapper = '<div role="heading"><p>Engines</p><p>and prices</p></div>'
+    root = parse_html(f"<body>{wrapper * 2}</body>")
+    assert [c.type for c in root.walk() if c.type != "section"] == ["heading", "heading"]
