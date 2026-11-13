@@ -271,10 +271,10 @@ def test_merge_ties_keep_the_earlier_route_and_agreement_is_no_conflict() -> Non
 
 def test_an_entitys_own_value_replaces_one_shared_by_every_entity() -> None:
     run = SchemaRun(SchemaSpec.from_model(Car))
-    run.set_field("SE", "model", FieldMeta(value="Golf", method="structured", shared=True))
+    run.set_field("SE", "model", FieldMeta(value="Golf", method="generator", shared=True))
     assert run.needs("SE", "model")  # a shared value is still worth looking past
     run.offer_field(
-        "SE", "model", FieldMeta(value="Polo", confidence=0.4, method="jev", shared=True)
+        "SE", "model", FieldMeta(value="Polo", confidence=0.4, method="generator", shared=True)
     )
     assert run.fields["SE"]["model"].value == "Golf"  # shared doesn't replace shared
     run.offer_field("SE", "model", FieldMeta(method="jev", error="no value"))
@@ -284,6 +284,36 @@ def test_an_entitys_own_value_replaces_one_shared_by_every_entity() -> None:
     # Even a less confident own value wins, and outside merge mode records no conflict.
     assert (meta.value, meta.shared, meta.conflicts) == ("Polo", False, [])
     assert not run.needs("SE", "model")
+
+
+def test_a_shared_value_from_the_text_replaces_one_the_pages_embedded_data_gave() -> None:
+    # An article's headline, read as every record's model: the text's shared value was
+    # chosen for this entity, the embedded one describes the page.
+    run = SchemaRun(SchemaSpec.from_model(Car))
+    headline = FieldMeta(value="New Golf and Polo prices", method="structured", shared=True)
+    run.set_field("SE", "model", headline)
+    run.offer_field("SE", "model", FieldMeta(method="generator", error="no value", shared=True))
+    assert run.fields["SE"]["model"] == headline  # nothing found replaces nothing
+    again = FieldMeta(value="Polo and Golf", method="structured", shared=True)
+    run.offer_field("SE", "model", again)
+    assert run.fields["SE"]["model"] == headline  # embedded data doesn't replace its own
+    run.offer_field(
+        "SE", "model", FieldMeta(value="Polo", confidence=0.4, method="generator", shared=True)
+    )
+    meta = run.fields["SE"]["model"]
+    assert (meta.value, meta.shared, meta.conflicts) == ("Polo", True, [])
+    assert run.needs("SE", "model")  # still shared: a value of its own would replace it
+
+
+def test_in_merge_mode_a_replaced_embedded_value_is_a_conflict_too() -> None:
+    run = SchemaRun(SchemaSpec.from_model(Car), merge=True)
+    run.set_field("SE", "model", FieldMeta(value="Golf", method="structured", shared=True))
+    run.offer_field(
+        "SE", "model", FieldMeta(value="Polo", confidence=0.4, method="generator", shared=True)
+    )
+    meta = run.fields["SE"]["model"]
+    assert (meta.value, meta.shared) == ("Polo", True)
+    assert meta.conflicts == [Conflict(value="Golf", method="structured")]
 
 
 def test_in_merge_mode_the_replaced_shared_value_is_a_conflict() -> None:

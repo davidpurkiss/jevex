@@ -3,9 +3,11 @@
 After categorising, each statement is assigned to a field (or none). Then:
 
 - :class:`CandidateStage` runs the generator registry on statements whose field needs
-  candidates (numbers, dates, strings) and stores them in ``SchemaRun.candidates``.
-- :class:`SelectStage` asks Jev about every categorised statement, **one request per
-  statement** covering every schema and scope that assigned it:
+  candidates (numbers, dates, strings) and stores them in ``SchemaRun.candidates``. It
+  also reads every table header for a quantity in a number field's units, whatever the
+  header was categorised as (:func:`field_statements`).
+- :class:`SelectStage` asks Jev about every statement assigned a field, **one request
+  per statement** covering every schema and scope that assigned it:
 
   - candidate fields: the :class:`~jevex.interfaces.CandidateSelector`'s questions (by
     default a Choice over the candidate spans plus "none", split across several Choices
@@ -94,10 +96,16 @@ def field_statements(
     """(statement, field) pairs in scope that the classifier assigned to a field.
 
     A statement pairs with its top category and, when that is a field, with every other
-    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. Fields another
-    route already found for the scope (structured data, in ``fill_gaps`` mode) are left
-    out, so nothing is asked about them; in ``merge`` mode, or with ``include_found`` (the
-    LLM fallback second-guesses low-confidence values), every field stays.
+    field whose probability is at least :data:`ALSO_CATEGORY_P`, top first. A table header
+    also pairs with the number fields it gives a quantity in a unit of
+    (:attr:`SchemaRun.header_quantities <jevex.pipeline.SchemaRun.header_quantities>`): a
+    price list's row label packs a trim, an engine and its power into one cell
+    ("GT-Line 1.6 T-GDi 147bhp"), the classifier puts it down to one of them, and a figure
+    in a unit of the field's kind may be the field's whichever that was (the selector
+    asks; "none" stays on offer). Fields another route already found
+    for the scope (structured data, in ``fill_gaps`` mode) are left out, so nothing is
+    asked about them; in ``merge`` mode, or with ``include_found`` (the LLM fallback
+    second-guesses low-confidence values), every field stays.
     """
     if ctx.parsed is None:
         return []
@@ -105,16 +113,17 @@ def field_statements(
     names = {f.name for f in run.spec.fields}
     for statement in ctx.parsed.scope_statements(scope):
         answer = run.categories.get(statement.id)
-        if answer is None or answer.choice not in names:
-            # A "none" answer routes nowhere, even if a field came close: a bool field
-            # would record False from a statement that isn't about it.
-            continue
-        also = sorted(
-            (p, name)
-            for name, p in answer.probabilities.items()
-            if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
-        )
-        chosen = [answer.choice, *(name for _, name in reversed(also))]
+        chosen: list[str] = []
+        # A "none" answer routes to no category, even if a field came close: a bool field
+        # would record False from a statement that isn't about it.
+        if answer is not None and answer.choice in names:
+            also = sorted(
+                (p, name)
+                for name, p in answer.probabilities.items()
+                if name != answer.choice and name in names and p >= ALSO_CATEGORY_P
+            )
+            chosen = [answer.choice, *(name for _, name in reversed(also))]
+        chosen += [n for n in run.header_quantities.get(statement.id, []) if n not in chosen]
         out.extend(
             (statement, run.spec.field(name))
             for name in chosen
@@ -305,13 +314,19 @@ class JevCandidateSelector:
 
 @dataclass
 class CandidateStage:
-    """Generates candidate spans for every categorised statement whose field needs them.
+    """Generates candidate spans for every categorised statement whose field needs them,
+    and finds the quantities table headers give
+    (:attr:`SchemaRun.header_quantities <jevex.pipeline.SchemaRun.header_quantities>`): a
+    header pairs with each number field some entity it belongs to still needs and it has
+    a candidate for spelled in a unit of that field's dimension ("147bhp" for a field in
+    kW, not "1.6" or "59 kWh").
 
     ``registry`` holds the stage's own generators; the document's learned ones
     (``ctx.generators``) run after them. Generators are scoped by the document's locale
     (:attr:`Context.locale <jevex.pipeline.Context.locale>`, else the stage's ``locale``)
     and its :attr:`~jevex.Document.source`; locale-aware ones read numbers and dates by
-    that locale too. Every generator it runs is added to ``ctx.generators_ran``. A
+    that locale too. The generators of every field it keeps candidates for are added to
+    ``ctx.generators_ran`` (not those run on a header that gives no quantity of the field). A
     generator that raises is skipped for that statement and recorded with
     :meth:`Context.part_failed <jevex.pipeline.Context.part_failed>` (the housekeeper
     quarantines a learned one that keeps failing).
@@ -322,6 +337,8 @@ class CandidateStage:
     name: str = "candidates"
 
     async def run(self, ctx: Context) -> None:
+        if ctx.parsed is None:
+            return
         registry = self.registry
         if ctx.generators is not None:
             registry = ctx.generators.on(registry)
@@ -333,26 +350,53 @@ class CandidateStage:
 
         for run in ctx.active:
             counted: set[str] = set()
+            measured = {
+                f.name: (f, kind)
+                for f in run.spec.fields
+                if f.kind == "number" and f.unit and (kind := dimension(f.unit)) is not None
+            }
+            headers: dict[tuple[str, str], tuple[Statement, FieldSpec]] = {}
+            categorised: dict[tuple[str, str], tuple[Statement, FieldSpec]] = {}
             for scope in run.scopes:
+                for statement in ctx.parsed.scope_statements(scope):
+                    if statement.kind == "table_header":
+                        for name, (spec, _) in measured.items():
+                            if run.needs(scope.label, name):
+                                headers[statement.id, name] = (statement, spec)
                 for statement, spec in field_statements(ctx, run, scope):
-                    key = (statement.id, spec.name)
-                    if spec.needs_candidates and key not in run.candidates:
-                        run.candidates[key] = registry.generate(
-                            statement,
-                            spec,
-                            schema=run.name,
-                            locale=locale,
-                            source=source,
-                            on_error=failed,
+                    if spec.needs_candidates:
+                        categorised[statement.id, spec.name] = (statement, spec)
+            for key, (statement, spec) in {**headers, **categorised}.items():
+                if key in run.candidates:
+                    continue
+                candidates = registry.generate(
+                    statement, spec, schema=run.name, locale=locale, source=source, on_error=failed
+                )
+                if key in headers and any(
+                    _in_units_of(c, measured[spec.name][1]) for c in candidates
+                ):
+                    run.header_quantities.setdefault(statement.id, []).append(spec.name)
+                elif key not in categorised:
+                    continue
+                run.candidates[key] = candidates
+                if spec.name not in counted:
+                    counted.add(spec.name)
+                    ctx.generators_ran.update(
+                        g.id
+                        for g in registry.for_field(
+                            spec, schema=run.name, locale=locale, source=source
                         )
-                        if spec.name not in counted:
-                            counted.add(spec.name)
-                            ctx.generators_ran.update(
-                                g.id
-                                for g in registry.for_field(
-                                    spec, schema=run.name, locale=locale, source=source
-                                )
-                            )
+                    )
+
+
+def _in_units_of(candidate: Candidate, kind: str) -> bool:
+    """Whether the candidate is spelled in a unit of the dimension ``kind``."""
+    return any(
+        step.name == "unit"
+        and (spelled := step.args.get("from")) is not None
+        and dimension(spelled) == kind
+        for step in candidate.normalise
+    )
 
 
 def candidate_locale(ctx: Context) -> str | None:

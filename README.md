@@ -20,7 +20,7 @@ structured stage's `mode` decides what happens next:
 | --- | --- |
 | `structured_only` | A schema the embedded data gave any value skips the layout route; the rest go on to it. |
 | `fill_gaps` (default) | The layout route runs while some field is still empty, and only those fields get values from it. With the default `SingleEntity` resolver, the component gate skips field groups whose fields were all found; under other resolvers it asks about every group, since a field found for the page can still be empty for each entity. The categoriser still offers every field. |
-| `merge` | The layout route looks for every field. The more confident value wins (a direct read of embedded data counts as certain), and the other is kept in `meta.conflicts`. |
+| `merge` | The layout route looks for every field. The more confident value wins (a direct read of embedded data counts as certain), and the other is kept in `meta.conflicts`. A page-wide embedded value an entity shares gives way to the text's without weighing (below). |
 
 ```python
 from jevex import StructuredStage
@@ -34,7 +34,9 @@ don't make a record of their own. Jev is asked which entity each object in an em
 array describes (a JSON-LD `offers[]` item called "Kestrova SE L" when a table column is
 "SE L"), and that entity gets the object's values. The rest (the make, the model, an
 object for every entity) are copied into every entity with `meta.shared` set, and a value
-the layout route finds for the entity itself replaces a shared one.
+the layout route finds for the entity itself replaces a shared one. So does a value from
+text the entity shares with others: the embedded one describes the page (an article's
+headline, a site's list of brands), and the text's was chosen for that entity.
 
 ## PDFs
 

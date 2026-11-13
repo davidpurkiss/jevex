@@ -154,6 +154,126 @@ def test_a_statement_also_goes_to_fields_with_enough_category_probability() -> N
     assert field_statements(ctx, run, run.scopes[0]) == []
 
 
+class Variant(BaseModel):
+    model: str = Field(description="Model name")
+    power_kw: float = Field(description="Power", unit="kW")
+    zero_to_62_s: float = Field(description="0-62 mph time", unit="s")
+
+
+def header(sid: str, text: str) -> Statement:
+    return st(sid, text).model_copy(update={"kind": "table_header"})
+
+
+async def test_a_header_is_asked_about_the_fields_it_gives_a_quantity_in_a_unit_of() -> None:
+    # A price list's row label: the classifier puts it down to the model, and its power
+    # is read all the same, because "147bhp" can only be a power.
+    label = header("s1", "GT-Line 1.6 T-GDi 147bhp 6-speed")
+    fake = (
+        FakeJev()
+        .choice("Which of these is the model", "GT-Line")
+        .choice("Which of these is the power", "147bhp")
+    )
+    ctx = context(fake, [label], {"s1": "model"}, models=(Variant,))
+    run = ctx.schemas["Variant"]
+    await run_both(ctx)
+    assert run.header_quantities == {"s1": ["power_kw"]}
+    assert [f.name for _, f in field_statements(ctx, run, run.scopes[0])] == ["model", "power_kw"]
+    power = run.selections[("doc", "power_kw", "s1")]
+    assert power.candidate is not None
+    assert power.candidate.raw == "147bhp"
+    # Its other numbers are no quantity of any field: "1.6" and "6" give no unit, so the
+    # header isn't asked about the acceleration, and nothing is kept for it.
+    assert ("s1", "zero_to_62_s") not in run.candidates
+    # The power question comes with the selector's usual ones for its bare numbers' units.
+    units: dict[str, JSONContent | None] = {"kW": None, "bhp": None}
+    asked = only_call_questions(fake)
+    del asked["Variant.model/choice0"]
+    assert asked == {
+        "Variant.power_kw/choice0": Choice(
+            instructions="Which of these is the power (kW)?",
+            options={"1.6": None, "147bhp": None, "6": None, "none": "None of these is the power"},
+        ),
+        "Variant.power_kw#unit0": Choice(instructions='Which unit is "1.6" in?', options=units),
+        "Variant.power_kw#unit1": Choice(instructions='Which unit is "6" in?', options=units),
+    }
+
+
+async def test_a_header_categorised_as_nothing_is_still_asked_about_its_quantity() -> None:
+    label = header("s1", "1.6 T-GDi 147bhp")
+    fake = FakeJev().choice("Which of these is the power", "147bhp")
+    ctx = context(fake, [label], {"s1": "none"}, models=(Variant,))
+    run = ctx.schemas["Variant"]
+    await run_both(ctx)
+    assert [f.name for _, f in field_statements(ctx, run, run.scopes[0])] == ["power_kw"]
+    assert run.selections[("doc", "power_kw", "s1")].candidate is not None
+
+
+async def test_only_a_header_is_read_for_a_quantity_it_wasnt_categorised_as() -> None:
+    # A cell repeats its row's label; the label is read once, as its own statement.
+    cell = st("s1", "GT-Line 1.6 T-GDi 147bhp · Seats: 5")
+    unitless = header("s2", "Power: 110")  # a bare number says nothing of what it measures
+    other = header("s3", "Battery 59 kWh")  # a unit of no field's dimension
+    none = {"s1": "none", "s2": "none", "s3": "none"}
+    ctx = context(FakeJev(), [cell, unitless, other], none, models=(Variant,))
+    run = ctx.schemas["Variant"]
+    await CandidateStage().run(ctx)
+    assert run.header_quantities == {}
+    assert run.candidates == {}
+    assert ctx.generators_ran == set()  # nothing was kept for any field
+    assert field_statements(ctx, run, run.scopes[0]) == []
+
+
+async def test_a_header_isnt_read_for_a_field_no_entity_still_needs() -> None:
+    label = header("s1", "GT-Line 147bhp")
+    ctx = context(FakeJev(), [label], {"s1": "none"}, models=(Variant,))
+    run = ctx.schemas["Variant"]
+    run.set_field("doc", "power_kw", FieldMeta(value=110.0, confidence=0.9))
+    await CandidateStage().run(ctx)
+    assert (run.header_quantities, run.candidates, ctx.generators_ran) == ({}, {}, set())
+    assert field_statements(ctx, run, run.scopes[0], include_found=True) == []
+
+
+class CrashesOnPower:
+    """A generator with a bug, counting the statements it was run on."""
+
+    id = "crashes"
+    scope = Scope(fields=frozenset({"power_kw"}))
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def generate(self, statement: Statement) -> list[Candidate]:
+        self.seen.append(statement.id)
+        raise IndexError("group 2 out of range")
+
+
+async def test_a_header_categorised_as_a_field_it_gives_no_unit_for_is_generated_once() -> None:
+    # A column label categorised as its field: the header pass finds no quantity in it,
+    # and the categorised route keeps what the one run gave.
+    label = header("s1", "Power 110")
+    ctx = context(FakeJev(), [label], {"s1": "power_kw"}, models=(Variant,))
+    crashes = CrashesOnPower()
+    numbers = RegexGenerator(
+        id="numbers", pattern=r"\d+", scope=Scope(fields=frozenset({"power_kw"}))
+    )
+    await CandidateStage(registry=GeneratorRegistry([crashes, numbers])).run(ctx)
+    run = ctx.schemas["Variant"]
+    assert crashes.seen == ["s1"]
+    assert [c.raw for c in run.candidates[("s1", "power_kw")]] == ["110"]
+    assert run.header_quantities == {}
+    assert ctx.errors.errors == [
+        PartError(
+            stage="candidates",
+            kind="generator",
+            part="crashes",
+            type="IndexError",
+            message="group 2 out of range",
+            count=1,
+        )
+    ]
+    assert ctx.generators_ran == {"crashes", "numbers"}
+
+
 def test_found_fields_are_left_out_unless_asked_for() -> None:
     ctx = context(FakeJev(), [st("s1", "0-62 mph in 9.1 s")], {"s1": "zero_to_62_s"})
     run = ctx.schemas["Car"]
