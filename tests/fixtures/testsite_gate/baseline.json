@@ -23,7 +23,7 @@
     "VehicleSpec.trim": 1.0,
     "VehicleSpec.zero_to_62_s": 1.0
   },
-  "llm_calls_per_document": 1.3333333333333333,
+  "llm_calls_per_document": 1.1666666666666667,
   "locale": null,
   "mode": "eval",
   "tolerances": {

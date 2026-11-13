@@ -349,6 +349,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "03b5ecd671192514": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "25,995": null,
+            "none": "None of these is the price",
+            "\u00a325,995": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Edition",
+        "statement": "Price: \u00a325,995"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a325,995",
+          "confidence": 0.92,
+          "probabilities": {
+            "25,995": 0.04,
+            "none": 0.01,
+            "\u00a325,995": 0.95
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 364,
+      "model": "jev-1.14.0"
+    }
+  },
   "041e122269319d47": {
     "request": {
       "questions": {
@@ -437,39 +472,6 @@
         }
       },
       "input_tokens": 338,
-      "model": "jev-1.13.0"
-    }
-  },
-  "04e10de2eb46fa22": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "Displacement: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 348,
       "model": "jev-1.13.0"
     }
   },
@@ -1719,41 +1721,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "198377cbdd097c9b": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "GT": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "GT",
-        "table_corner": "Specification",
-        "table_headers": "SE, Sport, GT, Edition"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "GT",
-          "confidence": 1.0,
-          "probabilities": {
-            "GT": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 372,
-      "model": "jev-1.13.0"
-    }
-  },
   "19982ed0e1565a3a": {
     "request": {
       "questions": {
@@ -1980,39 +1947,6 @@
         }
       },
       "input_tokens": 545,
-      "model": "jev-1.13.0"
-    }
-  },
-  "1a4369ad085b0d7e": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1395cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a GT",
-        "statement": "Displacement: 1395cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1395cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1395cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 346,
       "model": "jev-1.13.0"
     }
   },
@@ -3478,6 +3412,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "2111806c54056c03": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "19,000": null,
+            "19,000 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 SE: 19,000 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "19,000 GBP",
+          "confidence": 0.92,
+          "probabilities": {
+            "19,000": 0.03,
+            "19,000 GBP": 0.95,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 369,
+      "model": "jev-1.14.0"
+    }
+  },
   "21dda8cc6ee1cfee": {
     "request": {
       "questions": {
@@ -4326,6 +4295,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "2978e5bc2394cab6": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "21,495": null,
+            "none": "None of these is the price",
+            "\u00a321,495": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Sport",
+        "statement": "OTR price: \u00a321,495"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a321,495",
+          "confidence": 0.94,
+          "probabilities": {
+            "21,495": 0.04,
+            "none": 0.0,
+            "\u00a321,495": 0.96
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 366,
+      "model": "jev-1.14.0"
+    }
+  },
   "2988369353b5700e": {
     "request": {
       "questions": {
@@ -4657,6 +4661,41 @@
       },
       "input_tokens": 420,
       "model": "jev-1.13.0"
+    }
+  },
+  "2c578d2687d04242": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "19,000": null,
+            "none": "None of these is the price",
+            "\u00a319,000": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova SE",
+        "statement": "Expect to pay \u00a319,000 for this version."
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a319,000",
+          "confidence": 0.8,
+          "probabilities": {
+            "19,000": 0.12,
+            "none": 0.01,
+            "\u00a319,000": 0.87
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 367,
+      "model": "jev-1.14.0"
     }
   },
   "2d4ecf1c1d69af2d": {
@@ -5048,74 +5087,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "2fa65f7eacc20fed": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Sport": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "Sport"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "Sport",
-          "confidence": 0.96,
-          "probabilities": {
-            "Sport": 0.98,
-            "none": 0.02
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 345,
-      "model": "jev-1.13.0"
-    }
-  },
-  "30431f380163c0aa": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "19,000": null,
-            "19,000 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 SE: 19,000 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "19,000 GBP",
-          "confidence": 0.97,
-          "probabilities": {
-            "19,000": 0.02,
-            "19,000 GBP": 0.98,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 365,
-      "model": "jev-1.13.0"
-    }
-  },
   "30b15eb82455737e": {
     "request": {
       "questions": {
@@ -5414,6 +5385,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "3680f836171f4e3b": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Edition",
+        "statement": "Displacement: 1,395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 354,
+      "model": "jev-1.14.0"
+    }
+  },
   "3690850c71138aa7": {
     "request": {
       "questions": {
@@ -5548,39 +5552,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "3747546e80d758d9": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Edition",
-        "statement": "Displacement: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 348,
-      "model": "jev-1.13.0"
-    }
-  },
   "3772ed520fafbc70": {
     "request": {
       "questions": {
@@ -5648,48 +5619,6 @@
         }
       },
       "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
-  "38024f2214dc2054": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova trims": null,
-            "Kestrova": null,
-            "Kestrova trims": null,
-            "none": "None of these is the trim or variant name, e.g. SE L",
-            "trims": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova trims"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "Kestrova",
-          "confidence": 0.1,
-          "probabilities": {
-            "Delmaro": 0.02,
-            "Delmaro Kestrova": 0.11,
-            "Delmaro Kestrova trims": 0.17,
-            "Kestrova": 0.22999999999999998,
-            "Kestrova trims": 0.1,
-            "none": 0.19,
-            "trims": 0.18
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 386,
       "model": "jev-1.13.0"
     }
   },
@@ -5839,6 +5768,41 @@
         }
       },
       "input_tokens": 368,
+      "model": "jev-1.14.0"
+    }
+  },
+  "3b953850930eb075": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "25,995": null,
+            "25,995 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 Edition: 25,995 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "25,995 GBP",
+          "confidence": 0.91,
+          "probabilities": {
+            "25,995": 0.04,
+            "25,995 GBP": 0.94,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 369,
       "model": "jev-1.14.0"
     }
   },
@@ -6390,41 +6354,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "401e10239d76bfa0": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Edition": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Edition",
-        "table_corner": "Specification",
-        "table_headers": "SE, Sport, GT, Edition"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "Edition",
-          "confidence": 0.98,
-          "probabilities": {
-            "Edition": 0.99,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 372,
-      "model": "jev-1.13.0"
-    }
-  },
   "4085d263ba7001d6": {
     "request": {
       "questions": {
@@ -6740,6 +6669,39 @@
       },
       "input_tokens": 443,
       "model": "jev-1.13.0"
+    }
+  },
+  "472359c2f1d9a1bc": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1395cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a GT",
+        "statement": "Displacement: 1395cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1395cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1395cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 352,
+      "model": "jev-1.14.0"
     }
   },
   "476b413fdeffafa1": {
@@ -7769,37 +7731,39 @@
       "model": "jev-1.13.0"
     }
   },
-  "5193985a85a769d5": {
+  "5188f14b737617bf": {
     "request": {
       "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
           "options": {
-            "GT": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
+            "21,495": null,
+            "none": "None of these is the price",
+            "\u00a321,495": null
           },
           "type": "choice"
         }
       },
       "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "GT"
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 Sport: \u00a321,495"
       }
     },
     "response": {
       "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "GT",
-          "confidence": 1.0,
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "\u00a321,495",
+          "confidence": 0.92,
           "probabilities": {
-            "GT": 1.0,
-            "none": 0.0
+            "21,495": 0.04,
+            "none": 0.01,
+            "\u00a321,495": 0.95
           },
           "type": "choice"
         }
       },
-      "input_tokens": 345,
-      "model": "jev-1.13.0"
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
     }
   },
   "52cac1237d35b030": {
@@ -8614,39 +8578,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "5c8e15a84487f46e": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a SE",
-        "statement": "Engine size: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 347,
-      "model": "jev-1.13.0"
-    }
-  },
   "5cc3a4b7db03f53d": {
     "request": {
       "questions": {
@@ -8700,6 +8631,39 @@
       },
       "input_tokens": 552,
       "model": "jev-1.13.0"
+    }
+  },
+  "5eab7d9b75c51665": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a SE",
+        "statement": "Engine size: 1,395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 353,
+      "model": "jev-1.14.0"
     }
   },
   "5eb2cb573a0079ce": {
@@ -8799,6 +8763,39 @@
       },
       "input_tokens": 343,
       "model": "jev-1.13.0"
+    }
+  },
+  "5f20a84f56270e45": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Edition": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "Edition",
+          "confidence": 0.92,
+          "probabilities": {
+            "Edition": 0.96,
+            "none": 0.04
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 353,
+      "model": "jev-1.14.0"
     }
   },
   "5f22f86b30c1b951": {
@@ -9618,41 +9615,6 @@
         }
       },
       "input_tokens": 320,
-      "model": "jev-1.13.0"
-    }
-  },
-  "6dfe5b461c430911": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "SE": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "SE",
-        "table_corner": "Specification",
-        "table_headers": "SE, Sport, GT, Edition"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "SE",
-          "confidence": 0.98,
-          "probabilities": {
-            "SE": 0.99,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 372,
       "model": "jev-1.13.0"
     }
   },
@@ -10731,39 +10693,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "792ec6596090ae89": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova SE",
-        "statement": "Its engine has a capacity of 1,395 cc."
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 349,
-      "model": "jev-1.13.0"
-    }
-  },
   "79654b9ca34d7b94": {
     "request": {
       "questions": {
@@ -11116,6 +11045,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "7d61dbbb418789f0": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1395cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Displacement \u00b7 SE: 1395cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1395cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1395cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 355,
+      "model": "jev-1.14.0"
+    }
+  },
   "7dbce2084e14cac2": {
     "request": {
       "questions": {
@@ -11168,39 +11130,6 @@
         }
       },
       "input_tokens": 546,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7e3e3273c711c14d": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Displacement \u00b7 Edition: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 351,
       "model": "jev-1.13.0"
     }
   },
@@ -11271,41 +11200,6 @@
         }
       },
       "input_tokens": 348,
-      "model": "jev-1.13.0"
-    }
-  },
-  "7f35674da593c5cd": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "25,995": null,
-            "25,995 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 Edition: 25,995 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "25,995 GBP",
-          "confidence": 0.98,
-          "probabilities": {
-            "25,995": 0.01,
-            "25,995 GBP": 0.99,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 365,
       "model": "jev-1.13.0"
     }
   },
@@ -11526,74 +11420,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "8309d13ac56f5710": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "19,000": null,
-            "19,000 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a SE",
-        "statement": "Price from: 19,000 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "19,000 GBP",
-          "confidence": 0.91,
-          "probabilities": {
-            "19,000": 0.04,
-            "19,000 GBP": 0.94,
-            "none": 0.02
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 362,
-      "model": "jev-1.13.0"
-    }
-  },
-  "8441165458a7a7b3": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1,395 cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Displacement \u00b7 GT: 1,395 cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1,395 cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1,395 cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 351,
-      "model": "jev-1.13.0"
-    }
-  },
   "8595d2ae07331240": {
     "request": {
       "questions": {
@@ -11685,41 +11511,6 @@
         }
       },
       "input_tokens": 352,
-      "model": "jev-1.13.0"
-    }
-  },
-  "867c08edb2666b9f": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "21,495": null,
-            "none": "None of these is the price",
-            "\u00a321,495": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a Sport",
-        "statement": "OTR price: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a321,495",
-          "confidence": 0.92,
-          "probabilities": {
-            "21,495": 0.03,
-            "none": 0.02,
-            "\u00a321,495": 0.95
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 362,
       "model": "jev-1.13.0"
     }
   },
@@ -11945,30 +11736,6 @@
         }
       },
       "input_tokens": 449,
-      "model": "jev-1.13.0"
-    }
-  },
-  "894d2a480091212e": {
-    "request": {
-      "questions": {
-        "VehicleSpec.model/verify": {
-          "criteria": null,
-          "instructions": "The statement states that the model name is Kestrova.",
-          "type": "noul"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.model/verify": {
-          "p": 0.74,
-          "type": "noul"
-        }
-      },
-      "input_tokens": 291,
       "model": "jev-1.13.0"
     }
   },
@@ -12238,39 +12005,39 @@
       "model": "jev-1.13.0"
     }
   },
-  "8e1c16c67f595f47": {
+  "8dae1fad8f2daa73": {
     "request": {
       "questions": {
         "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
           "options": {
-            "25,995": null,
+            "23,995": null,
             "none": "None of these is the price",
-            "\u00a325,995": null
+            "\u00a323,995": null
           },
           "type": "choice"
         }
       },
       "state": {
-        "section": "Delmaro Kestrova trims \u203a Edition",
-        "statement": "Price: \u00a325,995"
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Price from \u00b7 GT: \u00a323,995"
       }
     },
     "response": {
       "answers": {
         "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a325,995",
-          "confidence": 0.98,
+          "choice": "\u00a323,995",
+          "confidence": 0.88,
           "probabilities": {
-            "25,995": 0.01,
-            "none": 0.0,
-            "\u00a325,995": 0.99
+            "23,995": 0.05,
+            "none": 0.03,
+            "\u00a323,995": 0.92
           },
           "type": "choice"
         }
       },
-      "input_tokens": 360,
-      "model": "jev-1.13.0"
+      "input_tokens": 368,
+      "model": "jev-1.14.0"
     }
   },
   "8fb027599e5b6eb5": {
@@ -12467,6 +12234,39 @@
       },
       "input_tokens": 452,
       "model": "jev-1.13.0"
+    }
+  },
+  "9133a97c1d67791c": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Displacement \u00b7 Edition: 1,395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 357,
+      "model": "jev-1.14.0"
     }
   },
   "9147b318bfae4806": {
@@ -12668,133 +12468,39 @@
       "model": "jev-1.13.0"
     }
   },
-  "938d89a4d5b71def": {
+  "93b411a45391131f": {
     "request": {
       "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
           "options": {
-            "1395 cc": null,
-            "none": "None of these is the engine displacement"
+            "23,995": null,
+            "23,995 GBP": null,
+            "none": "None of these is the price"
           },
           "type": "choice"
         }
       },
       "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Displacement \u00b7 Sport: 1395 cc"
+        "section": "Delmaro Kestrova trims \u203a GT",
+        "statement": "OTR price: 23,995 GBP"
       }
     },
     "response": {
       "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1395 cc",
-          "confidence": 1.0,
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "23,995 GBP",
+          "confidence": 0.97,
           "probabilities": {
-            "1395 cc": 1.0,
+            "23,995": 0.02,
+            "23,995 GBP": 0.98,
             "none": 0.0
           },
           "type": "choice"
         }
       },
-      "input_tokens": 349,
-      "model": "jev-1.13.0"
-    }
-  },
-  "93d5b8af7dd83f25": {
-    "request": {
-      "questions": {
-        "VehicleSpec.make/choice0": {
-          "instructions": "Which of these is the manufacturer (make) name?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova SE": null,
-            "Kestrova": null,
-            "Kestrova SE": null,
-            "SE": null,
-            "none": "None of these is the manufacturer (make) name"
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.model/choice0": {
-          "instructions": "Which of these is the model name?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova SE": null,
-            "Kestrova": null,
-            "Kestrova SE": null,
-            "SE": null,
-            "none": "None of these is the model name"
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Delmaro": null,
-            "Delmaro Kestrova": null,
-            "Delmaro Kestrova SE": null,
-            "Kestrova": null,
-            "Kestrova SE": null,
-            "SE": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "statement": "Delmaro Kestrova SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.make/choice0": {
-          "choice": "Delmaro",
-          "confidence": 0.36,
-          "probabilities": {
-            "Delmaro": 0.45,
-            "Delmaro Kestrova": 0.27,
-            "Delmaro Kestrova SE": 0.13,
-            "Kestrova": 0.11,
-            "Kestrova SE": 0.01,
-            "SE": 0.01,
-            "none": 0.02
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.model/choice0": {
-          "choice": "Kestrova",
-          "confidence": 0.19,
-          "probabilities": {
-            "Delmaro": 0.03,
-            "Delmaro Kestrova": 0.26,
-            "Delmaro Kestrova SE": 0.22,
-            "Kestrova": 0.31,
-            "Kestrova SE": 0.13,
-            "SE": 0.04,
-            "none": 0.01
-          },
-          "type": "choice"
-        },
-        "VehicleSpec.trim/choice0": {
-          "choice": "SE",
-          "confidence": 0.92,
-          "probabilities": {
-            "Delmaro": 0.0,
-            "Delmaro Kestrova": 0.01,
-            "Delmaro Kestrova SE": 0.03,
-            "Kestrova": 0.0,
-            "Kestrova SE": 0.03,
-            "SE": 0.93,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 585,
-      "model": "jev-1.13.0"
+      "input_tokens": 367,
+      "model": "jev-1.14.0"
     }
   },
   "9476e5a1f6d59efd": {
@@ -13040,6 +12746,39 @@
       },
       "input_tokens": 547,
       "model": "jev-1.13.0"
+    }
+  },
+  "962f5b43587e4405": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a Sport",
+        "statement": "Displacement: 1,395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 354,
+      "model": "jev-1.14.0"
     }
   },
   "96c2415f5c0312a0": {
@@ -13727,6 +13466,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "9d401347f3b6dc13": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Displacement \u00b7 Sport: 1395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 355,
+      "model": "jev-1.14.0"
+    }
+  },
   "9ddfc36f6ad521b9": {
     "request": {
       "questions": {
@@ -14290,41 +14062,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "a3bba6d80a1ebf53": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "23,995": null,
-            "none": "None of these is the price",
-            "\u00a323,995": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 GT: \u00a323,995"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a323,995",
-          "confidence": 0.98,
-          "probabilities": {
-            "23,995": 0.01,
-            "none": 0.0,
-            "\u00a323,995": 0.99
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 364,
-      "model": "jev-1.13.0"
-    }
-  },
   "a473ffb4eceade73": {
     "request": {
       "questions": {
@@ -14751,41 +14488,6 @@
         }
       },
       "input_tokens": 531,
-      "model": "jev-1.13.0"
-    }
-  },
-  "acc60dfd1055b063": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "Sport": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Sport",
-        "table_corner": "Specification",
-        "table_headers": "SE, Sport, GT, Edition"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "Sport",
-          "confidence": 0.98,
-          "probabilities": {
-            "Sport": 0.99,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 372,
       "model": "jev-1.13.0"
     }
   },
@@ -15528,6 +15230,41 @@
       "model": "jev-1.14.0"
     }
   },
+  "b2b15cc65549859e": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "SE": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "SE",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "SE",
+          "confidence": 0.96,
+          "probabilities": {
+            "SE": 0.98,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 380,
+      "model": "jev-1.14.0"
+    }
+  },
   "b2cf1eb2dfaafc76": {
     "request": {
       "questions": {
@@ -15691,6 +15428,48 @@
       "model": "jev-1.13.0"
     }
   },
+  "b5f6e3f331528f73": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova trims": null,
+            "Kestrova": null,
+            "Kestrova trims": null,
+            "none": "None of these is the trim or variant name, e.g. SE L",
+            "trims": null
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova trims"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "Kestrova",
+          "confidence": 0.19,
+          "probabilities": {
+            "Delmaro": 0.02,
+            "Delmaro Kestrova": 0.07,
+            "Delmaro Kestrova trims": 0.25,
+            "Kestrova": 0.31,
+            "Kestrova trims": 0.11,
+            "none": 0.13,
+            "trims": 0.11
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 394,
+      "model": "jev-1.14.0"
+    }
+  },
   "b624a5386371c3db": {
     "request": {
       "questions": {
@@ -15766,41 +15545,6 @@
         }
       },
       "input_tokens": 344,
-      "model": "jev-1.13.0"
-    }
-  },
-  "b69e8256d4596f26": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "19,000": null,
-            "none": "None of these is the price",
-            "\u00a319,000": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova SE",
-        "statement": "Expect to pay \u00a319,000 for this version."
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a319,000",
-          "confidence": 0.97,
-          "probabilities": {
-            "19,000": 0.02,
-            "none": 0.0,
-            "\u00a319,000": 0.98
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 363,
       "model": "jev-1.13.0"
     }
   },
@@ -16853,6 +16597,41 @@
       "model": "jev-1.14.0"
     }
   },
+  "c4525015fd1bb6c4": {
+    "request": {
+      "questions": {
+        "VehicleSpec.price_gbp/choice0": {
+          "instructions": "Which of these is the vehicle's recommended on-the-road price, before any grant?",
+          "options": {
+            "19,000": null,
+            "19,000 GBP": null,
+            "none": "None of these is the price"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims \u203a SE",
+        "statement": "Price from: 19,000 GBP"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.price_gbp/choice0": {
+          "choice": "19,000 GBP",
+          "confidence": 0.91,
+          "probabilities": {
+            "19,000": 0.04,
+            "19,000 GBP": 0.94,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 366,
+      "model": "jev-1.14.0"
+    }
+  },
   "c55b10933cee7a47": {
     "request": {
       "questions": {
@@ -16885,41 +16664,6 @@
         }
       },
       "input_tokens": 360,
-      "model": "jev-1.13.0"
-    }
-  },
-  "c8bfed032e4bcfca": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "21,495": null,
-            "none": "None of these is the price",
-            "\u00a321,495": null
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Price from \u00b7 Sport: \u00a321,495"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "\u00a321,495",
-          "confidence": 0.98,
-          "probabilities": {
-            "21,495": 0.01,
-            "none": 0.0,
-            "\u00a321,495": 0.99
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 364,
       "model": "jev-1.13.0"
     }
   },
@@ -16979,6 +16723,39 @@
       },
       "input_tokens": 348,
       "model": "jev-1.13.0"
+    }
+  },
+  "cd3c5efe8daf1a25": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Sport": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "Sport"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "Sport",
+          "confidence": 0.94,
+          "probabilities": {
+            "Sport": 0.97,
+            "none": 0.03
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 353,
+      "model": "jev-1.14.0"
     }
   },
   "cdc91bda472a7a58": {
@@ -17069,6 +16846,39 @@
         }
       },
       "input_tokens": 448,
+      "model": "jev-1.14.0"
+    }
+  },
+  "ce1cb2400aab44ff": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova SE",
+        "statement": "Its engine has a capacity of 1,395 cc."
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 355,
       "model": "jev-1.14.0"
     }
   },
@@ -17188,41 +16998,6 @@
         }
       },
       "input_tokens": 544,
-      "model": "jev-1.13.0"
-    }
-  },
-  "cecb5f51ee6e2f3d": {
-    "request": {
-      "questions": {
-        "VehicleSpec.price_gbp/choice0": {
-          "instructions": "Which of these is the price a buyer pays for the vehicle?",
-          "options": {
-            "23,995": null,
-            "23,995 GBP": null,
-            "none": "None of these is the price"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims \u203a GT",
-        "statement": "OTR price: 23,995 GBP"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.price_gbp/choice0": {
-          "choice": "23,995 GBP",
-          "confidence": 0.94,
-          "probabilities": {
-            "23,995": 0.03,
-            "23,995 GBP": 0.96,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 363,
       "model": "jev-1.13.0"
     }
   },
@@ -17582,6 +17357,39 @@
       "model": "jev-1.13.0"
     }
   },
+  "d46d0626c13bde33": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "GT": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "GT"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "GT",
+          "confidence": 0.98,
+          "probabilities": {
+            "GT": 0.99,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 353,
+      "model": "jev-1.14.0"
+    }
+  },
   "d4957268a2b71930": {
     "request": {
       "questions": {
@@ -17793,6 +17601,41 @@
       "model": "jev-1.13.0"
     }
   },
+  "d68672b33f6edb1f": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Edition": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Edition",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "Edition",
+          "confidence": 0.98,
+          "probabilities": {
+            "Edition": 0.99,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 380,
+      "model": "jev-1.14.0"
+    }
+  },
   "d687279ab84d2263": {
     "request": {
       "questions": {
@@ -17883,6 +17726,41 @@
       },
       "input_tokens": 356,
       "model": "jev-1.13.0"
+    }
+  },
+  "d8f1512720d9725b": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Sport": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Sport",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "Sport",
+          "confidence": 0.96,
+          "probabilities": {
+            "Sport": 0.98,
+            "none": 0.02
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 380,
+      "model": "jev-1.14.0"
     }
   },
   "d90f12132d3bab5d": {
@@ -18443,39 +18321,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "e1d06778b9dbded7": {
-    "request": {
-      "questions": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "instructions": "Which of these is the engine displacement (cc)?",
-          "options": {
-            "1395cc": null,
-            "none": "None of these is the engine displacement"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova: specifications \u203a Specifications",
-        "statement": "Displacement \u00b7 SE: 1395cc"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.engine_size_cc/choice0": {
-          "choice": "1395cc",
-          "confidence": 1.0,
-          "probabilities": {
-            "1395cc": 1.0,
-            "none": 0.0
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 349,
-      "model": "jev-1.13.0"
-    }
-  },
   "e207b4f6ea17df54": {
     "request": {
       "questions": {
@@ -18927,6 +18772,135 @@
       "model": "jev-1.13.0"
     }
   },
+  "eabbdf94b2ea0e73": {
+    "request": {
+      "questions": {
+        "VehicleSpec.make/choice0": {
+          "instructions": "Which of these is the manufacturer (make) name?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova SE": null,
+            "Kestrova": null,
+            "Kestrova SE": null,
+            "SE": null,
+            "none": "None of these is the manufacturer (make) name"
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.model/choice0": {
+          "instructions": "Which of these is the name of the model alone, not its code, without the make, trim level or engine?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova SE": null,
+            "Kestrova": null,
+            "Kestrova SE": null,
+            "SE": null,
+            "none": "None of these is the model name"
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "Delmaro": null,
+            "Delmaro Kestrova": null,
+            "Delmaro Kestrova SE": null,
+            "Kestrova": null,
+            "Kestrova SE": null,
+            "SE": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "statement": "Delmaro Kestrova SE"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.make/choice0": {
+          "choice": "Delmaro",
+          "confidence": 0.44,
+          "probabilities": {
+            "Delmaro": 0.52,
+            "Delmaro Kestrova": 0.2,
+            "Delmaro Kestrova SE": 0.11,
+            "Kestrova": 0.13,
+            "Kestrova SE": 0.01,
+            "SE": 0.01,
+            "none": 0.02
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.model/choice0": {
+          "choice": "Kestrova",
+          "confidence": 0.49,
+          "probabilities": {
+            "Delmaro": 0.06,
+            "Delmaro Kestrova": 0.31,
+            "Delmaro Kestrova SE": 0.04,
+            "Kestrova": 0.56,
+            "Kestrova SE": 0.02,
+            "SE": 0.01,
+            "none": 0.0
+          },
+          "type": "choice"
+        },
+        "VehicleSpec.trim/choice0": {
+          "choice": "SE",
+          "confidence": 0.76,
+          "probabilities": {
+            "Delmaro": 0.0,
+            "Delmaro Kestrova": 0.01,
+            "Delmaro Kestrova SE": 0.07,
+            "Kestrova": 0.01,
+            "Kestrova SE": 0.12,
+            "SE": 0.79,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 609,
+      "model": "jev-1.14.0"
+    }
+  },
+  "eae8aa01f983b0f1": {
+    "request": {
+      "questions": {
+        "VehicleSpec.trim/choice0": {
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
+          "options": {
+            "SE": null,
+            "none": "None of these is the trim or variant name, e.g. SE L"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova trims",
+        "statement": "SE"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.trim/choice0": {
+          "choice": "SE",
+          "confidence": 0.98,
+          "probabilities": {
+            "SE": 0.99,
+            "none": 0.01
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 353,
+      "model": "jev-1.14.0"
+    }
+  },
   "ec066d8ef24acec1": {
     "request": {
       "questions": {
@@ -19035,37 +19009,39 @@
       "model": "jev-1.13.0"
     }
   },
-  "ed13064b209ad826": {
+  "ee196605fa3117ee": {
     "request": {
       "questions": {
         "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
+          "instructions": "Which of these is the trim level alone, e.g. SE L, without the engine, power or body style?",
           "options": {
-            "Edition": null,
+            "GT": null,
             "none": "None of these is the trim or variant name, e.g. SE L"
           },
           "type": "choice"
         }
       },
       "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "Edition"
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "GT",
+        "table_corner": "Specification",
+        "table_headers": "SE, Sport, GT, Edition"
       }
     },
     "response": {
       "answers": {
         "VehicleSpec.trim/choice0": {
-          "choice": "Edition",
-          "confidence": 0.9,
+          "choice": "GT",
+          "confidence": 0.98,
           "probabilities": {
-            "Edition": 0.95,
-            "none": 0.05
+            "GT": 0.99,
+            "none": 0.01
           },
           "type": "choice"
         }
       },
-      "input_tokens": 345,
-      "model": "jev-1.13.0"
+      "input_tokens": 380,
+      "model": "jev-1.14.0"
     }
   },
   "ee3d5bee04b9cc3f": {
@@ -19855,39 +19831,6 @@
       "model": "jev-1.13.0"
     }
   },
-  "f6d6567bca8e28ba": {
-    "request": {
-      "questions": {
-        "VehicleSpec.trim/choice0": {
-          "instructions": "Which of these is the trim or variant name, e.g. SE L?",
-          "options": {
-            "SE": null,
-            "none": "None of these is the trim or variant name, e.g. SE L"
-          },
-          "type": "choice"
-        }
-      },
-      "state": {
-        "section": "Delmaro Kestrova trims",
-        "statement": "SE"
-      }
-    },
-    "response": {
-      "answers": {
-        "VehicleSpec.trim/choice0": {
-          "choice": "SE",
-          "confidence": 0.98,
-          "probabilities": {
-            "SE": 0.99,
-            "none": 0.01
-          },
-          "type": "choice"
-        }
-      },
-      "input_tokens": 345,
-      "model": "jev-1.13.0"
-    }
-  },
   "f743333dc308d61b": {
     "request": {
       "questions": {
@@ -20390,6 +20333,39 @@
       },
       "input_tokens": 442,
       "model": "jev-1.13.0"
+    }
+  },
+  "fcde3395ebb11d98": {
+    "request": {
+      "questions": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "instructions": "Which of these is the engine displacement in cc, not a size in litres?",
+          "options": {
+            "1,395 cc": null,
+            "none": "None of these is the engine displacement"
+          },
+          "type": "choice"
+        }
+      },
+      "state": {
+        "section": "Delmaro Kestrova: specifications \u203a Specifications",
+        "statement": "Displacement \u00b7 GT: 1,395 cc"
+      }
+    },
+    "response": {
+      "answers": {
+        "VehicleSpec.engine_size_cc/choice0": {
+          "choice": "1,395 cc",
+          "confidence": 1.0,
+          "probabilities": {
+            "1,395 cc": 1.0,
+            "none": 0.0
+          },
+          "type": "choice"
+        }
+      },
+      "input_tokens": 357,
+      "model": "jev-1.14.0"
     }
   },
   "fd24cf66336b917d": {

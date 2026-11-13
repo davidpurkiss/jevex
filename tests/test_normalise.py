@@ -19,7 +19,7 @@ from jevex import (
 from jevex.entities import EntityScope
 from jevex.errors import PartError
 from jevex.interfaces import ParsedDocument, Selection
-from jevex.jev import Choice, estimate_tokens
+from jevex.jev import MAX_STATE_TOKENS, Choice, estimate_question_tokens, estimate_tokens
 from jevex.layout import Component
 from jevex.normalise import (
     BUILTIN_NORMALISERS,
@@ -506,8 +506,15 @@ def test_custom_normalisers_can_be_registered() -> None:
 LOC = DomLocation(dom_path="/p")
 
 
-def statement(sid: str, text: str) -> Statement:
-    return Statement(id=sid, text=text, kind="sentence", component_id=f"c-{sid}", location=LOC)
+def statement(sid: str, text: str, *headings: str) -> Statement:
+    return Statement(
+        id=sid,
+        text=text,
+        kind="sentence",
+        component_id=f"c-{sid}",
+        location=LOC,
+        heading_trail=list(headings),
+    )
 
 
 def pick(st: Statement, raw: str, confidence: float, *chain: object, **alts: float) -> Selection:
@@ -518,10 +525,10 @@ def pick(st: Statement, raw: str, confidence: float, *chain: object, **alts: flo
     return Selection(candidate=cand, confidence=confidence, alternatives=alts)
 
 
-def context(*statements: Statement, jev: FakeJev | None = None) -> Context:
+def context(*statements: Statement, jev: FakeJev | None = None, spec: SchemaSpec = SPEC) -> Context:
     ctx = Context.create(
         Document.from_bytes(b"<p/>", url="https://example.com"),
-        [SPEC],
+        [spec],
         (jev or FakeJev(strict=True)).client(),
     )
     root = Component(id="root", type="section", location=LOC)
@@ -624,14 +631,18 @@ async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() 
     fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
     ctx = context(own, *everyone, jev=fake)
     run = ctx.schemas["Car"]
-    run.scopes = [EntityScope(label="doc", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
-    run.selections[("doc", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
-    run.selections[("doc", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    run.scopes = [EntityScope(label="SE", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("SE", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("SE", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
     await NormaliseStage().run(ctx)
-    seats = run.fields["doc"]["seats"]
+    seats = run.fields["SE"]["seats"]
     assert (seats.value, seats.shared) == (5, True)
     [asked] = fake.calls
-    assert asked.state == "The van seats 2\nEvery trim seats 5"
+    # Shared statements don't say which entity is asked about, so the state does.
+    assert asked.state == {
+        "asked_about": {"entity": "car", "label": "SE"},
+        "statements": "The van seats 2\nEvery trim seats 5",
+    }
     assert asked.questions == {
         "settle": Choice(
             instructions="Which of these is the seats?",
@@ -642,6 +653,129 @@ async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() 
             },
         )
     }
+
+
+async def test_a_question_over_shared_values_says_where_the_entitys_own_statements_are() -> None:
+    # A price guide's headings name every model in it; the entity's own section says which
+    # one it is a trim of.
+    own = [
+        statement("s1", "SE: ●", "Price guide", "Options"),
+        statement("s2", "SE · Price: £11,990", "Price guide", "Tourer"),
+        statement("s3", "SE · VED: £195", "Price guide", "Tourer"),
+    ]
+    everyone = [
+        statement("s4", "The Tourer seats 7", "Price guide"),
+        statement("s5", "The City seats 4", "Price guide"),
+    ]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "7")
+    ctx = context(*own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(
+            label="SE", statement_ids=["s1", "s2", "s3"], shared_statement_ids=["s4", "s5"]
+        ),
+        EntityScope(label="Urban", statement_ids=[], shared_statement_ids=["s4", "s5"]),
+    ]
+    for scope in ("SE", "Urban"):
+        run.selections[(scope, "seats", "s4")] = pick(everyone[0], "7", 0.9, "parse_number")
+        run.selections[(scope, "seats", "s5")] = pick(everyone[1], "4", 0.9, "parse_number")
+    await NormaliseStage().run(ctx)
+    assert run.fields["SE"]["seats"].value == 7
+    statements = "The Tourer seats 7\nThe City seats 4"
+    assert [call.state for call in fake.calls] == [
+        # The headings most of its own statements are under, not the options table's.
+        {
+            "asked_about": {"entity": "car", "label": "SE", "section": "Price guide › Tourer"},
+            "statements": statements,
+        },
+        # An entity with no statement of its own has no section to give.
+        {"asked_about": {"entity": "car", "label": "Urban"}, "statements": statements},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("trails", "about"),
+    [
+        # As many statements under each: the first in the document.
+        (
+            [("Guide", "Options"), ("Guide", "Tourer")],
+            {"entity": "car", "label": "SE", "section": "Guide › Options"},
+        ),
+        # Most under no heading at all: no section, not the one heading there is.
+        ([(), ("Guide", "Tourer"), ()], {"entity": "car", "label": "SE"}),
+    ],
+)
+async def test_the_section_is_the_one_most_of_an_entitys_statements_share(
+    trails: list[tuple[str, ...]], about: dict[str, str]
+) -> None:
+    own = [statement(f"o{i}", f"SE · row {i}", *trail) for i, trail in enumerate(trails)]
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(*own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(
+            label="SE", statement_ids=[s.id for s in own], shared_statement_ids=["s2", "s3"]
+        )
+    ]
+    run.selections[("SE", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("SE", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    [asked] = fake.calls
+    assert isinstance(asked.state, dict)
+    assert asked.state["asked_about"] == about
+
+
+class Statements(BaseModel):
+    seats: int = Field(description="Seats")
+
+
+async def test_an_entity_called_what_a_state_key_is_keeps_its_label_and_its_statements() -> None:
+    own = statement("s1", "SE · 5 doors", "Tourer")
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(own, *everyone, jev=fake, spec=SchemaSpec.from_model(Statements))
+    run = ctx.schemas["Statements"]
+    run.scopes = [EntityScope(label="SE", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("SE", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("SE", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    [asked] = fake.calls
+    assert asked.state == {
+        "asked_about": {"entity": "statements", "label": "SE", "section": "Tourer"},
+        "statements": "The van seats 2\nEvery trim seats 5",
+    }
+
+
+async def test_a_long_run_of_shared_statements_is_cut_to_fit_beside_the_entity() -> None:
+    filler = "also seats five adults in comfort on longer journeys; " * 200
+    everyone = [statement(f"s{i}", f"Trim {i} seats {i} and {filler}") for i in range(2, 12)]
+    own = statement("s1", "SE · 5 doors", "Price guide", "Tourer")
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "2")
+    ctx = context(own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(label="SE", statement_ids=["s1"], shared_statement_ids=[s.id for s in everyone])
+    ]
+    for i, shared in enumerate(everyone, start=2):
+        run.selections[("SE", "seats", shared.id)] = pick(shared, str(i), 0.9, "parse_number")
+    await NormaliseStage().run(ctx)
+    assert run.fields["SE"]["seats"].value == 2
+    [asked] = fake.calls
+    assert isinstance(asked.state, dict)
+    assert asked.state["asked_about"] == {
+        "entity": "car",
+        "label": "SE",
+        "section": "Price guide › Tourer",
+    }
+    text = asked.state["statements"]
+    assert isinstance(text, str)
+    assert "\n".join(s.text for s in everyone).startswith(text)
+    assert len(text) < sum(len(s.text) for s in everyone)
+    question = asked.questions["settle"]
+    assert estimate_tokens(asked.state) + estimate_question_tokens(question) <= int(
+        MAX_STATE_TOKENS * 0.9
+    )
 
 
 async def test_values_whose_statements_would_overfill_the_question_are_left_out() -> None:
