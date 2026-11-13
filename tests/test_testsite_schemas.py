@@ -37,10 +37,9 @@ def test_a_vehicle_specs_names_are_asked_for_without_what_a_label_adds_to_them()
     spec = SchemaSpec.from_model(VehicleSpec)
     asked = {
         name: spec.field(name).select_question(["Premium 1.2 79PS"]).instructions
-        for name in ("make", "model", "trim", "engine_size_cc")
+        for name in ("model", "trim", "engine_size_cc")
     }
     assert asked == {
-        "make": "Which of these is the vehicle's manufacturer (make)?",
         "model": (
             "Which of these is the name of the model alone, not its code, without the make, "
             "trim level or engine?"

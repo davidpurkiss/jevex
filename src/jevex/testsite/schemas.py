@@ -26,21 +26,14 @@ class VehicleSpec(BaseModel):
     # labelled trim, against 257 as "vehicle variant" (#322).
     __jevex__ = SchemaConfig(entity_name="vehicle variant")
 
-    # A price list also names the makers of its accessories (a dash camera's, a sound
-    # system's). Asked "Which of these is the manufacturer (make) name?", Jev took those
-    # too; asked for the vehicle's, it turned down 32 of 84 sampled picks that weren't a
-    # truth make and kept 308 of 310 that were (#326).
-    make: str = Field(
-        description="Manufacturer (make) name",
-        questions=Questions(select="Which of these is the vehicle's manufacturer (make)?"),
-    )
+    make: str = Field(description="Manufacturer (make) name")
     # A price list names a variant in one label ("Born V1 59 kWh 230PS", "Premium 1.2 79PS
     # 5MT", "GR Sport AWD"). Asked "Which of these is the model name?" or "... the trim or
     # variant name, e.g. SE L?", Jev took the whole label as either, and a "Model Code" as
-    # the model. Told what to leave out, it takes the part: of 250 sampled picks on real
-    # price lists that weren't a truth trim, 84 became one and 30 "none", and 4 of 250 that
-    # were one stopped being one; for the model, 32 and 95 of 250 (every model code among
-    # them), and 1 lost (#326).
+    # the model. Told what to leave out, it takes the part. Sampled on real price lists
+    # (#326), per field 250 picks that weren't the truth's value and 250 that were:
+    # - trim: 84 of the first became a truth trim and 30 "none"; 4 of the second were lost.
+    # - model: 32 became a truth model and 95 "none" (every model code); 1 was lost.
     model: str = Field(
         description="Model name",
         questions=Questions(

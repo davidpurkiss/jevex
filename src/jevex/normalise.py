@@ -590,10 +590,10 @@ class NormaliseStage:
     distinct values (their raw spans, the first standing for a span repeated), each
     described by the statement giving it (:meth:`~jevex.schema.FieldSpec.settle_question`),
     with those statements as the state, cut to fit. Shared statements don't say which
-    entity is being asked about, so with them the state also names it: its label and the
-    headings most of its own statements are under. Jev's pick wins, as sure as the less
-    sure of Jev's answer and the pick, and "none" leaves the field unfound. List fields
-    keep every accepted value, deduplicated in document order.
+    entity is being asked about, so with them the state also says (``asked_about``): its
+    label and the headings most of its own statements are under. Jev's pick wins, as sure
+    as the less sure of Jev's answer and the pick, and "none" leaves the field unfound.
+    List fields keep every accepted value, deduplicated in document order.
 
     If nothing normalises, the field's meta carries the error. A normaliser that raises
     (:class:`NormaliserFailedError`) skips that candidate and is recorded with
@@ -845,10 +845,10 @@ async def _settle(
     statements = "\n".join(dict.fromkeys(ctx.parsed.statements[sid].text for sid, *_ in accepted))
     state: JSONContent
     if shared:
-        about = _asked_about(ctx.parsed, run, scope)
+        about = _asked_about(ctx.parsed, run, scope, reading.shared)
 
         def beside(text: str) -> JSONContent:
-            return {**about, "statements": text}
+            return {"asked_about": about, "statements": text}
 
         state = beside(ctx.jev.fit_state(statements, {"settle": question}, within=beside))
     else:
@@ -863,11 +863,20 @@ async def _settle(
     )
 
 
-def _asked_about(parsed: ParsedDocument, run: SchemaRun, scope: str) -> dict[str, JSONContent]:
-    """Which entity a question over shared statements is about, as Jev sees it: its label
-    (under the schema's entity name) and, as ``section``, the headings most of its own
-    statements are under (capped by :func:`~jevex.layout.section_text`)."""
-    shared = run.shared_statements(scope)
+def _asked_about(
+    parsed: ParsedDocument, run: SchemaRun, scope: str, shared: set[str]
+) -> dict[str, JSONContent]:
+    """Which entity a question over shared statements is about, as Jev sees it: what the
+    schema calls one (``entity``), its ``label`` and, as ``section``, the headings its own
+    statements (those not in ``shared``) are under, capped by
+    :func:`~jevex.layout.section_text`.
+
+    An entity's statements can sit under several headings (its row of a model's price
+    table, its column of an options table further on). One trail is sent, the one most
+    of them are under: that is where the entity is mostly described, and a list of every
+    table's headings would name the other models' too. Of two trails with as many
+    statements, the first in the document is sent; when most have no heading above them,
+    none is."""
     trails = Counter(
         tuple(statement.heading_trail)
         for entity in run.scopes
@@ -875,7 +884,7 @@ def _asked_about(parsed: ParsedDocument, run: SchemaRun, scope: str) -> dict[str
         for statement in parsed.scope_statements(entity)
         if statement.id not in shared
     )
-    about: dict[str, JSONContent] = {run.spec.entity_name: scope}
+    about: dict[str, JSONContent] = {"entity": run.spec.entity_name, "label": scope}
     if trails and (section := section_text(trails.most_common(1)[0][0])):
         about["section"] = section
     return about

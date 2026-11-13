@@ -525,10 +525,10 @@ def pick(st: Statement, raw: str, confidence: float, *chain: object, **alts: flo
     return Selection(candidate=cand, confidence=confidence, alternatives=alts)
 
 
-def context(*statements: Statement, jev: FakeJev | None = None) -> Context:
+def context(*statements: Statement, jev: FakeJev | None = None, spec: SchemaSpec = SPEC) -> Context:
     ctx = Context.create(
         Document.from_bytes(b"<p/>", url="https://example.com"),
-        [SPEC],
+        [spec],
         (jev or FakeJev(strict=True)).client(),
     )
     root = Component(id="root", type="section", location=LOC)
@@ -639,7 +639,10 @@ async def test_without_values_of_its_own_an_entitys_shared_values_are_settled() 
     assert (seats.value, seats.shared) == (5, True)
     [asked] = fake.calls
     # Shared statements don't say which entity is asked about, so the state does.
-    assert asked.state == {"car": "SE", "statements": "The van seats 2\nEvery trim seats 5"}
+    assert asked.state == {
+        "asked_about": {"entity": "car", "label": "SE"},
+        "statements": "The van seats 2\nEvery trim seats 5",
+    }
     assert asked.questions == {
         "settle": Choice(
             instructions="Which of these is the seats?",
@@ -656,9 +659,9 @@ async def test_a_question_over_shared_values_says_where_the_entitys_own_statemen
     # A price guide's headings name every model in it; the entity's own section says which
     # one it is a trim of.
     own = [
-        statement("s1", "SE · Price: £11,990", "Price guide", "Tourer"),
-        statement("s2", "SE · VED: £195", "Price guide", "Tourer"),
-        statement("s3", "SE: ●", "Price guide", "Options"),
+        statement("s1", "SE: ●", "Price guide", "Options"),
+        statement("s2", "SE · Price: £11,990", "Price guide", "Tourer"),
+        statement("s3", "SE · VED: £195", "Price guide", "Tourer"),
     ]
     everyone = [
         statement("s4", "The Tourer seats 7", "Price guide"),
@@ -681,10 +684,34 @@ async def test_a_question_over_shared_values_says_where_the_entitys_own_statemen
     statements = "The Tourer seats 7\nThe City seats 4"
     assert [call.state for call in fake.calls] == [
         # The headings most of its own statements are under, not the options table's.
-        {"car": "SE", "section": "Price guide › Tourer", "statements": statements},
+        {
+            "asked_about": {"entity": "car", "label": "SE", "section": "Price guide › Tourer"},
+            "statements": statements,
+        },
         # An entity with no statement of its own has no section to give.
-        {"car": "Urban", "statements": statements},
+        {"asked_about": {"entity": "car", "label": "Urban"}, "statements": statements},
     ]
+
+
+class Statements(BaseModel):
+    seats: int = Field(description="Seats")
+
+
+async def test_an_entity_called_what_a_state_key_is_keeps_its_label_and_its_statements() -> None:
+    own = statement("s1", "SE · 5 doors", "Tourer")
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(own, *everyone, jev=fake, spec=SchemaSpec.from_model(Statements))
+    run = ctx.schemas["Statements"]
+    run.scopes = [EntityScope(label="SE", statement_ids=["s1"], shared_statement_ids=["s2", "s3"])]
+    run.selections[("SE", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("SE", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    [asked] = fake.calls
+    assert asked.state == {
+        "asked_about": {"entity": "statements", "label": "SE", "section": "Tourer"},
+        "statements": "The van seats 2\nEvery trim seats 5",
+    }
 
 
 async def test_a_long_run_of_shared_statements_is_cut_to_fit_beside_the_entity() -> None:
@@ -703,7 +730,11 @@ async def test_a_long_run_of_shared_statements_is_cut_to_fit_beside_the_entity()
     assert run.fields["SE"]["seats"].value == 2
     [asked] = fake.calls
     assert isinstance(asked.state, dict)
-    assert (asked.state["car"], asked.state["section"]) == ("SE", "Price guide › Tourer")
+    assert asked.state["asked_about"] == {
+        "entity": "car",
+        "label": "SE",
+        "section": "Price guide › Tourer",
+    }
     text = asked.state["statements"]
     assert isinstance(text, str)
     assert "\n".join(s.text for s in everyone).startswith(text)
