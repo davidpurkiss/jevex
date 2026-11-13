@@ -934,21 +934,71 @@ async def test_an_entity_giving_nothing_goes_and_doesnt_count_towards_what_most_
     ]
 
 
-async def test_nothing_is_unlike_the_rest_until_three_entities_give_something() -> None:
+@pytest.mark.parametrize("third", [("price",), ()], ids=["gives little", "gives nothing"])
+async def test_an_entity_is_compared_once_two_others_give_something(third: tuple[str, ...]) -> None:
     ctx = context()
     run = ctx.schemas["Car"]
     run.scopes = []
     given(run, "SE", "price", "power_kw", "seats", "economy")
+    given(run, "Range", *third, shared=("power_kw",))
+    await NormaliseStage().run(ctx)
+    assert dropped(ctx) == []  # what one other gives is no pattern to be unlike
     given(run, "SE L", "price", "power_kw", "seats", "economy")
-    given(run, "Range", shared=("price",))
+    await NormaliseStage().run(ctx)
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", list(third))]
+
+
+async def test_an_entity_giving_under_half_of_what_most_give_is_dropped() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats")
+    given(run, "Pack", "price")  # one of three usual fields: under a half, not under a third
+    await NormaliseStage().run(ctx)
+    assert [d["entity"] for d in dropped(ctx)] == ["Pack"]
+
+
+async def test_a_field_that_didnt_normalise_isnt_one_the_entity_gives() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats")
+    run.scopes.append(EntityScope(label="Range"))
+    for name in ("price", "power_kw", "seats"):
+        run.set_field("Range", name, FieldMeta(confidence=0.4, error="not a number"))
+    await NormaliseStage().run(ctx)
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", [])]
+
+
+async def test_how_many_fields_entities_give_is_compared_by_the_median_not_the_mean() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for heading in ("2024", "2025", "2026"):
+        given(run, heading, "model_year")
+    given(run, "SE", "price", "power_kw", "seats", "economy", "zero_to_62_s", "registered")
+    given(run, "Van", "seats")  # none of what is usual, but as many fields as most give
     await NormaliseStage().run(ctx)
     assert dropped(ctx) == []
-    given(run, "Sport", "price", "power_kw", "seats", "economy")
+
+
+async def test_a_bare_value_counts_as_given_and_goes_with_a_dropped_entity() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    for label, names in (("Tourer", ("price", "power_kw", "seats")), ("Range", ("model_year",))):
+        run.scopes.append(EntityScope(label=label))
+        run.values[label] = dict.fromkeys(names, 1)
     await NormaliseStage().run(ctx)
-    assert [d["entity"] for d in dropped(ctx)] == ["Range"]
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", ["model_year"])]
+    assert set(run.values) == {"Tourer"}
 
 
-async def test_a_schema_with_a_nested_model_keeps_all_its_entities() -> None:
+async def test_a_schema_whose_nested_model_has_records_keeps_all_its_entities() -> None:
     # A parent's children are part of what it gives, and they're in the child's run.
     for parent, child_of in (("Dealer", None), (None, "Car")):
         ctx = context()

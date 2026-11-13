@@ -608,9 +608,9 @@ class NormaliseStage:
     Last, the entities that give little of what the others give are dropped, with their
     values (:func:`_unlike_the_rest`; an ``entity_dropped`` event each, naming the fields
     it gave), so later stages don't work on them and they make no record: the fallback
-    never gets to fill one in. A schema with a nested model keeps all its entities, parents
-    and children: a parent's children are part of what it gives, and they are in another
-    run.
+    never gets to fill one in. A schema whose nested model has records in this document
+    (a child run) keeps all its entities, parents and children: a parent's children are
+    part of what it gives, and they are in the other run.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -649,6 +649,7 @@ class NormaliseStage:
             for label, gave in unlike.items():
                 run.scopes = [s for s in run.scopes if s.label != label]
                 run.fields.pop(label, None)
+                run.values.pop(label, None)
                 ctx.event(
                     self.name,
                     "entity_dropped",
@@ -790,15 +791,15 @@ class NormaliseStage:
 UNLIKE_SHARE = 0.5
 """An entity is unlike the rest when it gives less than this share of the fields most
 entities give (and fewer fields than the median entity). Chosen on the spec-sheets dev
-documents, simulated on recorded runs: at a half, 18 of 31 spurious records went and 4
-that had matched a truth record, and accuracy rose from 68.3% to 70.2%; at a third
-(tried without the median condition), 13 and 2, to 69.6% (#326)."""
+documents (#326): at a half, 22 of 270 entities went, 19 of the 30 that matched no truth
+record and 3 that had matched one, and accuracy rose from 67.7% to 70.3%. A third,
+simulated on the same runs without the median condition, dropped 13 and 2 for about half
+that gain."""
 
 
-MIN_ALIKE = 3
-"""The fewest entities giving anything before one can be unlike the rest: what "most" of
-one or two give is what a single entity gives, or what both do, and that is no pattern
-for a third to be unlike."""
+MIN_OTHERS = 2
+"""The fewest other entities giving anything that an entity is compared with: what one
+other gives is no pattern to be unlike."""
 
 
 def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
@@ -819,8 +820,8 @@ def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
     usual fields and fewer fields than the median of them does. The second condition keeps
     one that gives plenty where a majority of sparse ones give something else. One that
     gives nothing is unlike the rest whenever any field is usual, and doesn't count
-    towards what most give. Nothing is, while fewer than :data:`MIN_ALIKE` entities give
-    anything.
+    towards what most give. An entity is compared only when at least :data:`MIN_OTHERS`
+    others give something. A bare value (``SchemaRun.values``) counts as given.
 
     What it costs: a real record the document says little about goes with the rest (of
     two full variants and a third with only a price, the third), and values an entity
@@ -828,14 +829,19 @@ def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
     """
     own = {
         scope.label: sorted(
-            name
-            for name, meta in run.fields.get(scope.label, {}).items()
-            if meta.found and not meta.shared
+            {
+                *run.values.get(scope.label, {}),
+                *(
+                    name
+                    for name, meta in run.fields.get(scope.label, {}).items()
+                    if meta.found and not meta.shared
+                ),
+            }
         )
         for scope in run.scopes
     }
     giving = [fields for fields in own.values() if fields]
-    if len(giving) < MIN_ALIKE:
+    if not giving:
         return {}
     given = Counter(name for fields in giving for name in fields)
     usual = {name for name, entities in given.items() if entities * 2 > len(giving)}
@@ -843,7 +849,9 @@ def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
     return {
         label: fields
         for label, fields in own.items()
-        if len(usual.intersection(fields)) < UNLIKE_SHARE * len(usual) and len(fields) < typical
+        if len(giving) - bool(fields) >= MIN_OTHERS
+        and len(usual.intersection(fields)) < UNLIKE_SHARE * len(usual)
+        and len(fields) < typical
     }
 
 
