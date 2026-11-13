@@ -23,6 +23,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from statistics import median
 from typing import TYPE_CHECKING, Annotated, Any, Union, cast, get_args, get_origin
 
 from pydantic import TypeAdapter, ValidationError
@@ -603,6 +604,13 @@ class NormaliseStage:
     two are weighed (:meth:`~jevex.pipeline.SchemaRun.offer_field`). Values are recorded
     with ``method="generator"``, or ``"vision"`` when the statement came from a vision
     model.
+
+    Last, the entities that give little of what the others give are dropped, with their
+    values (:func:`_unlike_the_rest`; an ``entity_dropped`` event each, naming the fields
+    it gave), so later stages don't work on them and they make no record: the fallback
+    never gets to fill one in. A schema whose nested model has records in this document
+    (a child run) keeps all its entities, parents and children: a parent's children are
+    part of what it gives, and they are in the other run.
     """
 
     registry: NormaliserRegistry = BUILTIN_NORMALISERS
@@ -634,6 +642,22 @@ class NormaliseStage:
                     run.vision_values[(scope, field_name)] = checks
                     if run.spec.field(field_name).many:
                         run.value_picks[(scope, field_name)] = taken
+            nested = run.parent is not None or any(
+                other.parent == run.name for other in ctx.schemas.values()
+            )
+            unlike = _unlike_the_rest(run) if not nested else {}
+            for label, gave in unlike.items():
+                run.scopes = [s for s in run.scopes if s.label != label]
+                run.fields.pop(label, None)
+                run.values.pop(label, None)
+                ctx.event(
+                    self.name,
+                    "entity_dropped",
+                    f"{run.name}: {label!r} gives little of what the other entities give",
+                    schema=run.name,
+                    entity=label,
+                    fields=gave,
+                )
 
     def _accept(
         self,
@@ -762,6 +786,67 @@ class NormaliseStage:
             vision_values(given),
             _picks(ctx, used, shared),
         )
+
+
+UNLIKE_SHARE = 0.5
+"""An entity is unlike the rest when it gives less than this share of the fields most
+entities give (and fewer fields than the median entity). Chosen on the spec-sheets dev
+documents (#326): at a half, 22 of 270 entities went, 19 of the 30 that matched no truth
+record and 3 that had matched one, and accuracy rose from 67.7% to 70.3%. A third,
+simulated on the same runs without the median condition, dropped 13 and 2 for about half
+that gain."""
+
+
+MIN_OTHERS = 2
+"""The fewest other entities giving anything that an entity is compared with: what one
+other gives is no pattern to be unlike."""
+
+
+def _unlike_the_rest(run: SchemaRun) -> dict[str, list[str]]:
+    """The entities that aren't records like the document's others, each with the fields
+    it gives for itself (its found values that aren't shared).
+
+    The records of one document are described alike: a price list gives every variant a
+    price, a fuel and a power. The entity resolver also keeps things that only read like
+    one (a page's heading with its make and model, an equipment row, a section named after
+    a fuel type). Jev's answer doesn't tell them apart: the resolver's own question ("Does
+    ... name a separate ...?"), asked again of each entity on four real price lists with
+    the entity's own statements as the state, came back no surer for the real records
+    (p 0.17-0.5 for many) than for the spurious ones (up to 0.85). What they state does,
+    so this is decided from structure.
+
+    Among the entities that give anything, a field is usual when more than half give it.
+    An entity is unlike the rest when it gives less than :data:`UNLIKE_SHARE` of the
+    usual fields and fewer fields than the median of them does. The second condition keeps
+    one that gives plenty where a majority of sparse ones give something else. One that
+    gives nothing is unlike the rest whenever any field is usual, and doesn't count
+    towards what most give. An entity is compared only when at least :data:`MIN_OTHERS`
+    others give something. A bare value (``SchemaRun.values``) counts as given.
+
+    What it costs: a real record the document says little about goes with the rest (of
+    two full variants and a third with only a price, the third), and values an entity
+    gets from a coarser one it is a kind of are shared, so they don't count for it.
+    """
+    own: dict[str, list[str]] = {}
+    for scope in run.scopes:
+        metas = run.fields.get(scope.label, {})
+        found = {name for name, meta in metas.items() if meta.found and not meta.shared}
+        # A bare value stands only where the field has no meta, as in the record.
+        bare = {name for name in run.values.get(scope.label, {}) if name not in metas}
+        own[scope.label] = sorted(found | bare)
+    giving = [fields for fields in own.values() if fields]
+    if not giving:
+        return {}
+    given = Counter(name for fields in giving for name in fields)
+    usual = {name for name, entities in given.items() if entities * 2 > len(giving)}
+    typical = median(len(fields) for fields in giving)
+    return {
+        label: fields
+        for label, fields in own.items()
+        if len(giving) - bool(fields) >= MIN_OTHERS
+        and len(usual.intersection(fields)) < UNLIKE_SHARE * len(usual)
+        and len(fields) < typical
+    }
 
 
 @dataclass(frozen=True)

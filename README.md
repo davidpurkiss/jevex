@@ -38,6 +38,11 @@ the layout route finds for the entity itself replaces a shared one. So does a va
 text the entity shares with others: the embedded one describes the page (an article's
 headline, a site's list of brands), and the text's was chosen for that entity.
 
+Under `MultiEntity`, an entity that gives for itself little of what the document's other
+entities give (a page heading read as a variant, an equipment row) makes no record: it is
+dropped once values are normalised, and the document's `meta.events` gets an
+`entity_dropped` event naming it and the fields it gave.
+
 ## PDFs
 
 PDF layout uses [Docling](https://github.com/docling-project/docling), an optional extra:

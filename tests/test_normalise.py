@@ -832,6 +832,206 @@ async def test_only_the_entitys_own_values_are_settled_when_it_has_some() -> Non
     assert run.fields["doc"]["seats"].value == 4
 
 
+def given(run: SchemaRun, label: str, *own: str, shared: tuple[str, ...] = ()) -> None:
+    """An entity that found ``own`` for itself and ``shared`` from statements it shares."""
+    run.scopes.append(EntityScope(label=label))
+    for name in own:
+        run.set_field(label, name, FieldMeta(value=1, confidence=0.9))
+    for name in shared:
+        run.set_field(label, name, FieldMeta(value=1, confidence=0.9, shared=True))
+
+
+def dropped(ctx: Context) -> list[dict[str, Any]]:
+    return [e.data for e in ctx.events if e.kind == "entity_dropped"]
+
+
+async def test_an_entity_that_gives_little_of_what_the_others_give_is_dropped() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    # A page heading the resolver took for a variant: all it gives for itself is a year.
+    given(run, "Tourer range", "model_year", shared=("price", "power_kw", "seats"))
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport"]
+    assert "Tourer range" not in run.fields
+    [event] = [e for e in ctx.events if e.kind == "entity_dropped"]
+    assert (event.stage, event.message) == (
+        "normalise",
+        "Car: 'Tourer range' gives little of what the other entities give",
+    )
+    assert event.data == {"schema": "Car", "entity": "Tourer range", "fields": ["model_year"]}
+
+
+async def test_an_entity_giving_half_of_what_most_give_stays() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Van", "price", "seats")
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport", "Van"]
+    assert dropped(ctx) == []
+
+
+async def test_a_field_half_the_entities_give_isnt_one_most_give() -> None:
+    # Two of four give the seats. Were that usual, Range would give half of what is and
+    # stay; only the price is, and Range doesn't give it.
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    given(run, "SE", "price", "seats", "power_kw")
+    given(run, "SE L", "price", "economy", "zero_to_62_s")
+    given(run, "Sport", "price", "registered", "model_year")
+    given(run, "Range", "seats")
+    await NormaliseStage().run(ctx)
+    assert [d["entity"] for d in dropped(ctx)] == ["Range"]
+
+
+async def test_an_entity_giving_as_many_fields_as_the_median_stays() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw")
+    given(run, "Camper", "seats", "economy")  # none of what is usual, but as much
+    await NormaliseStage().run(ctx)
+    assert dropped(ctx) == []
+
+
+async def test_an_entity_giving_plenty_stays_among_a_majority_that_gives_little() -> None:
+    # Two headings and one real record: what most give (a year) the record doesn't, but
+    # it gives more than they do.
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    given(run, "Range", "model_year")
+    given(run, "Range (2)", "model_year")
+    given(run, "SE", "price", "power_kw", "seats")
+    await NormaliseStage().run(ctx)
+    assert dropped(ctx) == []
+
+
+async def test_an_entity_giving_nothing_goes_and_doesnt_count_towards_what_most_give() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Tourer range", "model_year")
+    # Labels that found nothing outnumber the records; the records still set what is usual.
+    for i in range(4):
+        given(run, f"Heading {i}", shared=("price",))
+    run.scopes.append(EntityScope(label="Note"))  # found nothing at all, shared or not
+    await NormaliseStage().run(ctx)
+    assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport"]
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [
+        ("Tourer range", ["model_year"]),
+        *((f"Heading {i}", []) for i in range(4)),
+        ("Note", []),
+    ]
+
+
+@pytest.mark.parametrize("third", [("price",), ()], ids=["gives little", "gives nothing"])
+async def test_an_entity_is_compared_once_two_others_give_something(third: tuple[str, ...]) -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    given(run, "SE", "price", "power_kw", "seats", "economy")
+    given(run, "Range", *third, shared=("power_kw",))
+    await NormaliseStage().run(ctx)
+    assert dropped(ctx) == []  # what one other gives is no pattern to be unlike
+    given(run, "SE L", "price", "power_kw", "seats", "economy")
+    await NormaliseStage().run(ctx)
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", list(third))]
+
+
+async def test_an_entity_giving_under_half_of_what_most_give_is_dropped() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats")
+    given(run, "Pack", "price")  # one of three usual fields: under a half, not under a third
+    await NormaliseStage().run(ctx)
+    assert [d["entity"] for d in dropped(ctx)] == ["Pack"]
+
+
+async def test_a_field_that_didnt_normalise_isnt_one_the_entity_gives() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats")
+    run.scopes.append(EntityScope(label="Range"))
+    for name in ("price", "power_kw", "seats"):
+        run.set_field("Range", name, FieldMeta(confidence=0.4, error="not a number"))
+    await NormaliseStage().run(ctx)
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [("Range", [])]
+
+
+async def test_how_many_fields_entities_give_is_compared_by_the_median_not_the_mean() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for heading in ("2024", "2025", "2026"):
+        given(run, heading, "model_year")
+    given(run, "SE", "price", "power_kw", "seats", "economy", "zero_to_62_s", "registered")
+    given(run, "Van", "seats")  # none of what is usual, but as many fields as most give
+    await NormaliseStage().run(ctx)
+    assert dropped(ctx) == []
+
+
+async def test_a_bare_value_counts_as_given_and_goes_with_a_dropped_entity() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    for label, names in (("Tourer", ("price", "power_kw", "seats")), ("Range", ("model_year",))):
+        run.scopes.append(EntityScope(label=label))
+        run.values[label] = dict.fromkeys(names, 1)
+    # A bare value under a field that has a meta isn't the record's: the meta is.
+    given(run, "Guide", shared=("price", "power_kw", "seats"))
+    run.values["Guide"] = dict.fromkeys(("price", "power_kw", "seats"), 1)
+    await NormaliseStage().run(ctx)
+    assert [(d["entity"], d["fields"]) for d in dropped(ctx)] == [
+        ("Range", ["model_year"]),
+        ("Guide", []),
+    ]
+    assert set(run.values) == {"Tourer"}
+
+
+async def test_a_schema_whose_nested_model_has_records_keeps_all_its_entities() -> None:
+    # A parent's children are part of what it gives, and they're in the child's run.
+    for parent, child_of in (("Dealer", None), (None, "Car")):
+        ctx = context()
+        run = ctx.schemas["Car"]
+        run.parent = parent
+        if child_of is not None:
+            ctx.schemas["Car.offers"] = SchemaRun(SPEC, parent=child_of)
+        run.scopes = []
+        for trim in ("SE", "SE L", "Sport"):
+            given(run, trim, "price", "power_kw", "seats", "economy")
+        given(run, "Range", "model_year")
+        await NormaliseStage().run(ctx)
+        assert [s.label for s in run.scopes] == ["SE", "SE L", "Sport", "Range"]
+
+
+async def test_another_schemas_child_run_doesnt_keep_this_schemas_entities() -> None:
+    ctx = context()
+    run = ctx.schemas["Car"]
+    ctx.schemas["Dealer.offers"] = SchemaRun(SPEC, parent="Dealer")
+    run.scopes = []
+    for trim in ("SE", "SE L", "Sport"):
+        given(run, trim, "price", "power_kw", "seats", "economy")
+    given(run, "Range", "model_year")
+    await NormaliseStage().run(ctx)
+    assert [d["entity"] for d in dropped(ctx)] == ["Range"]
+
+
 def _buggy(value: object, *, field: object = None) -> str:
     raise KeyError("lookup table")
 
