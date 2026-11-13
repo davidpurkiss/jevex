@@ -221,7 +221,8 @@ class SchemaRun:
         mode the shared one, if it differs, goes on its ``conflicts``). So does a shared
         value from the page's text when the one it has came from the page's embedded data:
         that describes the page (an article's headline, a site's list of brands), the
-        same for every entity, where the text's was chosen for this one. In ``merge`` mode,
+        same for every entity, where the text's was chosen for this one (in ``merge`` mode
+        too, without weighing, the embedded one going on ``conflicts``). In ``merge`` mode,
         two found values are otherwise weighed: the more confident one wins (a value with
         no confidence, such as a direct read of embedded data, counts as certain; a tie
         keeps the earlier route's), and the other, if it differs, goes on the winner's

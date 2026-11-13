@@ -551,11 +551,11 @@
         },
         "VehicleSpec.zero_to_62_s/choice0": {
           "choice": "none",
-          "confidence": 0.86,
+          "confidence": 0.88,
           "probabilities": {
             "0": 0.03,
-            "62mph": 0.06,
-            "none": 0.91
+            "62mph": 0.05,
+            "none": 0.92
           },
           "type": "choice"
         }
