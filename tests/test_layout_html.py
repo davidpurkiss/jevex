@@ -832,17 +832,65 @@ def test_wrappers_that_repeat_one_structure_are_each_a_section() -> None:
     ]
 
 
-def test_cards_built_from_divs_keep_their_heading_and_text_together() -> None:
+def test_wrappers_holding_a_heading_are_left_to_the_sections_their_headings_open() -> None:
+    # Cards built from div elements: each heading already keeps its card's text with it,
+    # closes the card before, and takes what follows the last card too.
     card = "<div><h3>{}</h3><p>{}</p></div>"
-    root = parse_html("<body>" + card.format("SE", "£22,095") + card.format("SE L", "£23,895"))
+    root = parse_html(
+        "<body><h3>Kamiq</h3><p>From £25,000</p>"
+        + card.format("Scala", "From £22,000")
+        + card.format("Fabia", "From £19,000")
+        + "<p>All prices on the road</p></body>"
+    )
     assert outline(root) == [
         (0, "section", ""),
-        (1, "heading", "SE"),
-        (1, "paragraph", "£22,095"),
+        (1, "heading", "Kamiq"),
+        (1, "paragraph", "From £25,000"),
         (0, "section", ""),
-        (1, "heading", "SE L"),
-        (1, "paragraph", "£23,895"),
+        (1, "heading", "Scala"),
+        (1, "paragraph", "From £22,000"),
+        (0, "section", ""),
+        (1, "heading", "Fabia"),
+        (1, "paragraph", "From £19,000"),
+        (1, "paragraph", "All prices on the road"),
     ]
+    # The sections are the headings' own, not the wrappers.
+    assert [path(c) for c in root.children] == [
+        "/html/body/h3",
+        "/html/body/div[1]/h3",
+        "/html/body/div[2]/h3",
+    ]
+
+
+def test_a_heading_deep_inside_a_wrapper_keeps_it_flat_too() -> None:
+    wrapper = "<div><div><h2>{}</h2></div><p>{}</p></div>"
+    root = parse_html(
+        "<body><div>"
+        + wrapper.format("Engine", "What drives it")
+        + wrapper.format("Petrol", "Unleaded")
+        + "</div><table><tr><th>Power</th><td>110 kW</td></tr></table></body>"
+    )
+    [table] = only(root, "table")
+    assert table.heading_trail == ["Petrol"]
+
+
+def test_a_list_items_blocks_stay_its_text() -> None:
+    pair = "<div><p>{}</p><p>{}</p></div>"
+    root = parse_html(
+        "<body><ul><li>"
+        + pair.format("Engine:", "1.0 TSI")
+        + pair.format("Price:", "£22,095")
+        + "</li></ul></body>"
+    )
+    [item] = only(root, "list_item")
+    assert (item.text, item.children) == ("Engine:\n1.0 TSI\nPrice:\n£22,095", [])
+
+
+def test_a_no_break_space_between_wrappers_is_text_between_them() -> None:
+    root = parse_html(
+        "<body>" + ROW.format("1.0 TSI", "£22,095") + "&nbsp;" + ROW.format("1.5 TSI", "£1")
+    )
+    assert [c for c in root.walk() if c.type == "section" and c is not root] == []
 
 
 ROW = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
@@ -908,20 +956,6 @@ def test_text_before_a_run_stays_before_it() -> None:
         ("paragraph", "Engines"),
         ("section", ""),
         ("section", ""),
-    ]
-
-
-def test_a_kept_wrappers_own_heading_groups_what_follows_it() -> None:
-    card = "<div><p>{}</p><h3>{}</h3><p>{}</p></div>"
-    root = parse_html(
-        "<body>" + card.format("New", "SE", "£22,095") + card.format("", "SE L", "£1")
-    )
-    first = root.children[0]
-    assert [(depth, kind, text) for depth, kind, text in outline(first)] == [
-        (0, "paragraph", "New"),
-        (0, "section", ""),
-        (1, "heading", "SE"),
-        (1, "paragraph", "£22,095"),
     ]
 
 

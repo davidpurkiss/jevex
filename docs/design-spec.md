@@ -193,7 +193,7 @@ class Component(BaseModel):
 
 **Defaults**
 
-- HTML: a DOM segmenter that uses block-level elements, the heading hierarchy and semantic tags (`aside`, `figure`, `table`). Wrapper elements (`div`) add no level, except a run of neighbours that repeat one structure of blocks, two or more next to each other with the same tag and tree of block elements, at least two blocks each and no text of their own: a page built from `div` elements marks its cards, and the rows of a grid that isn't a `table`, only that way, so each is kept as a section. Wrappers that hold a heading are kept only when the run ends its parent's content: left flat, a heading opens the section that what follows it sits in.
+- HTML: a DOM segmenter that uses block-level elements, the heading hierarchy and semantic tags (`aside`, `figure`, `table`). Wrapper elements (`div`) add no level, except a run of neighbours that repeat one structure of blocks, two or more next to each other with the same tag and tree of block elements, at least two blocks each, no text of their own and no heading: a page built from `div` elements marks the rows of a grid that isn't a `table` only that way, so each is kept as a section. A wrapper that holds a heading stays flat: its heading already opens a section for what follows and closes the one before. Nothing is regrouped inside `pre` or straight under a list item.
 - PDF: [Docling](https://github.com/docling-project/docling) for layout, reading order, table structure and OCR. It's an optional extra.
 - A `heading_trail` travels with every component. "7.9 s" under "Performance" means something that "7.9 s" alone doesn't.
 

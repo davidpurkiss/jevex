@@ -19,8 +19,8 @@ it was given. It then walks the DOM and maps it to components:
 - A ``figure`` holding one image or table attaches its ``figcaption`` to it.
 - Any other text becomes paragraphs: one per block element (``p``, ``div``, ``li``...),
   and one per run of loose text between blocks. Wrapper ``div`` elements add no level,
-  except neighbours that repeat one structure of blocks (cards, the rows of a grid built
-  from ``div`` elements): each of those is a section.
+  except neighbours that repeat one structure of blocks without a heading (the rows of a
+  grid built from ``div`` elements): each of those is a section.
 - ``img`` becomes an image component whose text is its alt text and whose ``src`` is its
   URL (a lazy loader's ``data-src`` first, then ``src``, then the first ``srcset``
   candidate), resolved against the document's URL.
@@ -194,6 +194,7 @@ _CLOSES_P = (BLOCK_TAGS - _TABLE_PARTS - {"body", "li", "dd", "dt", "caption"}) 
 # doesn't close a <div> the table sits in.
 _SCOPE = frozenset({"html", "body", "table", "td", "th", "caption", "template", "button"})
 
+_HTML_SPACE = " \t\n\r\f"
 _WHITESPACE = re.compile(r"[ \t\n\r\f]+")  # HTML whitespace; a no-break space stays
 _SPACES = re.compile(r" {2,}")
 _HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.IGNORECASE)
@@ -542,8 +543,10 @@ class _Segmenter:
         """Blocks for the node's children, with loose inline runs as paragraphs."""
         blocks: list[_Block] = []
         inline = _Inline()
-        # Inside ``pre`` nothing is regrouped: a kept wrapper's text would be read anew.
-        repeated = set[int]() if pre else self._repeated(node)
+        # Nothing is regrouped inside ``pre``, where a kept wrapper's text would be read
+        # anew, or straight under a list item, whose blocks are its text.
+        flat = pre or node.tag == "li"
+        repeated = set[int]() if flat else self._repeated(node)
         for child in node.children:
             if isinstance(child, str):
                 inline.pieces.append(child if pre else _WHITESPACE.sub(" ", child))
@@ -552,7 +555,7 @@ class _Segmenter:
             elif id(child) in repeated:
                 self._flush(inline, node, blocks, pre=pre)
                 inline = _Inline()
-                children = self.contents(child)
+                children = self.segment(child)
                 if len(children) < 2:  # its other blocks were empty: nothing to keep together
                     blocks.extend(children)
                 else:
@@ -593,38 +596,38 @@ class _Segmenter:
     def _repeated(self, node: _Node) -> set[int]:
         """The ids of ``node``'s wrapper children that repeat one structure: a run of two
         or more next to each other (nothing but whitespace between) with the same tag and
-        the same tree of block elements, each holding at least two blocks and no text of
-        its own. A page built from ``div`` elements marks its cards, and the rows of a
-        grid that isn't a ``table``, only this way; each stays a container, so what
-        belongs to one stays together (an engine and its price). The exact tree is
-        compared, so the parts of a page that merely each hold two blocks (a header, a
-        body) aren't taken for a run.
+        the same tree of block elements, each holding at least two blocks, no text of its
+        own and no heading. A page built from ``div`` elements marks the rows of a grid
+        that isn't a ``table`` only this way; each stays a container, so what belongs to
+        one stays together (an engine and its price). The exact tree is compared, so the
+        parts of a page that merely each hold two blocks (a header, a body) aren't taken
+        for a run.
 
-        A wrapper holding a heading is kept only in a run that ends its parent's content.
-        Left flat, its heading opens the section everything after it sits in, up to the
-        next heading; kept, it would close that section around the wrapper alone and leave
-        what follows (a table after each heading's wrapper) with no heading over it."""
+        A wrapper holding a heading is never kept. Left flat, its heading already opens a
+        section for what follows it, the rest of the wrapper and whatever comes after
+        (a table after each heading's wrapper), and closes the one before; a kept wrapper
+        would do neither."""
         kept: set[int] = set()
         run: list[_Node] = []
         shape: tuple[object, ...] | None = None
 
-        def close(*, last: bool) -> None:
-            if len(run) >= 2 and (last or not any(self._holds_heading(m) for m in run)):
+        def close() -> None:
+            if len(run) >= 2:
                 kept.update(id(member) for member in run)
             run.clear()
 
         for child in node.children:
             if isinstance(child, str):
-                if child.strip():
-                    close(last=False)
+                if child.strip(_HTML_SPACE):
+                    close()
             elif not child.skip:
                 own = self._wrapper_shape(child)
                 if own is None or own != shape:
-                    close(last=False)
+                    close()
                 shape = own
                 if own is not None:
                     run.append(child)
-        close(last=True)
+        close()
         return kept
 
     def _holds_heading(self, node: _Node) -> bool:
@@ -637,9 +640,11 @@ class _Segmenter:
 
     def _wrapper_shape(self, node: _Node) -> tuple[object, ...] | None:
         """The tree of block elements under a wrapper that could be one of a run: an
-        element with no component of its own, holding at least two blocks and no text or
-        inline elements beside them. ``None`` for anything else."""
+        element with no component of its own, holding at least two blocks, no text or
+        inline elements beside them and no heading. ``None`` for anything else."""
         if node.tag in _STRUCTURED or _heading_level(node) or _loose_text(node):
+            return None
+        if self._holds_heading(node):
             return None
         shape = self._block_shape(node)
         return (node.tag, *shape) if len(shape) >= 2 else None
@@ -832,7 +837,9 @@ rows and cells place a page's parts rather than repeat one."""
 def _loose_text(node: _Node) -> bool:
     """Whether ``node`` holds text or inline elements beside its blocks."""
     return any(
-        child.strip() if isinstance(child, str) else not child.skip and not _is_block(child)
+        child.strip(_HTML_SPACE)
+        if isinstance(child, str)
+        else not child.skip and not _is_block(child)
         for child in node.children
     )
 
