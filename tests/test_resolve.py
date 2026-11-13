@@ -837,10 +837,18 @@ async def test_rows_of_a_grid_with_one_label_and_the_same_cells_are_one_entity()
     assert texts(parsed, scopes[0].statement_ids) == ["1.0 TSI", "£22,095", "1.0 TSI", "£22,095"]
 
 
-async def test_cards_with_one_label_stay_one_entity_whatever_else_they_say() -> None:
-    # A card's parts aren't known to line up with another's: a trim's card in the overview
-    # and its card further down are the same trim.
-    card = "<article><h3>{}</h3><p>{}</p></article>"
+@pytest.mark.parametrize(
+    "card",
+    [
+        "<article><h3>{}</h3><p>{}</p></article>",
+        # Paragraphs alone, as a grid's rows are: but what follows the label is no figure.
+        "<article><p>{}</p><p>{}</p></article>",
+    ],
+    ids=["headed", "paragraphs"],
+)
+async def test_cards_with_one_label_and_different_text_stay_one_entity(card: str) -> None:
+    # A trim's card in the overview and its card further down are the same trim: text
+    # that differs says nothing about whether two places mean one thing.
     parsed = await parse(
         "<section>"
         + card.format("SE", "From £22,095")
@@ -853,6 +861,64 @@ async def test_cards_with_one_label_stay_one_entity_whatever_else_they_say() -> 
     scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
     assert [s.label for s in scopes] == ["SE", "SE L"]
     assert texts(parsed, scopes[0].statement_ids) == ["SE", "From £22,095", "SE", "Cloth seats"]
+
+
+async def test_grids_giving_different_kinds_of_figure_describe_one_entity() -> None:
+    # A price in one grid and an emissions figure in the other, in the same place of the
+    # row: written differently, so they aren't taken for two values of one thing.
+    parsed = await parse(
+        price_grid("Prices", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + price_grid("Emissions", ("1.0 TSI", "118 g/km"), ("1.5 TSI", "127 g/km"))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["1.0 TSI", "1.5 TSI"]
+    assert texts(parsed, scopes[0].statement_ids) == ["1.0 TSI", "£22,095", "1.0 TSI", "118 g/km"]
+
+
+async def test_a_figure_is_compared_with_the_one_in_its_place_whatever_else_the_row_holds() -> None:
+    wide = "<div><div><p>{}</p></div><div><p>{}</p></div><div><p>{}</p></div></div>"
+    parsed = await parse(
+        price_grid("SE", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + "<section><h3>SE L</h3>"
+        + wide.format("1.0 TSI", "£23,895", "118 g/km")
+        + wide.format("1.5 TSI", "£26,215", "127 g/km")
+        + "</section>"
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["SE 1.0 TSI", "SE 1.5 TSI", "SE L 1.0 TSI", "SE L 1.5 TSI"]
+
+
+async def test_a_row_with_no_figure_fits_every_row_of_its_label() -> None:
+    # "-" where another trim has a price: it says nothing, so it is neither priced row,
+    # and it isn't a record beside them.
+    parsed = await parse(
+        price_grid("SE", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + price_grid("SE L", ("1.0 TSI", "£23,895"), ("1.5 TSI", "£26,215"))
+        + price_grid("Sport", ("1.0 TSI", "-"), ("1.5 TSI", "£28,000"))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == [
+        "SE 1.0 TSI",
+        "SE 1.5 TSI",
+        "SE L 1.0 TSI",
+        "SE L 1.5 TSI",
+        "Sport 1.5 TSI",
+    ]
+
+
+async def test_a_cell_holding_more_than_text_isnt_compared() -> None:
+    row = "<div><div><p>{}</p></div><div><p>{}<img src=x.png alt=badge></p></div></div>"
+    parsed = await parse(
+        "<section><h3>SE</h3>"
+        + row.format("1.0 TSI", "£22,095")
+        + row.format("1.5 TSI", "£1")
+        + "</section><section><h3>SE L</h3>"
+        + row.format("1.0 TSI", "£23,895")
+        + row.format("1.5 TSI", "£2")
+        + "</section>"
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["1.0 TSI", "1.5 TSI"]
 
 
 @pytest.mark.parametrize("p", [-0.1, 1.5])
@@ -1439,6 +1505,28 @@ def two_columns(first: str, row: str, cells: tuple[str, str] = ("1", "2")) -> st
 
 def picking(*wanted: str) -> Callable[[Choice], str]:
     return lambda q: next((w for w in wanted if w in q.options), "none")
+
+
+async def test_what_one_group_proposes_side_by_side_arent_offered_as_kinds_of_each_other() -> None:
+    # A row of trim cards, and a trim named again further down beside another one:
+    # "Crosstar Advance" has "Advance"'s words and more, and Jev would call it a kind of
+    # it, but the two sit side by side as cards, so it isn't asked.
+    card = "<article><h3>{}</h3><p>{}</p></article>"
+    parsed = await parse(
+        "<section>"
+        + card.format("Advance", "From £26,000")
+        + card.format("Crosstar Advance", "From £28,000")
+        + "</section><h2>Advance</h2><p>Heated seats</p><h2>Elegance</h2><p>Cloth seats</p>"
+    )
+    fake = (
+        FakeJev(strict=True)
+        .noul(BOUNDARY, p=0.9)
+        .choice(KIND, picking("Advance"))
+        .choice(WHICH, ALL_OPTION)
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, fake.client())
+    assert [s.label for s in scopes] == ["Advance", "Crosstar Advance", "Elegance"]
+    assert kind_calls(fake)["Crosstar Advance"] == [["Elegance", "none"]]
 
 
 async def test_two_that_pick_each_other_but_are_already_related_stay_two() -> None:

@@ -84,10 +84,11 @@ class _Member:
     ids: frozenset[str]
     """The statements it claims."""
     values: dict[tuple[str, ...], str] = field(default_factory=dict[tuple[str, ...], str])
-    """For a table's column or row, its cells' text (without spacing, case or the
-    punctuation joining a word's parts) by their
-    headers on the other axis: what it states, so two that state different things can be
-    told apart (:func:`_conflict`)."""
+    """What it states, so two that state different things can be told apart
+    (:func:`_conflict`). For a table's column or row, its cells' text (without spacing,
+    case or the punctuation joining a word's parts) by their headers on the other axis;
+    for a row of a grid that isn't a table, its cells' figures by their place and form
+    (:func:`_row_values`)."""
 
 
 @dataclass(frozen=True)
@@ -157,8 +158,9 @@ class _Entity:
 
 
 def _conflict(a: dict[tuple[str, ...], str], b: dict[tuple[str, ...], str]) -> bool:
-    """Whether two table rows (or columns) state different things under one header: two
-    price-list rows with their own "Price" are two entities, whatever their labels."""
+    """Whether two table rows (or columns) state different things under one header, or two
+    rows of a grid different figures in one place: two price-list rows with their own
+    "Price" are two entities, whatever their labels."""
     return any(key in b and b[key] != text for key, text in a.items())
 
 
@@ -182,9 +184,9 @@ class MultiEntity:
     2. **Repeated sibling structures:** children of one parent with the same shape (their
        type and their children's types), such as listing cards, each labelled by their
        first heading (or first text). One made only of paragraphs is a row of a grid that
-       isn't a table: what it states is its cells, by their place in it
-       (:func:`_row_values`), so two such rows with one label and different cells are
-       two entities, as two table rows are.
+       isn't a table: what it states is the figures in its cells
+       (:func:`_row_values`), so two such rows with one label and different figures in
+       one place are two entities, as two table rows are.
     3. **Headed sections:** sibling sections that each start with a heading ("SE",
        "SE L"), each with its subtree.
 
@@ -587,6 +589,9 @@ class _Kinds:
         of, and record the answers."""
         asks: list[tuple[_Entity, list[list[_Entity]]]] = []
         for entity in dict.fromkeys(e for found in sets for e in found):
+            # What a group proposes side by side are peers (a run of cards, a table's
+            # columns): none is a kind of another, wherever else one of them is named.
+            peers = {e for found in sets if entity in found for e in found}
             offered: list[list[_Entity]] = []
             for found in sets:
                 # Not its own set, nor one it is already related to (the cards inside
@@ -598,7 +603,9 @@ class _Kinds:
                 options = [
                     e
                     for e in found
-                    if (entity, e) not in self._asked and not _conflict(entity.values, e.values)
+                    if e not in peers
+                    and (entity, e) not in self._asked
+                    and not _conflict(entity.values, e.values)
                 ]
                 if options and len(options) < MAX_CHOICE_OPTIONS:
                     offered.append(options)
@@ -977,7 +984,7 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
             label = _label(member)
             ids = frozenset(sid for c in member.walk() for sid in by_component.get(c.id, ()))
             if label and ids:
-                found.append((label, ids, _row_values(member) if rule == 1 else {}))
+                found.append((label, ids, _row_values(member)))
         if len(found) >= 2:
             labels = _unique([label for label, *_ in found])
             members_ = [
@@ -1007,19 +1014,32 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     return groups
 
 
+_FIGURE = re.compile(r"\d[\d.,]*")
+
+
 def _row_values(member: Component) -> dict[tuple[str, ...], str]:
-    """What a same-shaped sibling states, when it is a row of a grid that isn't a table:
-    nothing but paragraphs, the first its label and the others its cells, each by its
-    place in the row (as a table row's are by their column headers, :attr:`_Member.values`).
-    Two such rows with one label and different cells are two entities (an engine's row
-    under each trim's heading, each with its own price). A card (a heading, a mix of
-    blocks) states nothing this way: its parts aren't known to line up with another's."""
+    """What a sibling states, when it is a row of a grid that isn't a table: nothing but
+    paragraphs, the first its label and the others its cells (:attr:`_Member.values`).
+
+    A table row's cells are compared under their column headers; these have none. A
+    figure's form stands in for one: the cells in one place of two rows that give a
+    figure written the same way (the text around its digits: "£22,095" and "£23,895")
+    give the same kind of thing, so two rows with one label and different figures there
+    are two entities (an engine's row under each trim's heading, each with its own
+    price). That is number syntax, which code can read; whether two differently written
+    cells mean one thing it can't, so a price beside an emissions figure, or a card's
+    "From £22,095" beside another's "Cloth seats", says nothing either way, and those
+    stay one entity as before. A card with a heading or a mix of blocks states nothing
+    this way: its parts aren't known to line up with another's."""
     cells = member.children
     if any(cell.type != "paragraph" or cell.children for cell in cells):
         return {}
-    return {
-        ("cell", str(len(cells)), str(i)): _stated(cell.text) for i, cell in enumerate(cells) if i
-    }
+    values: dict[tuple[str, ...], str] = {}
+    for place, cell in enumerate(cells[1:], start=1):
+        text = _stated(cell.text)
+        if _FIGURE.search(text):
+            values["cell", str(place), _FIGURE.sub("0", text)] = text
+    return values
 
 
 def _records(

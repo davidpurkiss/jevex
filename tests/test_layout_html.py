@@ -845,6 +845,9 @@ def test_cards_built_from_divs_keep_their_heading_and_text_together() -> None:
     ]
 
 
+ROW = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
+
+
 @pytest.mark.parametrize(
     "markup",
     [
@@ -852,10 +855,21 @@ def test_cards_built_from_divs_keep_their_heading_and_text_together() -> None:
         "<div><p>Power</p><p>110 kW</p></div><p>Notes</p>",
         # Two wrappers of different structures: a page's parts, not a run.
         "<div><p>Power</p><p>110 kW</p></div><div><p>Notes</p><ul><li>one</li></ul></div>",
+        # The same blocks at the top and different trees beneath: the whole tree counts.
+        "<div><div><p>a</p></div><div><p>b</p></div></div>"
+        "<div><div><p>c</p><p>d</p></div><div><p>e</p></div></div>",
         # Wrappers of one block each: nothing to keep together.
         "<div><p>Power</p></div><div><p>110 kW</p></div>",
         # Text of the wrapper's own beside its blocks: not a pure container.
         "<div>Power <p>110 kW</p><p>148 bhp</p></div><div>Torque <p>250 Nm</p><p>184 lb</p></div>",
+        # An inline element of its own counts as text does.
+        "<div><span>Power</span><p>110 kW</p><p>148 bhp</p></div>"
+        "<div><span>Torque</span><p>250 Nm</p><p>184 lb</p></div>",
+        # Something between them: only neighbours make a run.
+        ROW.format("1.0 TSI", "£22,095") + "<p>or</p>" + ROW.format("1.5 TSI", "£24,370"),
+        ROW.format("1.0 TSI", "£22,095") + "or" + ROW.format("1.5 TSI", "£24,370"),
+        # Their other blocks are empty: one paragraph each is nothing to keep together.
+        "<div><div><p>a</p></div><div></div></div><div><div><p>b</p></div><div></div></div>",
     ],
 )
 def test_other_wrappers_add_no_level(markup: str) -> None:
@@ -863,7 +877,90 @@ def test_other_wrappers_add_no_level(markup: str) -> None:
     assert [c for c in root.walk() if c.type == "section" and c is not root] == []
 
 
-def test_elements_with_a_component_of_their_own_arent_taken_for_repeated_wrappers() -> None:
-    lists = "<ul><li>a</li><li>b</li></ul>" * 2
-    root = parse_html(f"<body>{lists}</body>")
-    assert [c.type for c in root.children] == ["list", "list"]
+def test_hidden_children_dont_break_a_run_or_count_as_a_wrappers_own_text() -> None:
+    row = "<div><span hidden>x</span><div><p>{}</p></div><div><p>{}</p></div></div>"
+    root = parse_html(
+        "<body>"
+        + row.format("1.0 TSI", "£22,095")
+        + "<p hidden>or</p>"
+        + row.format("1.5 TSI", "£24,370")
+        + "</body>"
+    )
+    assert [c.type for c in root.children] == ["section", "section"]
+
+
+def test_text_before_a_run_stays_before_it() -> None:
+    root = parse_html(
+        "<body>Engines "
+        + ROW.format("1.0 TSI", "£22,095")
+        + ROW.format("1.5 TSI", "£24,370")
+        + "</body>"
+    )
+    assert [(c.type, c.text) for c in root.children] == [
+        ("paragraph", "Engines"),
+        ("section", ""),
+        ("section", ""),
+    ]
+
+
+def test_a_kept_wrappers_own_heading_groups_what_follows_it() -> None:
+    card = "<div><p>{}</p><h3>{}</h3><p>{}</p></div>"
+    root = parse_html(
+        "<body>" + card.format("New", "SE", "£22,095") + card.format("", "SE L", "£1")
+    )
+    first = root.children[0]
+    assert [(depth, kind, text) for depth, kind, text in outline(first)] == [
+        (0, "paragraph", "New"),
+        (0, "section", ""),
+        (1, "heading", "SE"),
+        (1, "paragraph", "£22,095"),
+    ]
+
+
+def test_a_heading_wrapper_that_recurs_still_opens_the_section_its_content_follows_in() -> None:
+    part = "<div><h2>{}</h2><p>{}</p></div><table><tr><th>{}</th><td>{}</td></tr></table>"
+    root = parse_html(
+        "<body>"
+        + part.format("Engine", "What drives it", "Power", "110 kW")
+        + part.format("Dimensions", "How big", "Length", "4.3 m")
+        + "</body>"
+    )
+    assert [(depth, kind) for depth, kind, _ in outline(root)] == [
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
+    ]
+    assert [t.heading_trail for t in only(root, "table")] == [["Engine"], ["Dimensions"]]
+
+
+@pytest.mark.parametrize(
+    ("element", "kinds"),
+    [
+        ("<ul><li>a</li><li>b</li></ul>", ["list", "list"]),
+        ("<dl><dt>a</dt><dd>1</dd><dt>b</dt><dd>2</dd></dl>", ["list", "list"]),
+        (
+            "<table><thead><tr><th>a</th><th>b</th></tr></thead>"
+            "<tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
+            ["table", "table"],
+        ),
+        ("<aside><h3>Tip</h3><p>a</p></aside>", ["breakout", "breakout"]),
+        ("<section><h3>SE</h3><p>a</p></section>", ["section", "section"]),
+        ("<pre><p>a</p><p>b</p></pre>", ["paragraph"] * 4),
+    ],
+)
+def test_elements_with_a_component_of_their_own_arent_taken_for_repeated_wrappers(
+    element: str, kinds: list[str]
+) -> None:
+    root = parse_html(f"<body>{element * 2}</body>")
+    assert [c.type for c in root.children] == kinds
+
+
+def test_a_wrapper_with_a_heading_role_is_a_heading_not_a_container() -> None:
+    wrapper = '<div role="heading"><p>Engines</p><p>and prices</p></div>'
+    root = parse_html(f"<body>{wrapper * 2}</body>")
+    assert [c.type for c in root.walk() if c.type != "section"] == ["heading", "heading"]
