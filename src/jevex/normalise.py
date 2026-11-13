@@ -590,10 +590,11 @@ class NormaliseStage:
     distinct values (their raw spans, the first standing for a span repeated), each
     described by the statement giving it (:meth:`~jevex.schema.FieldSpec.settle_question`),
     with those statements as the state, cut to fit. Shared statements don't say which
-    entity is being asked about, so with them the state also says (``asked_about``): its
-    label and the headings most of its own statements are under. Jev's pick wins, as sure
-    as the less sure of Jev's answer and the pick, and "none" leaves the field unfound.
-    List fields keep every accepted value, deduplicated in document order.
+    entity is being asked about, so with them the state also says which (``asked_about``):
+    what the schema calls an entity, this one's label and the headings most of its own
+    statements are under. Jev's pick wins, as sure as the less sure of Jev's answer and
+    the pick, and "none" leaves the field unfound. List fields keep every accepted value,
+    deduplicated in document order.
 
     If nothing normalises, the field's meta carries the error. A normaliser that raises
     (:class:`NormaliserFailedError`) skips that candidate and is recorded with

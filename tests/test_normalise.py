@@ -693,6 +693,39 @@ async def test_a_question_over_shared_values_says_where_the_entitys_own_statemen
     ]
 
 
+@pytest.mark.parametrize(
+    ("trails", "about"),
+    [
+        # As many statements under each: the first in the document.
+        (
+            [("Guide", "Options"), ("Guide", "Tourer")],
+            {"entity": "car", "label": "SE", "section": "Guide › Options"},
+        ),
+        # Most under no heading at all: no section, not the one heading there is.
+        ([(), ("Guide", "Tourer"), ()], {"entity": "car", "label": "SE"}),
+    ],
+)
+async def test_the_section_is_the_one_most_of_an_entitys_statements_share(
+    trails: list[tuple[str, ...]], about: dict[str, str]
+) -> None:
+    own = [statement(f"o{i}", f"SE · row {i}", *trail) for i, trail in enumerate(trails)]
+    everyone = [statement("s2", "Every trim seats 5"), statement("s3", "The van seats 2")]
+    fake = FakeJev(strict=True).choice("Which of these is the seats", "5")
+    ctx = context(*own, *everyone, jev=fake)
+    run = ctx.schemas["Car"]
+    run.scopes = [
+        EntityScope(
+            label="SE", statement_ids=[s.id for s in own], shared_statement_ids=["s2", "s3"]
+        )
+    ]
+    run.selections[("SE", "seats", "s2")] = pick(everyone[0], "5", 0.6, "parse_number")
+    run.selections[("SE", "seats", "s3")] = pick(everyone[1], "2", 0.95, "parse_number")
+    await NormaliseStage().run(ctx)
+    [asked] = fake.calls
+    assert isinstance(asked.state, dict)
+    assert asked.state["asked_about"] == about
+
+
 class Statements(BaseModel):
     seats: int = Field(description="Seats")
 
