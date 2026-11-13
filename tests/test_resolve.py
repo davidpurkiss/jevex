@@ -888,6 +888,32 @@ async def test_a_figure_is_compared_with_the_one_in_its_place_whatever_else_the_
     assert [s.label for s in scopes] == ["SE 1.0 TSI", "SE 1.5 TSI", "SE L 1.0 TSI", "SE L 1.5 TSI"]
 
 
+async def test_the_figures_in_one_place_decide_not_a_later_cell_written_alike() -> None:
+    # The price differs and the monthly payment doesn't: both are written "£…", and it is
+    # the cell in the same place that is compared.
+    wide = "<div><div><p>{}</p></div><div><p>{}</p></div><div><p>{}</p></div></div>"
+    parsed = await parse(
+        "<section><h3>SE</h3>"
+        + wide.format("1.0 TSI", "£22,095", "£249")
+        + wide.format("1.5 TSI", "£24,370", "£279")
+        + "</section><section><h3>SE L</h3>"
+        + wide.format("1.0 TSI", "£23,895", "£249")
+        + wide.format("1.5 TSI", "£26,215", "£279")
+        + "</section>"
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["SE 1.0 TSI", "SE 1.5 TSI", "SE L 1.0 TSI", "SE L 1.5 TSI"]
+
+
+async def test_a_full_stop_after_a_figure_isnt_part_of_it() -> None:
+    parsed = await parse(
+        price_grid("Prices", ("1.0 TSI", "£22,095"), ("1.5 TSI", "£24,370"))
+        + price_grid("In short", ("1.0 TSI", "£22,095."), ("1.5 TSI", "£24,370."))
+    )
+    scopes = await MultiEntity().resolve(parsed, VEHICLE, kinds_jev().client())
+    assert [s.label for s in scopes] == ["1.0 TSI", "1.5 TSI"]
+
+
 async def test_a_row_with_no_figure_fits_every_row_of_its_label() -> None:
     # "-" where another trim has a price: it says nothing, so it is neither priced row,
     # and it isn't a record beside them.

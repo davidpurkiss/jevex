@@ -509,6 +509,7 @@ class _Segmenter:
     def __init__(self, base_url: str | None = None) -> None:
         self._paths: dict[int, str] = {}
         self._shapes: dict[int, tuple[object, ...]] = {}
+        self._headed: dict[int, bool] = {}
         self._base_url = base_url
 
     def path(self, node: _Node) -> str:
@@ -541,7 +542,8 @@ class _Segmenter:
         """Blocks for the node's children, with loose inline runs as paragraphs."""
         blocks: list[_Block] = []
         inline = _Inline()
-        repeated = self._repeated(node)
+        # Inside ``pre`` nothing is regrouped: a kept wrapper's text would be read anew.
+        repeated = set[int]() if pre else self._repeated(node)
         for child in node.children:
             if isinstance(child, str):
                 inline.pieces.append(child if pre else _WHITESPACE.sub(" ", child))
@@ -590,36 +592,48 @@ class _Segmenter:
 
     def _repeated(self, node: _Node) -> set[int]:
         """The ids of ``node``'s wrapper children that repeat one structure: a run of two
-        or more next to each other (nothing but whitespace between) with the same tree of
-        block elements, each holding at least two blocks and no text of its own. A page
-        built from ``div`` elements marks its cards, and the rows of a grid that isn't a
-        ``table``, only this way; each stays a container, so what belongs to one stays
-        together (an engine and its price). The exact tree is compared, so the parts of
-        a page that merely each hold two blocks (a header, a body) aren't taken for a
-        run; and only neighbours are, so a heading's wrapper that recurs down a page
-        still opens the section its content follows in."""
+        or more next to each other (nothing but whitespace between) with the same tag and
+        the same tree of block elements, each holding at least two blocks and no text of
+        its own. A page built from ``div`` elements marks its cards, and the rows of a
+        grid that isn't a ``table``, only this way; each stays a container, so what
+        belongs to one stays together (an engine and its price). The exact tree is
+        compared, so the parts of a page that merely each hold two blocks (a header, a
+        body) aren't taken for a run.
+
+        A wrapper holding a heading is kept only in a run that ends its parent's content.
+        Left flat, its heading opens the section everything after it sits in, up to the
+        next heading; kept, it would close that section around the wrapper alone and leave
+        what follows (a table after each heading's wrapper) with no heading over it."""
         kept: set[int] = set()
         run: list[_Node] = []
         shape: tuple[object, ...] | None = None
 
-        def close() -> None:
-            if len(run) >= 2:
+        def close(*, last: bool) -> None:
+            if len(run) >= 2 and (last or not any(self._holds_heading(m) for m in run)):
                 kept.update(id(member) for member in run)
             run.clear()
 
         for child in node.children:
             if isinstance(child, str):
                 if child.strip():
-                    close()
+                    close(last=False)
             elif not child.skip:
                 own = self._wrapper_shape(child)
                 if own is None or own != shape:
-                    close()
+                    close(last=False)
                 shape = own
                 if own is not None:
                     run.append(child)
-        close()
+        close(last=True)
         return kept
+
+    def _holds_heading(self, node: _Node) -> bool:
+        """Whether a heading sits anywhere inside ``node``."""
+        if (held := self._headed.get(id(node))) is None:
+            held = self._headed[id(node)] = any(
+                _heading_level(child) > 0 or self._holds_heading(child) for child in node.elements()
+            )
+        return held
 
     def _wrapper_shape(self, node: _Node) -> tuple[object, ...] | None:
         """The tree of block elements under a wrapper that could be one of a run: an
@@ -628,7 +642,7 @@ class _Segmenter:
         if node.tag in _STRUCTURED or _heading_level(node) or _loose_text(node):
             return None
         shape = self._block_shape(node)
-        return shape if len(shape) >= 2 else None
+        return (node.tag, *shape) if len(shape) >= 2 else None
 
     def _block_shape(self, node: _Node) -> tuple[object, ...]:
         """The tree of block elements under ``node``: each one's tag and its own tree."""
@@ -804,14 +818,15 @@ class _Segmenter:
 
 
 _STRUCTURED = (
-    frozenset(_HEADINGS)
-    | _LIST_TAGS
+    _LIST_TAGS
     | SECTION_TAGS
     | _TABLE_PARTS
     | {"table", "dl", "figure", "figcaption", "aside", "pre"}
 )
-"""Elements :meth:`_Segmenter.block` gives a component of their own, or reads its own way
-(``pre``): the rest are wrappers."""
+"""Elements that are never one of a run of repeated wrappers: those
+:meth:`_Segmenter.block` gives a component of their own, ``pre``, which it reads its own
+way, and a table's parts, which are wrappers only in a table used for page layout, whose
+rows and cells place a page's parts rather than repeat one."""
 
 
 def _loose_text(node: _Node) -> bool:

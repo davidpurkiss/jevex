@@ -238,6 +238,8 @@ class MultiEntity:
     other (two price lists' rows). The search goes outwards from each part of the page,
     and a label that something in its own part is a kind of isn't offered outside it:
     one model's trims aren't the next model's, whatever they're called.
+    What one group proposes side by side (a run of cards, a table's columns) are peers:
+    none is offered as what another is a kind of, wherever else one of them is named.
 
     When accepted groups overlap, a statement goes to the innermost (a table's columns
     beat the section around it), then to the higher priority above (a table beats headed
@@ -1014,7 +1016,7 @@ def _component_groups(parsed: ParsedDocument) -> list[_Group]:
     return groups
 
 
-_FIGURE = re.compile(r"\d[\d.,]*")
+_FIGURE = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def _row_values(member: Component) -> dict[tuple[str, ...], str]:
@@ -1030,7 +1032,13 @@ def _row_values(member: Component) -> dict[tuple[str, ...], str]:
     cells mean one thing it can't, so a price beside an emissions figure, or a card's
     "From £22,095" beside another's "Cloth seats", says nothing either way, and those
     stay one entity as before. A card with a heading or a mix of blocks states nothing
-    this way: its parts aren't known to line up with another's."""
+    this way: its parts aren't known to line up with another's.
+
+    The form is a stand-in for a header, and wrong where two quantities are written
+    alike: an on-the-road price in one grid and a monthly payment in another (both "£0"),
+    bare numbers under different headings (a power, a torque), or one amount written
+    with and without pence, each make two entities of one, named by their headings. The
+    place is the cell's among those the layout kept, so an empty cell shifts it."""
     cells = member.children
     if any(cell.type != "paragraph" or cell.children for cell in cells):
         return {}

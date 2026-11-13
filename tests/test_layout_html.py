@@ -870,6 +870,14 @@ ROW = "<div><div><p>{}</p></div><div><p>{}</p></div></div>"
         ROW.format("1.0 TSI", "£22,095") + "or" + ROW.format("1.5 TSI", "£24,370"),
         # Their other blocks are empty: one paragraph each is nothing to keep together.
         "<div><div><p>a</p></div><div></div></div><div><div><p>b</p></div><div></div></div>",
+        # Different elements with the same blocks inside: a page's parts again.
+        "<header><p>a</p><p>b</p></header><footer><p>c</p><p>d</p></footer>",
+        # The cells of a table used for layout place a page's parts.
+        '<table role="presentation"><tr><td><p>a</p><p>b</p></td><td><p>c</p><p>d</p></td></tr>'
+        "</table>",
+        # A figure's captions are its own.
+        "<figure><img src=a.png alt=A><figcaption><p>a</p><p>b</p></figcaption>"
+        "<figcaption><p>c</p><p>d</p></figcaption></figure>",
     ],
 )
 def test_other_wrappers_add_no_level(markup: str) -> None:
@@ -914,6 +922,39 @@ def test_a_kept_wrappers_own_heading_groups_what_follows_it() -> None:
         (0, "section", ""),
         (1, "heading", "SE"),
         (1, "paragraph", "£22,095"),
+    ]
+
+
+def test_wrappers_inside_pre_keep_their_text_as_written() -> None:
+    wrapper = "<div><p>a   b</p><p>c</p></div>"
+    root = parse_html(f"<body><pre>{wrapper * 2}</pre></body>")
+    assert [(c.type, c.text) for c in root.children] == [
+        ("paragraph", "a   b"),
+        ("paragraph", "c"),
+        ("paragraph", "a   b"),
+        ("paragraph", "c"),
+    ]
+
+
+def test_neighbouring_heading_wrappers_with_content_after_them_stay_flat() -> None:
+    # Kept, the second would close its heading's section before the table that belongs to it.
+    wrapper = "<div><h2>{}</h2><p>{}</p></div>"
+    root = parse_html(
+        "<body>"
+        + wrapper.format("Engine", "What drives it")
+        + wrapper.format("Petrol", "Unleaded")
+        + "<table><tr><th>Power</th><td>110 kW</td></tr></table></body>"
+    )
+    [table] = only(root, "table")
+    assert table.heading_trail == ["Petrol"]
+    assert [(depth, kind) for depth, kind, _ in outline(root)] == [
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (0, "section"),
+        (1, "heading"),
+        (1, "paragraph"),
+        (1, "table"),
     ]
 
 
